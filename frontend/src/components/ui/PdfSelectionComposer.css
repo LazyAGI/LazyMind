@@ -1,4 +1,5 @@
 .pdf-selection-composer{width:380px;max-width:100%;box-sizing:border-box;background:#fff;border:1px solid #e8e5f0;border-radius:15px;box-shadow:0 8px 32px #34215820;padding:16px 14px 12px;color:#302a3b;font:13px/1.5 system-ui,sans-serif;position:relative;}
+.pdf-selection-composer.is-composing{border-color:#c9ddff;box-shadow:0 8px 32px #134c9124,0 0 0 2px #e9f2ff;}
 .pdf-selection-composer textarea{display:block;box-sizing:border-box;width:100%;min-height:62px;resize:none;border:0;outline:0;background:transparent;padding:2px 22px 10px 2px;color:#302a3b;font:14px/1.6 system-ui,sans-serif;}
 .pdf-selection-composer textarea::placeholder{color:#9993a3;}
 .pdf-selection-composer button{cursor:pointer;border:0;background:transparent;color:#776e85;line-height:1;}
@@ -20,6 +21,8 @@
 
 .pdf-selection-composer-footer{flex-wrap:wrap;row-gap:8px;}
 .pdf-selection-icons{flex-wrap:wrap;justify-content:flex-end;margin-left:auto;gap:4px;}
-.pdf-selection-icons .pdf-selection-primary-action{height:29px;padding:0 6px;border-radius:7px;white-space:nowrap;font-size:12px;}
+.pdf-selection-icons .pdf-selection-primary-action{width:30px;height:30px;padding:0;border:1px solid #e2e7ed;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;font-size:15px;}
 .pdf-selection-icons .pdf-selection-primary-action:hover:not(:disabled){background:var(--color-primary-bg,#f0f7ff);color:var(--color-primary,#006ae6);}
 .pdf-selection-composer button:focus-visible{outline:2px solid var(--color-primary,#006ae6);outline-offset:2px;}
+
+@media(max-width:600px){.pdf-selection-icons .pdf-selection-primary-action{width:44px;height:44px;}.pdf-selection-icons .pdf-selection-send,.pdf-selection-icons .pdf-selection-icon{width:44px;height:44px;}}

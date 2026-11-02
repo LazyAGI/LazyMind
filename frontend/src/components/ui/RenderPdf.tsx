@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
-import {ControlOutlined, SearchOutlined, DownloadOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
+import {ControlOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
@@ -24,6 +24,7 @@ import type { FormulaEvidence } from "@/modules/knowledge/api/formulaExplanation
 import type { PdfIRBlock, PdfIRDocument } from "@/modules/knowledge/api/pdfIR";
 import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
 import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
+import {readNativePdfOutline,type PdfNativeOutlineItem} from "@/modules/knowledge/api/pdfOutline";
 import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
 export type { LearningSelectionAction } from "./learningSelection";
 export type { PdfReferenceAction } from "./pdfReferenceGeometry";
@@ -36,6 +37,7 @@ interface RenderPdfProps {
   paperTitle?: string;
   onStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: PdfIRDocument | undefined) => void;
+  onPdfOutlineChange?: (outline: PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page:number;requestId:number};
   pdfIRTarget?: PdfIRTarget;
@@ -114,9 +116,9 @@ export default function RenderPdf({
   onPreviewError,
   pdfHeaderStart,
   pdfHeaderEnd,
-  paperTitle,
   onStudyOpenChange,
   onPdfIRDocumentChange,
+  onPdfOutlineChange,
   pdfNavigateTo,
   pdfNavigateToPage,
   pdfIRTarget,
@@ -217,6 +219,12 @@ export default function RenderPdf({
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appliedPositionRef = useRef("");
+  const positionIdleTimer=useRef<ReturnType<typeof setTimeout>>();
+  const pendingPosition=useRef<PdfViewPosition>();
+  const reportedPage=useRef(viewPosition?.page||1);
+  const reportPosition=useRef(onViewPositionChange);
+  reportPosition.current=onViewPositionChange;
+  useEffect(()=>()=>{clearTimeout(positionIdleTimer.current);if(pendingPosition.current)reportPosition.current?.(pendingPosition.current);},[]);
   const [selectionAction, setSelectionAction] =
     useState<SelectionAction | null>(null);
   const [selectionHighlights, setSelectionHighlights] = useState<Array<{
@@ -252,18 +260,13 @@ export default function RenderPdf({
   const zoomPosition = useRef<PdfViewPosition>();
   const pdfDocument = useRef<{source: RenderPdfProps["fileData"]; document: {numPages:number;getPage:(page:number)=>Promise<{getTextContent:()=>Promise<{items:unknown[]}>}>}}>();
   const lastPageNavigation = useRef("");
-  const searchRequest = useRef(0);
-  const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<number[]>([]);
-  const [matchIndex, setMatchIndex] = useState(0);
-  const [searchStatus, setSearchStatus] = useState<"idle"|"busy"|"done"|"error">("idle");
   useEffect(() => {
     lastPageNavigation.current = "";
-    searchRequest.current++;
-    setMatches([]); setQuery(""); setSearchStatus("idle");
+    clearTimeout(positionIdleTimer.current);
+    pendingPosition.current=undefined;
+    reportedPage.current=viewPosition?.page||1;
     setScrollTop(0);
     appliedPositionRef.current = "";
-    return () => { searchRequest.current++; };
   }, [fileData]);
   useEffect(() => { onStudyOpenChange?.(studyOpen || tableStudyOpen || !!visualSelection); }, [studyOpen, tableStudyOpen, visualSelection, onStudyOpenChange]);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -332,7 +335,7 @@ export default function RenderPdf({
     }
     setScrollTop(containerRef.current.scrollTop);
     setSelectionAction(null);
-    if (onViewPositionChange && pageTops.length) {
+    if (reportPosition.current && pageTops.length) {
       const currentTop = containerRef.current.scrollTop;
       let currentPage = 0;
       for (let index = 0; index < pageTops.length; index += 1) {
@@ -340,10 +343,15 @@ export default function RenderPdf({
         else break;
       }
       const height = Math.max(pageHeightsPx[currentPage] || 1, 1);
-      onViewPositionChange({
+      const position={
         page: currentPage + 1,
         progress: Math.min(1, Math.max(0, (currentTop - pageTops[currentPage]) / height)),
-      });
+      };
+      pendingPosition.current=position;
+      clearTimeout(positionIdleTimer.current);
+      const publish=()=>{const latest=pendingPosition.current;if(!latest)return;pendingPosition.current=undefined;appliedPositionRef.current=`${latest.page-1}:${latest.progress.toFixed(4)}`;reportPosition.current?.(latest);};
+      if(position.page!==reportedPage.current){reportedPage.current=position.page;publish();}
+      else positionIdleTimer.current=setTimeout(publish,250);
     }
   };
 
@@ -520,35 +528,6 @@ export default function RenderPdf({
     containerRef.current?.scrollTo({top,behavior:"auto"});
     setScrollTop(top);
   }, [pageWidthPx,pageTops,pageHeightsPx]);
-  const searchPdf = async () => {
-    const request = ++searchRequest.current;
-    const doc = pdfDocument.current?.source === fileData ? pdfDocument.current.document : undefined;
-    const term = query.trim().toLocaleLowerCase();
-    setMatches([]); setMatchIndex(0);
-    if (!doc || !term) { setSearchStatus("idle"); return; }
-    setSearchStatus("busy");
-    try {
-      const found:number[] = [];
-      for (let page = 1; page <= doc.numPages; page++) {
-        if (request !== searchRequest.current) return;
-        const text = await (await doc.getPage(page)).getTextContent();
-        if (text.items.map(item => typeof item === "object" && item !== null && "str" in item ? String(item.str) : "").join(" ").toLocaleLowerCase().includes(term)) found.push(page);
-      }
-      if (request !== searchRequest.current) return;
-      setMatches(found); setSearchStatus("done");
-      if (found.length) jumpPage(found[0]);
-    } catch { if (request === searchRequest.current) setSearchStatus("error"); }
-  };
-  const downloadPdf = () => {
-    if (!fileData) return;
-    const objectUrl = typeof fileData === "string" ? undefined : URL.createObjectURL(fileData instanceof File ? fileData : new Blob([fileData],{type:"application/pdf"}));
-    const link = document.createElement("a");
-    link.href = objectUrl || String(fileData);
-    link.download = paperTitle ? (/\.pdf$/i.test(paperTitle) ? paperTitle : paperTitle + ".pdf") : "paper.pdf";
-    link.click();
-    if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-  };
-
   useEffect(() => {
     if (!viewPosition || !pdfLoaded || !containerRef.current || !pageTops.length) return;
     const page = Math.min(Math.max(viewPosition.page, 1), numPages) - 1;
@@ -950,12 +929,13 @@ export default function RenderPdf({
     );
   };
 
-  const readerTools = (
-    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
+  const pageControls = (
       <div className="pdf-reader-tools">
         <><button aria-label={readerLabel("previousPage")} disabled={!pdfLoaded||currentPage<=1} onClick={()=>jumpPage(currentPage-1)}><LeftOutlined/></button><input className="pdf-reader-page-input" aria-label={readerLabel("page")} type="number" disabled={!pdfLoaded} min={1} max={numPages} value={currentPage} onChange={event=>jumpPage(Number(event.target.value))}/><span className="pdf-reader-page-total">/ {pdfLoaded ? numPages : "—"}</span><button aria-label={readerLabel("nextPage")} disabled={!pdfLoaded||currentPage>=numPages} onClick={()=>jumpPage(currentPage+1)}><RightOutlined/></button><span className="pdf-reader-tool-divider"/><button aria-label={readerLabel("zoomOut")} disabled={!pdfLoaded||zoom<=.5} onClick={()=>changeZoom(zoom-.1)}><ZoomOutOutlined/></button><button title={readerLabel("fitWidth")} onClick={()=>changeZoom(1)}>{Math.round(zoom*100)}%</button><button aria-label={readerLabel("zoomIn")} disabled={!pdfLoaded||zoom>=2} onClick={()=>changeZoom(zoom+.1)}><ZoomInOutlined/></button></>
       </div>
-      <div className="pdf-reader-toolbar-end"><details className="pdf-reader-search"><summary aria-label={readerLabel("search")}><SearchOutlined/></summary><form role="search" onSubmit={event=>{event.preventDefault();void searchPdf();}}><input type="search" aria-label={readerLabel("search")} value={query} onChange={event=>{setQuery(event.target.value);searchRequest.current++;setMatches([]);setSearchStatus("idle");}}/><button disabled={!pdfLoaded||searchStatus==="busy"}>{readerLabel("search")}</button><span role="status">{searchStatus==="busy"?readerLabel("searching"):searchStatus==="error"?readerLabel("searchError"):searchStatus==="done"?(matches.length ? `${matchIndex+1}/${matches.length}` : readerLabel("noMatches")):""}</span>{matches.length>1&&<><button type="button" aria-label={readerLabel("previousMatch")} onClick={()=>{const index=(matchIndex-1+matches.length)%matches.length;setMatchIndex(index);jumpPage(matches[index]);}}>↑</button><button type="button" aria-label={readerLabel("nextMatch")} onClick={()=>{const index=(matchIndex+1)%matches.length;setMatchIndex(index);jumpPage(matches[index]);}}>↓</button></>}</form></details><button aria-label={readerLabel("download")} title={readerLabel("download")} disabled={!fileData} onClick={downloadPdf}><DownloadOutlined/></button></div>
+  );
+  const readerTools = (
+    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
         <details className="pdf-reader-parser-details"><summary>{readerLabel("displaySettings")}</summary><div><span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
@@ -974,6 +954,7 @@ export default function RenderPdf({
   const readerHeader = (
     <nav className="pdf-reader-modebar pdf-reader-header" aria-label={readerLabel("reading")}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
+      {pageControls}
       <div className="pdf-reader-header-end">
         <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
           <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
@@ -1077,6 +1058,8 @@ export default function RenderPdf({
         onLoadSuccess={(doc) => {
           if (currentSource.current !== fileData) return;
           pdfDocument.current = {source:fileData,document:doc};
+          onPdfOutlineChange?.([]);
+          if(onPdfOutlineChange&&typeof doc.getOutline==='function')void readNativePdfOutline(doc as unknown as Parameters<typeof readNativePdfOutline>[0]).then(outline=>{if(currentSource.current===fileData)onPdfOutlineChange(outline);}).catch(()=>undefined);
           setNumPages(doc.numPages);
           if (onPdfKindDetected) {
             void (async () => {

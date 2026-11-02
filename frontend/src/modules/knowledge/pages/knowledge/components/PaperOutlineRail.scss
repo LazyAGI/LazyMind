@@ -1,6 +1,9 @@
 .paper-outline-rail {
  position:absolute;
- inset:56px auto 20px 6px;
+ top:50%;
+ left:6px;
+ transform:translateY(-50%);
+ max-height:calc(100% - 72px);
  width:38px;
  z-index:12;
  pointer-events:none;
@@ -13,7 +16,7 @@
   justify-content:center;
   width:38px;
   min-height:44px;
-  max-height:100%;
+  max-height:min(70vh, calc(100vh - 96px));
   overflow:hidden;
   padding:16px 6px;
   border:0;
@@ -43,16 +46,16 @@
   pointer-events:none;
   visibility:hidden;
   opacity:0;
-  transform:translateX(-8px) scale(.985);
+  transform:translate(-8px,-50%) scale(.985);
   transform-origin:left top;
   transition:opacity 160ms ease,transform 180ms ease,visibility 0s linear 180ms;
-  &.is-open {pointer-events:auto;visibility:visible;opacity:1;transform:translateX(0) scale(1);transition-delay:0s;}
+  &.is-open {pointer-events:auto;visibility:visible;opacity:1;transform:translate(0,-50%) scale(1);transition-delay:0s;}
   position:absolute;
-  top:0;
+  top:50%;
   left:0;
   width:320px;
   max-width:calc(100vw - 88px);
-  max-height:100%;
+  max-height:min(72vh, calc(100vh - 96px));
   overflow:auto;
   overscroll-behavior:contain;
   padding:12px 8px;

@@ -81,7 +81,7 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
 });
 
 
-it('navigates pages, changes zoom and searches actual PDF page text',async()=>{
+it('navigates pages and changes zoom without search controls',async()=>{
  const view=render(<RenderPdf fileData="test.pdf" defaultPageWidth={600}/>);
  await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
@@ -95,10 +95,7 @@ it('navigates pages, changes zoom and searches actual PDF page text',async()=>{
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0].closest('[data-pdf-page-index]')).toHaveStyle({width:'660px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
- fireEvent.click(screen.getByLabelText('pdfReader.search',{selector:'summary'}));
- fireEvent.change(screen.getByRole('searchbox',{name:'pdfReader.search'}),{target:{value:'needle'}});
- fireEvent.submit(screen.getByRole('search'));
- await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3));
+ expect(screen.queryByRole('searchbox')).toBeNull();
  view.unmount();
 });
 
@@ -122,18 +119,12 @@ it('keeps zoom when verified parsing arrives and restores source-scoped reading 
 });
 
 
-it('downloads the original binary PDF and reports when a study occupies the side panel',async()=>{
- const create=vi.fn(()=> 'blob:original-pdf');const revoke=vi.fn();
- vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:create,revokeObjectURL:revoke}));
- const click=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
- const onStudyOpenChange=vi.fn();const file=new ArrayBuffer(12);
- render(<RenderPdf fileData={file} paperTitle="Real paper" pdfIRTarget={target} pdfSourceHash="hash" onStudyOpenChange={onStudyOpenChange}/>);
- fireEvent.click(screen.getByRole('button',{name:'pdfReader.download'}));
- expect(create).toHaveBeenCalledWith(expect.any(Blob));
- expect(click).toHaveBeenCalledOnce();
+it('omits the PDF download action and still opens the study panel',async()=>{
+ const onStudyOpenChange=vi.fn();
+ render(<RenderPdf fileData={new ArrayBuffer(12)} pdfIRTarget={target} pdfSourceHash="hash" onStudyOpenChange={onStudyOpenChange}/>);
+ expect(screen.queryByRole('button',{name:'pdfReader.download'})).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'pdfFormula.openCatalog'}));
  expect(onStudyOpenChange).toHaveBeenLastCalledWith(true);
- click.mockRestore();vi.unstubAllGlobals();
  await act(async()=>{});
 });
 
@@ -192,20 +183,6 @@ it('keeps PDF reading visible when source hashing replaces the loaded buffer',as
  await act(async()=>{});
 });
 
-it('stops searching more PDF pages after unmount',async()=>{
- let resolve!:(value:{items:Array<{str:string}>})=>void;
- state.text=vi.fn(()=>new Promise<{items:Array<{str:string}>}>(done=>{resolve=done;}));
- const view=render(<RenderPdf fileData="cancel-search.pdf"/>);
- await act(async()=>{});
- fireEvent.click(screen.getByLabelText('pdfReader.search',{selector:'summary'}));
- fireEvent.change(screen.getByRole('searchbox',{name:'pdfReader.search'}),{target:{value:'needle'}});
- fireEvent.submit(screen.getByRole('search'));
- await act(async()=>{});
- view.unmount();
- await act(async()=>resolve({items:[{str:'needle'}]}));
- expect(state.text).toHaveBeenCalledTimes(1);
-});
-
  it('retains header slots without overview or bilingual reflow',async()=>{
  sessionStorage.setItem('pdf-reader:d:one:hash',JSON.stringify({mode:'insight',zoom:1}));
  const view=render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={<button>Workspace</button>}/>);
@@ -252,18 +229,27 @@ it('keeps the captured quote while typing, never offers reference import, and us
  expect(view.container.querySelector('.pdf-reader-with-study')?.firstElementChild).toHaveStyle({backgroundColor:'#ffffff'});
 });
 
-it('keeps all PDF controls in a top-right popover without a second header row',async()=>{
+it('keeps page and zoom controls in the header without search or download',async()=>{
  const view=renderView(<RenderPdf fileData="tools.pdf" pdfIRTarget={target} pdfSourceHash="hash" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={<button>Document actions</button>}/>);
- expect(screen.queryByRole('spinbutton',{name:'pdfReader.page'})).toBeNull();
- const tools=screen.getByRole('button',{name:'阅读工具'});
- expect(view.container.querySelector('.pdf-reader-header-end')).toContainElement(tools);
- fireEvent.click(tools);
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toBeInTheDocument();
- expect(view.container.querySelector('.pdf-reader-header-end')).toContainElement(screen.getByRole('button',{name:'pdfReader.download'}));
+ const header=view.container.querySelector('.pdf-reader-header');
+ expect(header).toContainElement(screen.getByRole('spinbutton',{name:'pdfReader.page'}));
+ expect(header).toContainElement(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
+ expect(screen.queryByRole('searchbox')).toBeNull();
+ expect(screen.queryByRole('button',{name:'pdfReader.download'})).toBeNull();
  expect(view.container.querySelector('.pdf-reader-workspace > .pdf-reader-toolbar')).toBeNull();
- fireEvent.keyDown(tools,{key:'Escape'});
- expect(screen.queryByRole('spinbutton',{name:'pdfReader.page'})).toBeNull();
  await act(async()=>{});
+});
+it('sends reading progress to the outer page after scrolling settles',async()=>{
+ const onViewPositionChange=vi.fn();
+ const view=render(<RenderPdf fileData="progress.pdf" onViewPositionChange={onViewPositionChange}/>);
+ const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
+ await act(async()=>{});
+ viewport.scrollTop=80;fireEvent.scroll(viewport);
+ viewport.scrollTop=120;fireEvent.scroll(viewport);
+ expect(onViewPositionChange).not.toHaveBeenCalled();
+ await waitFor(()=>expect(onViewPositionChange).toHaveBeenCalledTimes(1));
+ expect(onViewPositionChange).toHaveBeenCalledWith(expect.objectContaining({page:1,progress:expect.any(Number)}));
+ view.unmount();
 });
 it('preserves the reading anchor when a newly mounted page reveals a different height',async()=>{
  const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);

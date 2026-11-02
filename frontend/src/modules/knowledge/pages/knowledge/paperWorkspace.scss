@@ -39,10 +39,11 @@
   .paper-chat-open-content { background: var(--paper-surface); }
   .paper-chat-toolbar { min-height: 46px; padding: 6px 14px; border-bottom: 1px solid var(--paper-border); color: var(--paper-ink); box-sizing: border-box; }
   .paper-chat-toolbar strong { font-size: 13px; font-weight: 600; }
-  .paper-chat-toolbar strong > .anticon { display: none; }
+  .paper-chat-toolbar strong > .anticon { display: inline-flex; margin-right: 6px; color: var(--paper-accent); }
   .paper-chat-toolbar .ant-btn { color: var(--paper-muted); }
   .paper-assistant-tabs { display: none; }
   .paper-assistant-pane { background: var(--paper-surface); }
+  .paper-assistant-pane > .paper-reader-details > header { display: none; }
   .paper-pane-divider { flex: 0 0 6px; cursor: col-resize; touch-action: none; position: relative; outline-offset: -2px; }
   .paper-pane-divider::after { content: ''; position: absolute; inset: 40% 3px; border-radius: 4px; background: transparent; transition: background .15s; }
   .paper-pane-divider:hover::after, .paper-pane-divider:focus-visible::after { background: var(--paper-accent); }

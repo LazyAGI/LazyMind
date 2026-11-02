@@ -72,7 +72,7 @@ const enUS = {
   "navigation": "Paper navigation",
   "library": "READING DESK",
   "collapseNavigation": "Collapse paper navigation",
-  "noOutline": "No section headings were identified in this PDF.",
+  "noOutline": "This PDF has no available outline.",
   "parseOutline": "Parse the original PDF to see its outline.",
   "segments": "Document chunks",
   "openNavigation": "Open paper navigation",

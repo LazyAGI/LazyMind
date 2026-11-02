@@ -89,7 +89,7 @@ describe('PaperOutlineRail',()=>{
  it('shows an honest empty state instead of invented chapters',()=>{
   render(<PaperOutlineRail currentPage={1} onNavigate={vi.fn()}/>);
   fireEvent.click(screen.getByRole('button',{name:'Outline'}));
-  expect(screen.getByText('Parse the original PDF to see its outline.')).toBeVisible();
+  expect(screen.getByText('This PDF has no available outline.')).toBeVisible();
   expect(screen.queryByRole('list')).not.toBeInTheDocument();
  });
 });

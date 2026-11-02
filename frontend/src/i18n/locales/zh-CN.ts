@@ -72,7 +72,7 @@ const zhCN = {
   "navigation": "论文导航",
   "library": "阅读工作台",
   "collapseNavigation": "收起论文导航",
-  "noOutline": "此 PDF 中未识别出章节标题。",
+  "noOutline": "此文档暂无目录。",
   "parseOutline": "解析原始 PDF 后即可查看目录。",
   "segments": "文档切片",
   "openNavigation": "展开论文导航",

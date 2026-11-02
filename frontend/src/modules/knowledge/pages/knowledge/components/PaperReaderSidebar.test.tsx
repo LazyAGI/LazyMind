@@ -19,14 +19,14 @@ describe('paper navigation sidebar',()=>{
  });
  it('shows a parsing hint without inventing an outline when source IR is unavailable',()=>{
   render(<PaperReaderSidebar activeTab="outline" onTabChange={vi.fn()} onNavigate={vi.fn()} onCollapse={vi.fn()} references={<div/>}/>);
-  expect(screen.getByText('Parse the original PDF to see its outline.')).toBeInTheDocument();
+  expect(screen.getByText('This PDF has no available outline.')).toBeInTheDocument();
  });
 });
 
 
 it('does not offer PDF parsing for non-PDF documents and keeps their chunks reachable',()=>{
  render(<PaperReaderSidebar isPdf={false} activeTab="outline" onTabChange={vi.fn()} onNavigate={vi.fn()} onCollapse={vi.fn()} references={<div/>} segments={<div>Existing document chunks</div>}/>);
- expect(screen.queryByText('Parse the original PDF to see its outline.')).not.toBeInTheDocument();
+ expect(screen.queryByText('This PDF has no available outline.')).not.toBeInTheDocument();
  expect(screen.getByText('An outline is not available for this document.')).toBeInTheDocument();
  fireEvent.click(screen.getByText('Document chunks'));
  expect(screen.getByText('Existing document chunks')).toBeVisible();

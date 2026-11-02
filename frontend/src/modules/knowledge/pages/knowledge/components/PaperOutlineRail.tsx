@@ -1,14 +1,17 @@
 import {useEffect,useId,useMemo,useRef,useState,type KeyboardEvent} from 'react';
 import {useTranslation} from 'react-i18next';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
+import type {PdfNativeOutlineItem} from '@/modules/knowledge/api/pdfOutline';
 import {paperOutline} from './PaperReaderSidebar';
 import './PaperOutlineRail.scss';
 
 export interface PaperOutlineRailProps {
  document?:PdfIRDocument;
+ nativeOutline?:PdfNativeOutlineItem[];
  /** One-based page number, matching the PDF reader. */
  currentPage:number;
  onNavigate:(blockId:string)=>void;
+ onNavigatePage?:(page:number)=>void;
  disabled?:boolean;
 }
 
@@ -17,20 +20,20 @@ function headingDepth(text?:string) {
  return Math.min(3,numbering?numbering[1].split('.').length-1:0);
 }
 
-export function PaperOutlineRail({document:source,currentPage,onNavigate,disabled=false}:PaperOutlineRailProps){
+export function PaperOutlineRail({document:source,nativeOutline=[],currentPage,onNavigate,onNavigatePage,disabled=false}:PaperOutlineRailProps){
  const {t}=useTranslation();
  const id=useId(),root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
  const suppressFocus=useRef(false);
  const [open,setOpen]=useState(false);
  const [selectedId,setSelectedId]=useState<string>();
- const outline=useMemo(()=>paperOutline(source).filter(block=>Number.isFinite(block.page)).sort((a,b)=>a.page-b.page),[source]);
+ const outline=useMemo(()=>nativeOutline.length?nativeOutline.map(item=>({id:item.id,text:item.title,page:item.page-1,depth:item.depth,native:true})):paperOutline(source).filter(block=>Number.isFinite(block.page)).sort((a,b)=>a.page-b.page).map(block=>({...block,depth:headingDepth(block.text),native:false})),[source,nativeOutline]);
  // Page information cannot distinguish headings on the same page; source order is the stable tie-breaker.
  const preceding=outline.filter(block=>block.page<currentPage);
  const selected=outline.find(block=>block.id===selectedId);
  const active=selected?.page===currentPage-1?selected.id:preceding[preceding.length-1]?.id;
  useEffect(()=>{setSelectedId(id=>outline.find(block=>block.id===id)?.page===currentPage-1?id:undefined);},[currentPage,outline]);
  const title=t('paperShell.outline',{defaultValue:'Outline'});
- const empty=source?t('paperShell.noOutline',{defaultValue:'No section headings were identified in this PDF.'}):t('paperShell.parseOutline',{defaultValue:'Parse the original PDF to see its outline.'});
+ const empty=t('paperShell.noOutline',{defaultValue:'This PDF has no available outline.'});
  const close=(restoreFocus=false)=>{
   setOpen(false);
   if(restoreFocus){suppressFocus.current=true;trigger.current?.focus();suppressFocus.current=false;}
@@ -68,14 +71,14 @@ export function PaperOutlineRail({document:source,currentPage,onNavigate,disable
    aria-expanded={open&&!disabled} aria-controls={`${id}-outline`} disabled={disabled}
    onMouseEnter={()=>{if(!disabled)setOpen(true);}} onFocus={()=>{if(!suppressFocus.current&&!disabled)setOpen(true);}}
    onClick={()=>setOpen(true)}>
-   <span className="paper-outline-rail__ticks" aria-hidden="true">{outline.length?outline.map(block=><span key={block.id} data-depth={headingDepth(block.text)} className={block.id===active?'is-active':undefined}/>):<span className="is-empty"/>}</span>
+   <span className="paper-outline-rail__ticks" aria-hidden="true">{outline.length?outline.map(block=><span key={block.id} data-depth={block.depth} className={block.id===active?'is-active':undefined}/>):<span className="is-empty"/>}</span>
   </button>
   <nav id={`${id}-outline`} className={`paper-outline-rail__popover${open&&!disabled?" is-open":""}`} aria-hidden={!open||disabled} aria-label={title}>
    <div className="paper-outline-rail__title">{title}</div>
    {outline.length?<ol>{outline.map(block=>{
-    const depth=headingDepth(block.text);
+    const depth=block.depth;
     return <li key={block.id}><button type="button" className="paper-outline-rail__chapter" style={{paddingInlineStart:12+depth*14}} aria-current={block.id===active?'location':undefined}
-     onClick={()=>{setSelectedId(block.id);onNavigate(block.id);}}><span>{block.text}</span></button></li>;
+     onClick={()=>{setSelectedId(block.id);if(block.native)onNavigatePage?.(block.page+1);else onNavigate(block.id);}}><span>{block.text}</span></button></li>;
    })}</ol>:<p className="paper-outline-rail__empty">{empty}</p>}
   </nav>
  </div>;

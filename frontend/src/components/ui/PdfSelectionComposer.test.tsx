@@ -7,6 +7,8 @@ it('keeps the selected quote while editing and prepares a question without auto-
  render(<PdfSelectionComposer selection={selection} onAsk={ask} onClose={close}/>);
  const input=screen.getByRole('textbox',{name:'向 AI 提问或记笔记'});
  fireEvent.focus(input);fireEvent.change(input,{target:{value:'Why does this work?'}});
+ expect(screen.queryByRole('button',{name:'快速解释'})).toBeNull();
+ expect(screen.getByRole('button',{name:'向 AI 提问'})).toBeVisible();
  document.dispatchEvent(new Event('selectionchange'));
  expect(input).toHaveValue('Why does this work?');expect(close).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole('button',{name:'向 AI 提问'}));

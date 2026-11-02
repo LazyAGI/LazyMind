@@ -17,11 +17,10 @@ function bibliography(metadata:PaperMetadata){
 }
 export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',onNavigatePage}:PaperReaderDetailsProps){
  const {i18n}=useTranslation();const zh=i18n.language.startsWith('zh');const label=(en:string,cn:string)=>zh?cn:en;
- const [tab,setTab]=useState(initialTab);const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
+ const tab=initialTab;const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
  const [revision,setRevision]=useState(0);const [draft,setDraft]=useState('');const [saving,setSaving]=useState(false);const [saveError,setSaveError]=useState('');const [copyStatus,setCopyStatus]=useState('');
  const draftDocument=useRef<string>();
  const generation=useRef(0);const noteId=useRef('');const key=`${datasetId}/${documentId}`;const currentKey=useRef(key);currentKey.current=key;const mounted=useRef(false);
- useEffect(()=>{setTab(initialTab);},[initialTab]);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  useEffect(()=>{
   const controller=new AbortController();generation.current+=1;
@@ -39,7 +38,7 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
   if(appliedDraft.current===requestKey)return;
   appliedDraft.current=requestKey;
   setDraft(current=>current.trim()?`${current}\n\n${draftRequest.text}`:draftRequest.text);
-  setTab('notes');noteId.current='';
+  noteId.current='';
  },[draftRequest,key,documentId,saving]);
  const library=result?.key===key?result.library:undefined;
  const paperIds=new Set(library?.data.attachments.filter(item=>item.contentRef===documentId).map(item=>item.paperId));
@@ -57,8 +56,8 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
   finally{if(mounted.current&&currentKey.current===key&&generation.current===saveGeneration)setSaving(false);}
  };
  return <aside className="paper-reader-details" aria-label={label('Paper details','论文资料')}>
-  <header><h2>{label('Your paper','论文资料')}</h2><div role="tablist" aria-label={label('Paper details','论文资料')}>{(['info','notes'] as const).map(value=><button key={value} role="tab" aria-selected={tab===value} onClick={()=>setTab(value)}>{value==='info'?label('Info','信息'):label('Notes','笔记')}</button>)}</div></header>
-  <div className="paper-reader-details__content" role="tabpanel">
+  <header><h2>{tab==='info'?label('Paper information','论文信息'):label('Notes','笔记')}</h2></header>
+  <div className="paper-reader-details__content">
    {result?.key===key&&result.error?<div role="alert"><p>{result.error}</p><button onClick={()=>{setResult(undefined);setRevision(value=>value+1);}}>{label('Retry','重试')}</button></div>:!library?<p role="status">{label('Loading paper details…','正在加载论文资料…')}</p>:tab==='info'?<>
     <p className="paper-reader-details__eyebrow">{label('DOCUMENT INFORMATION','文档信息')}</p><h3>{metadata?.title||fileName}</h3>
     {metadata&&<><dl>{!!metadata.authors.length&&<><dt>{label('Authors','作者')}</dt><dd>{metadata.authors.join(', ')}</dd></>}{metadata.year>0&&<><dt>{label('Year','年份')}</dt><dd>{metadata.year}</dd></>}{metadata.venue&&<><dt>{label('Publication','刊物')}</dt><dd>{metadata.venue}</dd></>}{Object.entries(metadata.identifiers).filter(([,value])=>!!value).map(([name,value])=>{const url=safePaperUrl(name==='doi'?`https://doi.org/${value}`:name==='arxiv'?`https://arxiv.org/abs/${value}`:undefined);return <div key={name}><dt>{name.toUpperCase()}</dt><dd>{url?<a href={url} target="_blank" rel="noopener noreferrer">{value}</a>:value}</dd></div>;})}</dl>

@@ -54,6 +54,7 @@ interface FileViewerProps {
   pdfHeaderEnd?: ReactNode;
   onPdfStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: import("@/modules/knowledge/api/pdfIR").PdfIRDocument | undefined) => void;
+  onPdfOutlineChange?: (outline: import("@/modules/knowledge/api/pdfOutline").PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page: number; requestId: number};
   pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
@@ -412,6 +413,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             onStudyOpenChange={props.onPdfStudyOpenChange}
             pdfIRTarget={props.pdfIRTarget}
             onPdfIRDocumentChange={props.onPdfIRDocumentChange}
+            onPdfOutlineChange={props.onPdfOutlineChange}
             pdfNavigateTo={props.pdfNavigateTo}
             pdfNavigateToPage={props.pdfNavigateToPage}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
@@ -531,6 +533,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfFingerprint,
     props.pdfIRTarget,
     props.onPdfIRDocumentChange,
+    props.onPdfOutlineChange,
     props.pdfNavigateTo,
     props.pdfNavigateToPage,
     props.pdfHeaderStart,
