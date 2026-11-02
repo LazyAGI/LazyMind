@@ -1688,7 +1688,9 @@ def _workflow_trigger_tools(
                     'paper_input when the request unambiguously selects one JSON attachment.'
                 )
         trigger_workflow.__doc__ = (
-            description + input_contract + attachment_guidance
+            'Initialize this Workflow. The only argument names are input_bindings and request_context. '
+            'Never pass input_type, inputBindings, step_id, or session_id. '
+            + description + input_contract + attachment_guidance
             + ' Omit inputs whose values were not supplied; do not invent values or '
             'fill absent inputs with empty placeholders. Pass explicitly supplied '
             'optional scalar preferences as well as required inputs.'
@@ -2052,6 +2054,11 @@ def resolve_workflow_injection(
             + 'step merely because it requires approval; the approval checkpoint belongs to its result. '
             + 'Do not replace continued execution with a promise that later steps will run. '
             + completed_followup
+            + ('\nDeclared clarification fields remain available through ask_user. '
+               'Ask for unanswered fields before continuing; a default input binding is not a user answer. '
+               'Preserve explicit answers and never overwrite existing input bindings silently.\n'
+               + json.dumps(_runtime_clarification_fields(runtime_policy), ensure_ascii=False)
+               if _runtime_clarification_fields(runtime_policy) else '')
             + '\n'
             + 'Artifact-mutation guard: when the user asks to change an Artifact already '
             + ('owned by this Workflow, the declared scoped completed-output actions '

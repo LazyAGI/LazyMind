@@ -10,6 +10,7 @@ from lazymind.common.token_estimation import estimate_tokens
 from ..contracts import validate_input, validate_output
 from .schema import ExperimentDraft, Metric, ResultMeta, code_column_types
 from .generation import GeneratedExperiment, validate_generation
+from .stream import generation_progress
 from ..prompts.experiment_prompt import EXPERIMENT_PROMPT
 
 LOG = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ def run(inputs: dict, *, on_event=None, allow_execution=False) -> dict:
     model = writer._build_structured_llm(
         writer._structured_output_prompt(GeneratedExperiment), stream_output=stream, apply_formatter=False)
     started = time.monotonic()
-    response = model(prompt)
+    with generation_progress(on_event):
+        response = model(prompt)
     LOG.info('paper_experiment generation elapsed=%.3fs', time.monotonic() - started)
     # Reuse Writer's JSON parser (fences and syntax repair); it does not call a
     # model again. The complete strict schema and code syntax still validate next.

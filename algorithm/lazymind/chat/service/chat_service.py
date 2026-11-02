@@ -704,9 +704,9 @@ def _workflow_startup_clarification_available(
     *,
     discovery_mode: bool = False,
 ) -> bool:
-    """Allow a declaratively interactive Workflow to clarify before Session creation."""
+    """Keep declared clarification available during an interactive Workflow too."""
     context = workflow_context if isinstance(workflow_context, dict) else {}
-    if str(context.get('session_id') or '').strip():
+    if str(context.get('session_id') or '').strip() and context.get('workflow_mode') == 'auto':
         return False
 
     def has_fields(policy: Any) -> bool:
@@ -722,6 +722,8 @@ def _workflow_startup_clarification_available(
 
     if has_fields(runtime_policy):
         return True
+    if str(context.get('session_id') or '').strip():
+        return False
     if not discovery_mode:
         return False
     return any(

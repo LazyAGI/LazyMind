@@ -487,6 +487,32 @@ def test_stream_preserves_model_chunks_without_character_replay():
     stream.close()
 
 
+@pytest.mark.parametrize('fail', [False, True])
+def test_generation_wait_updates_progress_and_stops_on_exit(monkeypatch, fail):
+    from threading import Event
+    from lazymind.document_tools.paper.experiment import stream as module
+    received = Event()
+    emitted = []
+    monkeypatch.setattr(module, 'GENERATION_HEARTBEAT_SECONDS', 0.01)
+    stream = module.ExperimentStream(emitted.append, 'T', ['experiment_document'])
+
+    def observe(event):
+        stream(event)
+        received.set()
+
+    try:
+        with module.generation_progress(observe):
+            assert received.wait(2), 'waiting model call never reported its progress'
+            if fail:
+                raise ValueError('model request failed')
+    except ValueError:
+        assert fail
+    assert any(e['type'] == 'progress' and '尚未执行代码' in e['current_phase'] for e in emitted)
+    assert max(e.get('progress', 0) for e in emitted) == 5
+    assert not any(e['type'].startswith('artifact_stream') for e in emitted)
+    stream.close()
+
+
 def repaired_records(example):
     table = example['output']['experiment']['results']
     return {
@@ -652,6 +678,7 @@ def test_framework_ask_user_configuration_and_artifact_bindings():
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
     package = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())
     field = package['runtime']['clarification_fields'][0]
+    assert not field.get('ask_when')  # Startup preference also applies to review-first tasks.
     governed = enforce_startup_clarification_policy(
         [{'id': field['id'], 'text': field['question'], 'type': 'single', 'choices': ['wrong']}],
         package['runtime'],

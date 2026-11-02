@@ -1,9 +1,34 @@
 """Project F3 model deltas onto existing task logs and attempt-scoped artifact previews."""
 import json
 import time
+from contextlib import contextmanager
+from threading import Event, Thread
 
 from ..runtime_events import PaperRuntimeEvents, StructuredPreview, current_events
 from .schema import ExperimentDraft, Preview
+
+GENERATION_HEARTBEAT_SECONDS = 15
+
+
+@contextmanager
+def generation_progress(on_event):
+    """Keep model generation observable even when the provider sends no usable preview."""
+    done = Event()
+    started = time.monotonic()
+
+    def waiting():
+        while not done.wait(GENERATION_HEARTBEAT_SECONDS):
+            on_event({'tag': 'heartbeat', 'elapsed_seconds': int(time.monotonic() - started)})
+
+    worker = Thread(target=waiting, daemon=True) if on_event else None
+    if worker:
+        worker.start()
+    try:
+        yield
+    finally:
+        done.set()
+        if worker:
+            worker.join()
 
 
 class ExperimentStream:
@@ -30,7 +55,10 @@ class ExperimentStream:
 
     def __call__(self, event):
         tag, delta = event.get('tag'), event.get('delta')
-        if tag == 'phase':
+        if tag == 'heartbeat':
+            self.emit({'type': 'progress', 'progress': self.progress,
+                       'current_phase': f'{self.last_phase}（已等待 {event["elapsed_seconds"]} 秒，尚未执行代码）'})
+        elif tag == 'phase':
             self.flush_think()
             self.phase(event['phase'], 85)
         elif tag == 'think' and isinstance(delta, str):

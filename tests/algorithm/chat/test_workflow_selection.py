@@ -447,6 +447,21 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
     assert '"allow_other": false' in contribution.runtime_context
 
 
+def test_active_workflow_retains_missing_preference_clarification():
+    runtime = {'clarification_fields': [{
+        'id': 'experiment_execution', 'question': '是否允许运行实验？',
+        'type': 'single', 'choices': ['不允许', '允许'], 'choice_policy': 'fixed',
+    }]}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory:
+        factory.return_value.get_state.return_value = {'session_id': 'session', 'status': 'active'}
+        contribution = resolve_workflow_injection({
+            'session_id': 'session', 'workflow_id': 'paper-writing', 'runtime': runtime,
+        }, current_query='进入实验')
+    assert contribution.runtime_policy == runtime
+    assert 'default input binding is not a user answer' in contribution.runtime_context
+    assert 'experiment_execution' in contribution.runtime_context
+
+
 def test_fixed_startup_choice_policy_overrides_model_other_option():
     runtime = {
         'clarification_fields': [{
