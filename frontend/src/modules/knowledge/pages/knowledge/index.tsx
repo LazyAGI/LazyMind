@@ -11,6 +11,7 @@ import {
   EditOutlined,
   TranslationOutlined,
   MoreOutlined,
+  PlusOutlined,
   CopyOutlined,
   CloseOutlined,
   FileImageOutlined,
@@ -53,6 +54,7 @@ import {
 import { DetailPageHeader, type PdfReferenceAction, type PdfTextSelection, type PdfViewPosition } from "@/components/ui";
 import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
+import type { PdfTemporaryChatHandle } from "@/modules/knowledge/components/PdfTemporaryChat";
 import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/components/PdfTemporaryChat/cache";
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
@@ -168,6 +170,7 @@ const KnowledgeDocumentContent = () => {
   const [segmentDetail, setSegmentDetail] = useState<Segment>();
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const fileViewerRef = useRef<FileViewerRef>(null);
+  const paperChatRef = useRef<PdfTemporaryChatHandle>(null);
   const [canExportImagePdf, setCanExportImagePdf] = useState(false);
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
   const [documentChatSelection, setDocumentChatSelection] =
@@ -1277,6 +1280,7 @@ const KnowledgeDocumentContent = () => {
                 onPointerUp={()=>{panelDrag.current=undefined;}} onPointerCancel={()=>{panelDrag.current=undefined;}} onLostPointerCapture={()=>{panelDrag.current=undefined;}}
                 onKeyDown={event=>{if(panelLayout!=='floating'||event.target!==event.currentTarget)return;const offset=event.key==='ArrowLeft'?[-24,0]:event.key==='ArrowRight'?[24,0]:event.key==='ArrowUp'?[0,-24]:event.key==='ArrowDown'?[0,24]:undefined;if(offset){event.preventDefault();moveFloatingPanel(floatingPosition.x+offset[0],floatingPosition.y+offset[1]);}}}
               ><strong>{previewSideTab==="translation"?<TranslationOutlined/>:previewSideTab==="info"?<InfoCircleOutlined/>:previewSideTab==="notes"?<EditOutlined/>:<MessageOutlined/>} {previewSideTab==="translation" ? (i18n.language.startsWith("zh") ? "翻译" : "Translation") : previewSideTab==="info" ? (i18n.language.startsWith("zh") ? "论文信息" : "Paper information") : previewSideTab==="notes" ? (i18n.language.startsWith("zh") ? "笔记" : "Notes") : t("paperShell.assistant",{defaultValue:"Paper assistant"})}</strong><div>
+                {previewSideTab === "chat" && <Button type="text" icon={<PlusOutlined/>} aria-label={t("knowledge.pdfChatNew")} onClick={()=>paperChatRef.current?.startNewConversation()}/>}
                 {previewSideTab === "chat" && <Popover trigger="click" placement="bottomRight" open={chatHistoryPopoverOpen} onOpenChange={setChatHistoryPopoverOpen} content={<Select allowClear className="knowledge-preview-chat-history-select" placeholder={t("knowledge.pdfChatHistoryPlaceholder")} value={selectedDocumentConversation} options={documentChatHistory.map(conversation=>({value:conversation.conversation_id||"",label:`${conversation.display_name||t("knowledge.pdfChatPanelLabel")} · ${moment(conversation.update_time).format("MM-DD HH:mm")}`})).filter(option=>Boolean(option.value))} onChange={(value:string|undefined)=>{setSelectedDocumentConversation(value||undefined);if(value)touchCachedPdfChat(knowledgeId,value);setChatHistoryPopoverOpen(false);}}/>}>
                   <Button type="text" icon={<HistoryOutlined/>} aria-label={t("paperShell.history",{defaultValue:"Conversation history"})}/>
                 </Popover>}
@@ -1288,7 +1292,7 @@ const KnowledgeDocumentContent = () => {
               </div>
               {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} draftRequest={noteDraftRequest} initialTab={previewSideTab==="notes"?"notes":"info"} onNavigatePage={page=>{setPdfSourceView("original");setPdfNavigateToPage({page,requestId:++navigationSequence.current});}}/></div>}
               <div className="paper-assistant-pane" hidden={previewSideTab !== "chat"}>
-              <PdfTemporaryChat key={`${knowledgeBaseId}:${knowledgeId}`} onClearSelection={()=>setDocumentChatSelection(null)} onNavigateSelection={selection=>{if(selection.page){setPdfSourceView("original");handlePdfViewPositionChange({page:selection.page,progress:0});setPdfNavigateToPage({page:selection.page,requestId:++navigationSequence.current});}}} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} selection={documentChatSelection||undefined} conversationToLoad={selectedDocumentConversation} onConversationChange={setSelectedDocumentConversation} onHistoryChange={refreshDocumentChatHistory} onClose={()=>{setDocumentChatSelection(null);setPreviewSideCollapsed(true);}}/>
+              <PdfTemporaryChat ref={paperChatRef} key={`${knowledgeBaseId}:${knowledgeId}`} onClearSelection={()=>setDocumentChatSelection(null)} onNavigateSelection={selection=>{if(selection.page){setPdfSourceView("original");handlePdfViewPositionChange({page:selection.page,progress:0});setPdfNavigateToPage({page:selection.page,requestId:++navigationSequence.current});}}} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} selection={documentChatSelection||undefined} conversationToLoad={selectedDocumentConversation} onConversationChange={setSelectedDocumentConversation} onHistoryChange={refreshDocumentChatHistory} onClose={()=>{setDocumentChatSelection(null);setPreviewSideCollapsed(true);}}/>
               </div>
             </div>
             {!isPdfDocument&&previewSideCollapsed&&<button className="paper-workspace-rail" aria-label={t("paperShell.openChat",{defaultValue:"Open paper assistant"})} onClick={()=>{setPreviewSideCollapsed(false);if(workspaceWidth<900)setPaperNavCollapsed(true);}}><MessageOutlined/><span>{t("paperShell.assistant",{defaultValue:"Paper assistant"})}</span></button>}

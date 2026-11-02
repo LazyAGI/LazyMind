@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import PdfTemporaryChat from "./index";
+import { createRef } from "react";
+import PdfTemporaryChat, { type PdfTemporaryChatHandle } from "./index";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
@@ -309,6 +310,15 @@ it('removes the fixed new/save action row only from paper chat',()=>{
  expect(container.querySelector(".pdf-temporary-chat--paper")).toBeNull();
  expect(screen.getByRole('button',{name:/knowledge.pdfChatNew/})).toBeInTheDocument();
  expect(screen.getByRole('button',{name:/knowledge.pdfChatSave/})).toBeInTheDocument();
+});
+
+it('lets the workspace title bar start a new paper conversation without remounting chat',()=>{
+ const ref=createRef<PdfTemporaryChatHandle>();
+ const view=render(<PdfTemporaryChat ref={ref} datasetId="d" documentId="toolbar-new-chat" fileName="paper.pdf" onClose={vi.fn()}/>);
+ const pane=view.container.querySelector('.pdf-temporary-chat');
+ act(()=>ref.current?.startNewConversation());
+ expect(chatActions.createNewChat).toHaveBeenCalledOnce();
+ expect(view.container.querySelector('.pdf-temporary-chat')).toBe(pane);
 });
 
 

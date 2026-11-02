@@ -291,16 +291,5 @@
 
 @media (prefers-reduced-motion: reduce) { .paper-assistant-prompts > button { transition: none; } }
 
-// The workspace supplies the title and history control; retain a compact new-chat action.
-.paper-chat-pane .pdf-temporary-chat--paper .pdf-temporary-chat__header {
-  display: flex;
-  justify-content: flex-end;
-  flex: 0 0 auto;
-  padding: 3px 10px;
-  min-height: 30px;
-  > div:first-child { display: none; }
-  > .ant-btn:last-child { display: none; }
-}
-
 .pdf-temporary-chat:has(.paper-assistant-quote) .paper-assistant-welcome { display: none; }
 .paper-assistant-prompts > button:hover { border-color: var(--color-primary-border, #a8bfff); background: var(--color-primary-bg, #e8f3fd); }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Alert, Button, message } from "antd";
 import { CloseOutlined, MessageOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -37,6 +37,10 @@ interface PdfTemporaryChatProps {
   onNavigateSelection?: (selection: DocumentChatSelection) => void;
 }
 
+export interface PdfTemporaryChatHandle {
+  startNewConversation: () => void;
+}
+
 function newPreviewConversationId() {
   const suffix = typeof crypto.randomUUID === "function"
     ? crypto.randomUUID().replace(/-/g, "")
@@ -44,7 +48,7 @@ function newPreviewConversationId() {
   return `pdf-${suffix}`.slice(0, 36);
 }
 
-export default function PdfTemporaryChat({
+const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProps>(function PdfTemporaryChat({
   datasetId,
   documentId,
   fileName,
@@ -56,7 +60,7 @@ export default function PdfTemporaryChat({
   onClose,
   onClearSelection,
   onNavigateSelection,
-}: PdfTemporaryChatProps) {
+}: PdfTemporaryChatProps, ref) {
   const { t, i18n } = useTranslation();
   const zh = (i18n?.resolvedLanguage || i18n?.language || "en").startsWith("zh");
   const copy = zh ? {
@@ -267,6 +271,8 @@ export default function PdfTemporaryChat({
     return nextId;
   };
 
+  useImperativeHandle(ref, () => ({ startNewConversation }));
+
   useEffect(() => {
     if (!translationRequest || handledTranslationRequestRef.current === translationRequest.id) return;
     handledTranslationRequestRef.current = translationRequest.id;
@@ -426,4 +432,6 @@ export default function PdfTemporaryChat({
       </div>
     </aside>
   );
-}
+});
+
+export default PdfTemporaryChat;
