@@ -163,92 +163,7 @@ func previewTaskRemoval(ctx context.Context, db *gorm.DB, owner, id string) (Tas
 func removeTaskWithImpact(ctx context.Context, db *gorm.DB, owner, id, version string) (TaskRemovalResult, error) {
 	result := TaskRemovalResult{RemovedTaskIDs: []string{}, TrashedConversationIDs: []string{}}
 	err := conversationgroup.UserTransaction(ctx, db, owner, func(tx *gorm.DB) error {
-		s, err := loadRemovalScope(ctx, tx, owner, id)
-		if err != nil {
-			return err
-		}
-		if s.target.ArchivedAt != nil {
-			for _, task := range s.tasks {
-				if task.ArchivedAt != nil && task.ArchivedAt.Equal(*s.target.ArchivedAt) {
-					result.RemovedTaskIDs = append(result.RemovedTaskIDs, task.ID)
-				}
-			}
-			for _, c := range s.conversations {
-				if c.DeletedAt != nil {
-					result.TrashedConversationIDs = append(result.TrashedConversationIDs, c.ID)
-				}
-			}
-			return nil
-		}
-		// Successful retries do not renew retention or enqueue cancellation twice.
-		if version != "" && version != s.preview().ImpactVersion {
-			return errRemovalScopeChanged
-		}
-		now := time.Now().UTC()
-		schedules := []string{}
-		cancelConversations := map[string]bool{}
-		executions := map[string][]string{}
-		for _, task := range s.tasks {
-			result.RemovedTaskIDs = append(result.RemovedTaskIDs, task.ID)
-			if task.ScheduleID != nil {
-				schedules = append(schedules, *task.ScheduleID)
-			}
-			if task.ArchivedAt == nil && !isTerminal(task.Status) && len(s.conversations) > 0 {
-				cancelConversations[task.ConversationID] = true
-			}
-		}
-		for _, c := range s.conversations {
-			ids, err := removalChatExecutionIDs(ctx, c.ID, now)
-			if err != nil {
-				return err
-			}
-			executions[c.ID] = ids
-			active, err := removalHasActiveRun(ctx, tx, owner, c.ID, now)
-			if err != nil {
-				return err
-			}
-			if len(ids) > 0 || active {
-				cancelConversations[c.ID] = true
-			}
-			if err := tasktiming.CancelConversation(ctx, tx, owner, c.ID, now); err != nil {
-				return err
-			}
-			result.TrashedConversationIDs = append(result.TrashedConversationIDs, c.ID)
-			if c.DeletedAt == nil {
-				if err := tx.Model(&orm.Conversation{}).Where("id=? AND create_user_id=?", c.ID, owner).Updates(map[string]any{"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour), "archived_at": nil, "archive_folder_id": nil, "updated_at": now}).Error; err != nil {
-					return err
-				}
-			}
-		}
-		reason := ArchivedReasonConversationTrash
-		if len(s.conversations) == 0 {
-			reason = ArchivedReasonTaskRemove
-		}
-		for _, task := range s.tasks {
-			if task.ArchivedAt != nil && task.ArchivedReason != ArchivedReasonConversationArchive {
-				continue
-			}
-			changes := map[string]any{"archived_at": now, "archived_reason": reason, "updated_at": now}
-			if !isTerminal(task.Status) {
-				changes["status"] = "canceled"
-				changes["dependency_status"] = "canceled"
-				changes["finished_at"] = now
-			}
-			if err := tx.Model(&orm.TaskCenterTask{}).Where("id=? AND user_id=?", task.ID, owner).Updates(changes).Error; err != nil {
-				return err
-			}
-		}
-		if err := recountScheduleRuns(ctx, tx, owner, schedules); err != nil {
-			return err
-		}
-		for conv := range cancelConversations {
-			_, err = asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: removalCancellationJob, ResourceType: "conversation", ResourceID: conv, CreateUserID: owner, IdempotencyKey: id + ":" + conv + ":" + now.Format(time.RFC3339Nano), Payload: map[string]any{"conversation_id": conv, "before": now, "chat_execution_ids": executions[conv]}, MaxAttempts: 8})
-			if err != nil {
-				return err
-			}
-			result.CancellationPending = true
-		}
-		return nil
+		return removeTaskInTransaction(ctx, tx, owner, id, version, &result)
 	})
 	sort.Strings(result.RemovedTaskIDs)
 	sort.Strings(result.TrashedConversationIDs)
@@ -354,4 +269,123 @@ func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	common.ReplyJSON(w, result)
+}
+
+func removeTaskInTransaction(ctx context.Context, tx *gorm.DB, owner, id, version string, result *TaskRemovalResult) error {
+	s, err := loadRemovalScope(ctx, tx, owner, id)
+	if err != nil {
+		return err
+	}
+	if s.target.ArchivedAt != nil {
+		for _, task := range s.tasks {
+			if task.ArchivedAt != nil && task.ArchivedAt.Equal(*s.target.ArchivedAt) {
+				result.RemovedTaskIDs = append(result.RemovedTaskIDs, task.ID)
+			}
+		}
+		for _, c := range s.conversations {
+			if c.DeletedAt != nil {
+				result.TrashedConversationIDs = append(result.TrashedConversationIDs, c.ID)
+			}
+		}
+		return nil
+	}
+	// Successful retries do not renew retention or enqueue cancellation twice.
+	if version != "" && version != s.preview().ImpactVersion {
+		return errRemovalScopeChanged
+	}
+	now := time.Now().UTC()
+	schedules := []string{}
+	cancelConversations := map[string]bool{}
+	executions := map[string][]string{}
+	for _, task := range s.tasks {
+		result.RemovedTaskIDs = append(result.RemovedTaskIDs, task.ID)
+		if task.ScheduleID != nil {
+			schedules = append(schedules, *task.ScheduleID)
+		}
+		if task.ArchivedAt == nil && !isTerminal(task.Status) && len(s.conversations) > 0 {
+			cancelConversations[task.ConversationID] = true
+		}
+	}
+	for _, c := range s.conversations {
+		ids, err := removalChatExecutionIDs(ctx, c.ID, now)
+		if err != nil {
+			return err
+		}
+		executions[c.ID] = ids
+		active, err := removalHasActiveRun(ctx, tx, owner, c.ID, now)
+		if err != nil {
+			return err
+		}
+		if len(ids) > 0 || active {
+			cancelConversations[c.ID] = true
+		}
+		if err := tasktiming.CancelConversation(ctx, tx, owner, c.ID, now); err != nil {
+			return err
+		}
+		result.TrashedConversationIDs = append(result.TrashedConversationIDs, c.ID)
+		if c.DeletedAt == nil {
+			if err := tx.Model(&orm.Conversation{}).Where("id=? AND create_user_id=?", c.ID, owner).Updates(map[string]any{"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour), "archived_at": nil, "archive_folder_id": nil, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	reason := ArchivedReasonConversationTrash
+	if len(s.conversations) == 0 {
+		reason = ArchivedReasonTaskRemove
+	}
+	for _, task := range s.tasks {
+		if task.ArchivedAt != nil && task.ArchivedReason != ArchivedReasonConversationArchive {
+			continue
+		}
+		changes := map[string]any{"archived_at": now, "archived_reason": reason, "updated_at": now}
+		if !isTerminal(task.Status) {
+			changes["status"] = "canceled"
+			changes["dependency_status"] = "canceled"
+			changes["finished_at"] = now
+		}
+		if err := tx.Model(&orm.TaskCenterTask{}).Where("id=? AND user_id=?", task.ID, owner).Updates(changes).Error; err != nil {
+			return err
+		}
+	}
+	if err := recountScheduleRuns(ctx, tx, owner, schedules); err != nil {
+		return err
+	}
+	for conv := range cancelConversations {
+		_, err = asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: removalCancellationJob, ResourceType: "conversation", ResourceID: conv, CreateUserID: owner, IdempotencyKey: id + ":" + conv + ":" + now.Format(time.RFC3339Nano), Payload: map[string]any{"conversation_id": conv, "before": now, "chat_execution_ids": executions[conv]}, MaxAttempts: 8})
+		if err != nil {
+			return err
+		}
+		result.CancellationPending = true
+	}
+	return nil
+}
+
+// RemoveAcademicConversation participates in the caller's user/record transaction.
+// It reuses task removal's execution snapshot and durable cancellation.
+func RemoveAcademicConversation(ctx context.Context, tx *gorm.DB, owner, conversation string) error {
+	var task orm.TaskCenterTask
+	err := tx.Where("user_id=? AND conversation_id=?", owner, conversation).Order("created_at DESC").Take(&task).Error
+	if err == nil {
+		result := TaskRemovalResult{}
+		return removeTaskInTransaction(ctx, tx, owner, task.ID, "", &result)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	var row orm.Conversation
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=?", conversation, owner).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if row.DeletedAt != nil {
+		return nil
+	}
+	if err = conversationgroup.RequireOrganizerUnlocked(ctx, tx, owner, []string{conversation}, ""); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	return tx.Model(&row).Updates(map[string]any{"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour), "updated_at": now}).Error
 }

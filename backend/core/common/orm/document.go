@@ -17,6 +17,7 @@ type Document struct {
 	ID           string `gorm:"column:id;type:varchar(128);primaryKey"`
 	LazyllmDocID string `gorm:"column:lazyllm_doc_id;type:varchar(128);not null;default:'';index"`
 
+	ResourceVersion  int64           `gorm:"column:resource_version;not null;default:1"`
 	DatasetID        string          `gorm:"column:dataset_id;type:varchar(255);not null;index"`
 	DisplayName      string          `gorm:"column:display_name;type:varchar(512);not null;default:''"`
 	DocumentType     string          `gorm:"column:document_type;type:varchar(64)"`

@@ -21,6 +21,11 @@ function buildGuideSteps(t: TFunction): GuideStep[] {
   const fieldKey = (key: string) => `${stepKey("dockerFields")}.${key}`;
   return [
     {
+      title: t(stepKey("environmentTitle")),
+      description: t(stepKey("environmentDesc")),
+      details: t(stepKey("environmentDetails"), { returnObjects: true }) as string[],
+    },
+    {
       title: t(stepKey("vaultTitle")),
       description: t(stepKey("vaultDesc")),
       details: t(stepKey("vaultDetails"), { returnObjects: true }) as string[],

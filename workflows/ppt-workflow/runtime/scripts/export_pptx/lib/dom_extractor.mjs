@@ -745,6 +745,9 @@ export async function extractPage(page, htmlPath) {
   // 先用较大 viewport 加载，以便检测实际画布尺寸
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(fileUrl, { waitUntil: 'load' });
+  const { localFontCss } = await import('./local_fonts.mjs');
+  const managedFontCss = await localFontCss(await page.content());
+  if (managedFontCss) await page.addStyleTag({ content: managedFontCss });
   await page.waitForTimeout(200);
 
   // CSS @import web fonts may finish after the document load event. Waiting

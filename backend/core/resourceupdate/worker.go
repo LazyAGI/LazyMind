@@ -228,6 +228,11 @@ func (w *Worker) claimPending(ctx context.Context, now time.Time) ([]orm.Resourc
 // updateOwned never lets an old execution renew or acknowledge a newer run.
 func (w *Worker) updateOwned(ctx context.Context, task orm.ResourceUpdateTask, updates map[string]any) error {
 	return maintenance.UserTransaction(ctx, w.db, task.UserID, func(tx *gorm.DB) error {
+		if task.TaskType == orm.ResourceUpdateTaskTypeOrganizePreference && updates["finished_at"] != nil {
+			if err := w.observePreferenceOrganizerCompletion(ctx, tx, task, updates); err != nil {
+				return err
+			}
+		}
 		update := tx.Model(&orm.ResourceUpdateTask{}).Where("id = ? AND run_id = ? AND run_id <> '' AND status = ? AND locked_by = ? AND locked_until > ?", task.ID, task.RunID, orm.ResourceUpdateTaskStatusRunning, w.workerID, w.clock().UTC()).Updates(updates)
 		if update.Error != nil {
 			return update.Error

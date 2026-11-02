@@ -95,7 +95,7 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 		if claimed.Error != nil || claimed.RowsAffected != 1 {
 			continue
 		}
-		err = ensureDatasetRAG(r, &dataset)
+		err = ensureDatasetRAG(ctx, &dataset)
 		if err == nil {
 			err = db.Model(&orm.Dataset{}).Where("id = ?", dataset.ID).Update("ext", dataset.Ext).Error
 		}

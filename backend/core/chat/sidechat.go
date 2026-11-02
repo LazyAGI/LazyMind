@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lazymind/core/toolpolicy"
 	"net/http"
 	"strings"
 	"time"
@@ -537,6 +538,19 @@ func createSidechatConversation(
 		} else if *parent.ChatModelMode == chatModelModeAuto {
 			child.ChatModelSnapshot = nil
 		}
+		if child.ChatModelMode != nil && *child.ChatModelMode == chatModelModeFixed && child.ChatModelID != nil {
+			models, err := loadAvailableChatModels(ctx, tx, userID)
+			if err != nil {
+				return err
+			}
+			model := findAvailableChatModelBySource(models, *child.ChatModelID, conversationChatModelSource(&child))
+			model, err = lockAndReloadSelectableChatModel(ctx, tx, userID, model)
+			if err != nil {
+				return err
+			}
+			child.ChatModelID = &model.ID
+			child.ChatModelSource = &model.Source
+		}
 		if source != nil {
 			sourceID := source.ID
 			sourceSeq := source.Seq
@@ -601,6 +615,9 @@ func conversationRelationMetadata(c orm.Conversation, parentDisplayName string, 
 }
 
 func mergeConversationRelationMetadata(item map[string]any, c orm.Conversation, parentDisplayName string, includeContext bool) {
+	if c.SourceType == "academic" {
+		item["academic_task"] = true
+	}
 	for key, value := range conversationRelationMetadata(c, parentDisplayName, includeContext) {
 		item[key] = value
 	}
@@ -663,6 +680,8 @@ func CreateSidechat(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, errSidechatNestingLimit):
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, errChatModelUnavailable):
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
 	case errors.Is(err, doc.ErrChatSourceAttachmentUnavailable):
 		common.ReplyErr(w, doc.ErrChatSourceAttachmentUnavailable.Error(), http.StatusConflict)
 	case errors.Is(err, doc.ErrChatSourceAttachmentForbidden):
@@ -834,7 +853,7 @@ func enforceSidechatRequestPolicy(raw map[string]any, inheritedSearchConfig json
 		config["enable_subagent"] = false
 	}
 	delete(raw, "available_skills")
-	raw["disabled_tools"] = mergeDisabledToolNames(
+	raw["disabled_tools"] = toolpolicy.Merge(
 		stringSliceFromAny(raw["disabled_tools"]), []string{"set_session_env"},
 	)
 	delete(raw, "workflow_context")

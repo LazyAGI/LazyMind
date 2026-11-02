@@ -96,12 +96,22 @@ export async function createSearchablePdfJob(datasetId: string, documentId: stri
   return response.data.data;
 }
 
-export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<{ status: "parsed" | "parsing" | "failed"; task_id?: string }> {
-  const response = await axiosInstance.post<Envelope<{ status: "parsed" | "parsing" | "failed"; task_id?: string }>>(
-    `${documentBase(datasetId, documentId)}:ensure-parsed`,
-    {},
-  );
-  return response.data.data || response.data as unknown as { status: "parsed" | "parsing" | "failed"; task_id?: string };
+export interface DocumentParseResult {
+  status: "parsed" | "parsing" | "failed" | "unknown" | "not_requested";
+  task_id?: string;
+  error?: { code: string; message: string; recovery?: string };
+}
+export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<DocumentParseResult> {
+  const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {});
+  return response.data.data || response.data as unknown as DocumentParseResult;
+}
+export async function retryDocumentParsed(datasetId: string, documentId: string): Promise<void> {
+  const response = await axiosInstance.post(`${documentBase(datasetId, documentId)}:reparse`, {}, { headers: { "Idempotency-Key": crypto.randomUUID() } });
+  const result = response.data.data || response.data;
+  const item = result.items?.[0];
+  if (!item || item.resource_status === "failed" || item.processing_status === "failed" || item.resource_status === "unconfirmed") {
+    throw new Error(item?.error?.message || "解析重试未提交，请刷新文档状态后核对。");
+  }
 }
 
 export async function createTranslationPdfJob(datasetId: string, documentId: string, input: {

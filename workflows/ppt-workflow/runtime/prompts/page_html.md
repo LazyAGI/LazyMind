@@ -109,6 +109,16 @@ Use ECharts only when no such diagram image is available for the data on this pa
 
 ## 内容元素稳定 id（硬性）
 
+科研内容约束：公式优先使用可编辑 HTML（sub/sup）或 MathML，并给公式最外层添加
+`data-el="formula-N" data-academic-kind="formula"`。长公式在等号、加号等有数学意义的
+位置分行，必要时安排专页并解释变量，保持原始符号、上下标、单位和含义，禁止为了
+塞入页面过度缩小文字或裁切。根据当前模型能力完成排版，不承诺自动数学证明。
+科研图优先用可局部编辑的内联 SVG，根节点添加 `data-el="chart-N" data-academic-kind="chart"`，
+保留有依据的数据、坐标轴、图例、单位和来源。交互编辑支持被选中 SVG/HTML/MathML 元素。
+不要将这些可编辑图表做成 canvas 截图或把业务数据藏在外部 JavaScript 中。
+论文原图使用独立带 data-el 的 img，并显示来源；不得通过 AI 重绘捏造实验结果。
+用户模板继续遵守现有 style_spec，不额外选择科研模板。
+
 每个**面向读者的内容元素**都要带 `data-el` 属性，命名按类型 + 出现序号（1 开始），全 deck 统一：
 
 | 元素 | `data-el` |
@@ -146,7 +156,10 @@ Use ECharts only when no such diagram image is available for the data on this pa
 
 ## 背景与装饰
 
+- 未提供 AI 底图只表示不使用生成的栅格底图，仍需用可编辑 HTML/CSS、显式图形或 SVG 实现设计。根据主题与页面目的选择主视觉、标题层级和空间分区；不能把每页都退化为同一种纯底色加等宽卡片。用户明确要求纯色、极简或留白时遵从其要求。
+- 封面、内容页和数据页采用适合各自内容的构图，复用同套颜色、字体和装饰语言。背景结构可用少量显式色带、曲线、轮廓或分隔线承载；不为填空新增文案、虚构图表数据或素材。
 - `#bg` / `.wrapper` / 卡片等需要背景的容器，`background` 或 `background-image` **最多一层**：一个纯色、或一个 `linear-gradient(...)`、或一个 `radial-gradient(...)`、或一个 `url(...)`。禁止多层叠加（形如 `background: linear-gradient(...), radial-gradient(...), url(...);` 只会丢层或渲染为纯色块）。
+- “最多一层”针对单个元素的 CSS 背景，不限制整个页面使用多个显式装饰元素。将主题纹理或几何结构放在独立元素中，保持安全区、层级和内容可读性。
 - 若需要"图片 + 遮罩叠加"效果，用两个子元素实现（`<img class="bg-photo">` + 同级 `<div class="bg-overlay">`），不要叠背景层。
 
 ## 可编辑 PPTX 导出兼容（硬性）

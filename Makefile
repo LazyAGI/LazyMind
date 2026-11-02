@@ -19,6 +19,10 @@ endif
 export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
+.PHONY: model-catalog
+model-catalog:
+	$(PYTHON) frontend/scripts/generate_upstream_model_catalog.py
+
 GO ?= go
 LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)

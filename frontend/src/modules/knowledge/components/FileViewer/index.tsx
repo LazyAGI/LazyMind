@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Spin, message, Empty } from "antd";
 import { useTranslation } from "react-i18next";
@@ -46,6 +47,9 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  renderMarkdown?: (markdown: string) => ReactNode;
+  data?: ArrayBuffer;
+  onPreviewError?: () => void;
   file?: string;
   fileName: string;
   segment?: Segment;
@@ -107,6 +111,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const { t } = useTranslation();
   const { file, segment, onExportReadyChange } = props;
   const resolvedFileUrl = useMemo(() => normalizeProxyableUrl(file), [file]);
+  const errorCallback = useRef(props.onPreviewError);
+  errorCallback.current = props.onPreviewError;
+  const onPreviewError = useCallback(() => errorCallback.current?.(), []);
   const [loading, setLoading] = useState(false);
   const [fileData, setFileData] = useState<ArrayBuffer | null>(null);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
@@ -286,26 +293,36 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   );
 
   useEffect(() => {
+    if (props.data !== undefined) {
+      setFileData(props.data); setLoading(false); setPreviewError(null);
+      return;
+    }
     if (!resolvedFileUrl) {
       setFileData(null);
       setPreviewError(null);
       return;
     }
+    let cancelled = false;
     setLoading(true);
+    setFileData(null);
     setPreviewError(null);
     getFileData(resolvedFileUrl as string | ArrayBuffer | File | Blob)
       .then((data) => {
+        if (cancelled) return;
         setFileData(data);
         setLoading(false);
       })
       .catch(() => {
+        if (cancelled) return;
+        onPreviewError();
         const uiMessage = localizeErrorCode("2000509");
         message.error(uiMessage);
         setPreviewError(uiMessage);
         setLoading(false);
         setFileData(null);
       });
-  }, [resolvedFileUrl, getFileData]);
+    return () => { cancelled = true; };
+  }, [resolvedFileUrl, getFileData, props.data, onPreviewError]);
 
   useEffect(() => {
     if (!fileData || (fileType !== "image" && fileType !== "video" && fileType !== "audio")) {
@@ -358,7 +375,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     }
     switch (fileType) {
       case "markdown":
-        return <RenderMarkdown fileData={fileData} />;
+        return <RenderMarkdown fileData={fileData} renderMarkdown={props.renderMarkdown} />;
       case "text":
         return <RenderTxt fileData={fileData} content={content} />;
       case "html":
@@ -370,6 +387,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             style={{
               height: "100%",
             }}
+            onPreviewError={props.onPreviewError ? onPreviewError : undefined}
             fileData={pdfPreviewData}
             metadata={meta}
             content={content}
@@ -397,6 +415,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "docx":
         return (
           <RenderWord
+            onPreviewError={props.onPreviewError ? onPreviewError : undefined}
             fileData={fileData}
             content={content}
           />
@@ -404,6 +423,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "excel":
         return (
           <RenderExcel
+            onPreviewError={props.onPreviewError ? onPreviewError : undefined}
             fileData={fileData}
             fileType={fileType}
             metadata={meta}
@@ -412,13 +432,14 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
           />
         );
       case "pptx":
-        return <RenderPpt fileData={fileData} />;
+        return <RenderPpt fileData={fileData} onPreviewError={props.onPreviewError ? onPreviewError : undefined} />;
       case "image":
         return mediaObjectUrl ? (
           <div className="file-viewer-media-container">
             <img
               alt={props.fileName}
               className="file-viewer-media file-viewer-image"
+              onError={onPreviewError}
               src={mediaObjectUrl}
             />
           </div>
@@ -430,6 +451,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
               className="file-viewer-media file-viewer-video"
               controls
               preload="metadata"
+              onError={onPreviewError}
               src={mediaObjectUrl}
               title={props.fileName}
             />
@@ -442,6 +464,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
               className="file-viewer-media file-viewer-audio"
               controls
               preload="metadata"
+              onError={onPreviewError}
               src={mediaObjectUrl}
               title={props.fileName}
             />
@@ -473,6 +496,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     meta,
     pdfPreviewData,
     props.fileName,
+    props.renderMarkdown,
+    props.onPreviewError,
+    onPreviewError,
     props.onPdfSelection,
     props.onPdfKindDetected,
     props.onPdfTranslateSelection,

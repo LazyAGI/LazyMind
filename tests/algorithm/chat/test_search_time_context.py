@@ -92,3 +92,18 @@ def test_search_time_policy_follows_tools_without_task_routing(tmp_path, role, w
     assert 'Current user date: 2026-09-16 (Asia/Shanghai)' in bundle.system_prompt
     assert '02:30:00' not in bundle.system_prompt
     assert 'Current user time: 02:30:00 (Asia/Shanghai)' in bundle.current_input
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_knowledge_operation_guidance_is_bound_to_work_runtime(tmp_path, enabled):
+    from lazymind.chat.engine.prompts.guidance import KNOWLEDGE_OPERATIONS_GUIDANCE
+    ctx = SubAgentContext(
+        task_id='knowledge-policy', conversation_id='conversation', agent_type='research',
+        objective='delete requested folder', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda event: None,
+    )
+    plan = runner._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+        knowledge_management=object() if enabled else None,
+    )
+    assert (KNOWLEDGE_OPERATIONS_GUIDANCE in plan.prompt.current_input) is enabled

@@ -710,3 +710,15 @@ def test_search_credentials_do_not_survive_an_unconfigured_request():
     assert 'web_search' in _active_tool_names()
     inject_tool_config({})
     assert 'web_search' not in _active_tool_names()
+
+
+def test_management_group_is_separate_from_native_read_kb_and_requires_core_scope():
+    group = _tool_group('knowledge_management')
+    assert group['active'] is False
+    lazyllm.globals['agentic_config'] = {'system_mcp_config': [
+        {'id': 'lazymind-knowledge', 'allowed_tools': ['knowledge.create']}]}
+    group = _tool_group('knowledge_management')
+    assert group['active'] is True
+    assert group['provider_id'] == 'lazymind-knowledge'
+    lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
+    assert _tool_group('knowledge_management')['active'] is False

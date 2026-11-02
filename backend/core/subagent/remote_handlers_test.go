@@ -168,6 +168,13 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	}
 	data := getData(rec.Body.Bytes())
 	params := data["params"].(map[string]any)
+	taskParams := data["task"].(map[string]any)["params"].(map[string]any)
+	publicVisibility, _ := json.Marshal(params["_tool_visibility"])
+	taskVisibility, _ := json.Marshal(taskParams["_tool_visibility"])
+	if string(publicVisibility) != string(taskVisibility) || params["_tool_visibility"] == nil {
+		t.Fatalf("execution spec returned inconsistent visibility: %#v", data)
+	}
+
 	steps := data["steps"].([]any)
 	if params["operation"] != "execute" || len(steps) != 1 {
 		t.Fatalf("data=%#v", data)

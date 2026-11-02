@@ -65,7 +65,8 @@ func TestFindAvailableUploadedFilesByHash(t *testing.T) {
 	}
 }
 
-func TestCreateTaskFromContentHashCreatesTargetHardLink(t *testing.T) {
+func TestCreateTaskFromContentHashCreatesIndependentOriginal(t *testing.T) {
+	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
 	now := time.Now().UTC()
@@ -122,16 +123,22 @@ func TestCreateTaskFromContentHashCreatesTargetHardLink(t *testing.T) {
 	if err := json.Unmarshal(target.Ext, &targetExt); err != nil {
 		t.Fatalf("decode target upload metadata: %v", err)
 	}
-	sourceInfo, err := os.Stat(sourcePath)
-	if err != nil {
-		t.Fatalf("stat source file: %v", err)
+	var document orm.Document
+	if err := db.First(&document, "id = ?", tasks[0].DocID).Error; err != nil {
+		t.Fatal(err)
 	}
-	targetInfo, err := os.Stat(targetExt.StoredPath)
-	if err != nil {
-		t.Fatalf("stat target file: %v", err)
+	var original documentExt
+	if err := json.Unmarshal(document.Ext, &original); err != nil {
+		t.Fatal(err)
 	}
-	if !os.SameFile(sourceInfo, targetInfo) {
-		t.Fatal("target file is not a hard link to the reusable source")
+	if original.StoredPath == sourcePath {
+		t.Fatal("document kept source path")
+	}
+	if err := os.Remove(sourcePath); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(original.StoredPath); err != nil || string(data) != string(content) {
+		t.Fatalf("original lost: %q %v", data, err)
 	}
 
 	var unchanged orm.UploadedFile

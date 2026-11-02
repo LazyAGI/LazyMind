@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"errors"
+	"lazymind/core/common"
 	"sort"
 	"strings"
 )
@@ -13,13 +14,7 @@ const (
 	RuntimeEventRunFinished         = "run_finished"
 )
 
-type ChatRuntimeEvent struct {
-	SchemaVersion int             `json:"schema_version"`
-	EventID       string          `json:"event_id"`
-	RunID         string          `json:"run_id"`
-	Type          string          `json:"type"`
-	Data          json.RawMessage `json:"data"`
-}
+type ChatRuntimeEvent common.ModelRuntimeEvent
 
 type RunTerminal struct {
 	Status              string                  `json:"status"`
@@ -87,17 +82,7 @@ var validModelFailureOrigins = map[string]struct{}{
 	"transport": {}, "http": {}, "provider": {}, "protocol": {},
 }
 
-// Keys define the public model failure contract. Values retain Auto's existing
-// policy: true marks this model unavailable for the next automatic selection.
-var validModelFailureCodes = map[string]bool{
-	"invalid_request": false, "authentication_failed": true, "permission_denied": true, "not_found": true,
-	"rate_limited": true, "usage_limit_exceeded": true, "concurrency_limited": true, "quota_exhausted": true,
-	"balance_exhausted": true, "organization_spend_limit_exceeded": true, "project_spend_limit_exceeded": true,
-	"input_filtered": false, "output_filtered": false, "token_limit": false, "request_timeout": true,
-	"provider_overloaded": true, "service_unavailable": true, "provider_internal_error": true,
-	"provider_rejected": false, "conflict": false, "unprocessable_entity": false, "protocol_error": false,
-	"transport_error": true, "model_configuration": true,
-}
+var validModelFailureCodes = common.ValidModelFailureCodes
 
 // ModelFailureCodes supplies OpenAPI and its generated clients from the same
 // directory used to validate persisted and streamed terminals.
@@ -121,6 +106,8 @@ func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 		return errors.New("runtime event run_id mismatch")
 	}
 	switch e.Type {
+	case RuntimeEventModelSwitched:
+		return validateModelSwitched(e.Data)
 	case RuntimeEventModelRetryScheduled:
 		return validateModelRetryScheduled(e.Data)
 	case RuntimeEventModelCallFinished:
@@ -235,6 +222,7 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 		switch terminal.Reason {
 		case "model_failure":
 			_, valid = validModelFailureCodes[terminal.Code]
+			valid = valid || terminal.Code == "model_fallback_exhausted" || terminal.Code == "model_context_not_fit"
 		case "runtime_failure":
 			valid = strings.TrimSpace(terminal.Code) != ""
 		}
@@ -331,7 +319,7 @@ func storedRunEvent(runID string, raw json.RawMessage) *ChatRuntimeEvent {
 
 func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
 	return chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
-		chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
+		chunk.KnowledgeOperationResult != nil || chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
 		chunk.CapabilityDependency != nil || chunk.ToolConfiguration != nil ||
 		chunk.Heartbeat

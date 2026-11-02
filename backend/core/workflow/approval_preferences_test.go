@@ -88,6 +88,7 @@ func TestSetWorkflowApprovalPreferencePersistsForFutureProjections(t *testing.T)
 	}`))
 	req = mux.SetURLVars(req, map[string]string{"session_id": "approval-session"})
 	req.Header.Set("X-User-Id", "user-a")
+	req.Header.Set("Origin", "http://localhost")
 	rec := httptest.NewRecorder()
 	SetWorkflowApprovalPreference(rec, req)
 	if rec.Code != http.StatusOK {
@@ -163,6 +164,7 @@ func TestFollowingApprovalPreferenceDisablesWholeWorkflowInFutureRuns(t *testing
 	}`))
 	req = mux.SetURLVars(req, map[string]string{"session_id": "workflow-wide-approval-session"})
 	req.Header.Set("X-User-Id", "user-a")
+	req.Header.Set("Origin", "http://localhost")
 	rec := httptest.NewRecorder()
 	SetWorkflowApprovalPreference(rec, req)
 	if rec.Code != http.StatusOK {

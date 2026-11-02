@@ -152,6 +152,14 @@ sequenceDiagram
 
 外部 Agent 兼任 Executor 时，提交后根据最新状态继续推进；等待审核、等待独立 Executor 或已停止时让出自动运行，完成时结束推进，不轮询等待。
 
+#### 4.2.1 步骤失败与自动重试
+
+步骤失败会将 run 标为 `failed`，但这本身不代表自动重试预算已耗尽。Core 按步骤累计已受理的自动执行次数，默认最多 3 次（首次执行 + 2 次自动重试）；被拒绝的请求和重复提交同一 command 不增加次数。用户明确点击重试走独立控制路径，不受此自动预算限制。
+
+失败 run 没有活跃执行、没有待审核或待继续的编辑、且绑定有效时，若仍有预算，`workflow.state` 返回 `control.continuation=continue`、`admission.can_begin=true` 和 `automatic_retry_steps`。Controller 应对列表中的失败步骤调用 `workflow.step.begin`；Core 在同一事务中再次检查目标步骤预算、失效旧 attempt 并创建新 attempt。失败 run 不能借此自动执行其他步骤或回退成功步骤。
+
+预算耗尽时返回 `continuation=failed`、`admission.can_begin=false`、`reason=recovery_required`，Controller 应结束本轮并交由用户处理。若仍直接请求自动重试，返回 `WORKFLOW_AUTOMATIC_RETRY_LIMIT_EXCEEDED`。停止、审核、绑定、编辑和执行授权限制继续优先生效。`workflow.control.v1` 是创建 run 时保存的控制模式版本，不需要在步骤之间切换。
+
 **控制通道：Core 保存 HostAction，Connector 领取并调用外部应用的会话接口。**
 
 ```mermaid

@@ -1,6 +1,14 @@
 package bootstrap
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"lazymind/core/doc"
+	"lazymind/core/knowledgeruntime"
+	"lazymind/core/state"
 	"net/http"
 	"strings"
 
@@ -14,19 +22,29 @@ import (
 )
 
 type Config struct {
-	DB                        *gorm.DB
-	LazyDB                    *gorm.DB
-	AuthServiceBaseURL        string
-	AuthHTTPClient            *http.Client
-	KnowledgeSearchBaseURL    string
-	CloudDocumentBaseURL      string
-	InternalServiceToken      string
-	KnowledgeSearchHTTPClient *http.Client
-	ScanBaseURL               string
+	KnowledgeDecisionRecorded    func(context.Context, knowledgeruntime.Execution, knowledgeruntime.Prepared, string) error
+	PendingKnowledgeConfirmation func(context.Context, knowledgeruntime.Execution, knowledgeruntime.Prepared) error
+	EnableKnowledgeManagement    bool
+	State                        state.Store
+	ValidateKnowledgeExecution   knowledgeruntime.ValidateFunc
+	ValidateKnowledgeCommit      knowledgeruntime.ValidateCommitFunc
+	MoveBudget                   doc.ResourceBudget
+	DB                           *gorm.DB
+	LazyDB                       *gorm.DB
+	AuthServiceBaseURL           string
+	AuthHTTPClient               *http.Client
+	KnowledgeSearchBaseURL       string
+	CloudDocumentBaseURL         string
+	InternalServiceToken         string
+	KnowledgeSearchHTTPClient    *http.Client
+	ScanBaseURL                  string
 }
 
 type Runtime struct {
-	MCP http.Handler
+	MCP               http.Handler
+	KnowledgeInternal http.Handler
+	KnowledgeMCP      http.Handler
+	KnowledgeDecision http.HandlerFunc
 }
 
 func NewHandler(config Config) (http.Handler, error) {
@@ -83,8 +101,23 @@ func NewRuntime(config Config) (*Runtime, error) {
 		}
 		cloudContent = cloud
 	}
+	var management *coreadapter.KnowledgeManagement
+	var managementPort capability.KnowledgeManager
+	var resources *doc.ResourceService
+	if config.EnableKnowledgeManagement {
+		originals, e := doc.NewOriginalService(doc.OriginalServiceDeps{DB: config.DB})
+		if e != nil {
+			return nil, e
+		}
+		resources, e = doc.NewResourceService(doc.ResourceServiceDeps{LazyDB: config.LazyDB, DB: config.DB, Originals: originals, Budget: config.MoveBudget})
+		if e != nil {
+			return nil, e
+		}
+		management = coreadapter.NewKnowledgeManagement(config.DB, lazyDB, resources)
+		managementPort = management
+	}
 	service, err := capability.NewService(capability.Dependencies{
-		Skills: skills, Knowledge: knowledge, Documents: documents, Search: search, Cloud: cloud, CloudContent: cloudContent, Vocabulary: vocabularyTrainer,
+		Management: managementPort, Skills: skills, Knowledge: knowledge, Documents: documents, Search: search, Cloud: cloud, CloudContent: cloudContent, Vocabulary: vocabularyTrainer,
 		External: externalcapability.New(config.DB, nil),
 	})
 	if err != nil {
@@ -100,5 +133,118 @@ func NewRuntime(config Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{MCP: handler}, nil
+	runtime := &Runtime{MCP: handler}
+	if config.EnableKnowledgeManagement {
+		kr, e := knowledgeruntime.New(config.State, config.ValidateKnowledgeExecution, func(ctx context.Context, id knowledgeruntime.Identity, name string, args json.RawMessage) (doc.ResourceSnapshot, error) {
+			permissions := []string{}
+			for p := range id.Principal.Permissions {
+				permissions = append(permissions, p)
+			}
+			op := doc.ResourceOperationContext{Caller: doc.DatasetCatalogCaller{UserID: id.Principal.UserID, TenantID: id.Principal.TenantID, Permissions: permissions}, AllowedDatasetIDs: id.AllowedDatasetIDs}
+			if name == "knowledge.create" {
+				var req doc.CreateKnowledgeRequest
+				if e := json.Unmarshal(args, &req); e != nil {
+					return doc.ResourceSnapshot{}, e
+				}
+				return resources.SnapshotCreateKnowledge(ctx, op, req)
+			}
+			if name == "knowledge.folder.create" {
+				var req doc.CreateFoldersRequest
+				if e := json.Unmarshal(args, &req); e != nil {
+					return doc.ResourceSnapshot{}, e
+				}
+				return resources.SnapshotCreateFolders(ctx, op, req)
+			}
+			if name == "knowledge.resource.move" {
+				var req doc.MoveResourcesRequest
+				if e := json.Unmarshal(args, &req); e != nil {
+					return doc.ResourceSnapshot{}, e
+				}
+				return resources.SnapshotMove(ctx, op, req)
+			}
+			var req doc.DeleteResourcesRequest
+			if e := json.Unmarshal(args, &req); e != nil {
+				return doc.ResourceSnapshot{}, e
+			}
+			return resources.Snapshot(ctx, op, req.Targets)
+		})
+		if e != nil {
+			return nil, e
+		}
+		kr.SetPendingHook(config.PendingKnowledgeConfirmation)
+		kr.SetDecisionHook(config.KnowledgeDecisionRecorded)
+		kr.SetReceiptLookup(func(ctx context.Context, id knowledgeruntime.Identity, req knowledgeruntime.PrepareRequest) (bool, error) {
+			permissions := []string{}
+			for permission := range id.Principal.Permissions {
+				permissions = append(permissions, permission)
+			}
+			op := doc.ResourceOperationContext{Caller: doc.DatasetCatalogCaller{UserID: id.Principal.UserID, TenantID: id.Principal.TenantID, Permissions: permissions}, OperationKey: req.OperationKey}
+			switch req.WireName {
+			case "knowledge.create":
+				var input doc.CreateKnowledgeRequest
+				if e := json.Unmarshal(req.Arguments, &input); e != nil {
+					return false, e
+				}
+				_, found, e := resources.ReplayOperation(ctx, op, req.WireName, input)
+				return found, e
+			case "knowledge.folder.create":
+				var input doc.CreateFoldersRequest
+				if e := json.Unmarshal(req.Arguments, &input); e != nil {
+					return false, e
+				}
+				_, found, e := resources.ReplayOperation(ctx, op, req.WireName, input)
+				return found, e
+
+			case "knowledge.resource.delete":
+				var input doc.DeleteResourcesRequest
+				if err := json.Unmarshal(req.Arguments, &input); err != nil {
+					return false, err
+				}
+				_, found, err := resources.ReplayOperation(ctx, op, req.WireName, input)
+				return found, err
+			case "knowledge.resource.move":
+				var input doc.MoveResourcesRequest
+				if err := json.Unmarshal(req.Arguments, &input); err != nil {
+					return false, err
+				}
+				return resources.HasCommittedMove(ctx, op, input)
+			}
+			return false, nil
+		})
+		management.SetBeforeCommit(kr.ValidateCommitPreparation)
+		management.SetCommitGuard(func(ctx context.Context, tx *gorm.DB, c capability.InvocationContext) error {
+			return kr.GuardCommit(ctx, tx, c.ExecutionKey, config.ValidateKnowledgeCommit)
+		})
+		internalVerifier := func(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+			id, execution, e := kr.Authenticate(ctx, token)
+			if e != nil {
+				return nil, e
+			}
+			scopes := []string{}
+			for p := range id.Principal.Permissions {
+				scopes = append(scopes, p)
+			}
+			return &auth.TokenInfo{UserID: id.Principal.UserID, Scopes: scopes, Extra: map[string]any{"tenant_id": id.Principal.TenantID, "execution": execution, "knowledge_identity": id}}, nil
+		}
+		runtime.KnowledgeMCP, e = mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{Verifier: internalVerifier, ManagementOnly: true, AuthorizeCall: func(ctx context.Context, req *mcp.CallToolRequest) (capability.InvocationContext, error) {
+			if req.Extra == nil || req.Extra.TokenInfo == nil || req.Params == nil {
+				return capability.InvocationContext{}, errors.New("authenticated execution missing")
+			}
+			execution, ok := req.Extra.TokenInfo.Extra["execution"].(knowledgeruntime.Execution)
+			if !ok {
+				return capability.InvocationContext{}, errors.New("execution missing")
+			}
+			identity, ok := req.Extra.TokenInfo.Extra["knowledge_identity"].(knowledgeruntime.Identity)
+			if !ok {
+				return capability.InvocationContext{}, errors.New("verified identity missing")
+			}
+			return kr.AuthorizeDispatch(ctx, execution, req.Params.Name, req.Params.Arguments, req.Params.GetMeta(), identity)
+		}})
+		if e != nil {
+			return nil, e
+		}
+		runtime.KnowledgeInternal = kr.InternalHandler(config.InternalServiceToken)
+		runtime.KnowledgeDecision = kr.Decision
+	}
+	return runtime, nil
 }

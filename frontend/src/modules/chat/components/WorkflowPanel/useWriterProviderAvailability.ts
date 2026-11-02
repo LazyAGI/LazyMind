@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CloudConnectionResponse } from '@/api/generated/auth-client';
 import { dataSourceCloudOauthApi } from '@/modules/dataSource/api/clients';
 import { getCloudConnectionItems } from '@/modules/dataSource/mappers/cloudConnection';
 
@@ -8,19 +9,22 @@ export type ProviderAvailability = 'checking' | 'ready' | 'authorize' | 'chat-di
 export function useWriterProviderAvailability(providers: string[]) {
   const [states, setStates] = useState<Record<string, ProviderAvailability>>({});
   const generation = useRef(0);
+  const [accounts, setAccounts] = useState<Record<string, CloudConnectionResponse[]>>({});
   const signature = providers.join(',');
   const refresh = useCallback(async () => {
     const ids = signature.split(',').filter(Boolean);
     const request = ++generation.current;
+    setAccounts({});
     setStates(Object.fromEntries(ids.map(id => [id, cloudProviders.has(id) ? 'checking' : 'ready'])));
     const results = await Promise.all(ids.filter(id => cloudProviders.has(id)).map(async id => {
       try {
         const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({ provider: id, status: null });
         const connections = getCloudConnectionItems(response.data);
+        if (request === generation.current) setAccounts(current => ({ ...current, [id]: connections.filter(item => item.status === 'ACTIVE' && item.can_use_chat === true) }));
         if (connections.some(connection => typeof connection.can_use_chat !== 'boolean')) {
           return [id, 'failed'] as const;
         }
-        const ready = connections.some(connection => connection.can_use_chat === true);
+        const ready = connections.some(connection => connection.status === 'ACTIVE' && connection.can_use_chat === true);
         const chatDisabled = connections.some(connection => {
           if (connection.status !== 'ACTIVE') return false;
           const options = connection.provider_options ?? {};
@@ -39,5 +43,5 @@ export function useWriterProviderAvailability(providers: string[]) {
     window.addEventListener('focus', onFocus);
     return () => { generation.current++; window.removeEventListener('focus', onFocus); };
   }, [refresh]);
-  return { states, refresh };
+  return { states, accounts, refresh };
 }

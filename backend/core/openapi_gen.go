@@ -217,7 +217,7 @@ func removePrivateOpenAPISchemas(spec map[string]any) {
 		return
 	}
 	for name := range schemas {
-		if strings.HasPrefix(strings.ToLower(name), "remotefs") {
+		if strings.HasPrefix(strings.ToLower(name), "remotefs") || name == "SubagentRunRequest" || name == "TaskModelCandidate" || name == "TaskModelFallbackInitialSwitch" {
 			delete(schemas, name)
 		}
 	}

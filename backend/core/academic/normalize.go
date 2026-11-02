@@ -10,7 +10,7 @@ import (
 
 var (
 	doiPattern           = regexp.MustCompile(`(?i)10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
-	arxivPattern         = regexp.MustCompile(`(?i)(?:arxiv\s*:\s*)?((?:\d{4}\.\d{4,5}|[a-z-]+/\d{7})(?:v(\d+))?)`)
+	arxivPattern         = regexp.MustCompile(`(?i)(?:arxiv\s*:\s*)?((?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})(?:v(\d+))?)`)
 	arxivExplicitPattern = regexp.MustCompile(`(?i)(?:arxiv\s*[:.]\s*|arxiv\s*\.\s*org\s*/\s*(?:abs|pdf)\s*/\s*)((?:\d{4}\.\s*\d{4,5}|[a-z-]+/\s*\d{7})(?:v\s*(\d+))?)`)
 	yearPattern          = regexp.MustCompile(`\b(?:19|20)\d{2}\b`)
 )
@@ -23,7 +23,8 @@ func NormalizeDOI(value string) string {
 	if match := doiPattern.FindString(v); match != "" {
 		v = strings.ToLower(match)
 	}
-	return strings.TrimRight(v, ".,;)]}")
+	v = strings.TrimRight(v, ".,;)]}")
+	return regexp.MustCompile(`(/arxiv\.\d{4}\.\d{4,5})v\d+$`).ReplaceAllString(v, "$1")
 }
 
 func NormalizeArxivID(value string) (base, version string) {

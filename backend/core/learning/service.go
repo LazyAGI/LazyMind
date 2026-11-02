@@ -121,6 +121,10 @@ func (s *Service) ProfileRefs(ctx context.Context, owner, key string) ([]Capabil
 	}
 	return refs, validateRefs(refs)
 }
+func ValidateCapabilityRefs(refs []CapabilityRef) error {
+	return validateRefs(refs)
+}
+
 func validateRefs(refs []CapabilityRef) error {
 	if len(refs) == 0 {
 		return errors.New("at least one capability is required")
@@ -137,6 +141,9 @@ func validateRefs(refs []CapabilityRef) error {
 		if seen[ref.Key] {
 			return errors.New("duplicate learning capability")
 		}
+		if err := validateCapabilitySettings(def, ref.Settings); err != nil {
+			return err
+		}
 		seen[ref.Key] = true
 	}
 	return nil
@@ -149,36 +156,42 @@ func (s *Service) PutKnowledgeBaseCapabilities(ctx context.Context, owner, datas
 		return err
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := time.Now().UTC()
-		desired := map[string]bool{}
-		for i, ref := range refs {
-			def, _ := CapabilityByKey(ref.Key)
-			if err := validateCapabilitySettings(def, ref.Settings); err != nil {
-				return err
-			}
-			desired[def.Key] = true
-			order := ref.DisplayOrder
-			if order == 0 {
-				order = i + 1
-			}
-			row := KnowledgeBaseCapability{ID: uuid.NewString(), OwnerID: owner, DatasetID: dataset, CapabilityKey: def.Key, CapabilityVersion: def.Version, Enabled: ref.Enabled, DisplayOrder: order, SettingsJSON: marshal(ref.Settings), CreatedAt: now, UpdatedAt: now}
-			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "dataset_id"}, {Name: "capability_key"}}, DoUpdates: clause.AssignmentColumns([]string{"owner_id", "capability_version", "enabled", "display_order", "settings_json", "updated_at"})}).Create(&row).Error; err != nil {
-				return err
-			}
-		}
-		var existing []KnowledgeBaseCapability
-		if err := tx.Where("owner_id = ? AND dataset_id = ?", owner, dataset).Find(&existing).Error; err != nil {
+		return SaveKnowledgeBaseCapabilities(tx, owner, dataset, refs)
+	})
+}
+
+// SaveKnowledgeBaseCapabilities participates in the caller's existing transaction.
+// Callers must authorize the dataset and validate refs before entering the transaction.
+func SaveKnowledgeBaseCapabilities(tx *gorm.DB, owner, dataset string, refs []CapabilityRef) error {
+	now := time.Now().UTC()
+	desired := map[string]bool{}
+	for i, ref := range refs {
+		def, _ := CapabilityByKey(ref.Key)
+		if err := validateCapabilitySettings(def, ref.Settings); err != nil {
 			return err
 		}
-		for _, row := range existing {
-			if !desired[row.CapabilityKey] {
-				if err := tx.Model(&row).Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
-					return err
-				}
+		desired[def.Key] = true
+		order := ref.DisplayOrder
+		if order == 0 {
+			order = i + 1
+		}
+		row := KnowledgeBaseCapability{ID: uuid.NewString(), OwnerID: owner, DatasetID: dataset, CapabilityKey: def.Key, CapabilityVersion: def.Version, Enabled: ref.Enabled, DisplayOrder: order, SettingsJSON: marshal(ref.Settings), CreatedAt: now, UpdatedAt: now}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "dataset_id"}, {Name: "capability_key"}}, DoUpdates: clause.AssignmentColumns([]string{"owner_id", "capability_version", "enabled", "display_order", "settings_json", "updated_at"})}).Create(&row).Error; err != nil {
+			return err
+		}
+	}
+	var existing []KnowledgeBaseCapability
+	if err := tx.Where("owner_id = ? AND dataset_id = ?", owner, dataset).Find(&existing).Error; err != nil {
+		return err
+	}
+	for _, row := range existing {
+		if !desired[row.CapabilityKey] {
+			if err := tx.Model(&row).Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
+				return err
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func validateCapabilitySettings(def Capability, settings map[string]any) error {

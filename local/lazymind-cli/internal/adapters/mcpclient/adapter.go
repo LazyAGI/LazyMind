@@ -19,6 +19,7 @@ import (
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workbuddyhost"
 )
@@ -85,12 +86,33 @@ func New(kind Kind, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	return &Adapter{kind: kind, self: resolvedSelf, bridge: bridge, home: home, hostID: hostID}, nil
 }
 
+var workBuddyStartupHealth = workbuddyhost.StartupHealth
+
 func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
-	return a.status(ctx)
+	status := a.status(ctx)
+	if a.kind == WorkBuddy {
+		status = agentintegration.ApplyPreference(a.home, "workbuddy", status)
+		if status.Enabled != nil && *status.Enabled && status.State == agentintegration.Enabled {
+			store, err := credentials.NewStore(a.home, "")
+			if err == nil {
+				account, err := store.AccountScope()
+				if err == nil {
+					config, _, err := workbuddyhost.Load(a.home, account)
+					if err == nil {
+						agentintegration.SetRuntimeIssue(&status, workBuddyStartupHealth(ctx, a.home, config.CDPPort))
+					}
+				}
+			}
+		}
+	}
+	return status
 }
 
 func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) {
 	defer func() {
+		if a.kind == WorkBuddy {
+			defer func() { result = agentintegration.ApplyPreference(a.home, "workbuddy", result) }()
+		}
 		if a.kind == WorkBuddy && result.State == agentintegration.Failed {
 			sanitizeWorkBuddyFailure(&result)
 			// Installation may have written the owned entry before startup failed.
@@ -108,12 +130,17 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 		defer cancel()
 		ctx = bounded
 	}
-	status := a.status(ctx)
+	status := a.Status(ctx)
 	if a.kind == WorkBuddy {
 		status.Issue = nil
 	}
 	if status.State != agentintegration.Ready && !(a.kind == WorkBuddy && status.State == agentintegration.Enabled) {
 		return status
+	}
+	if a.kind == WorkBuddy {
+		if err := integrationstate.Set(a.home, "workbuddy", true); err != nil {
+			return agentintegration.Fail(status, err.Error())
+		}
 	}
 	if _, err := a.bridge.Probe(ctx); err != nil {
 		return agentintegration.Fail(status, "LazyMind MCP is unavailable: "+err.Error())
@@ -183,11 +210,17 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	return a.status(ctx)
 }
 
-func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
+func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Status) {
+	if a.kind == WorkBuddy {
+		defer func() { result = agentintegration.ApplyPreference(a.home, "workbuddy", result) }()
+		if err := integrationstate.Set(a.home, "workbuddy", false); err != nil {
+			return agentintegration.Fail(a.Status(ctx), err.Error())
+		}
+	}
 	if a.desktopDSHMode() {
 		return a.disconnectDSHDesktop(ctx)
 	}
-	status := a.status(ctx)
+	status := a.Status(ctx)
 	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed && !(a.kind == WorkBuddy && status.CanDisconnect) {
 		return status
 	}
@@ -197,18 +230,11 @@ func (a *Adapter) Disconnect(ctx context.Context) agentintegration.Status {
 		}
 	}
 	if a.kind == WorkBuddy {
-		store, err := credentials.NewStore(a.home, "")
-		if err != nil {
-			return agentintegration.Fail(status, err.Error())
-		}
-		account, err := store.AccountScope()
-		if err != nil {
-			return agentintegration.Fail(status, err.Error())
-		}
-		if err := workbuddyhost.Disable(a.home, account); err != nil {
+		if err := workbuddyhost.DisableLocal(a.home); err != nil {
 			return agentintegration.Fail(status, err.Error())
 		}
 	}
+
 	if err := removeManagedConfig(a.kind, configPath(a.kind)); err != nil {
 		return agentintegration.Fail(status, err.Error())
 	}
@@ -272,6 +298,9 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 					}
 					status.Connection.PresentationStatus = host.Presentation.Status
 					status.Connection.PageStatus = host.Presentation.PageStatus
+				} else {
+					status.Issue = &agentintegration.Issue{Code: "host_unavailable"}
+					status.Message = workBuddyIssueMessage("host_unavailable")
 				}
 			}
 		}

@@ -3,14 +3,19 @@ package controlpolicy
 
 const Protocol = "workflow.control.v1"
 
+// MaxAutomaticStepAttempts includes the initial execution; explicit user retries
+// use a separate control path and do not consume this budget.
+const MaxAutomaticStepAttempts = 3
+
 type Facts struct {
-	Status          string
-	Dismissed       bool
-	PendingReviews  int64
-	ActiveAttempts  int64
-	NativeAttempts  int64
-	BindingRequired bool
-	Bound           bool
+	Status                  string
+	Dismissed               bool
+	PendingReviews          int64
+	ActiveAttempts          int64
+	NativeAttempts          int64
+	BindingRequired         bool
+	Bound                   bool
+	AutomaticRetryAvailable bool
 }
 
 type Admission struct {
@@ -35,6 +40,9 @@ func Decide(f Facts) (continuation string, admission Admission) {
 		return "completed", Admission{Reason: "session_completed"}
 	}
 	if f.Status == "failed" {
+		if f.AutomaticRetryAvailable && f.ActiveAttempts == 0 {
+			return "continue", Admission{CanBegin: true}
+		}
 		return "failed", Admission{Reason: "recovery_required"}
 	}
 	if f.NativeAttempts > 0 {

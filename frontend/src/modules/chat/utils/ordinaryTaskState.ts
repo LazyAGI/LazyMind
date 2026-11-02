@@ -1,6 +1,6 @@
 import type { OrdinaryCollection, OrdinaryTaskView, OrdinaryRunView } from "../types/ordinaryTask";
 
-const collections: OrdinaryCollection[] = ["process_steps", "sources", "stage_artifacts"];
+const collections = ["process_steps", "sources", "stage_artifacts"] as const;
 
 export function readOrdinaryTask(value: unknown): OrdinaryTaskView | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -43,6 +43,14 @@ export function mergeOrdinarySnapshot(
     // Collection versions are unchanged, so previously loaded pages are still valid.
     Object.assign(result, { [key]: [...objects.values()] });
     result.pages[key] = key === appendedCollection ? incoming.pages[key] : current.pages[key];
+  }
+  if (current.pages.knowledge_operations && incoming.pages.knowledge_operations
+    && current.pages.knowledge_operations.revision === incoming.pages.knowledge_operations.revision) {
+    const operations = new Map((current.knowledge_operations ?? []).map(item => [item.call_id, item]));
+    for (const item of incoming.knowledge_operations ?? []) operations.set(item.call_id, item);
+    result.knowledge_operations = [...operations.values()];
+    result.pages.knowledge_operations = appendedCollection === "knowledge_operations"
+      ? incoming.pages.knowledge_operations : current.pages.knowledge_operations;
   }
   return result;
 }

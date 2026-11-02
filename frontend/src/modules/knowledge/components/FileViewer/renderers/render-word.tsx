@@ -7,11 +7,14 @@ import "../index.scss";
 
 interface WordViewerProps {
   fileData: ArrayBuffer;
+  onPreviewError?: () => void;
   content: Segment["content"] | null;
 }
 
 const RenderWord = (props: WordViewerProps) => {
   const { fileData, content } = props;
+  const errorCallback = useRef(props.onPreviewError);
+  errorCallback.current = props.onPreviewError;
   const [loading, setLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -36,6 +39,7 @@ const RenderWord = (props: WordViewerProps) => {
           });
         }
       } catch (err) {
+        if (isMounted) errorCallback.current?.();
         console.error(i18n.t("knowledge.previewLoadFailedLog"), err);
       } finally {
         if (isMounted) {

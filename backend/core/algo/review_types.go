@@ -78,11 +78,12 @@ type MemoryReviewError struct {
 }
 
 type PreferenceOrganizerRequest struct {
-	TaskID        string         `json:"task_id"`
-	RunID         string         `json:"run_id"`
-	UserID        string         `json:"user_id"`
-	LLMConfig     map[string]any `json:"llm_config"`
-	ForceAnalysis bool           `json:"force_analysis"`
+	TaskID           string         `json:"task_id"`
+	RunID            string         `json:"run_id"`
+	UserID           string         `json:"user_id"`
+	LLMConfig        map[string]any `json:"llm_config"`
+	ForceAnalysis    bool           `json:"force_analysis"`
+	ExpectedMaxChars int            `json:"expected_max_chars"`
 }
 
 type PreferenceOrganizerResponse struct {

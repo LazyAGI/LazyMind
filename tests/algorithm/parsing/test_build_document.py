@@ -5,6 +5,21 @@ from lazymind.parsing.engine.readers.native_office import NativeOfficeReader
 from lazymind.parsing.engine.readers.retained import RetainedReader
 
 
+@pytest.mark.parametrize('force,previous,expected', [
+    (True, 'none', 'force'), (True, 'update', 'force'),
+    (False, 'none', 'none'), (False, 'update', 'update'),
+])
+def test_effective_registration_policy_without_reset(monkeypatch, force, previous, expected):
+    monkeypatch.setenv('LAZYLLM_ALGO_REGISTER_POLICY', previous)
+    monkeypatch.setitem(build_document._cfg._impl, 'force_algo_register', force)
+    monkeypatch.setitem(build_document.lazyllm.config._impl, 'algo_register_policy', previous)
+    monkeypatch.setattr(build_document, 'drop_lazyllm_tables', lambda: pytest.fail('must not drop data'))
+    monkeypatch.setattr(build_document, 'reset_stores', lambda: pytest.fail('must not reset vectors'))
+    assert build_document.configure_algorithm_registration() == expected
+    assert build_document.lazyllm.config['algo_register_policy'] == expected
+    assert build_document.os.environ['LAZYLLM_ALGO_REGISTER_POLICY'] == expected
+
+
 @pytest.mark.parametrize('mode,profile,native', [
     ('local', 'cloud', True), ('cloud', 'local', True), ('cloud', 'cloud', False),
 ])
@@ -142,10 +157,10 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     docs = build_document.build_document()
 
     assert docs.kwargs['name'] == build_document.ALGO_ID
-    assert docs.kwargs['embed'] == {
-        key: f'emb-{key}'
-        for key in build_document.EMBED_KEYS
-    }
+    from lazymind.embedding_options import EmbeddingModel
+    assert isinstance(docs.kwargs['embed']['embed_main'], EmbeddingModel)
+    assert docs.kwargs['embed']['embed_main'].model == 'emb-embed_main'
+    assert docs.kwargs['embed']['embed_image'] == 'emb-embed_image'
     assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': build_document.EMBED_INDEX_KWARGS}
     assert docs.kwargs['manager'].kwargs['url'] == 'http://processor.test'
     assert ('*.pdf', 'pdf-reader') in docs.readers

@@ -231,27 +231,9 @@ def validate(credentials=Depends(bearer_scheme)):  # noqa: B008
         raise_error(ErrorCodes.UNAUTHORIZED)
 
     user_id = _user_id_from_token(credentials.credentials)
-    with SessionLocal() as db:
-        user = UserRepository.get_by_id(
-            db,
-            user_id,
-            load_role=True,
-            load_permission_groups=True,
-            load_groups=True,
-            load_group_permission_groups=True,
-        )
+    from core.current_identity import current_identity
 
-    if not user:
-        raise_error(ErrorCodes.UNAUTHORIZED)
-
-    from core.permissions import get_effective_permission_codes
-
-    return {
-        'sub': str(user.id),
-        'role': user.role.name,
-        'tenant_id': user.tenant_id,
-        'permissions': list(get_effective_permission_codes(user)),
-    }
+    return current_identity(user_id)
 
 
 @router.get('/me', response_model=MeResponse)

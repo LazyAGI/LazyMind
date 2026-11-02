@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from .context_estimator import estimate_tokens
-from .message_fields import model_facing_message
+from .message_fields import estimate_message_tokens
 
 RUNTIME_SUMMARY_KIND = 'runtime_summary'
 AUTHORITATIVE_TASK_KIND = 'authoritative_task'
@@ -15,7 +13,7 @@ RUNTIME_SUMMARY_DISCLAIMER_PREFIX = (
 
 
 def _message_tokens(message: dict[str, Any]) -> int:
-    return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
+    return estimate_message_tokens(message)
 
 
 def is_authoritative_task_message(message: dict[str, Any]) -> bool:

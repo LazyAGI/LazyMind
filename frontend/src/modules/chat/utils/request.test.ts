@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ChatServiceApi,
   ConversationSettingsApi,
   FALLBACK_CHAT_ENTRY_DEFAULTS,
   parseChatEntryDefaults,
@@ -287,5 +288,15 @@ describe('chat entry defaults', () => {
     expect(parseThinkingDepth('turbo')).toBeUndefined();
     expect(resolveConversationThinkingDepth({ thinking_depth: 'high' })).toBe('high');
     expect(resolveConversationThinkingDepth({})).toBe('medium');
+  });
+});
+
+
+describe('ask answer autosave', () => {
+  it('binds the saved answers to the exact ask ID', () => {
+    const answers = { 0: { type: 'text', value: 'Friday' } };
+    ChatServiceApi().conversationServiceSaveAskAnswers('conversation', 'history', 'ask-new', answers);
+    expect(patchMock).toHaveBeenLastCalledWith('/api/core/conversations/conversation:ask-answers',
+      { history_id: 'history', ask_id: 'ask-new', answers }, { silentError: true, headers: { 'Content-Type': 'application/json' } });
   });
 });

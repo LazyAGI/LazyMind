@@ -53,11 +53,21 @@ func updateOwnedChatHistory(ctx context.Context, db *gorm.DB, historyID, runID s
 	}
 	var affected int64
 	err := conversationCheckpoint(ctx, db, history.ConversationID, func(tx *gorm.DB) error {
+		if _, exists := values["ext"]; exists {
+			// Decision handlers lock the history row too. Read after obtaining that
+			// lock so terminal/progress writes cannot resurrect an answered card.
+			if err := tx.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).UpdateColumn("update_time", gorm.Expr("update_time")).Error; err != nil {
+				return err
+			}
+		}
 		var current orm.ChatHistory
 		if err := tx.Where("id = ? AND run_id = ?", historyID, runID).Take(&current).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil
 			}
+			return err
+		}
+		if err := preserveHistoryKnowledgeConfirmation(current.Ext, values); err != nil {
 			return err
 		}
 		preserveOwnedTerminalCompletion(values, current.Ext, current.TimeMixin, current.RunStatus, runID)
@@ -86,6 +96,35 @@ func updateOwnedChatHistory(ctx context.Context, db *gorm.DB, historyID, runID s
 		subagent.EventHooks.CallConversationEvent(ctx, store.State(), history.ConversationID, historyID, "task_run_updated", map[string]any{})
 	}
 	return true, nil
+}
+
+// Call after locking and reading the history row, so stale progress cannot replace a saved decision.
+func preserveHistoryKnowledgeConfirmation(currentExt json.RawMessage, values map[string]any) error {
+	if incoming, exists := values["ext"]; exists {
+		raw, err := json.Marshal(incoming)
+		if err != nil {
+			return err
+		}
+		var stored, next map[string]any
+		if json.Unmarshal(currentExt, &stored) == nil && json.Unmarshal(raw, &next) == nil && next != nil {
+			pending, _ := stored["ask_pending"].(map[string]any)
+			incomingPending, _ := next["ask_pending"].(map[string]any)
+			if pending["knowledge_management"] != nil && (incomingPending == nil || incomingPending["knowledge_management"] != nil) {
+				for _, key := range []string{"ask_pending", "ask_answered", "ask_saved_answers"} {
+					delete(next, key)
+					if value, ok := stored[key]; ok {
+						next[key] = value
+					}
+				}
+				merged, err := json.Marshal(next)
+				if err != nil {
+					return err
+				}
+				values["ext"] = json.RawMessage(merged)
+			}
+		}
+	}
+	return nil
 }
 
 func updateOwnedMultiAnswerHistory(ctx context.Context, db *gorm.DB, historyID, runID string, values any) (bool, error) {

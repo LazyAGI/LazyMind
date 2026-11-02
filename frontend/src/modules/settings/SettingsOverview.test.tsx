@@ -119,12 +119,12 @@ describe("Settings overview", () => {
     ["local", "admin", "zh-CN"],
     ["desktop", "user", "en-US"],
     ["cloud", "user", "zh-CN"],
-  ])("keeps paired cards and three translated memory capabilities in %s mode", async (mode, role, language) => {
+  ])("keeps independent model entries and three translated memory capabilities in %s mode", async (mode, role, language) => {
     mocks.mode = mode;
     mocks.role = role;
     const t = await renderOverview(language);
-    expect(screen.getAllByRole("heading", { level: 2 }).slice(0, 6).map((heading) => heading.textContent)).toEqual(
-      ["models", "knowledge", "memory", "systemTools", "mcp", "assistants"].map((key) => t(`settingsPage.sections.${key}`)),
+    expect(screen.getAllByRole("heading", { level: 2 }).slice(0, 7).map((heading) => heading.textContent)).toEqual(
+      ["models", "defaultModels", "knowledge", "memory", "systemTools", "mcp", "assistants"].map((key) => t(`settingsPage.sections.${key}`)),
     );
     const memory = card(t("settingsPage.sections.memory"));
     for (const capability of ["vocabulary", "read", "edit"]) {

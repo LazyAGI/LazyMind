@@ -156,12 +156,53 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 			return err
 		}
 	} else {
-		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, restored.Provider.ProviderCatalogKey, restored.Provider.ProviderCatalogKey).Order("default_model_provider_id DESC").Take(&provider).Error; err != nil {
+		var err error
+		provider, err = restoredSupplier(tx, sink.localUserID, restored.Provider, resolution, now, sink.keys)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return credentialvault.ErrLocalConflict
 			}
 			return err
 		}
+	}
+	if hasSharedProviderEndpoint(provider) {
+		if err := lockProvider(tx, &provider); err != nil {
+			return err
+		}
+		if err := initializeProviderActiveKey(tx, &provider); err != nil {
+			return err
+		}
+		if groupFound {
+			if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, provider.ID, sink.localUserID).Take(&group).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id = ?", binding.ID).Take(&binding).Error; err != nil {
+				return err
+			}
+			if group.CredentialRevision != binding.LastLocalCredentialRevision && resolution == credentialvault.ConflictFail {
+				return credentialvault.ErrLocalConflict
+			}
+		}
+		if strings.TrimSpace(provider.BaseURL) == "" {
+			if err := tx.Model(&provider).Update("base_url", restored.Provider.BaseURL).Error; err != nil {
+				return err
+			}
+			provider.BaseURL = restored.Provider.BaseURL
+		}
+	}
+	if hasSharedProviderEndpoint(provider) {
+		restored.Provider.DisplayName = provider.Name
+	}
+	// Restoring a connection never changes a model supplier's shared endpoint.
+	// A credential checked against a different old endpoint needs a new check.
+	verified := true
+	if hasSharedProviderEndpoint(provider) {
+		currentURL := connectionBaseURL(provider, restored.Provider.BaseURL)
+		verified = normalizeBaseURLForCompare(currentURL) == normalizeBaseURLForCompare(restored.Provider.BaseURL)
+		restored.Provider.BaseURL = currentURL
+	}
+	if err := validateSavedKeyPool(provider, restored.Provider.DisplayName, restored.Provider.BaseURL, string(restored.Provider.APIKey)); err != nil {
+		return credentialvault.ErrInvalidContract
 	}
 	localRevision := int64(1)
 	groupID := uuid.NewString()
@@ -176,7 +217,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	if groupFound {
 		if err := tx.Model(&orm.UserModelProviderGroup{}).Where("id = ? AND create_user_id = ?", group.ID, sink.localUserID).Updates(map[string]any{
 			"name": restored.Provider.DisplayName, "base_url": restored.Provider.BaseURL, "api_key": "", "api_key_ciphertext": ciphertext,
-			"credential_version": modelProviderCredentialVersion, "credential_revision": localRevision, "is_verified": true, "updated_at": now,
+			"credential_version": modelProviderCredentialVersion, "credential_revision": localRevision, "is_verified": verified, "updated_at": now,
 		}).Error; err != nil {
 			return err
 		}
@@ -184,7 +225,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		group = orm.UserModelProviderGroup{
 			ID: groupID, UserModelProviderID: provider.ID, Name: restored.Provider.DisplayName, BaseURL: restored.Provider.BaseURL,
 			APIKey: "", APIKeyCiphertext: ciphertext, CredentialVersion: modelProviderCredentialVersion,
-			CredentialRevision: localRevision, IsVerified: true,
+			CredentialRevision: localRevision, IsVerified: verified,
 			BaseModel: orm.BaseModel{CreateUserID: sink.localUserID, CreatedAt: now, UpdatedAt: now},
 		}
 		if err := tx.Create(&group).Error; err != nil {
@@ -205,7 +246,30 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	binding.VaultID, binding.CloudRecordID, binding.LocalProviderGroupID = restored.VaultID, restored.RecordID, groupID
 	binding.LastCloudRevision, binding.LastLocalCredentialRevision = restored.Revision, localRevision
 	binding.LastETag, binding.BackupState, binding.UpdatedAt = restored.ETag, string(credentialvault.BackupSucceeded), now
-	return tx.Save(&binding).Error
+	if hasSharedProviderEndpoint(provider) && restored.Provider.ActiveKeyIndex != nil {
+		groupID, keyID := "", ""
+		if index := *restored.Provider.ActiveKeyIndex; index >= 0 {
+			keys := splitAPIKeys(string(restored.Provider.APIKey))
+			if index >= len(keys) {
+				return credentialvault.ErrInvalidContract
+			}
+			groupID, keyID = group.ID, groupKeyID(group.ID, keys[index])
+		}
+		if err := saveActiveProviderKey(tx, &provider, groupID, keyID, verified && keyID != "", now); err != nil {
+			return err
+		}
+	} else {
+		if err := reconcileProviderActiveKey(tx, &provider); err != nil {
+			return err
+		}
+	}
+	if err := tx.Save(&binding).Error; err != nil {
+		return err
+	}
+	if !verified {
+		return enqueueCredentialBackup(tx, groupID, localRevision, credentialvault.BackupUpsert, now)
+	}
+	return nil
 }
 
 func (sink *CredentialRestoreSink) ActivateTemporary(ctx context.Context, scope credentialvault.AccountScope, credentials []credentialvault.RestoredCredential, expiresAt time.Time) error {
@@ -219,18 +283,16 @@ func (sink *CredentialRestoreSink) ActivateTemporary(ctx context.Context, scope 
 	}
 	values := make(map[string]temporaryCredential, len(credentials))
 	for _, restored := range credentials {
-		if strings.TrimSpace(restored.Provider.DisplayName) == "" || strings.TrimSpace(restored.Provider.BaseURL) == "" {
-			var provider orm.UserModelProvider
-			if err := sink.db.WithContext(ctx).Where("create_user_id = ? AND deleted_at IS NULL AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", sink.localUserID, restored.Provider.ProviderCatalogKey, restored.Provider.ProviderCatalogKey).Take(&provider).Error; err != nil {
-				clearTemporaryValues(values)
-				return credentialvault.ErrLocalConflict
-			}
-			if strings.TrimSpace(restored.Provider.DisplayName) == "" {
-				restored.Provider.DisplayName = provider.Name
-			}
-			if strings.TrimSpace(restored.Provider.BaseURL) == "" {
-				restored.Provider.BaseURL = provider.BaseURL
-			}
+		catalogProvider, err := sink.temporarySupplier(ctx, scope, restored.RecordID, restored.Provider)
+		if err != nil {
+			clearTemporaryValues(values)
+			return credentialvault.ErrLocalConflict
+		}
+		if strings.TrimSpace(restored.Provider.DisplayName) == "" {
+			restored.Provider.DisplayName = catalogProvider.Name
+		}
+		if hasSharedProviderEndpoint(catalogProvider) || strings.TrimSpace(restored.Provider.BaseURL) == "" {
+			restored.Provider.BaseURL = connectionBaseURL(catalogProvider, restored.Provider.BaseURL)
 		}
 		if !validRestoredCredential(restored) {
 			clearTemporaryValues(values)
@@ -303,17 +365,44 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 			return credentialvault.ProviderCredential{}, false
 		}
 		result = value.provider
-		result.APIKey = append([]byte(nil), value.provider.APIKey...)
+		provider, err := sink.temporarySupplier(context.Background(), scope, recordID, result)
+		if err != nil {
+			return credentialvault.ProviderCredential{}, false
+		}
+		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
+		result.RequestConfig, err = portableProviderRequestConfig(provider)
+		if err != nil {
+			return credentialvault.ProviderCredential{}, false
+		}
+		index := 0
+		if value.provider.ActiveKeyIndex != nil {
+			index = *value.provider.ActiveKeyIndex
+		}
+		keys := splitAPIKeys(string(value.provider.APIKey))
+		if index < 0 || index >= len(keys) {
+			return credentialvault.ProviderCredential{}, false
+		}
+		result.APIKey = []byte(keys[index])
+		if result.ActiveKeyIndex != nil {
+			selected := 0
+			result.ActiveKeyIndex = &selected
+		}
 		found = true
 	}
 	return result, found
 }
 
 func validRestoredCredential(restored credentialvault.RestoredCredential) bool {
-	return restoreSinkUUID.MatchString(restored.RecordID) && restored.Revision > 0 && restoreSinkUUID.MatchString(restored.VaultID) &&
+	valid := restoreSinkUUID.MatchString(restored.RecordID) && restored.Revision > 0 && restoreSinkUUID.MatchString(restored.VaultID) &&
 		regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(restored.ETag) && strings.TrimSpace(restored.Provider.ProviderCatalogKey) != "" &&
 		len(restored.Provider.ProviderCatalogKey) <= 128 && strings.TrimSpace(restored.Provider.DisplayName) != "" && len(restored.Provider.DisplayName) <= 255 &&
-		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && len(restored.Provider.APIKey) > 0 && len(restored.Provider.APIKey) <= 512
+		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && credentialvault.ValidAPIKeyPool(restored.Provider.APIKey) && credentialvault.ValidProviderRequestConfig(restored.Provider.RequestConfig)
+	if !valid {
+		return false
+	}
+	payload, err := credentialvault.EncodeProviderCredentialPayload(restored.Provider)
+	clear(payload)
+	return err == nil
 }
 
 func clearTemporaryValues(values map[string]temporaryCredential) {

@@ -99,6 +99,7 @@ export interface DesktopAgentAction {
 }
 
 export interface DesktopAgentConnectionStatus {
+  runtime_state?: "waiting" | "connected" | "unavailable";
   mcp_trusted?: boolean;
   mcp_enabled?: boolean;
   mcp_configured: boolean;
@@ -108,8 +109,9 @@ export interface DesktopAgentConnectionStatus {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  enabled?: boolean;
   login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };
-  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable"; path?: string };
+  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable" | "startup_unavailable" | "installation_unavailable" | "cdp_unavailable"; path?: string };
 	can_connect?: boolean;
 	can_disconnect?: boolean;
 	retry_action?: "connect" | "disconnect";

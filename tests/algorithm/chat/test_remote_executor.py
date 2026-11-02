@@ -10,6 +10,103 @@ import pytest
 from lazymind.chat.workflow.remote_executor import RemoteWorkflowExecutor
 
 
+class StopReceiptRuntime:
+    async def acknowledge_stop(self, *_):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_stop_receipt_retries_transport_and_service_errors_without_rerunning_tools(monkeypatch):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.workflow.client import RemoteExecutorClient
+
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = RemoteExecutorClient('http://core', 'executor', 'lazymind')
+    execute = AsyncMock()
+    monkeypatch.setattr(worker, '_execute_claim', execute)
+    sleep = AsyncMock()
+    monkeypatch.setattr('lazymind.chat.workflow.client.asyncio.sleep', sleep)
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ReadTimeout('receipt response lost', request=request)
+        return httpx.Response(503 if len(requests) == 2 else 200)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        await worker._run_claim(client, {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    execute.assert_awaited_once()
+    assert len(requests) == 3
+    assert all(request.url.path == '/internal/workflow-attempts/attempt:stop-ack'
+               and json.loads(request.content) == {'lease_token': 'lease'} for request in requests)
+    assert [call.args[0] for call in sleep.await_args_list] == [0.5, 1.0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status', [401, 403, 404, 409, 422])
+async def test_stop_receipt_does_not_retry_permanent_rejection(monkeypatch, status):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.workflow.client import RemoteExecutorClient
+
+    runtime = RemoteExecutorClient('http://core', 'executor', 'lazymind')
+    sleep = AsyncMock()
+    monkeypatch.setattr('lazymind.chat.workflow.client.asyncio.sleep', sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(status))) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await runtime.acknowledge_stop(client, 'attempt', 'lease')
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stop_receipt_retry_is_cancellable(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from lazymind.chat.workflow.client import RemoteExecutorClient
+
+    sleep = AsyncMock(side_effect=asyncio.CancelledError)
+    monkeypatch.setattr('lazymind.chat.workflow.client.asyncio.sleep', sleep)
+    runtime = RemoteExecutorClient('http://core', 'executor', 'lazymind')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as client:
+        with pytest.raises(asyncio.CancelledError):
+            await runtime.acknowledge_stop(client, 'attempt', 'lease')
+    sleep.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['success', 'lease_lost', 'setup_failed'])
+async def test_stop_receipt_is_sent_only_after_execution_cleanup(monkeypatch, outcome):
+    from unittest.mock import AsyncMock
+
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = AsyncMock()
+    order = []
+
+    async def execute(*_):
+        try:
+            worker.runtime.acknowledge_stop.assert_not_awaited()
+            if outcome == 'setup_failed':
+                raise RuntimeError('setup failed')
+            return outcome
+        finally:
+            order.append('executor exited')
+
+    async def acknowledge(*_):
+        assert order == ['executor exited']
+        order.append('receipt')
+
+    monkeypatch.setattr(worker, '_execute_claim', execute)
+    worker.runtime.acknowledge_stop.side_effect = acknowledge
+    claim = {'attempt_id': 'attempt', 'lease_token': 'lease'}
+    if outcome == 'setup_failed':
+        with pytest.raises(RuntimeError, match='setup failed'):
+            await worker._run_claim(None, claim)
+    else:
+        await worker._run_claim(None, claim)
+    worker.runtime.acknowledge_stop.assert_awaited_once_with(None, 'attempt', 'lease')
+    assert order == ['executor exited', 'receipt']
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('status', ['interrupted', 'cancelled', 'canceled'])
 async def test_interrupted_subagent_cancels_attempt_without_failure_or_output_checks(monkeypatch, tmp_path, status):
@@ -22,12 +119,14 @@ async def test_interrupted_subagent_cancels_attempt_without_failure_or_output_ch
     runtime.execution_spec.return_value = {
         'task': {'input_slots': [], 'output_slots': ['required-image']},
         'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+        'system_mcp_config': [{'id': 'lazymind-knowledge', 'allowed_tools': []}],
     }
     worker.runtime = runtime
     checks = AsyncMock()
     monkeypatch.setattr(worker, '_run_post_step_checks', checks)
 
     async def stream(**_kwargs):
+        assert _kwargs['system_mcp_config'] == [{'id': 'lazymind-knowledge', 'allowed_tools': []}]
         yield 'data: ' + json.dumps({'type': 'done', 'status': status, 'summary': 'stopped by user'}) + '\n\n'
 
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)
@@ -81,7 +180,7 @@ async def test_remote_event_failure_closes_subagent_inside_execution_scope(monke
             'task': {'input_slots': [], 'output_slots': []}, 'params': {}, 'steps': [],
             'workspace_path': str(tmp_path), 'llm_config': {},
         }),
-        task_event=event, fail=fail,
+        task_event=event, fail=fail, acknowledge_stop=AsyncMock(),
     )
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)
     await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
@@ -95,7 +194,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
 ):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         events = []
         completed = None
 
@@ -184,9 +283,10 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
 
 
 @pytest.mark.parametrize('next_step', ['collect_materials', 'optimize_prompt'])
+@pytest.mark.parametrize('large', [False, True])
 @pytest.mark.asyncio
 async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
-    monkeypatch, tmp_path, next_step,
+    monkeypatch, tmp_path, next_step, large,
 ):
     worker = RemoteWorkflowExecutor()
     marker = (
@@ -194,7 +294,7 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
         '{"status":"blocked","missing":[{"id":"video_generator"}]}'
     )
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         events = []
         failure = ''
         checkpoint = None
@@ -203,6 +303,7 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 
         async def context(self, *_):
             return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {},
+                    'declared_output_types': {'workflow_routing': 'text'},
                     'workflow_revision': 'revision-1',
                     'post_step_checkpoint': self.checkpoint}
 
@@ -225,14 +326,6 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
                     }},
                     'workflow_runtime': {'post_step_checks': [{
                         'step_id': 'analyze_subject',
-                    'user_id': 'user-1',
-                    'parent_agentic_config': {'_core_workspace_context': {
-                        'workspace_id': 'workspace-1', 'root': str(tmp_path),
-                        'workspace_version': 1,
-                        'permission_mode': 'always_ask',
-                        'permission_version': 2 if configured else 1,
-                        'opaque_tool_grants': ['shell'] if configured else [],
-                    }},
                         'tool': 'check_image_workflow_capabilities',
                         'arguments': {'workflow_routing': 'workflow_routing'},
                     }]},
@@ -247,6 +340,9 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 
         async def artifact(self, _client, _attempt, _lease, artifact):
             self.artifacts.append(artifact)
+
+        async def upload_artifact_file(self, *_):
+            return '/core-host/uploads/workflow-artifacts/route.txt'
 
         async def progress(self, *_):
             return None
@@ -263,9 +359,17 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     async def stream(**_kwargs):
         nonlocal subagent_runs
         subagent_runs += 1
+        route = 'WORKFLOW: CREATE_ANIMATED_MEME\nREQUIRES: video_generator'
+        if large:
+            route += '\n' + 'Detailed requirements. ' * 3000
+            path = Path(_kwargs['task_spec']['workspace_path']) / 'route.txt'
+            path.write_text(route)
+            content_type, value = 'file', {'type': 'text', 'path': str(path)}
+        else:
+            content_type, value = 'text', {'text': route}
         yield 'data: ' + json.dumps({
-            'type': 'artifact', 'slot': 'workflow_routing', 'content_type': 'text',
-            'seq': 1, 'value': {'text': 'WORKFLOW: CREATE_ANIMATED_MEME\nREQUIRES: video_generator'},
+            'type': 'artifact', 'slot': 'workflow_routing', 'content_type': content_type,
+            'seq': 1, 'value': value,
         }) + '\n\n'
         yield 'data: ' + json.dumps({
             'type': 'done', 'status': 'succeeded', 'summary': 'analyzed',
@@ -337,6 +441,10 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     assert checkpoint['control'] == {'next_step': next_step}
     assert checkpoint['summary'] == 'analyzed'
     assert checkpoint['workflow_revision'] == 'revision-1'
+    if large:
+        assert checks[0]['workflow_routing'].startswith('WORKFLOW: CREATE_ANIMATED_MEME\n')
+        assert len(checks[0]['workflow_routing']) > 32768
+        (tmp_path / 'task-analysis' / 'route.txt').unlink()
 
     # A second blocked attempt must preserve the same checkpoint. The third
     # attempt succeeds with the exact saved route and zero new model work.
@@ -360,7 +468,7 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 async def test_remote_executor_persists_artifact_before_task_center_event(monkeypatch, tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         task_artifact = None
         workflow_artifact = None
         uploaded = None
@@ -418,10 +526,130 @@ async def test_remote_executor_persists_artifact_before_task_center_event(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('declared_type,large', [
+    ('json', False), ('json', True), ('text', False), ('text', True), ('file', True),
+])
+async def test_post_step_checks_receive_scalar_content_and_keep_file_references(
+    monkeypatch, tmp_path, declared_type, large,
+):
+    import importlib.util
+    from lazymind.chat.engine.subagent import context, runner, tools
+
+    source = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
+    spec = importlib.util.spec_from_file_location('paper_result_check', source)
+    package = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(package)
+    description = 'Full-text analysis. ' * (4000 if large else 1)
+    body = {
+        'user_instruction': 'Research requirements', 'candidate_directions': ['agents'],
+        'selected_directions': ['agents'],
+        'papers': [{'paper': {'paper_id': 'paper-1'}, 'is_seed': True,
+                    'is_important': False, 'key_contribution': description}],
+    }
+    checked = []
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime(StopReceiptRuntime):
+        completed = None
+        failure = None
+        published = None
+
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'scalar-task'}, 'inputs': {},
+                    'declared_output_types': {'result': declared_type}}
+
+        async def execution_spec(self, *_):
+            return {
+                'task': {'input_slots': [], 'output_slots': ['result']},
+                'workspace_path': str(tmp_path / 'scalar-task'), 'steps': [], 'llm_config': {},
+                'params': {'step_id': 'compose', 'workflow_runtime': {'post_step_checks': [{
+                    'step_id': 'compose', 'tool': 'validate_result', 'arguments': {'result': 'result'},
+                }]}},
+            }
+
+        async def task_event(self, *_):
+            return None
+
+        async def artifact(self, _client, _attempt, _lease, artifact):
+            self.published = artifact
+
+        async def upload_artifact_file(self, _client, _attempt, _lease, _name, content):
+            assert content
+            # Core can run on a different host; its durable path is not readable here.
+            return '/core-host/uploads/workflow-artifacts/session/attempt/result.txt'
+
+        async def complete(self, _client, _attempt, _lease, result):
+            self.completed = result
+
+        async def fail(self, _client, _attempt, _lease, message):
+            self.failure = message
+
+    def validate_result(result):
+        checked.append(result)
+        if declared_type == 'json':
+            return package.academic_validate_result(result)
+        if declared_type == 'text':
+            assert result == description
+        else:
+            assert result['path'] == '/core-host/uploads/workflow-artifacts/session/attempt/result.txt'
+        return {'status': 'valid'}
+
+    async def stream(**kwargs):
+        events = []
+        ctx = context.SubAgentContext(
+            'scalar-task', 'chat', 'workflow_step', 'compose', kwargs['task_spec']['params'],
+            kwargs['task_spec']['workspace_path'], [], ['result'], None, events.append,
+        )
+        monkeypatch.setattr(tools, 'require_context', lambda: ctx)
+        if declared_type == 'file':
+            path = Path(ctx.workspace_path) / 'data.json'
+            path.write_text(json.dumps(body))
+            # A file slot remains a reference even when it contains JSON.
+            events.append({'type': 'artifact', 'slot': 'result', 'content_type': 'file',
+                           'seq': 1, 'value': {'type': 'json', 'path': str(path)}})
+        else:
+            tools._save_artifact('result', body if declared_type == 'json' else description,
+                                 content_type=declared_type)
+        for event in events:
+            yield 'data: ' + json.dumps(event) + '\n\n'
+        yield 'data: {"type":"done","status":"succeeded","summary":"saved"}\n\n'
+
+    runtime = Runtime()
+    worker.runtime = runtime
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda *_: {'validate_result': validate_result})
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+
+    assert runtime.failure is None
+    assert runtime.completed is not None
+    assert len(checked) == 1
+    if declared_type == 'json':
+        assert checked[0] == body
+    if large:
+        assert runtime.published['content_type'] == 'file'
+        assert runtime.completed['artifacts'][0]['value']['path'].startswith('/core-host/')
+
+
+def test_post_step_scalar_check_rejects_files_outside_its_task_workspace(tmp_path):
+    workspace = tmp_path / 'task'
+    workspace.mkdir()
+    outside = tmp_path / 'other-task.json'
+    outside.write_text('{"private": true}')
+    artifact = {'slot': 'result', 'content_type': 'file',
+                'value': {'type': 'json', 'path': str(outside)}}
+    params = {'step_id': 'compose', 'output_slot_types': {'result': 'json'},
+              'workflow_runtime': {'post_step_checks': [{
+                  'step_id': 'compose', 'arguments': {'result': 'result'},
+              }]}}
+    with pytest.raises(ValueError, match='outside its task workspace'):
+        RemoteWorkflowExecutor._inline_post_step_artifact(artifact, params, str(workspace))
+
+
+@pytest.mark.asyncio
 async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         calls = []
 
         async def input(self, _client, attempt, lease, material):
@@ -441,7 +669,7 @@ async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_
 async def test_remote_executor_passes_external_scalar_inputs_as_values(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, material):
             values = {
                 'topic': ('topic.txt', '5Lq65bel5pm66IO96L6F5Yqp6L2v5Lu25rWL6K+V'),
@@ -477,7 +705,7 @@ async def test_remote_executor_passes_external_scalar_inputs_as_values(tmp_path)
 async def test_remote_executor_unwraps_upstream_artifacts_by_declared_type(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, material):
             values = {
                 'workflow_routing': {
@@ -530,7 +758,7 @@ async def test_remote_executor_unwraps_upstream_artifacts_by_declared_type(tmp_p
 async def test_remote_executor_infers_artifact_types_when_core_omits_them(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, material):
             values = {
                 'workflow_routing': {'text': 'WORKFLOW: FIND_AND_EDIT'},
@@ -576,7 +804,7 @@ async def test_remote_executor_infers_artifact_types_when_core_omits_them(tmp_pa
 async def test_remote_executor_materializes_scalar_artifacts_when_transport_is_path(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, material):
             payloads = {
                 'brief': {'text': 'approved brief'},
@@ -618,7 +846,7 @@ async def test_remote_executor_materializes_scalar_artifacts_when_transport_is_p
 async def test_remote_executor_materializes_binary_image_inputs(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, _material):
             return {
                 'name': 'upload.png',
@@ -645,7 +873,7 @@ async def test_remote_executor_materializes_binary_image_inputs(tmp_path):
 async def test_remote_executor_materializes_every_list_input_in_order(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, _material):
             return {'items': [
                 {'name': '../effect.png', 'content_base64': 'Zmlyc3Q='},
@@ -667,7 +895,7 @@ async def test_remote_executor_materializes_every_list_input_in_order(tmp_path):
 async def test_remote_executor_preserves_single_item_list_cardinality(tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def input(self, _client, _attempt, _lease, _material):
             return {'items': [{'name': 'only.png', 'content_base64': 'b25seQ=='}]}
 
@@ -684,7 +912,7 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
     worker = RemoteWorkflowExecutor()
     captured = {}
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         async def context(self, *_):
             return {
                 'metadata': {'task_id': 'task-1'},
@@ -782,7 +1010,7 @@ def test_workflow_material_bindings_keep_values_paths_and_references_distinct():
 async def test_execution_spec_failure_marks_claimed_attempt_failed():
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         failure = ''
         terminal = None
 
@@ -813,7 +1041,7 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_path):
     worker = RemoteWorkflowExecutor()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         failed = False
         terminal = None
 
@@ -858,7 +1086,7 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_workspace(monkeypatch,
     captured = {}
     workspace = tmp_path / 'task-1'
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         completed = False
 
         async def context(self, *_):
@@ -907,7 +1135,7 @@ async def test_lease_loss_cancels_subagent_and_suppresses_stale_terminal(monkeyp
     worker.heartbeat_seconds = 0.01
     cancelled = threading.Event()
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         terminal_calls = 0
 
         async def context(self, *_):
@@ -955,7 +1183,7 @@ async def test_worker_claim_loop_runs_up_to_configured_concurrency(monkeypatch):
     active = 0
     maximum = 0
 
-    class Runtime:
+    class Runtime(StopReceiptRuntime):
         claims = 0
 
         async def claim(self, _client):
@@ -988,3 +1216,41 @@ async def test_worker_claim_loop_runs_up_to_configured_concurrency(monkeypatch):
     loop.cancel()
     with pytest.raises(asyncio.CancelledError):
         await loop
+
+
+@pytest.mark.asyncio
+async def test_argument_failure_code_reaches_the_existing_attempt_terminal_protocol(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+    from lazymind.chat.workflow.client import RemoteExecutorClient
+
+    request_bodies = []
+
+    async def transport(request):
+        request_bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={'ok': True, 'data': {}}, request=request)
+
+    client_transport = RemoteExecutorClient('http://core.test', 'executor', 'local')
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+    }
+    runtime.fail.side_effect = client_transport.fail
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = runtime
+
+    async def stream(**_kwargs):
+        yield 'data: ' + json.dumps({
+            'type': 'error', 'status': 'failed', 'message': '参数修复次数已耗尽',
+            'error_code': 'TOOL_ARGUMENT_RETRY_EXHAUSTED',
+        }) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        await worker._run_claim(client, {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    assert len(request_bodies) == 1
+    assert request_bodies[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
+    assert request_bodies[0]['result'] == {'error': '参数修复次数已耗尽'}
+    runtime.complete.assert_not_awaited()

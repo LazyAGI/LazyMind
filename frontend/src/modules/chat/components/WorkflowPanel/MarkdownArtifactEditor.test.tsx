@@ -1,4 +1,5 @@
 vi.mock('./writerListNumberingPlugin', () => ({ writerListNumberingPlugin: () => ({}) }));
+vi.mock('./writerImageDownloadPlugin', () => ({ writerImageDownloadPlugin: () => ({}) }));
 vi.mock('./writerLocalSourcePlugin', () => ({ writerLocalSourcePlugin: () => ({}), writerLocalCodeEditor: {} }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
@@ -11,7 +12,8 @@ const mdxMocks = vi.hoisted(() => ({
 
 vi.mock('./writerEmptyHeadingPlugin', () => ({ writerEmptyHeadingPlugin: () => ({}) }));
 
-vi.mock('@mdxeditor/editor', async () => {
+vi.mock('@mdxeditor/editor', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@mdxeditor/editor')>();
   const React = await import('react');
   const { flushSync } = await import('react-dom');
   const emptyPlugin = () => ({});
@@ -79,6 +81,7 @@ vi.mock('@mdxeditor/editor', async () => {
     );
   });
   return {
+    ...actual,
     BlockTypeSelect: EmptyControl,
     BoldItalicUnderlineToggles: FormattingControl,
     ListsToggle: EmptyControl,

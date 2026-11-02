@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BuiltinSkillLineEndingTests(unittest.TestCase):
-    def test_windows_git_checkout_preserves_locked_builtin_skill_bytes(self):
+    def test_windows_git_checkout_preserves_skill_source_and_asset_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
@@ -17,6 +17,9 @@ class BuiltinSkillLineEndingTests(unittest.TestCase):
             fixtures = {
                 'skills/search/personal-document-search/SKILL.md': b'# Skill\n\nBody\n',
                 'skills/search/personal-document-search/references/source-routing.md': b'# Routing\n\nBody\n',
+                'skills/featured/photo-to-gongbi/skill/SKILL.md': b'# Gongbi\n\nBody\n',
+                'skills/featured/photo-to-gongbi/skill/scripts/crop_image.py': b'print("crop")\n',
+                'skills/featured/photo-to-gongbi/assets/cat-preview.html': b'<p>Preview</p>\n',
             }
             for name, data in fixtures.items():
                 path = root / name

@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/taskdisplay"
 	"lazymind/core/localworkspace"
+	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/userenv"
 )
@@ -46,42 +49,54 @@ func CancelRuns(taskIDs []string) {
 // snapshot and never receives a database DSN. Runtime events are streamed back
 // to Core, which is the only component that persists steps and artifacts.
 type RunRequest struct {
-	TaskID             string            `json:"task_id"`
-	AgentType          string            `json:"agent_type"`
-	Params             map[string]any    `json:"params,omitempty"`
-	WorkspacePath      string            `json:"workspace_path"`
-	Tools              []string          `json:"tools,omitempty"`
-	Resume             bool              `json:"resume"`
-	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
-	ToolConfig         map[string]any    `json:"tool_config,omitempty"`
-	UserEnvVars        map[string]string `json:"user_env_vars,omitempty"`
-	TaskSpec           map[string]any    `json:"task_spec,omitempty"`
-	InitialSteps       []stepDTO         `json:"initial_steps,omitempty"`
-	WorkspaceExecution map[string]string `json:"workspace_execution,omitempty"`
+	DisabledTools              []string                           `json:"disabled_tools"`
+	SystemMCPConfig            []any                              `json:"system_mcp_config"`
+	TaskID                     string                             `json:"task_id"`
+	AgentType                  string                             `json:"agent_type"`
+	Params                     map[string]any                     `json:"params,omitempty"`
+	WorkspacePath              string                             `json:"workspace_path"`
+	Tools                      []string                           `json:"tools"`
+	Resume                     bool                               `json:"resume"`
+	LLMConfig                  map[string]any                     `json:"llm_config,omitempty"`
+	ToolConfig                 map[string]any                     `json:"tool_config,omitempty"`
+	UserEnvVars                map[string]string                  `json:"user_env_vars,omitempty"`
+	TaskSpec                   map[string]any                     `json:"task_spec,omitempty"`
+	InitialSteps               []stepDTO                          `json:"initial_steps,omitempty"`
+	WorkspaceExecution         map[string]string                  `json:"workspace_execution,omitempty"`
+	ModelFallbackCurrentID     string                             `json:"model_fallback_current_id,omitempty"`
+	ModelFallbackCandidates    []modelconfig.ChatModelCandidate   `json:"model_fallback_candidates,omitempty"`
+	ModelFallbackInitialSwitch *common.ModelFallbackInitialSwitch `json:"model_fallback_initial_switch,omitempty"`
+	InheritedModelOrigin       *InheritedModelOrigin              `json:"-"`
+	modelModels                []modelconfig.AvailableChatModel
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
-	Type         string                         `json:"type"`
-	V2ArtifactID string                         `json:"v2_artifact_id,omitempty"`
-	V2RevisionID string                         `json:"v2_revision_id,omitempty"`
-	ExecutionID  string                         `json:"execution_id,omitempty"`
-	EventID      string                         `json:"event_id,omitempty"`
-	ProcessStep  *taskdisplay.PublicProcessStep `json:"process_step,omitempty"`
-	Steps        []string                       `json:"steps,omitempty"`
-	ScopeVersion int                            `json:"scope_version,omitempty"`
-	TaskID       string                         `json:"task_id,omitempty"`
-	Progress     int                            `json:"progress,omitempty"`
-	CurrentPhase string                         `json:"current_phase,omitempty"`
-	EstimatedSec int                            `json:"estimated_sec,omitempty"`
-	ArtifactKey  string                         `json:"slot,omitempty"`
-	ContentType  string                         `json:"content_type,omitempty"`
-	Seq          int                            `json:"seq,omitempty"`
-	Value        json.RawMessage                `json:"value,omitempty"`
-	Sources      json.RawMessage                `json:"sources,omitempty"`
-	Status       string                         `json:"status,omitempty"`
-	Summary      string                         `json:"summary,omitempty"`
-	Message      string                         `json:"message,omitempty"`
+	KnowledgeOperation json.RawMessage                `json:"knowledge_operation,omitempty"`
+	AskPending         map[string]any                 `json:"ask_pending,omitempty"`
+	Type               string                         `json:"type"`
+	ModelOutput        *common.ModelOutput            `json:"model_output,omitempty"`
+	RuntimeEvent       *common.ModelRuntimeEvent      `json:"runtime_event,omitempty"`
+	V2ArtifactID       string                         `json:"v2_artifact_id,omitempty"`
+	V2RevisionID       string                         `json:"v2_revision_id,omitempty"`
+	ExecutionID        string                         `json:"execution_id,omitempty"`
+	Snapshot           bool                           `json:"snapshot,omitempty"`
+	EventID            string                         `json:"event_id,omitempty"`
+	ProcessStep        *taskdisplay.PublicProcessStep `json:"process_step,omitempty"`
+	Steps              []string                       `json:"steps,omitempty"`
+	ScopeVersion       int                            `json:"scope_version,omitempty"`
+	TaskID             string                         `json:"task_id,omitempty"`
+	Progress           int                            `json:"progress,omitempty"`
+	CurrentPhase       string                         `json:"current_phase,omitempty"`
+	EstimatedSec       int                            `json:"estimated_sec,omitempty"`
+	ArtifactKey        string                         `json:"slot,omitempty"`
+	ContentType        string                         `json:"content_type,omitempty"`
+	Seq                int                            `json:"seq,omitempty"`
+	Value              json.RawMessage                `json:"value,omitempty"`
+	Sources            json.RawMessage                `json:"sources,omitempty"`
+	Status             string                         `json:"status,omitempty"`
+	Summary            string                         `json:"summary,omitempty"`
+	Message            string                         `json:"message,omitempty"`
 	// Tool step events forwarded from SubAgent runner for frontend display.
 	ToolCalls   json.RawMessage `json:"tool_calls,omitempty"`
 	ToolResults json.RawMessage `json:"tool_results,omitempty"`
@@ -121,18 +136,49 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	defer cancel()
 	if err := hydrateRunRequest(runCtx, db, &req); err != nil {
 		wrapped := fmt.Errorf("prepare subagent run task=%s: %w", req.TaskID, err)
-		routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
+		if errors.Is(err, errTaskModelsExhausted) {
+			ev := TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, CurrentPhase: "model_fallback_exhausted", Message: "task model configuration unavailable"}
+			_ = routeEventWithWorkflowHooks(runCtx, db, stateStore, ev, true, true)
+		} else {
+			routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
+		}
 		return wrapped
 	}
 	params, _ := req.TaskSpec["params"].(map[string]any)
-	workspaceBound := localworkspace.SnapshotFromParams(params) != nil
+	workspaceBound := localworkspace.SnapshotFromParams(params) != nil || len(req.SystemMCPConfig) > 0
 	generation := uuid.NewString()
+	call := taskModelCall{cursor: common.ModelOutput{RunID: generation, Phase: "commit"}, currentID: req.ModelFallbackCurrentID, seen: map[string]string{}}
+	ordinary := req.AgentType != "workflow_step"
+	terminalAccepted := false
+	if err := saveKnowledgeRunPolicy(runCtx, stateStore, req, generation); err != nil {
+		return err
+	}
 	routeAccepted := func(ev TaskEvent) error {
+		if ordinary && terminalAccepted {
+			return nil
+		}
+		var next taskModelCall
 		accepted, err := routeExecutionEvent(runCtx, db, req.TaskID, generation, ev, func(tx *gorm.DB, event TaskEvent) (bool, error) {
+			next = call
+			next.seen = maps.Clone(call.seen)
 			ev = event
+			if ev.RuntimeEvent != nil {
+				runtimeEvent := *ev.RuntimeEvent
+				ev.RuntimeEvent = &runtimeEvent
+			}
+			if ordinary {
+				return persistTaskModelEvent(runCtx, tx, &req, &next, &ev)
+			}
 			return persistTaskEventWithRecord(runCtx, tx, &ev)
 		})
 		if err == nil && accepted {
+			call = next
+			if ev.Type == "done" || ev.Type == "error" {
+				terminalAccepted = true
+			}
+			if ordinary && ev.RuntimeEvent != nil {
+				req.LLMConfig["llm"] = cloneTaskConfig(taskModelCandidate(&req, call.currentID).LLMConfig)["llm"]
+			}
 			ev.DurableToolResults = nil
 			publishTaskEvent(runCtx, db, stateStore, ev, true, true)
 		}
@@ -182,7 +228,34 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 		return err
 	}
 	req.TaskSpec["execution_id"] = generation
+	rollbackOpen := func() {
+		if ordinary && call.cursor.Phase == "begin" {
+			boundary := call.cursor
+			boundary.Phase = "rollback"
+			_ = routeAccepted(TaskEvent{Type: "model_output", TaskID: req.TaskID, ModelOutput: &boundary})
+		}
+	}
+	defer func() {
+		if ordinary && (call.cursor.Phase == "begin" || call.cursor.CallIndex > 0 && runCtx.Err() != nil) {
+			stopped := runCtx.Err()
+			// Cancellation must close previews even after the HTTP context has expired.
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)
+			defer stop()
+			runCtx = cleanup
+			rollbackOpen()
+			if stopped != nil {
+				if task, err := GetTask(cleanup, db, req.TaskID); err == nil && !isTerminal(task.Status) {
+					status := StatusCanceled
+					if errors.Is(stopped, context.DeadlineExceeded) {
+						status = StatusInterrupted
+					}
+					_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: status, Message: "task execution interrupted"})
+				}
+			}
+		}
+	}()
 	runError := func(message string) {
+		rollbackOpen()
 		_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, Message: message})
 	}
 
@@ -229,6 +302,19 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 			continue
 		}
 		ev.TaskID = req.TaskID
+		if ordinary && terminalAccepted {
+			continue
+		}
+		if ev.ExecutionID != "" && ev.ExecutionID != generation || ev.ModelOutput != nil && ev.ModelOutput.RunID != generation {
+			continue
+		}
+		if ordinary && (ev.Type == "done" || ev.Type == "error") {
+			open := call.cursor.Phase == "begin"
+			rollbackOpen()
+			if open && ev.Type == "done" {
+				ev = TaskEvent{Type: "error", TaskID: req.TaskID, ExecutionID: generation, Status: StatusFailed, Message: "task ended before model commit"}
+			}
+		}
 		if observe != nil {
 			if err := observe(ev); err != nil {
 				return fmt.Errorf("%w", err)
@@ -236,13 +322,20 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 		}
 		if err := routeAccepted(ev); err != nil {
 			message := fmt.Sprintf("persist subagent %s event failed: %v", ev.Type, err)
-			runError(message)
+			if ordinary {
+				runError("subagent runtime event rejected")
+			} else {
+				runError(message)
+			}
 			return fmt.Errorf("%s", message)
 		}
 	}
 	if err := scanner.Err(); err != nil && runCtx.Err() == nil {
 		runError(fmt.Sprintf("subagent stream read error: %v", err))
 		return err
+	}
+	if ordinary && call.cursor.CallIndex > 0 && !terminalAccepted && runCtx.Err() == nil {
+		runError("subagent stream ended before task completion")
 	}
 	return nil
 }
@@ -271,11 +364,41 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	if err != nil {
 		return err
 	}
+	visibility, err := captureTaskVisibility(ctx, db, task)
+	if err != nil {
+		return fmt.Errorf("tool visibility unavailable: %w", err)
+	}
+	req.DisabledTools = visibility.Disabled
+	params := map[string]any{}
+	if err := json.Unmarshal(normalizeJSON(task.Params, "{}"), &params); err != nil {
+		return fmt.Errorf("invalid task parameters: %w", err)
+	}
+	params["_tool_visibility"] = visibility
+	req.SystemMCPConfig = visibleKnowledgeConfig(req.Tools, req.DisabledTools)
 	req.UserEnvVars, err = userenv.LoadEnabled(ctx, db, task.CreateUserID)
 	if err != nil {
 		return fmt.Errorf("user environment configuration unavailable")
 	}
+	req.AgentType = task.AgentType
+	if task.AgentType != "workflow_step" {
+		if err := prepareTaskModelInput(ctx, db, task, req); err != nil {
+			return err
+		}
+	}
 	if req.TaskSpec != nil {
+		req.TaskSpec["execution_id"] = visibility.ExecutionID
+		// Existing task specs may contain rebuilt workspace bindings. Keep them.
+		if existing, ok := req.TaskSpec["params"].(map[string]any); ok {
+			existing["_tool_visibility"] = visibility
+		} else {
+			if raw, ok := req.TaskSpec["params"].(json.RawMessage); ok {
+				if err := json.Unmarshal(raw, &params); err != nil {
+					return err
+				}
+				params["_tool_visibility"] = visibility
+			}
+			req.TaskSpec["params"] = params
+		}
 		return nil
 	}
 	steps, err := LoadSteps(ctx, db, req.TaskID)
@@ -289,13 +412,14 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 
 	req.TaskSpec = map[string]any{
 		"id":                  task.ID,
+		"execution_id":        task.ExecutionID,
 		"conversation_id":     task.ConversationID,
 		"trigger_history_id":  task.TriggerHistoryID,
 		"seq_in_conversation": task.SeqInConversation,
 		"agent_type":          task.AgentType,
 		"title":               task.Title,
 		"objective":           task.Objective,
-		"params":              normalizeJSON(task.Params, "{}"),
+		"params":              params,
 		"mode":                task.Mode,
 		"status":              task.Status,
 		"progress_pct":        task.ProgressPct,
@@ -364,8 +488,10 @@ func persistTaskEvent(ctx context.Context, db *gorm.DB, ev TaskEvent) (bool, err
 func persistTaskEventWithRecord(ctx context.Context, db *gorm.DB, ev *TaskEvent) (bool, error) {
 	var err error
 	switch ev.Type {
+	case "knowledge_operation_result":
+		return persistKnowledgeOperation(ctx, db, *ev)
 	case "process_step":
-		if ev.ProcessStep == nil {
+		if ev.ProcessStep == nil || ev.ProcessStep.ModelSwitch != nil {
 			return false, taskdisplay.ErrInvalidProcessStep
 		}
 		return PersistPublicProcessStep(ctx, db, ev.TaskID, ev.ExecutionID, ev.EventID, *ev.ProcessStep)
@@ -439,7 +565,7 @@ func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, summary)
 		}
 	}
-	if isArtifactStreamEvent(ev.Type) || ev.Type == "plan" || ev.Type == "progress" || ev.Type == "done" || ev.Type == "error" {
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "plan" || ev.Type == "progress" || ev.Type == "knowledge_operation_result" || ev.Type == "done" || ev.Type == "error" {
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
@@ -477,6 +603,21 @@ func PublishConversationTaskEvent(
 	if err != nil || task.ConversationID == "" {
 		return
 	}
+	if ev.Type == "ask_pending" {
+		confirmation, ok := ev.AskPending["knowledge_management"].(map[string]any)
+		confirmationID, _ := confirmation["confirmation_id"].(string)
+		argumentsDigest, _ := confirmation["arguments_digest"].(string)
+		snapshot, _ := confirmation["snapshot"].(string)
+		if ok && confirmationID != "" && argumentsDigest != "" && snapshot != "" {
+			payload := make(map[string]any, len(ev.AskPending)+1)
+			for key, value := range ev.AskPending {
+				payload[key] = value
+			}
+			payload["confirmation_id"] = confirmationID
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, task.TriggerHistoryID, "ask_pending", payload)
+		}
+		return
+	}
 	if task.AgentType == "workflow_step" {
 		switch ev.Type {
 		case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
@@ -484,7 +625,7 @@ func PublishConversationTaskEvent(
 			// stream even though workflow tasks stay hidden from TaskCenter.
 			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
 				map[string]any{"task_id": ev.TaskID, "event": ev})
-		case "task_start", "plan", "process_step", "sources", "progress", "artifact", "done", "error":
+		case "task_start", "plan", "process_step", "sources", "progress", "artifact", "knowledge_operation_result", "done", "error":
 			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
 				"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
 		default:
@@ -493,7 +634,7 @@ func PublishConversationTaskEvent(
 		}
 	}
 	switch ev.Type {
-	case "task_start", "plan", "process_step", "progress", "sources", "done", "error":
+	case "task_start", "plan", "process_step", "progress", "sources", "knowledge_operation_result", "done", "error":
 	default:
 		return
 	}
@@ -565,6 +706,36 @@ func workspaceRunKey(taskID string) string { return "rag/subagent/execution:" + 
 // ValidateWorkspaceRun is independent of the parent Chat run: detached tasks
 // survive normal parent completion, but not interruption or a later launch.
 func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
+	params, err := ValidateActiveRun(ctx, db, stateStore, req)
+	if err != nil {
+		return nil, err
+	}
+	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil {
+		if req.WorkspaceID == "" {
+			return nil, nil
+		}
+		return nil, invalid
+	}
+	if snapshot.WorkspaceID != req.WorkspaceID {
+		return nil, invalid
+	}
+	return snapshot, nil
+}
+
+func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		return update(tx)
+	})
+}
+
+// ValidateActiveRun verifies task ownership and generation without requiring a workspace.
+func ValidateActiveRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (map[string]any, error) {
 	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
 	if stateStore == nil || req.TaskID == "" || req.Generation == "" || req.RunID != "" || req.HistoryID != "" {
 		return nil, invalid
@@ -595,25 +766,6 @@ func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 	if len(task.Params) > 0 && json.Unmarshal(task.Params, &params) != nil {
 		return nil, invalid
 	}
-	snapshot := localworkspace.SnapshotFromParams(params)
-	if snapshot == nil {
-		if req.WorkspaceID == "" {
-			return nil, nil
-		}
-		return nil, invalid
-	}
-	if snapshot.WorkspaceID != req.WorkspaceID {
-		return nil, invalid
-	}
-	return snapshot, nil
-}
 
-func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
-	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
-			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
-			return err
-		}
-		return update(tx)
-	})
+	return params, nil
 }

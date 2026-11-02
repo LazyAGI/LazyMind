@@ -20,7 +20,8 @@ func TestAlgoServiceURL(t *testing.T) {
 }
 
 func TestHydrateRunRequestUsesCoreOwnedSnapshotWithoutDSN(t *testing.T) {
-	db := newTestDB(t)
+	db := orm.MigrateAllModelsForTest(t)
+	seedTaskModel(t, db.DB, "user-1", "snapshot-model", false)
 	now := time.Now().UTC()
 	task := &orm.SubAgentTask{
 		ID: "task-snapshot", ConversationID: "conv-1", TriggerHistoryID: "history-1",
@@ -49,6 +50,12 @@ func TestHydrateRunRequestUsesCoreOwnedSnapshotWithoutDSN(t *testing.T) {
 	if req.TaskSpec["id"] != task.ID || len(req.InitialSteps) != 1 {
 		t.Fatalf("request not hydrated: %#v", req)
 	}
+	params := req.TaskSpec["params"].(map[string]any)
+	snapshot, ok := params["_tool_visibility"].(taskVisibilitySnapshot)
+	if !ok || snapshot.ExecutionID != task.ExecutionID || params["depth"] != "high" {
+		t.Fatalf("execution snapshot lost parameters or visibility: %#v", params)
+	}
+
 	artifacts, ok := req.TaskSpec["artifacts"].([]map[string]any)
 	if !ok || len(artifacts) != 1 || artifacts[0]["seq"] != 2 {
 		t.Fatalf("artifacts=%#v", req.TaskSpec["artifacts"])
@@ -149,10 +156,11 @@ func TestRouteArtifactRollsBackDeliveryWhenV2SnapshotFails(t *testing.T) {
 }
 
 func TestHydrationFailureMarksExistingTaskFailed(t *testing.T) {
-	db := newTestDB(t)
+	db := orm.MigrateAllModelsForTest(t)
+	seedTaskModel(t, db.DB, "user-1", "hydration-model", false)
 	now := time.Now().UTC()
 	task := &orm.SubAgentTask{ID: "task-hydration-error", ConversationID: "conv-1",
-		AgentType: "research", Title: "Research", Objective: "Investigate", Mode: "auto",
+		CreateUserID: "user-1", AgentType: "research", Title: "Research", Objective: "Investigate", Mode: "auto",
 		Status: StatusRunning, Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`),
 		OutputSlots: json.RawMessage(`[]`), LastHeartbeat: now, CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(task).Error; err != nil {

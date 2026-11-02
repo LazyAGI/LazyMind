@@ -1,11 +1,17 @@
 vi.mock('./writerListNumberingPlugin', () => ({ writerListNumberingPlugin: () => ({}) }));
 vi.mock('./writerLocalSourcePlugin', () => ({ writerLocalSourcePlugin: () => ({}), writerLocalCodeEditor: {} }));
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+vi.mock('./writerImageDownloadPlugin', () => ({ writerImageDownloadPlugin: () => ({}) }));
+const availability = vi.hoisted(() => ({
+  states: { 'future-provider': 'ready' }, accounts: { 'future-provider': [{ connection_id: 'fixture-account' }] }, refresh: vi.fn(),
+}));
+vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => availability }));
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SlotRenderer, SlotEditingContext } from './SlotComponents';
 import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
 import { WriterIRControl } from './WriterIRControl';
 import type { SlotFooterAction } from './slotEditingContext';
+import i18n from '@/i18n';
 
 // Only the third-party editing surfaces are substitutes. The real Markdown
 // editor / WriterIRControl, registered flush functions and SlotRenderer save
@@ -40,6 +46,7 @@ vi.mock('./FilePreviewDrawer', () => ({ FilePreviewDrawer: () => null }));
 vi.mock('@/modules/chat/components/MarkdownViewer', () => ({ default: ({ children }: { children: string }) => <div>{children}</div> }));
 const api = vi.hoisted(() => ({
   getPublicationForArtifact: vi.fn(), listDocumentProviders: vi.fn(), saveDocumentArtifact: vi.fn(), publishDocument: vi.fn(), getSlots: vi.fn(),
+  getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn(),
 }));
 const confirm = vi.hoisted(() => vi.fn());
 vi.mock('@/modules/chat/utils/request', async (original) => ({
@@ -52,9 +59,12 @@ vi.mock('antd', async (original) => {
 
 afterEach(() => vi.useRealTimers());
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await i18n.changeLanguage('en-US');
   api.getPublicationForArtifact.mockResolvedValue({ data: { data: {} } });
+  api.getPublicationTargets.mockResolvedValue({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } } });
+  api.createPublicationGroup.mockReset().mockRejectedValue(new Error('Acceptance response lost'));
   api.getSlots.mockResolvedValue({ data: { data: { slots: [] } } });
   api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'future-provider', capabilities: ['create', 'replace', 'patch'] }] } } });
   api.saveDocumentArtifact.mockImplementation(async (_id, body) => ({ data: { contract_version: 'workflow.v1', ok: true, result: {
@@ -90,39 +100,41 @@ for (const representation of ['markdown', 'ir'] as const) {
       fireEvent.change(editor, { target: { value: representation === 'markdown' ? '# Edited markdown' : 'Edited IR' } });
       await waitFor(() => expect(action?.flushKey).toBeTruthy());
       const beforeFlushAction = action!;
-      expect(beforeFlushAction.flushBeforeAction).toBe(true); // The real panel captures onClick before awaiting flush.
+      expect(beforeFlushAction.flushBeforeAction).toBe(false); // Saving occurs only after publication confirmation.
       const flush = flushers.get(beforeFlushAction.flushKey!);
       expect(flush).toBeTypeOf('function');
-      let saved = false;
-      await act(async () => { saved = await flush!(); });
-      expect(api.saveDocumentArtifact).toHaveBeenCalledTimes(1);
+      act(() => beforeFlushAction.onClick());
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'future-provider' }));
+      expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
+      expect(api.createPublicationGroup).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Publish to future-provider' }));
+      await waitFor(() => expect(api.saveDocumentArtifact).toHaveBeenCalledTimes(1));
       expect(api.saveDocumentArtifact.mock.calls[0][0]).toBe('before-save');
       expect(JSON.stringify(api.saveDocumentArtifact.mock.calls[0][1].value)).toContain(representation === 'markdown' ? 'Edited markdown' : 'Edited IR');
       expect(api.saveDocumentArtifact.mock.calls[0][1]).toEqual(expect.objectContaining({ base_revision: 3, base_draft_version: 7 }));
       if (conflict) {
-        expect(saved).toBe(false);
+        expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('Save failed');
         expect((editor as HTMLTextAreaElement).value).toContain(representation === 'markdown' ? 'Edited markdown' : 'Edited IR');
         expect(api.publishDocument).not.toHaveBeenCalled();
+        expect(api.createPublicationGroup).not.toHaveBeenCalled();
         expect(confirm).not.toHaveBeenCalled();
         return;
       }
-      expect(saved).toBe(true);
+      await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledTimes(1));
+      const retry = await screen.findByRole('button', { name: /Check this publication request/ });
       vi.useFakeTimers();
-      act(() => beforeFlushAction.onClick());
       expect(confirm).not.toHaveBeenCalled();
       await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
-      expect(api.publishDocument).toHaveBeenCalledTimes(1);
-      const [id, body] = api.publishDocument.mock.calls[0];
+      expect(api.createPublicationGroup).toHaveBeenCalledTimes(1);
+      const [id, body] = api.createPublicationGroup.mock.calls[0];
       expect(id).toBe('after-save');
       expect(body).toEqual(expect.objectContaining({ base_revision: 4, base_draft_version: 1,
-        input: expect.objectContaining({ provider: 'future-provider', idempotency_key: expect.any(String) }) }));
-      const key = body.input.idempotency_key;
+        idempotency_key: expect.any(String), targets: [expect.objectContaining({ provider: 'future-provider', connection_id: 'fixture-account' })] }));
       // An explicit retry can only replay the same operation; never auto-write.
-      expect(api.publishDocument).toHaveBeenCalledTimes(1);
-      await act(async () => { beforeFlushAction.onClick(); });
-      if (api.publishDocument.mock.calls.length > 1) {
-        expect(api.publishDocument.mock.calls[1][1].input.idempotency_key).toBe(key);
-      }
+      await act(async () => { fireEvent.click(retry); });
+      expect(api.createPublicationGroup).toHaveBeenCalledTimes(2);
+      expect(api.createPublicationGroup.mock.calls[1]).toEqual(api.createPublicationGroup.mock.calls[0]);
+      expect(api.saveDocumentArtifact).toHaveBeenCalledTimes(1);
     });
   }
 }
@@ -146,9 +158,9 @@ it.each(['markdown', 'ir'])('%s editing surface control uses the real registered
   expect(JSON.stringify(save.mock.calls[0])).toContain(kind === 'markdown' ? 'Edited markdown' : 'Edited IR');
 });
 
-it.each(['markdown', 'ir'] as const)('%s: keeps new edits while a fixed version is publishing and resumes autosave on the returned identity', async representation => {
+it.each(['markdown', 'ir'] as const)('%s: keeps autosaved edits separate from the fixed publication snapshot', async representation => {
   let finish!: (value: unknown) => void;
-  api.publishDocument.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  api.createPublicationGroup.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   const ir = { document_id: 'ir', title: 'Fixture', stage: 'draft', ui_editable: true, blocks: [{ node_id: 'p', type: 'paragraph', content: 'Original' }] };
   const original = representation === 'markdown' ? '# Original' : ir;
   let action: SlotFooterAction | undefined;
@@ -161,17 +173,21 @@ it.each(['markdown', 'ir'] as const)('%s: keeps new edits while a fixed version 
   const editor = await screen.findByRole('textbox', { name: representation === 'markdown' ? 'markdown editing surface' : 'IR editing surface' });
   await waitFor(() => expect(action?.disabled).toBe(false));
   act(() => action!.onClick());
-  await waitFor(() => expect(api.publishDocument).toHaveBeenCalledTimes(1));
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'future-provider' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to future-provider' }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledTimes(1));
+  const request = api.createPublicationGroup.mock.calls[0];
+  expect(request[0]).toBe('before-publish');
+  expect(request[1]).toMatchObject({ base_revision: 3, base_draft_version: 7 });
   fireEvent.change(editor, { target: { value: '发布期间新增中文' } });
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); });
-  expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
-  expect(editor).not.toBeDisabled();
-  await act(async () => finish({ data: { data: { artifact_id: 'published-identity', revision: 4, draft_version: 1,
-    document: original, provider_synced: true, artifact_saved: true } } }));
-  expect((editor as HTMLTextAreaElement).value).toContain('发布期间新增中文');
   await waitFor(() => expect(api.saveDocumentArtifact).toHaveBeenCalledTimes(1), { timeout: 2500 });
-  expect(api.saveDocumentArtifact.mock.calls[0][0]).toBe('published-identity');
-  expect(api.saveDocumentArtifact.mock.calls[0][1]).toMatchObject({ base_revision: 4, base_draft_version: 1 });
+  expect(api.saveDocumentArtifact.mock.calls[0][0]).toBe('before-publish');
+  expect(api.saveDocumentArtifact.mock.calls[0][1]).toMatchObject({ base_revision: 3, base_draft_version: 7 });
   expect(JSON.stringify(api.saveDocumentArtifact.mock.calls[0][1].value)).toContain('发布期间新增中文');
-  expect(action?.statusText).toMatch(/新修改尚未发布|newer edits have not been published/i);
+  expect(editor).not.toBeDisabled();
+  await act(async () => finish({ data: { data: { current_hash: 'fixture', preferred_providers: ['future-provider'], targets: [] } } }));
+  expect((editor as HTMLTextAreaElement).value).toContain('发布期间新增中文');
+  expect(api.createPublicationGroup).toHaveBeenCalledTimes(1);
+  expect(request[1]).toMatchObject({ base_revision: 3, base_draft_version: 7 });
+  expect(api.publishDocument).not.toHaveBeenCalled();
 });

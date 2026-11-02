@@ -2163,9 +2163,6 @@ class MailToolkit:
         'search', 'read', 'read_thread', 'read_attachment',
         'compose_draft', 'update_draft', 'send_draft',
     ]
-    __tool_auto_activate__ = [
-        r'邮件|邮箱|inbox|gmail|163|126|yeah\.net|qq邮箱|企业邮|(?<!\w)email(?!\w)|(?<!\w)mail(?!\w)',
-    ]
 
     def __init__(self) -> None:
         register_tool_auth('mail', 'dynamic_tool_auth')

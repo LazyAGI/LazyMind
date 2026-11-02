@@ -11,8 +11,14 @@ COPY backend/core/go.mod backend/core/go.sum ./
 RUN go mod download
 
 COPY backend/core/ ./
+COPY frontend/scripts/generate_upstream_model_catalog.py /tmp/generate_upstream_model_catalog.py
 
 FROM build-base AS build
+# The catalog is fetched when the image is built, not stored in git.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 ca-certificates \
+    && python3 /tmp/generate_upstream_model_catalog.py --backend-out /app/config/upstream_model_catalog.json \
+    && rm -rf /var/lib/apt/lists/*
 RUN CGO_ENABLED=0 go build -o /core .
 
 FROM build-base AS skill-bundler-build
@@ -43,7 +49,7 @@ WORKDIR /app
 COPY --from=build /core /core
 # SQL migrations (read by MIGRATIONS_DIR, default /migrations in docker-compose)
 COPY --from=build /app/migrations /migrations
-# Model catalog YAML (seeded at startup from ./config/model_catalog.yaml)
+# Provider metadata, public model snapshot, and optional legacy YAML catalog.
 COPY --from=build /app/config /app/config
 # Built-in Workflow packages are imported into Core's revision store at startup.
 COPY workflows /app/workflows

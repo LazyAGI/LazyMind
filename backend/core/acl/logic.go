@@ -1,6 +1,8 @@
 package acl
 
 import (
+	"gorm.io/gorm"
+	"lazymind/core/common/orm"
 	"sort"
 	"strings"
 )
@@ -76,7 +78,15 @@ func effectivePermissions(resourceType, resourceID string, userID string) (permi
 }
 
 func effectivePermissionsWithGroups(resourceType, resourceID string, userID string, groupIDs []string) (permissions []string, source string) {
-	st := GetStore()
+	return effectivePermissionsUsingStore(GetStore(), resourceType, resourceID, userID, groupIDs)
+}
+
+// PermissionsForWithDB reads resource ACL rows through the caller transaction.
+func PermissionsForWithDB(db *gorm.DB, resourceType, resourceID, userID string, groupIDs []string) ([]string, string) {
+	return effectivePermissionsUsingStore(&Store{db: &orm.DB{DB: db}}, resourceType, resourceID, userID, groupIDs)
+}
+
+func effectivePermissionsUsingStore(st *Store, resourceType, resourceID, userID string, groupIDs []string) (permissions []string, source string) {
 	if st == nil || strings.TrimSpace(userID) == "" || strings.TrimSpace(resourceID) == "" {
 		return nil, "private"
 	}

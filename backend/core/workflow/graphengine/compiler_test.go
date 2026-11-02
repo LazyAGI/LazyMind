@@ -168,6 +168,37 @@ runtime:
 	}
 }
 
+func TestCompileRuntimeClarificationConditionalAttachment(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  clarification_fields:
+    - id: template_mode
+      question: 是否上传模板？
+      ask_when: Only when source material is missing.
+      type: single
+      choice_policy: fixed
+      choices: [不使用模板, 上传 PPTX 模板]
+      attachment:
+        when_choice: 上传 PPTX 模板
+        material_id: seed
+        accept: [PPTX]
+        max_files: 1
+        required: true
+`, 1)
+	workflowYAML = strings.Replace(workflowYAML, "{id: seed, external: true}", "{id: seed, type: file, external: true}", 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("unexpected diagnostics: %#v", result.Diagnostics)
+	}
+	attachment := result.Graph.Runtime.ClarificationFields[0].Attachment
+	if result.Graph.Runtime.ClarificationFields[0].AskWhen != "Only when source material is missing." {
+		t.Fatal("conditional Ask applicability was lost during compilation")
+	}
+	if attachment == nil || attachment.WhenChoice != "上传 PPTX 模板" || attachment.MaterialID != "seed" || len(attachment.Accept) != 1 || attachment.Accept[0] != ".pptx" || attachment.MaxFiles != 1 || !attachment.Required {
+		t.Fatalf("conditional attachment was not compiled: %#v", attachment)
+	}
+}
+
 func TestCompileRejectsMultipleProducerAndSelfOverwrite(t *testing.T) {
 	state := `
 transitions:
@@ -777,6 +808,30 @@ func TestValidateUIDeclarativeHTMLSlideExport(t *testing.T) {
 	}
 }
 
+func TestValidateUIViewModes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ui   map[string]any
+		code string
+	}{
+		{"omitted", map[string]any{}, ""},
+		{"following", map[string]any{"default_panel_mode": "expanded", "follow_mode": map[string]any{"default": "following"}}, ""},
+		{"free", map[string]any{"default_panel_mode": "compact", "follow_mode": map[string]any{"default": "free"}}, ""},
+		{"unknown panel mode", map[string]any{"default_panel_mode": "fullscreen"}, "E_UI_PANEL_MODE_INVALID"},
+		{"invalid panel type", map[string]any{"default_panel_mode": []string{"expanded"}}, "E_UI_PANEL_MODE_INVALID"},
+		{"unknown follow mode", map[string]any{"follow_mode": map[string]any{"default": "auto"}}, "E_UI_FOLLOW_MODE_INVALID"},
+		{"missing default", map[string]any{"follow_mode": map[string]any{}}, "E_UI_FOLLOW_MODE_INVALID"},
+		{"invalid follow type", map[string]any{"follow_mode": true}, "E_UI_FOLLOW_MODE_INVALID"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			diagnostics := validateUI(test.ui, nil, nil, nil, ProfilePublish)
+			if test.code == "" && len(diagnostics) != 0 || test.code != "" && !hasDiagnostic(diagnostics, test.code) {
+				t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+			}
+		})
+	}
+}
+
 func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
 	known := map[string]bool{"plan": true, "skip_prototype": true, "prototype": true}
 	specs := map[string]uiMaterialSpec{
@@ -890,5 +945,26 @@ func TestImageWorkflowDirectEditReadyWithoutGeneratedBase(t *testing.T) {
 	}
 	if projection.Nodes["generate_image"].Branch != "pruned" {
 		t.Fatalf("generation must be pruned: %#v", projection.Nodes["generate_image"])
+	}
+}
+
+func TestCompileUserVisibilityDoesNotChangeExecution(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		result := Compile(strings.Replace(validWorkflow, "{id: final}", "{id: final, user_visible: "+value+"}", 1), validState, "", ProfilePublish)
+		if !result.Valid || len(result.Graph.Nodes["f"].Outputs) != 1 || result.Graph.Nodes["f"].Outputs[0] != "final" {
+			t.Fatalf("visibility changed execution: %#v", result)
+		}
+	}
+	for _, value := range []string{`"false"`, "null", "1", "[]"} {
+		result := Compile(strings.Replace(validWorkflow, "{id: final}", "{id: final, user_visible: "+value+"}", 1), validState, "", ProfilePublish)
+		found := false
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "E_USER_VISIBLE_INVALID" {
+				found = true
+			}
+		}
+		if result.Valid || !found {
+			t.Fatalf("invalid visibility accepted: %s %#v", value, result.Diagnostics)
+		}
 	}
 }

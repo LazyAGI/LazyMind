@@ -1,107 +1,63 @@
-from types import SimpleNamespace
-
 import pytest
 
-from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
-
-from lazymind.chat.service.chat_service import (
-    _add_browser_visual_tools,
-    _agent_max_retries_for_mcp_tools,
-    _browser_tool_name,
-    _mcp_model_tool_name,
-    _normalize_mcp_tool_names,
-)
+from lazyllm.tools import get_tool_runtime_metadata
+from lazyllm.tools.agent.toolsManager import ToolManager
+from lazymind.chat.service import chat_service
 
 
-def _tool(name: str):
-    def invoke():
-        return name
-
-    invoke.__name__ = name
-    return invoke
-
-
-def test_mcp_model_tool_name_replaces_registry_separators():
-    assert _mcp_model_tool_name('browser.open') == 'browser_open'
-    assert _mcp_model_tool_name('browser capture-current') == 'browser_capture_current'
-    assert _mcp_model_tool_name('12.browser.open') == 'mcp_12_browser_open'
+def _tools(names, *, server_id='lazymind-browser', server_name='lazymind-browser'):
+    server = {'id': server_id, 'name': server_name, 'url': 'https://mcp.example/tools',
+              'transport': 'streamable-http'}
+    capability = {'status': 'ready', 'tools': [
+        {'tool_name': name, 'description': 'Test tool.', 'input_schema': {'type': 'object', 'properties': {}}}
+        for name in names
+    ]}
+    return chat_service._mcp_tools_for_preview(server, capability, 'system')
 
 
-def test_normalize_mcp_tool_names_keeps_wire_callable_and_avoids_collisions():
-    dotted = _tool('browser.open')
-    colliding = _tool('browser-open')
-
-    tools = _normalize_mcp_tool_names([dotted, colliding], 'lazymind-browser')
-
-    assert tools[0].__name__ == 'browser_open'
-    assert tools[0]._lazymind_mcp_original_name == 'browser.open'
-    assert tools[0]() == 'browser.open'
-    assert tools[1].__name__.startswith('browser_open_')
-    assert tools[1].__name__ != tools[0].__name__
-    assert len(tools[1].__name__) <= 64
-
-
-def test_mcp_model_tool_name_caps_model_function_limit():
-    alias = _mcp_model_tool_name('browser.' + ('very-long-name-' * 10))
-
-    assert len(alias) == 64
-    assert '.' not in alias
+@pytest.mark.parametrize(('server_id', 'server_name', 'wire', 'expected'), [
+    ('lazymind-knowledge', 'lazymind-knowledge', 'knowledge.list', 'mcp_kbmanager_list'),
+    ('lazymind-knowledge', 'changed display label', 'knowledge.document.list', 'mcp_kbmanager_document_list'),
+    ('lazymind-browser', 'lazymind-browser', 'browser.open', 'mcp_browser_open'),
+    ('notion-id', 'Notion', 'search', 'mcp_notion_search'),
+])
+def test_preview_uses_readable_names_and_keeps_wire_identity(server_id, server_name, wire, expected):
+    tool, = _tools([wire], server_id=server_id, server_name=server_name)
+    assert tool.__name__ == expected
+    assert tool.__mcp_tool_name__ == wire
+    assert get_tool_runtime_metadata(tool).tool_origin == server_id
+    assert list(ToolManager([tool]).atomic_tool_catalog()) == [expected]
 
 
-def test_add_browser_visual_tools_only_when_vlm_and_browser_screenshot_exist():
-    screenshot = _tool('browser.screenshot')
-    normalized = _normalize_mcp_tool_names([screenshot], 'lazymind-browser')
-
-    augmented = _add_browser_visual_tools(normalized, vlm_available=True)
-
-    assert [tool.__name__ for tool in augmented] == [
-        'browser_screenshot',
-        'browser_visual_inspect',
-    ]
-    assert _add_browser_visual_tools(
-        [_tool('other')], vlm_available=True,
-    )[0].__name__ == 'other'
-    assert _add_browser_visual_tools(normalized, vlm_available=False) == normalized
+def test_normalized_tool_collisions_are_rejected():
+    with pytest.raises(ValueError, match='MCP tool name|Duplicate tool name'):
+        ToolManager(_tools(['browser.foo.bar', 'browser.foo-bar']))
 
 
-def test_browser_mcp_tools_raise_agent_round_limit_to_200():
-    browser_open = _tool('browser.open')
-    normalized = _normalize_mcp_tool_names([browser_open], 'lazymind-browser')
-
-    # ReactAgent adds the initial attempt to max_retries when reporting round_limit.
-    assert _agent_max_retries_for_mcp_tools(20, normalized) == 199
+@pytest.mark.parametrize('name', ['', '---', 'browser.' + 'very-long-name-' * 10])
+def test_preview_rejects_invalid_names_instead_of_hashing(name):
+    with pytest.raises(ValueError, match='MCP tool name'):
+        _tools([name])
 
 
-def test_non_browser_mcp_tools_keep_configured_agent_round_limit():
-    other = _tool('filesystem.read')
-    normalized = _normalize_mcp_tool_names([other], 'filesystem')
-
-    assert _agent_max_retries_for_mcp_tools(20, normalized) == 20
-    assert _agent_max_retries_for_mcp_tools(20, []) == 20
-
-
-@pytest.mark.parametrize('wire_name', ['browser.open', 'browser.screenshot', 'browser.click_intersection'])
-def test_browser_identity_survives_real_lazyllm_adapter(wire_name):
-    tool = generate_lazyllm_tool(None, SimpleNamespace(
-        name=wire_name, description='Browser regression test.',
-        inputSchema={'type': 'object', 'properties': {}},
-    ))
-    assert '.' not in tool.__name__
-    tools = _normalize_mcp_tool_names([tool], 'lazymind-browser')
-
-    assert _browser_tool_name(tool) == wire_name
-    assert _agent_max_retries_for_mcp_tools(20, tools) == 199
-    assert _agent_max_retries_for_mcp_tools(299, tools) == 299
-    augmented = _add_browser_visual_tools(tools, vlm_available=True)
-    assert ('browser_visual_inspect' in [t.__name__ for t in augmented]) == (
-        wire_name == 'browser.screenshot'
-    )
-    assert _add_browser_visual_tools(tools, vlm_available=False) == tools
+def test_browser_visual_tools_use_original_method_and_server_identity():
+    tools = _tools(['browser.screenshot'])
+    augmented = chat_service._add_browser_visual_tools(tools, vlm_available=True)
+    assert [tool.__name__ for tool in augmented] == ['mcp_browser_screenshot', 'browser_visual_inspect']
+    assert chat_service._add_browser_visual_tools(tools, vlm_available=False) == tools
+    assert chat_service._add_browser_visual_tools([], vlm_available=True) == []
 
 
-def test_unrelated_mcp_browser_names_do_not_activate_browser_policy():
-    tools = _normalize_mcp_tool_names([_tool('browser.screenshot')], 'other-server')
+@pytest.mark.parametrize('wire', ['browser.open', 'browser.screenshot', 'browser.click_intersection'])
+def test_browser_policy_survives_readable_names(wire):
+    tools = _tools([wire])
+    assert chat_service._browser_tool_name(tools[0]) == wire
+    assert chat_service._agent_max_retries_for_mcp_tools(20, tools) == 199
+    assert chat_service._agent_max_retries_for_mcp_tools(299, tools) == 299
 
-    assert _browser_tool_name(tools[0]) == ''
-    assert _agent_max_retries_for_mcp_tools(20, tools) == 20
-    assert _add_browser_visual_tools(tools, vlm_available=True) == tools
+
+def test_display_name_cannot_turn_another_server_into_builtin_browser():
+    tools = _tools(['browser.screenshot'], server_id='external-browser', server_name='lazymind-browser')
+    assert chat_service._browser_tool_name(tools[0]) == ''
+    assert chat_service._agent_max_retries_for_mcp_tools(20, tools) == 20
+    assert chat_service._add_browser_visual_tools(tools, vlm_available=True) == tools

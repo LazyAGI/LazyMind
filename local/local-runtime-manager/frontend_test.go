@@ -123,3 +123,70 @@ func TestFrontendDownStopsPIDFileProcess(t *testing.T) {
 		t.Fatalf("frontend pid file still exists: %v", err)
 	}
 }
+
+func TestFrontendNodeModulesReadyLayouts(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata         string
+		missingVite, wantReady bool
+	}{
+		{"hoisted", "nodeLinker: hoisted\n", false, true},
+		{"isolated", "nodeLinker: isolated\nvirtualStoreDir: .pnpm\n", false, true},
+		{"wrong isolated store", "nodeLinker: isolated\nvirtualStoreDir: /wrong/store\n", false, false},
+		{"hoisted missing vite", "nodeLinker: hoisted\n", true, false},
+		{"comment is not linker", "# nodeLinker: hoisted\nvirtualStoreDir: /wrong/store\n", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			nm := filepath.Join(root, "node_modules")
+			if err := os.MkdirAll(filepath.Join(nm, ".bin"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(nm, "vite", "bin"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			files := map[string]string{filepath.Join(nm, ".modules.yaml"): tc.metadata, frontendToolPath(nm, "vite"): ""}
+			if !tc.missingVite {
+				files[filepath.Join(nm, "vite", "bin", "vite.js")] = ""
+			}
+			for path, content := range files {
+				if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ready, reason, err := frontendNodeModulesReady(RuntimePaths{FrontendNodeModules: nm}, root)
+			if err != nil || ready != tc.wantReady {
+				t.Fatalf("ready=%v reason=%q err=%v", ready, reason, err)
+			}
+		})
+	}
+}
+
+func TestPrepareFrontendNodeModulesPreservesHoistedRuntime(t *testing.T) {
+	root := t.TempDir()
+	runtimeModules := filepath.Join(root, "runtime", "node_modules")
+	frontend := filepath.Join(root, "frontend")
+	if err := os.MkdirAll(filepath.Join(runtimeModules, "vite", "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runtimeModules, ".bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(frontend, 0755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(runtimeModules, "keep")
+	for path, content := range map[string]string{filepath.Join(runtimeModules, ".modules.yaml"): "nodeLinker: hoisted\n", frontendToolPath(runtimeModules, "vite"): "", filepath.Join(runtimeModules, "vite", "bin", "vite.js"): "", marker: "keep"} {
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := createDirectoryLink(runtimeModules, filepath.Join(frontend, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareFrontendNodeModules(RuntimePaths{FrontendNodeModules: runtimeModules}, frontend); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("valid hoisted dependencies were cleared: %v", err)
+	}
+}

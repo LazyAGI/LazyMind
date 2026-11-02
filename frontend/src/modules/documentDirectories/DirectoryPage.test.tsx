@@ -123,8 +123,46 @@ it('hides completed history and retries only the latest failed organization', as
   vi.mocked(api.listBatches).mockResolvedValue([
     { id: 'failed', parent_id: '', directory_id: 'd', status: 'failed', acknowledged: false, created_at: directory.last_used_at },
   ]);
-  view(); fireEvent.click(await screen.findByRole('button', { name: 'directories.retry' }));
+  view();
+  fireEvent.click(await screen.findByRole('button', { name: /directories.failedResults/ }));
+  fireEvent.click(await screen.findByRole('button', { name: 'directories.retry' }));
   await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'retry', batch_id: 'failed', directory_id: 'd', version: 2 }));
+});
+
+it('folds failed tasks by default and keeps their times and actions after expanding', async () => {
+  const failures = Array.from({ length: 4 }, (_, i) => ({
+    id: `failed-${i}`, parent_id: '', directory_id: '', status: 'failed', acknowledged: false,
+    created_at: `2026-10-16T08:2${i}:00Z`,
+  }));
+  vi.mocked(api.listBatches).mockResolvedValue([
+    ...failures,
+    { id: 'running', parent_id: '', directory_id: 'd', status: 'running', acknowledged: false,
+      created_at: '2026-10-22T00:00:00Z', result: { directory_name: 'Running task' } },
+  ]);
+  vi.mocked(api.directoryAction).mockImplementation(async command => {
+    if (command.operation === 'acknowledge') {
+      failures.find(batch => batch.id === command.batch_id)!.acknowledged = true;
+    }
+    return {};
+  });
+  render(<MemoryRouter><DirectoryPage /></MemoryRouter>);
+  const summary = await screen.findByRole('button', { name: /directories.failedResults/ });
+  expect(summary).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('button', { name: 'directories.retry' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'directories.cancel' })).toBeVisible();
+  expect(screen.getByText('directories.organizing')).toBeVisible();
+  fireEvent.click(summary);
+  const retries = await screen.findAllByRole('button', { name: 'directories.retry' });
+  expect(retries).toHaveLength(4);
+  for (const batch of failures) {
+    await waitFor(() => expect(document.querySelector(`time[datetime="${batch.created_at}"]`)).toBeVisible());
+  }
+  fireEvent.click(retries[0]);
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith(expect.objectContaining({ operation: 'retry', batch_id: 'failed-3' })));
+  await waitFor(() => expect(screen.getAllByRole('button', { name: 'directories.dismissResult' })[0]).not.toBeDisabled());
+  fireEvent.click(screen.getAllByRole('button', { name: 'directories.dismissResult' })[0]);
+  await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith(expect.objectContaining({ operation: 'acknowledge', batch_id: 'failed-3' })));
+  await waitFor(() => expect(screen.getAllByRole('button', { name: 'directories.retry' })).toHaveLength(3));
 });
 
 it('pins and unpins a directory from its card without opening it', async () => {

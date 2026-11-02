@@ -415,6 +415,8 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	h, db := testHandler(t)
 	if err := db.AutoMigrate(
 		&orm.Conversation{},
+		&orm.ChatHistory{},
+		&orm.MultiAnswersChatHistory{},
 		&orm.TaskCenterTask{},
 		&orm.WorkflowSession{},
 		&orm.WorkflowResource{},
@@ -445,6 +447,9 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 		t.Fatal(err)
 	}
 	inputContent := []byte("source material")
+	if err := db.Create(&orm.ChatHistory{ID: "trigger-history", ConversationID: "foreign-chat"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	inputHashBytes := sha256.Sum256(inputContent)
 	inputHash := "sha256:" + hex.EncodeToString(inputHashBytes[:])
 	inputResource, _, err := h.Store.ImportInputResource(
@@ -454,12 +459,13 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 		t.Fatal(err)
 	}
 	requestJSON, err := json.Marshal(map[string]any{
-		"workflow_id":     "writer",
-		"conversation_id": "conversation-1",
-		"origin_host":     "lazymind",
-		"origin_ref":      "conversation-1",
-		"controller_host": "lazymind",
-		"request_context": "draft carefully",
+		"workflow_id":        "writer",
+		"conversation_id":    "conversation-1",
+		"trigger_history_id": "trigger-history",
+		"origin_host":        "lazymind",
+		"origin_ref":         "conversation-1",
+		"controller_host":    "lazymind",
+		"request_context":    "draft carefully",
 		"input_bindings": map[string]any{
 			"source": map[string]any{
 				"resource_id":  inputResource.ID,
@@ -522,6 +528,17 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 		h.Consume(w, r)
 		return w
 	}
+	denied := consume("session-1")
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("foreign trigger history was accepted: %d %s", denied.Code, denied.Body.String())
+	}
+	var sessions int64
+	if err := db.Model(&orm.WorkflowSession{}).Count(&sessions).Error; err != nil || sessions != 0 {
+		t.Fatalf("invalid history created a session: %d %v", sessions, err)
+	}
+	if err := db.Model(&orm.ChatHistory{}).Where("id = ?", "trigger-history").Update("conversation_id", "conversation-1").Error; err != nil {
+		t.Fatal(err)
+	}
 	first := consume("session-1")
 	if first.Code != http.StatusServiceUnavailable || decodeEnvelope(t, first).Error.Code != "WORKFLOW_SESSION_EVENT_FAILED" {
 		t.Fatalf("first consume: status=%d body=%s", first.Code, first.Body.String())
@@ -529,6 +546,10 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	second := consume("different-session-id")
 	if second.Code != http.StatusOK {
 		t.Fatalf("retry consume: status=%d body=%s", second.Code, second.Body.String())
+	}
+	var bound orm.WorkflowSession
+	if err := db.First(&bound, "id = ?", "session-1").Error; err != nil || bound.TriggerHistoryID != "trigger-history" {
+		t.Fatalf("initial Chat turn binding lost: %+v %v", bound, err)
 	}
 	encodedResponse, _ := json.Marshal(decodeEnvelope(t, second).Data)
 	if !bytes.Contains(encodedResponse, []byte(`"session_id":"session-1"`)) {

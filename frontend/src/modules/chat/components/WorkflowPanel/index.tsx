@@ -1,3 +1,5 @@
+import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
+import { hiddenUserSlots, workflowUIForAudience } from './workflowAudience';
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
@@ -27,14 +29,14 @@ import {
   workflowTabAllowsDownload,
   useWorkflowStore,
 } from '@/modules/chat/store/workflowPanel';
-import { isWorkflowReadyToStart } from '@/modules/chat/store/workflowStatus';
+import { workflowDisplayLabel, type NativeWorkflowControl } from '@/modules/chat/store/workflowStatus';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import StateGraphModal from '@/components/StateGraphModal';
 import {
   WORKFLOW_PANEL_EXPANDED_EVENT,
-  WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
 } from '@/modules/chat/constants/chat';
 import type {
   WorkflowSession,
@@ -61,17 +63,24 @@ import { SlideThumb } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
-import { resolveCompletedContinueStep, resolveExternalContinueAction, resolveWorkflowContinueAction } from './workflowContinue';
-import { resolvePendingApprovalStep } from './workflowApproval';
+import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
-import { deliveryPending, type WorkflowActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
+import type { WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import {
   filterPresentCompositeItems,
   findAlignedCompositeRevision,
 } from './compositeArtifactLayout';
+import { linkedPageTabs, buildPageOrderChange } from './workflowPageGroup';
+import { PreviewContent } from '../ArtifactPreview';
+import { useArtifactPreview } from '../ArtifactPreview/context';
+import { useWorkflowViewState } from './useWorkflowViewState';
+import { resolveWorkflowActiveTabIndex, resolveWorkflowRealTabIndex } from './workflowFollowMode';
 import './WorkflowPanel.scss';
 
+const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
+
 const EMPTY_TASK_CENTER_TASKS: SubAgentTask[] = [];
+const EMPTY_WORKFLOW_UI: WorkflowUI = {};
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
 function parseIntentText(raw?: string): string {
@@ -171,8 +180,7 @@ function IntentPopover({
 }
 
 export interface WorkflowPanelControlAdapter {
-  control: WorkflowControlView;
-  execute(intent: WorkflowActionIntent): Promise<void>;
+  execute(intent: WorkflowPanelActionIntent): Promise<void>;
 }
 
 interface WorkflowPanelProps {
@@ -184,11 +192,11 @@ interface WorkflowPanelProps {
 
   conversationId: string;
   /** Called when the user clicks Continue or Retry — simulates sending a user message. */
-  onSendMessage?: (text: string) => void;
+  onSendMessage?: (text: string, control?: NativeWorkflowControl) => void | Promise<boolean | void>;
+  /** Native Chat owns the submitted turn, including before workflow events arrive. */
+  chatBusy?: boolean;
   /** Called when the user clicks the reference button on a slot item. */
   onReference?: (slot: SlotRevision) => void;
-  /** Called when the user clicks the Stop button during an active session. */
-  onStop?: () => void;
   /** Called after a session is successfully dismissed. */
   onDismissed?: () => void;
 }
@@ -383,14 +391,13 @@ function getPresentSlotIds(
 
 /**
  * Resolve which slot ids should be visible for a tab from `composite_behavior`.
- * Returns null when no behavior is declared (show all configured columns/slots).
+ * Empty slots are hidden by default; explicit false retains authoring placeholders.
  */
 function resolveVisibleSlotIds(
   tab: TabDef,
   session: WorkflowSession,
 ): Set<string> | null {
-  const behavior = tab.composite_behavior;
-  if (!behavior) return null;
+  const behavior = tab.composite_behavior ?? {};
 
   const scope = behavior.empty_column_scope === 'tab' ? 'tab' : 'selected';
   const present = getPresentSlotIds(tab, session, scope);
@@ -409,7 +416,7 @@ function resolveVisibleSlotIds(
     }
   }
 
-  if (behavior.hide_empty_columns) {
+  if (behavior.hide_empty_columns !== false) {
     for (const id of [...allowed]) {
       if (!present.has(id)) allowed.delete(id);
     }
@@ -825,6 +832,8 @@ function CompositeSlotGrid({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const pageGroups = React.useContext(PageGroupContext);
+  const tabActive = React.useContext(WorkflowPanelTabActiveContext);
   const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
   const rows = getCompositeRows(tab, session);
@@ -832,7 +841,7 @@ function CompositeSlotGrid({
     buildColumns(tab),
     resolveVisibleSlotIds(tab, session),
   );
-  const hideEmptyCells = Boolean(tab.composite_behavior?.hide_empty_columns);
+  const hideEmptyCells = tab.composite_behavior?.hide_empty_columns !== false;
   const hideImageMutationActions = ['result', 'generate_image', 'enhance_image'].includes(tab.id);
 
   // Compute total weight for flex proportions.
@@ -845,22 +854,27 @@ function CompositeSlotGrid({
       && tab.composite_layout.direction === 'column',
   );
   const [slideExpanded, setSlideExpanded] = useState(false);
-  const [currentPage, setCurrentPage] = useState<number | null>(null);
+  const [localPage, setLocalPage] = useState<number | null>(null);
+  const currentPage = tab.page_group ? (pageGroups.pages[tab.page_group] ?? null) : localPage;
+  const setCurrentPage = (page: number | null) => {
+    if (tab.page_group && page !== null) pageGroups.select(tab.page_group, page);
+    else setLocalPage(page);
+  };
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
 
   useEffect(() => {
-    if (!paged) return;
+    if (!paged || !tabActive) return;
     if (!rows.length) {
       setCurrentPage(null);
       return;
     }
-    setCurrentPage((page) => page != null && rows.includes(page) ? page : rows[0]);
-  }, [paged, rows.join(',')]);
+    if (currentPage == null || !rows.includes(currentPage)) setCurrentPage(rows[0]);
+  }, [paged, tabActive, currentPage, rows.join(',')]);
 
   useEffect(() => {
-    if (paged) onFocusSortOrder?.(currentPage ?? undefined);
-  }, [paged, currentPage, onFocusSortOrder]);
+    if (paged && tabActive) onFocusSortOrder?.(currentPage ?? undefined);
+  }, [paged, tabActive, currentPage, onFocusSortOrder]);
 
   const activePage = currentPage ?? rows[0];
   const reorderableCompositeSlotIds = tab.slots
@@ -885,27 +899,17 @@ function CompositeSlotGrid({
     setReordering(true);
     setReorderError(null);
     try {
-      for (const slotId of reorderableCompositeSlotIds) {
-        const revisions = getTabSlotRevisions(session, tab, slotId)
-          .filter((revision) => revision.selected
-            && revision.sort_order !== undefined
-            && revision.list_index !== undefined)
-          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        if (revisions.length < 2) continue;
-        const bySortOrder = new Map(revisions.map((revision) => [revision.sort_order as number, revision]));
-        const nextListOrder = nextPages
-          .map((sortOrder) => bySortOrder.get(sortOrder)?.list_index)
-          .filter((listIndex): listIndex is number => listIndex !== undefined);
-        if (nextListOrder.length !== revisions.length) {
-          throw new Error(t('chat.workflowPageReorderFailed'));
+      const changes = new Map<string, ReturnType<typeof buildPageOrderChange>>();
+      for (const linkedTab of linkedPageTabs(tab, pageGroups.tabs)) {
+        for (const slot of linkedTab.slots) {
+          if (slot.cardinality !== 'list' || !slot.ordered || changes.has(slot.id)) continue;
+          const change = buildPageOrderChange(slot.id, getTabSlotRevisions(session, linkedTab, slot.id), nextPages);
+          if (change) changes.set(slot.id, change);
         }
-        await reorderSlotItems(
-          session.session_id,
-          slotId,
-          nextListOrder,
-          revisions[0]?.order_version ?? 0,
-        );
       }
+      const [first, ...rest] = [...changes.values()].filter((change): change is NonNullable<typeof change> => change !== null);
+      if (!first) return;
+      await reorderSlotItems(session.session_id, first.slot_id, first.order, first.version, rest);
       await onRefresh?.();
       const nextFocusedPage = focusedVisualIdx + 1;
       setCurrentPage(nextFocusedPage);
@@ -915,7 +919,7 @@ function CompositeSlotGrid({
     } finally {
       setReordering(false);
     }
-  }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t]);
+  }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t, pageGroups]);
 
   if (rows.length === 0) {
     return (
@@ -1410,7 +1414,8 @@ function NamedTabSlot({
     revisions.length > 0 || Boolean(artifactStream), collapseWhenEmpty, slotDef.widget?.collapsed === true,
   );
   const contentCollapsed = compactEmptyStates ? externalCollapsed : nativeCollapsed;
-  const prefersFullGridRow = slotDef.widget?.itemLayout === 'grid'
+  const prefersFullGridRow = slotDef.type === 'text' || slotDef.type === 'json'
+    || slotDef.widget?.itemLayout === 'grid'
     || (slotDef.widget?.itemWidth ?? 0) >= 600
     || slotDef.widget?.collapsed === true;
   const isWriterDocument = slotDef.widget?.widgetType === 'writer-document';
@@ -1582,7 +1587,7 @@ function TabSlotGrid({
     && getTabSlotRevisions(session, tab, process.result_slot).some(revision => revision.selected)
     && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks)?.state !== 'streaming';
   const processSlots = resultReady ? visibleSlots.filter(slot => slot.id !== process.result_slot && process.slots.includes(slot.id)) : [];
-  const allHidden = visibleSlots.length === 0 || Boolean(tab.composite_behavior?.hide_empty_columns)
+  const allHidden = visibleSlots.length === 0 || tab.composite_behavior?.hide_empty_columns !== false
     && visibleSlots.every(def => getTabSlotRevisions(session, tab, def.id).length === 0
       && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks));
   if (compactEmptyStates && allHidden) return <div className='workflow-panel__empty' role='status'>
@@ -1597,7 +1602,7 @@ function TabSlotGrid({
       slotDef.id,
       tasks,
     );
-    const hideEmpty = Boolean(tab.composite_behavior?.hide_empty_columns);
+    const hideEmpty = tab.composite_behavior?.hide_empty_columns !== false;
     if (hideEmpty && revisions.length === 0 && !artifactStream) {
       return null;
     }
@@ -1643,43 +1648,21 @@ function TabSlotGrid({
   );
 }
 
-const STATUS_KEY: Record<string, string> = {
-  active: 'chat.workflowStatusRunning',
-  completed: 'chat.workflowStatusDone',
-  waiting: 'chat.workflowStatusPaused',
-  failed: 'chat.workflowStatusFailed',
-  stopped: 'chat.workflowStatusStopped',
-};
-
-function readPersistedExpanded(conversationId: string): boolean {
-  try {
-    return localStorage.getItem(`${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function persistExpanded(conversationId: string, expanded: boolean) {
-  try {
-    localStorage.setItem(
-      `${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`,
-      String(expanded),
-    );
-  } catch {
-    // The live layout state still works when browser storage is unavailable.
-  }
-}
-
 export function WorkflowPanel({
   conversationId,
   onSendMessage,
   onReference,
-  onStop,
+  chatBusy = false,
   onDismissed,
   embedded = false, onRefresh, controlAdapter, externalPresentation,
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
   const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId, Boolean(onRefresh));
+  const artifactPreview = useArtifactPreview();
+  const previewTarget = artifactPreview?.target?.workflow && artifactPreview.target.workflow.sessionId === session?.session_id
+    ? artifactPreview?.target : null;
+  const previewFocusRef = useRef<HTMLDivElement>(null);
+  const locatedPreview = useRef<string | null>(null);
   const refresh = onRefresh ?? refreshConversation;
   const activities = externalPresentation?.activities ?? {};
   const runningTasks = externalPresentation ? activeExecutionTasks(session) : [];
@@ -1690,28 +1673,53 @@ export function WorkflowPanel({
       : EMPTY_TASK_CENTER_TASKS,
   );
   const bumpDismissedRefresh = useWorkflowStore((s) => s.bumpDismissedRefresh);
-  const autoRunning = useWorkflowStore((s) =>
-    conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
-  );
-  const setAutoRunning = useWorkflowStore((s) => s.setAutoRunning);
-  const [activeTabIdx, setActiveTabIdx] = React.useState(0);
-  const [localCollapsed, setCollapsed] = useState(false);
-  const collapsed = externalPresentation?.collapsed ?? localCollapsed;
-  const toggleCollapsed = externalPresentation?.onToggleCollapse
-    ?? (() => setCollapsed(value => !value));
   const fetchWorkflowUI = useWorkflowStore((s) => s.fetchWorkflowUI);
   const setFocusedTab = useWorkflowStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = useWorkflowStore((s) => s.setFocusedSortOrder);
-  // Focused tab id mirrored out of the session so polling refreshes don't
-  // reset the user's current tab.
   const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
-  const [ui, setUI] = useState<WorkflowUI>({});
+  const uiCacheKey = session ? workflowUICacheKey(session.workflow_id, session.pinned_revision_id, i18n.language || '') : '';
+  const uiRequestKey = JSON.stringify([session?.session_id, uiCacheKey]);
+  const [uiResponse, setUIResponse] = useState<{ requestKey: string; ui: WorkflowUI } | null>(null);
+  const uiReady = uiResponse?.requestKey === uiRequestKey && Boolean(session);
+  const rawUI = uiReady ? uiResponse!.ui : undefined;
+  const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
+  useEffect(() => {
+    const update = () => setDeveloperMode(isDeveloperModeActive());
+    window.addEventListener(DEVELOPER_ACTIVE_EVENT, update);
+    return () => window.removeEventListener(DEVELOPER_ACTIVE_EVENT, update);
+  }, []);
+  const ui = useMemo(() => workflowUIForAudience(rawUI ?? EMPTY_WORKFLOW_UI, developerMode), [rawUI, developerMode]);
+  const hiddenSlots = useMemo(() => developerMode ? new Set<string>() : hiddenUserSlots(rawUI ?? {}), [rawUI, developerMode]);
+  const { view, update: updateView, key: viewKey } = useWorkflowViewState(session, ui, uiReady);
+  const expanded = view.expanded;
+  const collapsed = externalPresentation?.collapsed ?? view.collapsed;
+  const setCollapsed = useCallback((value: boolean) => updateView({ collapsed: value }), [updateView]);
+  const toggleCollapsed = externalPresentation?.onToggleCollapse ?? (() => setCollapsed(!collapsed));
+  const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
+  const activeTabId = view.tabId;
+  const followingEnabled = Boolean(ui.follow_mode?.default);
+  const tabs = useMemo(() => filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material,
+    { steps: session?.steps, projection: session?.projection }), [ui, session?.slots, session?.steps, session?.projection]);
+  const visibleActiveTabIdx = resolveWorkflowActiveTabIndex(tabs, activeTabId);
+  const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
+  const runtimeTabId = tabs[runtimeTabIdx]?.id;
+  const navigation = useRef(0);
+  const currentView = useRef({ key: viewKey, runtimeTabId });
+  currentView.current = { key: viewKey, runtimeTabId };
+  const enterBrowse = useCallback((tabId?: string) => {
+    navigation.current++;
+    if (!followingEnabled) return;
+    updateView({ mode: 'free', tabId: tabId ?? tabs[resolveWorkflowActiveTabIndex(tabs, activeTabId)]?.id ?? '' });
+  }, [followingEnabled, updateView, tabs, activeTabId]);
+  const [resumingFollow, setResumingFollow] = useState(false);
+  const resumePending = useRef<number | null>(null);
+  useEffect(() => {
+    setResumingFollow(false);
+    return () => { resumePending.current = null; navigation.current++; };
+  }, [viewKey]);
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
-  const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
-  const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
-  const initialExpandedRef = useRef(expanded);
   // Track which slots are currently being edited; dismiss stays blocked until
   // each editor saves or cancels. Footer retry/continue flushes pending saves.
   const editingSlots = useRef<Set<string>>(new Set());
@@ -1719,6 +1727,7 @@ export function WorkflowPanel({
   const flushFns = useRef<Map<string, () => Promise<boolean>>>(new Map());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [stopSubmitting, setStopSubmitting] = useState(false);
   const { footerActions, registerFooterAction, clearFooterActions } = useSlotFooterActions();
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const tabsRef = useRef<HTMLDivElement | null>(null);
@@ -1760,35 +1769,29 @@ export function WorkflowPanel({
     // Follow runtime stage changes without scrolling the conversation or editor.
     if (tab.left < viewport.left) container.scrollLeft += tab.left - viewport.left;
     else if (tab.right > viewport.right) container.scrollLeft += tab.right - viewport.right;
-  }, [activeTabIdx, ui.tabs, collapsed]);
+  }, [activeTabId, ui.tabs, collapsed]);
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
-    if (nextExpanded) setCollapsed(false);
-    setExpanded(nextExpanded);
-    persistExpanded(conversationId, nextExpanded);
-    window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
-      detail: { conversationId, expanded: nextExpanded },
-    }));
-  }, [conversationId]);
-
-  const handleStop = useCallback(() => {
-    setAutoRunning(conversationId, false);
-    onStop?.();
-    window.setTimeout(() => {
-      void refresh();
-    }, 250);
-  }, [conversationId, onStop, refresh, setAutoRunning]);
+    updateView({ expanded: nextExpanded, ...(nextExpanded ? { collapsed: false } : {}) });
+  }, [updateView]);
 
   useEffect(() => {
+    if (embedded) return;
     window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
-      detail: { conversationId, expanded: initialExpandedRef.current },
+      detail: { conversationId, expanded },
     }));
-    return () => {
-      window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
-        detail: { conversationId, expanded: false },
-      }));
-    };
-  }, [conversationId]);
+  }, [conversationId, embedded, expanded]);
+
+  useEffect(() => {
+    // A conversation can contain both ordinary replies and a workflow.
+    if (!embedded && expanded && artifactPreview?.target && !artifactPreview.target.workflow) setExpandedMode(false);
+  }, [artifactPreview?.target, embedded, expanded, setExpandedMode]);
+
+  useEffect(() => () => {
+    if (!embedded) window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
+      detail: { conversationId, expanded: false },
+    }));
+  }, [conversationId, embedded]);
 
   const handleDismiss = useCallback(async () => {
     if (!session || dismissing || anySlotEditing) return;
@@ -1807,11 +1810,12 @@ export function WorkflowPanel({
   const handleSlotEditingChange = useCallback((key: string, editing: boolean) => {
     if (editing) {
       editingSlots.current.add(key);
+      enterBrowse();
     } else {
       editingSlots.current.delete(key);
     }
     setAnySlotEditing(editingSlots.current.size > 0);
-  }, []);
+  }, [enterBrowse]);
 
   const registerSnapshot = useCallback((key: string, read: () => unknown) => {
     snapshotFns.current.set(key, read);
@@ -1842,65 +1846,111 @@ export function WorkflowPanel({
     clearFooterActions();
     setAnySlotEditing(false);
     setActionPending(false);
+    setStopSubmitting(false);
   }, [session?.session_id, clearFooterActions]);
 
   useEffect(() => {
     if (!session?.workflow_id) return;
-    const lang = i18n.language || '';
-    const cached = useWorkflowStore.getState().workflowUIByWorkflow[`${session.workflow_id}:${lang}`];
-    if (cached) {
-      setUI(cached);
-    }
-    // Always re-fetch once to avoid stale cached tab/slot layouts after workflow.yaml updates.
-    fetchWorkflowUI(session.workflow_id).then(setUI);
-  }, [session?.workflow_id, fetchWorkflowUI, i18n.language]);
+    let disposed = false;
+    const workflowId = session.workflow_id;
+    const pinnedRevisionId = session.pinned_revision_id;
+    const cached = pinnedRevisionId ? useWorkflowStore.getState().workflowUIByWorkflow[uiCacheKey] : undefined;
+    if (cached) setUIResponse({ requestKey: uiRequestKey, ui: cached });
+    void fetchWorkflowUI(workflowId, pinnedRevisionId).then(config => {
+      if (!disposed) setUIResponse({ requestKey: uiRequestKey, ui: config });
+    });
+    return () => { disposed = true; };
+  }, [session?.workflow_id, session?.pinned_revision_id, fetchWorkflowUI, uiCacheKey, uiRequestKey]);
 
-  // Restore the previously focused tab when UI loads.
   useEffect(() => {
-    const tabs = filterWorkflowTabs(
-      ui.tabs ?? [],
-      session?.slots ?? [],
-      ui.tab_visibility_ready_material,
-    );
-    if (!tabs.length || !persistedFocusedTab) return;
-    const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
-    if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, ui.tab_visibility_ready_material, persistedFocusedTab, session?.slots]);
-
-  // Until the user explicitly chooses a visible tab, follow the runtime
-  // frontier. This also moves focus immediately when a skip material removes
-  // the previously selected tab.
-  useEffect(() => {
-    const tabs = filterWorkflowTabs(
-      ui.tabs ?? [],
-      session?.slots ?? [],
-      ui.tab_visibility_ready_material,
-    );
-    const focusedTabVisible = Boolean(
-      persistedFocusedTab && tabs.some((tab) => tab.id === persistedFocusedTab),
-    );
-    if (!tabs.length || focusedTabVisible || !session) return;
-    let idx = tabs.findIndex((tab) => getTabStepId(tab) === session.current_step_id);
-    if (idx === -1 && (session.status === 'completed' || session.status === 'failed')) {
-      idx = tabs.length - 1;
+    if (!uiReady || !session || !tabs.length || previewTarget) return;
+    if (followingEnabled) {
+      if (view.mode === 'following') {
+        if (runtimeTabId) updateView({ tabId: runtimeTabId });
+      } else if (!tabs.some(tab => tab.id === activeTabId)) {
+        // Fall back to the first visible tab; never follow runtime in free mode.
+        updateView({ tabId: tabs[0].id });
+      }
+      return;
     }
-    if (idx !== -1) setActiveTabIdx(idx);
-  }, [
-    ui.tabs,
-    ui.tab_visibility_ready_material,
-    persistedFocusedTab,
-    session?.current_step_id,
-    session?.session_id,
-    session?.slots,
-    session?.status,
-  ]);
+    // Unconfigured workflows retain their existing implicit navigation behavior.
+    const focused = tabs.find(tab => tab.id === persistedFocusedTab);
+    if (focused) { updateView({ tabId: focused.id }); return; }
+    // Page order is presentation, not execution. The runtime resolver also
+    // handles cleared terminal pointers, stale attempts and grouped result tabs.
+    if (runtimeTabId) updateView({ tabId: runtimeTabId });
+  }, [uiReady, session, tabs, previewTarget, followingEnabled, view.mode, runtimeTabId, activeTabId, persistedFocusedTab, updateView]);
+
+  const resumeFollowing = async () => {
+    if (resumePending.current !== null) return;
+    const request = ++navigation.current;
+    resumePending.current = request;
+    setResumingFollow(true);
+    const key = viewKey;
+    const isCurrent = () => resumePending.current === request && currentView.current.key === key && request === navigation.current;
+    try {
+      const saved = await flushPendingEdits();
+      if (!isCurrent()) return;
+      if (!saved) {
+        antdMessage.error(t('chat.workflowFollowSaveFailed'));
+        return;
+      }
+      artifactPreview?.close();
+      updateView({ mode: 'following', ...(currentView.current.runtimeTabId ? { tabId: currentView.current.runtimeTabId } : {}) });
+      setFocusedSortOrder(conversationId, undefined);
+    } catch {
+      if (isCurrent()) antdMessage.error(t('chat.workflowFollowSaveFailed'));
+    } finally {
+      if (resumePending.current === request) {
+        resumePending.current = null;
+        setResumingFollow(false);
+      }
+    }
+  };
+
+  const [groupFocus, setGroupFocus] = useState<{ sessionId?: string; pages: Record<string, number> }>({ pages: {} });
+  const groupPages = groupFocus.sessionId === session?.session_id ? groupFocus.pages : {};
+  const selectGroupPage = useCallback((group: string, page: number) => {
+    setGroupFocus(previous => ({ sessionId: session?.session_id, pages: {
+      ...(previous.sessionId === session?.session_id ? previous.pages : {}), [group]: page,
+    } }));
+  }, [session?.session_id]);
 
   // Track focused tab changes.
-  const handleTabChange = useCallback((idx: number, tabId: string) => {
-    setActiveTabIdx(idx);
-    setFocusedTab(conversationId, tabId);
+  useEffect(() => {
+    if (!previewTarget?.workflow) { locatedPreview.current = null; return; }
+    if (!uiReady || locatedPreview.current === `${session?.session_id}:${previewTarget.key}`) return;
+    const stepId = previewTarget.workflow.stepId;
+    const idx = tabs.findIndex(tab => [tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])].includes(stepId));
+    if (tabs.length && idx === -1) {
+      antdMessage.info(t('chat.preview.workflowStepUnavailable'));
+      artifactPreview?.close();
+      return;
+    }
+    if (idx !== -1) {
+      locatedPreview.current = `${session?.session_id}:${previewTarget.key}`;
+      enterBrowse(tabs[idx].id);
+      updateView({ tabId: tabs[idx].id });
+      setFocusedTab(conversationId, tabs[idx].id);
+    }
     setFocusedSortOrder(conversationId, undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder]);
+    if (externalPresentation?.collapsed) externalPresentation.onToggleCollapse?.();
+    setCollapsed(false);
+    const frame = requestAnimationFrame(() => {
+      previewFocusRef.current?.scrollIntoView?.({ block: 'nearest' });
+      previewFocusRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [previewTarget, uiReady, conversationId, session?.session_id, setFocusedTab, setFocusedSortOrder, enterBrowse, updateView, tabs]);
+
+  const handleTabChange = useCallback((idx: number, tabId: string) => {
+    if (previewTarget) artifactPreview?.close();
+    if (!followingEnabled || view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
+    updateView({ tabId });
+    setFocusedTab(conversationId, tabId);
+    const group = ui.tabs?.find(tab => tab.id === tabId)?.page_group;
+    setFocusedSortOrder(conversationId, group ? groupPages[group] : undefined);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close, followingEnabled, view.mode, runtimeTabIdx, enterBrowse, updateView]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);
@@ -1918,18 +1968,11 @@ export function WorkflowPanel({
 
   if (!session) return null;
 
-  const tabs = filterWorkflowTabs(
-    ui.tabs ?? [],
-    session.slots ?? [],
-    ui.tab_visibility_ready_material,
-  );
   const hasTabs = tabs.length > 0;
-  const visibleActiveTabIdx = hasTabs
-    ? Math.min(activeTabIdx, tabs.length - 1)
-    : 0;
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
+    session.status === 'pausing' ||
     session.status === 'completed' ||
     session.status === 'failed' ||
     session.status === 'stopped';
@@ -1942,25 +1985,19 @@ export function WorkflowPanel({
       : footerActions),
     [footerActions, ui?.group_downloads, tabs, i18n.language, runFooterAction],
   );
-  const displayStatus = autoRunning ? 'active' : session.status;
-  const externalControl = controlAdapter?.control;
-  const availableActions = new Set(externalControl?.available_actions ?? []);
-  const pendingReview = externalControl?.reviews.find(review => review.status === 'pending');
-  const approvalStepId = resolvePendingApprovalStep(session, displayStatus);
-  const displayStatusKey = approvalStepId ? 'chat.workflowStatusWaiting'
-    : displayStatus === 'waiting' && (session.projection?.blocked?.length ?? 0) > 0 ? 'chat.workflowStatusBlocked'
-    : isWorkflowReadyToStart(
-    displayStatus,
-    session.projection,
-    session.steps?.length ?? 0,
-  )
-    ? 'chat.workflowStatusReady'
-    : STATUS_KEY[displayStatus] ?? displayStatus;
-  // Only block footer actions while the plugin is actually running (or flush-in-progress).
-  // Dirty editors no longer disable retry — click flushes saves first, then proceeds.
-  const sessionBusy = displayStatus === 'active' || autoRunning;
-  const externalDeliveryBusy = externalControl ? deliveryPending(externalControl) : false;
-  const buttonsDisabled = sessionBusy || actionPending || externalDeliveryBusy;
+  const display = session.projection?.display;
+  const stopping = stopSubmitting || display?.reason === 'pausing';
+  const displayStatus = display?.status === 'running' ? 'active'
+    : display?.status === 'paused' ? 'stopped' : display?.status ?? 'loading';
+  // Every surface uses the same projection and button rules. The adapter only
+  // transports the selected action; host delivery is not workflow execution.
+  const sessionBusy = displayStatus === 'active' || displayStatus === 'loading';
+  const approvalStepId = display?.status === 'waiting' ? display.approval_step_id : undefined;
+  const displayStatusKey = workflowDisplayLabel(display?.status);
+  // A native Chat submission can outlive this panel (it moves to the new reply).
+  // Keep controls locked until that turn ends, even before workflow events arrive.
+  // Dirty editors do not disable retry — click flushes saves first, then proceeds.
+  const buttonsDisabled = sessionBusy || chatBusy || actionPending;
   const dismissDisabled = dismissing || anySlotEditing || actionPending;
   const collapseDisabled = (anySlotEditing || actionPending) && !collapsed;
   const completedContinueStepId = resolveCompletedContinueStep(
@@ -1968,14 +2005,10 @@ export function WorkflowPanel({
     tabs[visibleActiveTabIdx],
   );
   const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx]);
-  // Control capabilities constrain an existing UI action; they must not invent
-  // a checkpoint/button that the native panel would not render for this run.
-  const showContinue = Boolean(continueAction) && (!externalControl
-    || Boolean(resolveExternalContinueAction(externalControl, completedContinueStepId)));
+  const showContinue = Boolean(continueAction);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
-    && Boolean(session.steps && session.steps.length > 0)
-    && (!externalControl || availableActions.has('rewind'));
+    && Boolean(session.steps && session.steps.length > 0);
 
   // A failed step cannot be checkpoint-resumed — the SubAgent exited uncleanly and there is
   // no valid checkpoint to restore. Only "重试" (full restart) is meaningful in this case.
@@ -1996,14 +2029,20 @@ export function WorkflowPanel({
   const stepLabel = (stepId: string) => tabs.find(tab => getTabStepId(tab) === stepId)?.label
     ?? tabs.find(tab => tab.status_step_ids?.includes(stepId))?.label ?? stepId;
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
-  const activeControlTab = tabs[visibleActiveTabIdx];
-  const activeControlStepId = (activeControlTab
-    ? resolveWorkflowTabStepId(activeControlTab, session.steps)
-    : undefined) ?? session.current_step_id ?? '';
-  const supportsExternal = (action: string) => !externalControl || availableActions.has(action);
+
+  async function refreshBeforeAction() {
+    if (controlAdapter) {
+      try { await refresh(); }
+      catch (error) {
+        antdMessage.error(getLocalizedErrorMessage(error));
+        return false;
+      }
+    } else await useWorkflowStore.getState().loadActiveSession(conversationId);
+    return true;
+  }
 
   async function runFooterAction(action: () => void | Promise<void>, flushKey?: string, flush = true, allowBusy = false) {
-    if ((!allowBusy && sessionBusy) || actionPending) return;
+    if ((!allowBusy && (sessionBusy || chatBusy)) || actionPending) return;
     setActionPending(true);
     try {
       const saved = !flush || await flushPendingEdits(flushKey);
@@ -2014,58 +2053,81 @@ export function WorkflowPanel({
     }
   }
 
+  async function handlePause() {
+    if (!session) return;
+    setStopSubmitting(true);
+    try {
+      if (controlAdapter) await controlAdapter.execute({ kind: 'stop' });
+      else {
+        await WorkflowSessionApi().pauseSession(session.session_id);
+        await refresh();
+      }
+    } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
+    finally { setStopSubmitting(false); }
+  }
+
   function handleContinue() {
-    if (!isContinuationCurrent()) return;
-    if (controlAdapter) {
-      const intent: WorkflowActionIntent = completedContinueStepId
-        ? { kind: 'continue', completedStepId: completedContinueStepId }
-        : externalControl?.continuation === 'stopped'
-          ? { kind: 'resume' }
-          : { kind: 'continue' };
-      void runFooterAction(() => controlAdapter.execute(intent));
-      return;
-    }
+    if (!session || !isContinuationCurrent()) return;
+    const sessionId = session.session_id;
     const message = completedContinueStepId
       ? `${t('chat.workflowRollbackPrefix')}${completedContinueStepId}`
       : t('chat.workflowContinue');
-    void runFooterAction(() => {
-      if (isContinuationCurrent()) onSendMessage?.(message);
+    void runFooterAction(async () => {
+      if (!await refreshBeforeAction()) return;
+      if (!isContinuationCurrent()) return;
+      try {
+        if (controlAdapter) {
+          await controlAdapter.execute(completedContinueStepId
+            ? { kind: 'continue', completedStepId: completedContinueStepId }
+            : { kind: display?.status === 'paused' ? 'resume' : 'continue' });
+          return;
+        }
+        const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        await onSendMessage?.(message, completedContinueStepId
+          ? { session_id: sessionId, kind: 'rewind', step_id: completedContinueStepId, expected_state_version: latest?.state_version ?? 0 }
+          : display?.status === 'paused'
+            ? { session_id: sessionId, kind: 'resume', expected_state_version: latest?.state_version ?? 0 } : undefined);
+      } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
     });
   }
 
   // Saving edits is asynchronous: execution may have advanced since the click.
   function isContinuationCurrent() {
-    if (controlAdapter) return true;
     if (!continueAction) return false;
     const state = useWorkflowStore.getState();
     const latest = state.sessionByConversation[conversationId];
-    if (!latest || latest.session_id !== session?.session_id
-      || latest.state_version !== session?.state_version || state.autoRunningByConversation[conversationId]) return false;
-    const action = resolveWorkflowContinueAction(latest, latest.status, tabs[visibleActiveTabIdx]);
+    if (!latest || latest.session_id !== session?.session_id) return false;
+    // Saving edits may increment the version. It must not invalidate the same
+    // checkpoint, but a new execution attempt must require a fresh user choice.
+    const attempts = (value: WorkflowSession) => (value.steps ?? []).filter(step => step.validity !== 'stale')
+      .map(step => `${step.step_id}:${step.task_id}:${step.attempt}`).sort().join('|');
+    if (!session || attempts(latest) !== attempts(session)) return false;
+    const latestDisplay = latest.projection?.display?.status;
+    const action = resolveWorkflowContinueAction(latest,
+      latestDisplay === 'paused' ? 'stopped' : latestDisplay === 'running' ? 'active' : latestDisplay ?? 'loading', tabs[visibleActiveTabIdx]);
     return action?.kind === continueAction.kind && action.stepId === continueAction.stepId;
   }
 
   function handleContinueWithApprovalPreference(scope?: 'step' | 'following') {
     if (!session || !approvalStepId || !isContinuationCurrent()) return;
-    if (controlAdapter && pendingReview) {
-      const kind = availableActions.has('confirm_and_continue') ? 'confirm_and_continue' : 'confirm';
-      void runFooterAction(() => controlAdapter.execute({
-        kind, review: pendingReview,
-        ...(kind === 'confirm_and_continue' && scope ? { preferenceScope: scope } : {}),
-      }));
-      return;
-    }
-    if (!scope) { handleContinue(); return; }
     const sessionId = session.session_id;
     void runFooterAction(async () => {
+      if (!await refreshBeforeAction()) return;
       if (!isContinuationCurrent()) return;
       try {
-        await WorkflowSessionApi().setApprovalPreference(sessionId, {
+        if (controlAdapter) {
+          await controlAdapter.execute({ kind: 'approve', stepId: approvalStepId,
+            ...(scope ? { preferenceScope: scope } : {}) });
+          return;
+        }
+        const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        await onSendMessage?.(t('chat.workflowContinue'), {
+          session_id: sessionId, kind: 'approve',
           step_id: approvalStepId,
-          scope,
-          approval_required: false,
+          expected_state_version: latest?.state_version ?? 0,
+          ...(scope ? { preference_scope: scope } : {}),
         });
-        if (isContinuationCurrent()) onSendMessage?.(t('chat.workflowContinue'));
+        void refresh();
       } catch (error) {
         antdMessage.error(getLocalizedErrorMessage(error));
       }
@@ -2073,19 +2135,46 @@ export function WorkflowPanel({
   }
 
   function handleRetry() {
-    if (controlAdapter) {
-      void runFooterAction(() => controlAdapter.execute({ kind: 'retry', stepId: activeControlStepId }));
-      return;
-    }
-    void runFooterAction(() => onSendMessage?.(t('chat.workflowRetry')));
+    if (!session) return;
+    const sessionId = session.session_id;
+    void runFooterAction(async () => {
+      try {
+        if (!await refreshBeforeAction()) return;
+        const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        if (!latest || latest.session_id !== sessionId
+          || latest.projection?.display?.status !== display?.status) return;
+        // A failed parallel branch can coexist with a confirmed user pause.
+        // Retry must explicitly release that pause, just like Continue.
+        if (controlAdapter) {
+          await controlAdapter.execute({ kind: display?.status === 'paused' ? 'resume' : 'retry' });
+          return;
+        }
+        await onSendMessage?.(t('chat.workflowRetry'), display?.status === 'paused'
+          ? { session_id: latest.session_id, kind: 'resume', expected_state_version: latest.state_version ?? 0 }
+          : display?.status === 'failed'
+            ? { session_id: latest.session_id, kind: 'retry', expected_state_version: latest.state_version ?? 0 }
+            : undefined);
+      } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
+    });
   }
 
   function handleRollback(stepId: string) {
-    if (controlAdapter) {
-      void runFooterAction(() => controlAdapter.execute({ kind: 'rewind', stepId }));
-      return;
-    }
-    void runFooterAction(() => onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`));
+    if (!session) return;
+    const sessionId = session.session_id;
+    void runFooterAction(async () => {
+      try {
+        if (!await refreshBeforeAction()) return;
+        const latest = useWorkflowStore.getState().sessionByConversation[conversationId];
+        if (!latest || latest.session_id !== sessionId) return;
+        if (controlAdapter) {
+          await controlAdapter.execute({ kind: 'rewind', stepId });
+          return;
+        }
+        await onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`, {
+          session_id: sessionId, kind: 'rewind', step_id: stepId, expected_state_version: latest.state_version ?? 0,
+        });
+      } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
+    });
   }
 
   const continueLabel = approvalStepId
@@ -2099,6 +2188,7 @@ export function WorkflowPanel({
   const panel = (
     <CompactWorkflowEmptyStatesContext.Provider value={externalPresentation?.compactEmptyStates === true}>
     <SlotEditingContext.Provider value={{
+      onBrowse: enterBrowse,
       setEditing: handleSlotEditingChange,
       registerFlush,
       registerSnapshot,
@@ -2144,6 +2234,12 @@ export function WorkflowPanel({
               moreButtonRef.current?.focus();
             }} />}
           </div>
+          {followingEnabled && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
+            <button type='button' aria-pressed={view.mode === 'following'} disabled={resumingFollow}
+              onClick={() => void resumeFollowing()}>{t('chat.workflowFollowProgress')}</button>
+            <button type='button' aria-pressed={view.mode === 'free'}
+              onClick={() => enterBrowse()}>{t('chat.workflowFreeBrowse')}</button>
+          </div>}
           {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'
             className='workflow-panel__expand-btn'
@@ -2277,8 +2373,14 @@ export function WorkflowPanel({
                   {!ui.task_presentation?.grouped && (
                     <span className='workflow-panel__tab-badge' aria-hidden='true'>{idx + 1}</span>
                   )}
-                  <span className='workflow-panel__tab-label'>{tab.label}</span>
-                  {stepStatus && stepStatus !== 'succeeded' && (
+                  <span className='workflow-panel__tab-text'>
+                    <span className='workflow-panel__tab-label'>{tab.label}</span>
+                    {followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx && (
+                      <span className='workflow-panel__tab-current' role='img'
+                        aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
+                    )}
+                  </span>
+                  {stepStatus && stepStatus !== 'succeeded' && !(followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx) && (
                     <span
                       className={`workflow-panel__step-status workflow-panel__step-status--${stepStatus}`}
                       aria-label={`Step status: ${stepStatus}`}
@@ -2292,11 +2394,6 @@ export function WorkflowPanel({
         </div>
       )}
 
-      </div>
-
-      <div className='workflow-panel__trust-notice' role='note'>
-        <InfoCircleOutlined aria-hidden='true' />
-        <span>{t('chat.workflowFullTrustNotice')}</span>
       </div>
 
       {!collapsed && externalPresentation && runningTasks.length > 0 && <div className='workflow-external-activity'>
@@ -2315,7 +2412,16 @@ export function WorkflowPanel({
 
       {/* Body */}
       {!collapsed && (
-        <div className='workflow-panel__body' key={session.session_id}>
+        <div className={`workflow-panel__body${previewTarget ? ' workflow-panel__body--artifact-preview' : ''}`} key={session.session_id}
+          onFocusCapture={event => {
+            const target = event.target as HTMLElement;
+            if (target.closest('[contenteditable="true"], textarea:not([readonly]), input[type="text"]:not([readonly])')) enterBrowse();
+          }}>
+          <PageGroupContext.Provider value={{ tabs: ui.tabs ?? [], pages: groupPages, select: selectGroupPage }}>
+          {previewTarget && <div className="workflow-panel__artifact-preview" ref={previewFocusRef} tabIndex={-1}
+            onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); artifactPreview?.close(); } }}>
+            <PreviewContent key={previewTarget.key} target={previewTarget} close={() => artifactPreview?.close()} onVersions={artifactPreview?.onVersions} />
+          </div>}
           <WorkflowExtensions names={ui?.extensions} session={session} disabled={actionPending}
             beforeAction={flushPendingEdits} onRefresh={refresh} onSendMessage={onSendMessage} />
           {hasTabs ? (
@@ -2327,7 +2433,7 @@ export function WorkflowPanel({
                 id={`workflow-tab-panel-${tab.id}`}
                 role='tabpanel'
                 aria-labelledby={`workflow-tab-${session.session_id}-${tab.id}`}
-                hidden={idx !== visibleActiveTabIdx}
+                hidden={Boolean(previewTarget) || idx !== visibleActiveTabIdx}
               >
                 <WorkflowPanelTabActiveContext.Provider value={idx === visibleActiveTabIdx}>
                 <SlotDownloadContext.Provider value={!previewing && workflowTabAllowsDownload(tab, idx, tabs.length)}>
@@ -2347,39 +2453,44 @@ export function WorkflowPanel({
             })
           ) : (
             <AutoSlotGrid
-              session={session}
+              session={{ ...session, slots: rawUI || developerMode ? session.slots?.filter(slot => !hiddenSlots.has(slot.slot_id || slot.slot)) : [] }}
               onRefresh={refresh}
               onReference={onReference}
             />
           )}
+          </PageGroupContext.Provider>
         </div>
       )}
 
       {/* Footer */}
-      {!collapsed && (showActions || controlAdapter) && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0
+      {!collapsed && showActions && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0
         || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || displayStatus === 'failed' || displayStatus === 'stopped') && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
-          {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
+          {!previewTarget && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0) ? (
             <DocumentActions documentFooter={documentFooter} actionPending={actionPending} runFooterAction={runFooterAction} />
           ) : null}
           {sessionBusy && !approvalStepId && (
             <span className='workflow-panel__execution-status' role='status'>
               {t('chat.workflowStatusRunning')}{session.current_step_id ? ` · ${stepLabel(session.current_step_id)}` : ''}
+              {stopping ? ` · ${t('chat.workflowStoppingHint')}` : ''}
             </span>
           )}
-          {displayStatus === 'active' && (onStop || controlAdapter) && supportsExternal('stop') && (
+          {displayStatus === 'active' && (controlAdapter || session.controller_host === 'lazymind') && (
             <button
               type='button'
               className='workflow-panel__action-btn workflow-panel__action-btn--danger'
-              onClick={controlAdapter
-                ? () => { void runFooterAction(() => controlAdapter.execute({ kind: 'stop' }), undefined, false, true); }
-                : handleStop}
-              title={t('chat.workflowStop')}
+              disabled={actionPending || stopping}
+              onClick={() => { void runFooterAction(
+                handlePause,
+                undefined, false, true,
+              ); }}
+              title={t('chat.workflowPauseScopeHint')}
             >
-              {t('chat.workflowStop')}
+              {t(stopping ? 'chat.workflowStopping' : 'chat.workflowStop')}
             </button>
           )}
-          {displayStatus === 'failed' && supportsExternal('retry') && (
+          {(displayStatus === 'failed' || (displayStatus === 'stopped' && Object.values(session.projection?.nodes ?? {})
+            .some(node => node.validity !== 'stale' && node.execution === 'failed'))) && (
             <button
               type='button'
               className='workflow-panel__action-btn workflow-panel__action-btn--secondary'
@@ -2399,9 +2510,7 @@ export function WorkflowPanel({
               {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowRetry')}
             </button>
           )}
-          {showContinue && !approvalStepId && supportsExternal(
-            externalControl ? resolveExternalContinueAction(externalControl, completedContinueStepId) ?? 'continue' : 'continue',
-          ) && (
+          {showContinue && !approvalStepId && (
             <button
               type='button'
               className='workflow-panel__action-btn workflow-panel__action-btn--primary'
@@ -2445,8 +2554,7 @@ export function WorkflowPanel({
           )}
         </div>
       )}
-    {!collapsed && approvalStepId && (!externalControl
-      || Boolean(pendingReview && (availableActions.has('confirm_and_continue') || availableActions.has('confirm')))) && (
+    {!collapsed && approvalStepId && (
       <WorkflowApprovalActions disabled={continueDisabled} onContinue={scope => {
         void handleContinueWithApprovalPreference(scope);
       }} />

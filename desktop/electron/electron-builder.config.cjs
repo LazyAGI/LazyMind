@@ -347,6 +347,8 @@ async function restoreRuntimeAndFinalizeSignature(context) {
   signArgs.push(appPath);
   await codesignWithRetry(signArgs, appPath);
   await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
+  const { verifyMacosPrivacyIdentity } = require("../scripts/verify-macos-privacy-identity.cjs");
+  verifyMacosPrivacyIdentity(appPath, { expectedTeamId: process.env.LAZYMIND_MACOS_TEAM_ID || "" });
   console.log("Restored embedded runtime and resealed the outer app signature");
 }
 

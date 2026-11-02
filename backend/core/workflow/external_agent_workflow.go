@@ -607,32 +607,10 @@ func completeExternalTask(ctx context.Context, db *gorm.DB, task orm.ExternalAge
 }
 
 func inputBindingsFromExternalRequest(ctx context.Context, db *gorm.DB, owner string, values map[string]any, files []any) ([]workflowstore.InputBinding, error) {
-	out := make([]workflowstore.InputBinding, 0, len(values)+len(files))
 	repo := workflowstore.New(db)
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, materialID := range keys {
-		raw := values[materialID]
-		value, _ := raw.(map[string]any)
-		resourceID, _ := value["resource_id"].(string)
-		hash, _ := value["content_hash"].(string)
-		revisionFloat, _ := value["revision"].(float64)
-		if strings.TrimSpace(materialID) == "" || resourceID == "" {
-			return nil, fmt.Errorf("input_bindings[%q] requires material_id and resource_id", materialID)
-		}
-		resource, err := repo.GetInputResource(ctx, owner, resourceID)
-		if err != nil {
-			return nil, fmt.Errorf("input_bindings[%q]: resource is not available to this user", materialID)
-		}
-		if (revisionFloat != 0 && int64(revisionFloat) != resource.Revision) || (hash != "" && hash != resource.ContentHash) {
-			return nil, fmt.Errorf("input_bindings[%q]: resource revision or content_hash mismatch", materialID)
-		}
-		out = append(out, workflowstore.InputBinding{MaterialID: materialID, ResourceType: "input_resource",
-			ResourceID: resourceID, ResourceRevision: resource.Revision, ContentHash: resource.ContentHash,
-			CreatedByCommandID: "external-agent-workflow"})
+	out, err := repo.ResolveInputBindings(ctx, owner, values, "external-agent-workflow")
+	if err != nil {
+		return nil, err
 	}
 	for index, raw := range files {
 		file, ok := raw.(map[string]any)

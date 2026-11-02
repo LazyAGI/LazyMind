@@ -90,6 +90,7 @@ import NotificationSettings from "@/modules/notifications/NotificationSettings";
 type SectionID =
   | "overview"
   | "models"
+  | "model_defaults"
   | "tasks"
   | "knowledge"
   | "memory"
@@ -152,6 +153,7 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
       title: t("settingsPage.navGroups.gettingStarted"),
       items: [
         { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined /> },
+        { id: "model_defaults", label: t("settingsPage.sections.defaultModels"), keywords: t("settingsPage.sectionKeywords.defaultModels"), icon: <RobotOutlined /> },
         { id: "overview", label: t("settingsPage.sections.overview"), keywords: t("settingsPage.sectionKeywords.overview"), icon: <SettingOutlined />, status: t("settingsPage.sectionStatus.synced") },
       ],
     },
@@ -232,8 +234,10 @@ function SettingsPageContent() {
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section");
+  const legacyModelDefaults = candidate === "models" && (searchParams.get("view") === "defaults" || (searchParams.has("target") && searchParams.get("view") !== "providers"));
   const section: SectionID = candidate === "defaults"
     ? "tasks"
+    : legacyModelDefaults ? "model_defaults"
     : navigationItems.some((item) => item.id === candidate)
       ? candidate as SectionID
       : "overview";
@@ -242,7 +246,6 @@ function SettingsPageContent() {
     ? knowledgeToolCandidate
     : null;
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const modelProviderTabRef = useRef<HTMLButtonElement>(null);
   const latestRequest = useRef(0);
   const latestOverviewRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
@@ -263,7 +266,6 @@ function SettingsPageContent() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
-  const modelView = searchParams.get("view") === "providers" ? "providers" : "defaults";
   const modelTarget = settingsModelTarget(searchParams.get("target"));
   const modelProviderTarget = searchParams.get("provider_id") || undefined;
   const returnTo = settingsReturnTo(searchParams.get("return_to"));
@@ -344,16 +346,8 @@ function SettingsPageContent() {
   }, [keyword, navigationGroupsWithStatus]);
 
   const selectSection = (next: SectionID) => setSearchParams(
-    settingsRouteParams(searchParams, { section: next }),
+    settingsRouteParams(searchParams, { section: next, ...(next === "models" ? {view: "providers"} : {}) }),
   );
-  const selectModelView = (next: "defaults" | "providers") => {
-    setSearchParams(settingsRouteParams(
-      searchParams,
-      next === "providers"
-        ? { section: "models", view: "providers" }
-        : { section: "models" },
-    ));
-  };
   const selectTaskView = (next: "conversation" | "tasks") => {
     setSearchParams(settingsRouteParams(searchParams, next === "tasks"
       ? { section: "tasks", view: "tasks" }
@@ -483,6 +477,7 @@ function SettingsPageContent() {
   const renderDashboard = () => {
     const sections = overview?.sections || [];
     const get = (id: string) => sections.find((item) => item.id === id) || sectionFallback(id as SectionID, t);
+    const models = get("models");
     const tasks = get("tasks");
     const skills = get("skills");
     const mcp = get("mcp");
@@ -496,7 +491,10 @@ function SettingsPageContent() {
       </div>
       {overview?.issues.length ? <div className="settings-ref-issues" role="status" aria-live="polite">{overview.issues.map((issue) => <Alert key={issue.id} type={issue.severity === "warning" ? "warning" : "info"} showIcon message={issue.message} action={<Button type="link" size="small" onClick={() => selectSection(issue.section as SectionID)}>{t("settingsPage.view")}</Button>} />)}</div> : null}
       <div className="settings-dashboard-grid">
-        {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelsDesc"), [
+        {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelServicesDesc"), [
+          dashboardRow(t("settingsPage.sections.models"), t("modelProvider.workspace.suppliers"), formatCount(models, t), <Button size="small" onClick={() => selectSection("models")}>{t("settingsPage.quickConfig")}</Button>),
+        ])}
+        {dashboardCard("model_defaults", <RobotOutlined />, t("settingsPage.sections.defaultModels"), t("settingsPage.overview.modelsDesc"), [
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,
         ])}
         {dashboardCard("knowledge", <DatabaseOutlined />, t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeDesc"), [
@@ -594,7 +592,6 @@ function SettingsPageContent() {
   );
 
   const renderDiagnostics = () => {
-    const models = overview?.sections.find((item) => item.id === "models") || sectionFallback("models", t);
     const mcp = overview?.sections.find((item) => item.id === "mcp") || sectionFallback("mcp", t);
     const lastCheckedLabel = lastCheckedAt
       ? new Date(lastCheckedAt).toLocaleString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", { hour12: false })
@@ -611,17 +608,6 @@ function SettingsPageContent() {
         : t("settingsPage.diagnostics.pendingConfig");
     const mcpReadinessStatus = resolveMcpReadinessStatus(mcp, overview?.issues);
     const rows = [
-      {
-        id: "models",
-        title: t("settingsPage.diagnostics.modelProviders"),
-        description: models.counts.configured > 0
-          ? t("settingsPage.diagnostics.modelsConfigured", { count: models.counts.configured })
-          : t("settingsPage.diagnostics.modelsEmpty"),
-        status: models.counts.configured > 0 ? t("settingsPage.diagnostics.configured") : t("settingsPage.diagnostics.pendingConfig"),
-        tone: models.counts.configured > 0 ? "success" : "warning",
-        action: t("settingsPage.diagnostics.viewConnection"),
-        onClick: () => selectSection("models"),
-      },
       {
         id: "mcp",
         title: t("settingsPage.sections.mcp"),
@@ -723,35 +709,29 @@ function SettingsPageContent() {
       </>;
     } else if (section === "models") {
       content = <>
-        {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
-        <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")} role="tablist">
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => selectModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
-          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => selectModelView("providers")}>{t("settingsPage.models.providers")}</button>
-        </nav>
-        {integratedSurface(modelView === "defaults" ? (
-          <DefaultServicesPage
-            onModelSelectionChanged={syncOverview}
-            highlightTarget={modelTarget}
-            onHighlightResolved={() => setSearchParams((current) => {
-              const next = new URLSearchParams(current);
-              next.delete("target");
-              return next;
-            }, { replace: true })}
-            onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {
-              section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search",
-            }))}
-            onConfigureProviders={() => {
-              selectModelView("providers");
-              requestAnimationFrame(() => modelProviderTabRef.current?.focus());
-            }}
-          />
-        ) : (
-          <ModelProvidersPage
-            onConfigurationChanged={syncOverview}
-            highlightProviderId={modelProviderTarget}
-          />
-        ), "is-models")}
+        <h1 className="settings-model-services-heading" ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.models")}</h1>
+        {integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} />, "is-models")}
       </>;
+    } else if (section === "model_defaults") {
+      content = <div className="provider-workspace model-defaults-workspace">
+        <header className="provider-workspace-topbar">
+          <h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1>
+          <Button onClick={() => selectSection("models")}>{t("modelProvider.defaults.addModels")}</Button>
+        </header>
+        {integratedSurface(<DefaultServicesPage
+          onModelSelectionChanged={syncOverview}
+          highlightTarget={modelTarget}
+          onHighlightResolved={() => setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.set("section", "model_defaults");
+            next.delete("view");
+            next.delete("target");
+            return next;
+          }, {replace: true})}
+          onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search"}))}
+          onConfigureProviders={() => selectSection("models")}
+        />, "is-default-models")}
+      </div>;
     } else if (section === "tasks") {
       const schedulesEnabled = Boolean(overview?.controls.schedules_enabled);
       content = <>
@@ -806,7 +786,7 @@ function SettingsPageContent() {
         <KnowledgeDataSettings
         routeParams={searchParams}
           controlsDisabled={saving !== null}
-          documentDirectoriesEnabled={overview?.controls.document_directories_enabled ?? true}
+          documentDirectoriesEnabled={overview?.controls.document_directories_enabled ?? false}
           documentDirectoriesSaving={saving === "document_directories_enabled"}
           onDocumentDirectoriesChange={(enabled) => requestMasterChange("document_directories_enabled", enabled)}
           documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
@@ -881,7 +861,7 @@ function SettingsPageContent() {
       content = renderDiagnostics();
     } else {
       content = <>
-        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail)}
+        {integratedHeader(t("settingsPage.sections.developer"), t("settingsPage.developer.description"))}
         <div className="settings-detail-group">
           <div className="settings-detail-row">
             <div>
@@ -899,65 +879,72 @@ function SettingsPageContent() {
               aria-label={t("settingsPage.developer.modeAria")}
             />
           </div>
-          <div className="settings-detail-row">
-            <div>
-              <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
-              <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
+          <div
+            className={`settings-developer-options${developerActive ? "" : " is-master-paused"}`}
+            role="group"
+            aria-label={t("settingsPage.developer.optionsGroupAria")}
+            aria-disabled={!developerActive}
+          >
+            <div className="settings-detail-row" aria-disabled={!developerActive}>
+              <div>
+                <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
+                <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
+              </div>
+              <Switch
+                className="settings-ref-switch"
+                checked={sensitiveWordFilterEnabled}
+                loading={saving === "sensitive_word_filter"}
+                disabled={!developerActive || saving !== null}
+                onChange={async (enabled) => {
+                  setSaving("sensitive_word_filter");
+                  try {
+                    await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
+                    setSensitiveWordFilterEnabled(enabled);
+                    await refresh();
+                    message.success(t("settingsPage.saved"));
+                  } catch (error) {
+                    message.error(getLocalizedErrorMessage(error));
+                  } finally {
+                    setSaving(null);
+                  }
+                }}
+                aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
+              />
             </div>
-            <Switch
-              className="settings-ref-switch"
-              checked={sensitiveWordFilterEnabled}
-              loading={saving === "sensitive_word_filter"}
-              disabled={!developerActive || saving !== null}
-              onChange={async (enabled) => {
-                setSaving("sensitive_word_filter");
-                try {
-                  await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
-                  setSensitiveWordFilterEnabled(enabled);
-                  await refresh();
-                  message.success(t("settingsPage.saved"));
-                } catch (error) {
-                  message.error(getLocalizedErrorMessage(error));
-                } finally {
-                  setSaving(null);
-                }
-              }}
-              aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
-            />
-          </div>
-          <div className="settings-detail-row">
-            <div>
-              <strong>{t("settingsPage.developer.performanceTitle")}</strong>
-              <p>{t("settingsPage.developer.performanceDesc")}</p>
+            <div className="settings-detail-row" aria-disabled={!developerActive}>
+              <div>
+                <strong>{t("settingsPage.developer.performanceTitle")}</strong>
+                <p>{t("settingsPage.developer.performanceDesc")}</p>
+              </div>
+              <Switch
+                className="settings-ref-switch"
+                checked={performanceStatsEnabled}
+                loading={saving === "performance_stats"}
+                disabled={!developerActive || saving !== null}
+                onChange={async (enabled) => {
+                  setPerformanceStatsEnabled(enabled);
+                  setSaving("performance_stats");
+                  try {
+                    await patchUserUiPreferences({ performance_stats_enabled: enabled });
+                    cachePerformanceStatsEnabled(enabled);
+                    message.success(t("settingsPage.saved"));
+                  } catch {
+                    setPerformanceStatsEnabled(!enabled);
+                    cachePerformanceStatsEnabled(!enabled);
+                    message.error(t("settingsPage.saveFailed"));
+                  } finally {
+                    setSaving(null);
+                  }
+                }}
+                aria-label={t("settingsPage.developer.performanceAria")}
+              />
             </div>
-            <Switch
-              className="settings-ref-switch"
-              checked={performanceStatsEnabled}
-              loading={saving === "performance_stats"}
-              disabled={!developerActive || saving !== null}
-              onChange={async (enabled) => {
-                setPerformanceStatsEnabled(enabled);
-                setSaving("performance_stats");
-                try {
-                  await patchUserUiPreferences({ performance_stats_enabled: enabled });
-                  cachePerformanceStatsEnabled(enabled);
-                  message.success(t("settingsPage.saved"));
-                } catch {
-                  setPerformanceStatsEnabled(!enabled);
-                  cachePerformanceStatsEnabled(!enabled);
-                  message.error(t("settingsPage.saveFailed"));
-                } finally {
-                  setSaving(null);
-                }
-              }}
-              aria-label={t("settingsPage.developer.performanceAria")}
-            />
           </div>
         </div>
       </>;
     }
 
-    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
+    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "model_defaults" ? " settings-model-defaults-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
       <div className="settings-screenreader-status" role="status" aria-live="polite">
         {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}
@@ -965,12 +952,22 @@ function SettingsPageContent() {
     </section>;
   };
 
-  return <main className="settings-reference" aria-label={t("settingsPage.title")}>
+  return <main className={`settings-reference${section === "models" || section === "model_defaults" ? " is-model-settings-workspace" : ""}${section === "model_defaults" ? " is-default-model-workspace" : ""}`} aria-label={t("settingsPage.title")}>
     {settingsChange.dialog}
     <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
-        <ArrowLeftOutlined />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
+        <ArrowLeftOutlined aria-hidden="true" />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
       </button>
+      <label className="settings-mobile-navigation">
+        <span>{t("settingsPage.navAria")}</span>
+        <select value={section} onChange={(event) => selectSection(event.target.value as SectionID)}>
+          {navigationGroups.map((group) => (
+            <optgroup key={group.title} label={group.title}>
+              {group.items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </label>
       <div className="settings-reference-search">
         <Input
           prefix={<SearchOutlined />}
@@ -990,6 +987,7 @@ function SettingsPageContent() {
                 key={item.id}
                 type="button"
                 className={section === item.id ? "is-active" : ""}
+                aria-current={section === item.id ? "page" : undefined}
                 onClick={() => selectSection(item.id)}
               >
                 <span className="settings-reference-nav-icon">{item.icon}</span>

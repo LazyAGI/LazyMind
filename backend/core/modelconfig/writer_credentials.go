@@ -37,6 +37,11 @@ type writerConnectionToken struct {
 // Unlike the general chat loader, document writes require all listed tokens to
 // load successfully. An Auth failure must never become a partial account set.
 func LoadWriterProviderToolConfig(ctx context.Context, provider, userID string) (map[string]any, error) {
+	return LoadWriterProviderConnectionConfig(ctx, provider, userID, "")
+}
+
+// A selected connection cannot silently fall back to another account.
+func LoadWriterProviderConnectionConfig(ctx context.Context, provider, userID, connectionID string) (map[string]any, error) {
 	provider = strings.TrimSpace(provider)
 	userID = strings.TrimSpace(userID)
 	if provider == "" || userID == "" {
@@ -72,9 +77,17 @@ func LoadWriterProviderToolConfig(ctx context.Context, provider, userID string) 
 		}
 		seen[item.ConnectionID] = struct{}{}
 	}
+	if connectionID != "" {
+		if _, ok := seen[connectionID]; !ok {
+			return nil, errWriterCredentialLoad
+		}
+	}
 	tokens := make([]string, 0, len(connections.Data.Items))
 	bridge := providerconnection.DefaultService()
 	for _, item := range connections.Data.Items {
+		if connectionID != "" && item.ConnectionID != connectionID {
+			continue
+		}
 		if bridge != nil {
 			resolved, err := bridge.ResolveAccessToken(ctx, providerconnection.ResolveRequest{
 				AuthConnectionID: item.ConnectionID, UserID: userID,

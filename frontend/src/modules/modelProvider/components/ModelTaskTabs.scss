@@ -1,0 +1,48 @@
+.provider-model-type-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--provider-sidebar, #f8f9fb);
+  scrollbar-width: thin;
+
+  button {
+    display: inline-flex;
+    flex: 1 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 4px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--provider-muted, #697586);
+    font: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  button.is-active {
+    color: var(--provider-ink, #202735);
+    background: var(--ant-color-bg-container, #fff);
+    box-shadow: 0 1px 4px #10182812;
+  }
+  .anticon {
+    font-size: 13px;
+  }
+  small {
+    color: var(--provider-muted, #697586);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+@media (pointer: coarse) {
+  .provider-model-type-tabs button { min-height: 44px; }
+}

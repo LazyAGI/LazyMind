@@ -41,6 +41,7 @@ def test_optimize_step_produces_optional_structured_meme_plan():
 
     assert slots['meme_generation_plan'] == {
         'id': 'meme_generation_plan',
+        'user_visible': False,
         'label': 'Meme Generation Plan',
         'type': 'json',
         'cardinality': 'single',

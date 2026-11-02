@@ -206,8 +206,8 @@ def citation_map_from_state(state: Any) -> list[dict[str, Any]]:
     return mapping
 
 
-def collect_summary_runtime_state() -> dict[str, Any]:
-    cfg = _agentic_config()
+def collect_summary_runtime_state(cfg: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    cfg = _agentic_config() if cfg is None else cfg
     workflow = cfg.get('workflow_runtime') if isinstance(cfg.get('workflow_runtime'), dict) else {}
     session_id = str(
         cfg.get('workflow_session_id')

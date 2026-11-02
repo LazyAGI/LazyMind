@@ -12,10 +12,11 @@ vi.mock('@/modules/chat/utils/request',async original=>({...await original<typeo
 vi.mock('./useDocumentCopy',()=>({useDocumentCopy:()=>{}}));
 vi.mock('./ArtifactRewriteDialog',async original=>({...await original<typeof import('./ArtifactRewriteDialog')>(),ArtifactRewriteDialog:({open,selection,requestPreview,onPreviewReady,onClose}:any)=>open?<button onClick={async()=>{try{onPreviewReady(await requestPreview('Make clearer',selection));onClose();}catch(error){formFailures.push(error);}}}>生成预览</button>:null}));
 const editorChanges = vi.hoisted(() => ({ change: undefined as ((value: string) => void) | undefined }));
-vi.mock('@mdxeditor/editor', async () => {
+vi.mock('@mdxeditor/editor', async original => {
+ const actual = await original<typeof import('@mdxeditor/editor')>();
  const React = await import('react');
  const plugin = () => ({}), control = () => null;
- return { MDXEditor: React.forwardRef((props: any, ref) => {
+ return { ...actual, MDXEditor: React.forwardRef((props: any, ref) => {
   const text = React.useRef(props.markdown);
   editorChanges.change = (value: string) => { text.current = value; props.onChange(value); };
   React.useImperativeHandle(ref, () => ({ getMarkdown: () => text.current, setMarkdown: (value: string) => { text.current = value; } }));

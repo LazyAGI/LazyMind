@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ func executorComponentDB(t *testing.T, models ...any) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models = append(models, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{})
+	models = append(models, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowInputBinding{})
 	if err := db.AutoMigrate(models...); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"},
 			InputTransports: map[string]string{"brief": "path", "images": "reference"}}},
 		MaterialTypes:         map[string]string{"brief": "text", "images": "image"},
-		MaterialCardinalities: map[string]string{"report": "single", "notes": "list", "images": "list"}}
+		MaterialCardinalities: map[string]string{"report": "single", "notes": "list", "images": "list", "files": "list"}}
 	if err := db.Create(&orm.WorkflowRevision{ID: "revision-1", WorkflowResourceID: "resource-1", RevisionNo: 1,
 		CompiledGraph: graph.JSON(), GraphSchemaVersion: graph.SchemaVersion, CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -117,6 +118,21 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Attempt witnesses may be inserted in UUID order at one timestamp. The
+	// resource binding order must survive that projection and tied timestamps.
+	for _, index := range []int{2, 0, 1} {
+		resourceBinding := fmt.Sprintf("external-%d", index)
+		if err := db.Create(&orm.WorkflowInputBinding{ID: resourceBinding, WorkflowSessionID: "session-1",
+			MaterialID: "files", ResourceID: fmt.Sprintf("file-%d", index), ResourceRevision: 1,
+			CreatedByCommandID: fmt.Sprintf("prepare:files:item:%08d", index), CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: fmt.Sprintf("witness-%d", 2-index),
+			SessionID: "session-1", AttemptID: "attempt-1", MaterialID: "files", SourceType: "input_resource",
+			SourceID: fmt.Sprintf("file-%d", index), MaterialRevisionID: resourceBinding, CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	value, err := (DBContextLoader{DB: db}).LoadAttemptContext(context.Background(), "attempt-1")
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +156,10 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	if len(images) != 2 || images[0]["source_revision_id"] != "image-revision-1" ||
 		images[1]["source_revision_id"] != "image-revision-2" {
 		t.Fatalf("list input=%v", images)
+	}
+	files := value.Inputs["files"].([]map[string]any)
+	if len(files) != 3 || files[0]["source_id"] != "file-0" || files[1]["source_id"] != "file-1" || files[2]["source_id"] != "file-2" {
+		t.Fatalf("external files reordered: %v", files)
 	}
 	raw, _ := json.Marshal(value)
 	for _, forbidden := range []string{"api_key", "db_dsn", "workspace_path"} {

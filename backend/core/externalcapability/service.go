@@ -373,7 +373,7 @@ func (s *Service) InvokeExternalModel(ctx context.Context, call capability.Invoc
 	if available, reason := modelAvailability(row); !available {
 		return result, capability.NewError(capability.Unavailable, op, reason+"; verify the model connection in Settings", false, nil)
 	}
-	apiKey, err := modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	baseURL, apiKey, err := modelprovider.ResolveProviderRuntimeCredential(ctx, s.db, row.GroupID)
 	if err != nil {
 		return result, capability.NewError(capability.Unavailable, op, "model credentials cannot be loaded; save the connection again", false, err)
 	}
@@ -385,7 +385,7 @@ func (s *Service) InvokeExternalModel(ctx context.Context, call capability.Invoc
 		payload["max_tokens"] = input.MaxTokens
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(row.BaseURL), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(baseURL), bytes.NewReader(body))
 	if err != nil {
 		return result, capability.NewError(capability.Internal, op, "cannot prepare model request", false, err)
 	}
@@ -616,12 +616,8 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 			toolConfig[key] = value
 		}
 	}
-	var disabled []string
-	if err := s.db.WithContext(ctx).Table("user_disabled_tools").Where("create_user_id = ? AND deleted_at IS NULL", userID).Pluck("tool_name", &disabled).Error; err != nil {
-		return nil, err
-	}
 	payload, err := json.Marshal(map[string]any{
-		"tool_name": name, "arguments": arguments, "llm_config": llmConfig, "tool_config": toolConfig, "disabled_tools": disabled,
+		"tool_name": name, "arguments": arguments, "llm_config": llmConfig, "tool_config": toolConfig,
 	})
 	if err != nil {
 		return nil, errors.New("encode built-in tool request")

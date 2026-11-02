@@ -863,3 +863,33 @@ type ioNopCloser struct {
 }
 
 func (c ioNopCloser) Close() error { return nil }
+
+func TestProcessingMetadataBatchesRequestedVisibleDocuments(t *testing.T) {
+	_, db, op := resourceFixture(t)
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "source").Update("processing_level", ProcessingLevelStored).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := []orm.Document{{ID: "visible", DatasetID: "source"}, {ID: "second", DatasetID: "source"}, {ID: "foreign", DatasetID: "target"}, {ID: "deleted", DatasetID: "source"}}
+	for _, row := range rows {
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Where("id = ?", "deleted").Delete(&orm.Document{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewDocumentService(DocumentServiceDeps{DB: db.DB, LazyDB: db.DB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.GetProcessingMetadata(t.Context(), op.Caller, "source", []string{"visible", "visible", "second", "foreign", "deleted", "missing"})
+	if err != nil || len(result) != 2 {
+		t.Fatalf("status batch=%+v err=%v", result, err)
+	}
+	if result["visible"].DatasetID != "source" || result["visible"].ProcessingLevel != ProcessingLevelStored {
+		t.Fatalf("invalid metadata: %+v", result["visible"])
+	}
+	if _, err := svc.GetProcessingMetadata(t.Context(), DatasetCatalogCaller{UserID: "other"}, "source", []string{"visible"}); err == nil {
+		t.Fatal("status batch bypassed library permission")
+	}
+}

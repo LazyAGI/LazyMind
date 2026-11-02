@@ -14,7 +14,10 @@ export interface ConfigurationAction {
 
 export function configurationPath(service: string): string {
   if (service.startsWith("mcp:")) return "/settings?section=mcp";
-  if (service.split("/")[0] === "mail") return "/cloud-documents/mail";
+  const baseService = service.split("/")[0];
+  if (baseService === "web_search") return "/settings?section=knowledge&tool=web-search";
+  if (baseService === "academic_search") return "/settings?section=knowledge&tool=academic-search";
+  if (baseService === "mail") return "/cloud-documents/mail";
   if (service === "googledrive") return "/cloud-documents/google-drive";
   if (service === "feishu") return "/cloud-documents/feishu";
   if (service === "notion") return "/cloud-documents";

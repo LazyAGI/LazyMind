@@ -7,11 +7,12 @@ import './index.scss';
 
 interface Props {
   errors: ValidationError[];
+  title?: string;
   getTargetNodeId?: (error: ValidationError) => string | null;
   onSelectNode?: (nodeId: string) => void;
 }
 
-export default function ValidationPanel({ errors, getTargetNodeId, onSelectNode }: Props) {
+export default function ValidationPanel({ errors, title, getTargetNodeId, onSelectNode }: Props) {
   const { t } = useTranslation();
   const grouped = useMemo(() => {
     const map = new Map<string, ValidationError[]>();
@@ -26,10 +27,10 @@ export default function ValidationPanel({ errors, getTargetNodeId, onSelectNode 
   if (errors.length === 0) return null;
 
   return (
-    <div className="validation-panel" role="alert" aria-label={t('selfEvolutionRun.validationPanelAriaLabel')}>
+    <div className="validation-panel" role="alert" aria-label={title ?? t('selfEvolutionRun.validationPanelAriaLabel')}>
       <div className="validation-panel-header">
         <ExclamationCircleOutlined className="validation-panel-icon" />
-        <span>{t('selfEvolutionRun.validationPanelErrorCount', { count: errors.length })}</span>
+        <span>{title ?? t('selfEvolutionRun.validationPanelErrorCount', { count: errors.length })}</span>
       </div>
       <ul className="validation-panel-list">
         {[...grouped.entries()].map(([groupKey, groupErrors]) =>

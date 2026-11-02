@@ -401,7 +401,7 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
     monkeypatch.setattr(chat_service, 'MCPClient', Client)
     monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
     lazyllm.globals['agentic_config']['enable_tool_retrieval'] = retrieval_enabled
-    configs = [{'id': key, 'name': 'Documents', 'url': f'https://example.test/{key}'} for key in ('a', 'b')]
+    configs = [{'id': key, 'name': f'Documents {key}', 'url': f'https://example.test/{key}'} for key in ('a', 'b')]
     cached = asyncio.run(chat_service._build_mcp_tools(configs))
     builtin = [search] if with_builtin else []
     plan = AgentRunPlan(role=AgentRole.CHAT,
@@ -428,27 +428,35 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
             'name': aliases[server], 'arguments': json.dumps({'query': server})}}])
         assert result[0]['ok'] is True
     assert sorted(calls) == [('a', 'search', {'query': 'a'}), ('b', 'search', {'query': 'b'})]
-    assert [t.__name__ for t in cached] == ['search', 'search']
+    assert [t.__name__ for t in cached] == ['mcp_documents_a_search', 'mcp_documents_b_search']
     reversed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*reversed(cached), *builtin]))
     assert {entry['origin']: name for name, entry in reversed_agent._tools_manager.atomic_tool_catalog().items()
             if entry['source'] == 'mcp'} == aliases
     configs[0]['name'] = 'Renamed documents'
     renamed = asyncio.run(chat_service._build_mcp_tools(configs))
     renamed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*builtin, *renamed]))
-    assert {entry['origin']: name for name, entry in renamed_agent._tools_manager.atomic_tool_catalog().items()
-            if entry['source'] == 'mcp'} == aliases
+    renamed_catalog = renamed_agent._tools_manager.atomic_tool_catalog()
+    renamed_aliases = {entry['origin']: name for name, entry in renamed_catalog.items()
+                       if entry['source'] == 'mcp'}
+    assert renamed_aliases == {'a': 'mcp_renamed_documents_search', 'b': aliases['b']}
+    if retrieval_enabled:
+        exposed = {item['function']['name'] for item in renamed_agent._tools_manager.tools_description}
+        assert aliases['a'] not in exposed
+        assert renamed_aliases['a'] not in exposed
+        assert aliases['b'] in exposed
     single = AgentExecutor().create_agent(object(), replace(plan, tools=[cached[0], cached[0]]))
-    assert [t.__name__ for t in single._tools] == ['search']
+    assert [t.__name__ for t in single._tools] == ['mcp_documents_a_search']
     assert {name for name, entry in single._tools_manager.atomic_tool_catalog().items()
             if entry['source'] == 'mcp'} == {aliases['a']}
 
 
-def test_legacy_state_drops_optional_names_and_rebuilds_dependencies(scope):
+@pytest.mark.parametrize('legacy_version', [1, 2])
+def test_legacy_state_drops_optional_names_and_rebuilds_dependencies(scope, legacy_version):
     import json
 
     store = ToolStateStore(['u', 'c', 'chat'])
     store.path.parent.mkdir(parents=True, exist_ok=True)
-    legacy = {'version': 1, 'loaded': ['search_mail'], 'skills': {'mail': ['search_mail']}}
+    legacy = {'version': legacy_version, 'loaded': ['search_mail'], 'skills': {'mail': ['search_mail']}}
     store.path.write_text(json.dumps(legacy))
     before = store.path.read_bytes()
     skills = SimpleNamespace(_get_visible_skill_info=lambda name: ({'allowed-tools': ['read_mail']}, None),
@@ -469,7 +477,8 @@ def test_legacy_state_drops_optional_names_and_rebuilds_dependencies(scope):
         controller.initialize()
     assert store.path.read_bytes() == before
     restored = agent(skills=skills)
-    assert json.loads(store.path.read_text())['version'] == 2
+    assert json.loads(store.path.read_text())['version'] == 3
+    assert json.loads(store.path.read_text())['mcp_bindings'] == {}
     assert 'search_mail' not in {d['function']['name'] for d in restored._tools_manager.tools_description}
     # Optional loads made with the new names survive subsequent requests.
     restored._tools_manager.retrieval.load(['search_mail'], [])
@@ -480,9 +489,9 @@ def test_mcp_dedup_uses_wire_identity_before_registration(scope):
     from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
     from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
 
-    tools = [generate_lazyllm_tool(SimpleNamespace(server_id='a'), SimpleNamespace(
+    tools = [generate_lazyllm_tool(SimpleNamespace(server_id='a', server_name='A'), SimpleNamespace(
         name=name, description='Search documents.', inputSchema={'type': 'object', 'properties': {}}))
-        for name in ('foo.bar', 'foo-bar')]
+        for name in ('foo.bar', 'foo.baz')]
     plan = AgentRunPlan(role=AgentRole.CHAT,
                         prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
                         tools=[*tools, tools[0]],
@@ -503,7 +512,8 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
     def make_tool(server):
         async def call_tool(name, arguments):
             return CallToolResult(content=[TextContent(type='text', text=f'{server}:{name}')])
-        return generate_lazyllm_tool(SimpleNamespace(server_id=server, call_tool=call_tool), SimpleNamespace(
+        client = SimpleNamespace(server_id=server, server_name=server, call_tool=call_tool)
+        return generate_lazyllm_tool(client, SimpleNamespace(
             name='search', description='Search documents.', inputSchema={'type': 'object', 'properties': {}}))
 
     def search() -> str:
@@ -529,7 +539,7 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
         assert result[0]['ok'] is True
         assert 'a:search' in str(result)
     persisted = json.loads(next(scope.rglob('*.json')).read_text())
-    assert persisted['version'] == 2
+    assert persisted['version'] == 3
     assert set(persisted['loaded']) == {'search_tools', 'load_tools', name}
 
 
@@ -611,3 +621,60 @@ def test_normal_activation_and_retrieval_unload_are_isolated(scope):
     preview = grouped_agent(preview=True)
     with pytest.raises(RuntimeError):
         preview.activate_group('MailToolkit')
+
+
+@pytest.mark.parametrize('bindings', [None, [], {'mcp_docs_search': ''}, {'mcp_docs_search': 3}])
+def test_v3_rejects_invalid_mcp_identity_bindings(scope, bindings):
+    store = ToolStateStore(['u', 'c', 'chat'])
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {'version': 3, 'loaded': ['mcp_docs_search'], 'skills': {}, 'mcp_bindings': bindings}
+    store.path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match='Invalid MCP tool bindings'):
+        store.read()
+
+
+@pytest.mark.parametrize('change', [{'id': 'replacement'}, {'url': 'https://other.test/mcp'},
+                                    {'allowed_tools': []}, {'headers': {'Authorization': 'rotated'}}])
+def test_v3_disk_restore_requires_current_host_identity(scope, monkeypatch, change):
+    import asyncio
+    from dataclasses import replace
+    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
+    from lazymind.chat.service import chat_service
+    from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
+
+    class Client(chat_service.MCPClient):
+        def get_tools(self, allowed_tools=None):
+            if allowed_tools == []:
+                return []
+            return [generate_lazyllm_tool(self, SimpleNamespace(
+                name='search', description='Search documents.',
+                inputSchema={'type': 'object', 'properties': {}}))]
+
+    monkeypatch.setattr(chat_service, 'MCPClient', Client)
+    monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
+    server = {'id': 'docs', 'name': 'Docs', 'url': 'https://example.test/mcp'}
+    tools = asyncio.run(chat_service._build_mcp_tools([server]))
+    plan = AgentRunPlan(
+        role=AgentRole.CHAT,
+        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
+        tools=[search_mail, *tools], execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False))
+    manager = AgentExecutor().create_agent(object(), plan)._tools_manager
+    manager.retrieval.load(['mcp_docs_search'], [])
+    store = ToolStateStore(['u', 'c', 'chat'])
+    original = store.path.read_bytes()
+    identity = store.read()['mcp_bindings']['mcp_docs_search']
+    changed = asyncio.run(chat_service._build_mcp_tools([{**server, **change}]))
+
+    preview_plan = replace(plan, tools=[search_mail, *changed],
+                           execution_options=replace(plan.execution_options, context_preview=True))
+    preview = AgentExecutor().create_agent(object(), preview_plan)._tools_manager
+    expected = {'search_tools', 'load_tools'}
+    if 'headers' in change:
+        expected.add('mcp_docs_search')
+    assert {d['function']['name'] for d in preview.tools_description} == expected
+    assert store.path.read_bytes() == original
+
+    restored = AgentExecutor().create_agent(object(), replace(plan, tools=[search_mail, *changed]))._tools_manager
+    assert {d['function']['name'] for d in restored.tools_description} == expected
+    assert store.read()['mcp_bindings'] == (
+        {'mcp_docs_search': identity} if 'headers' in change else {})
