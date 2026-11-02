@@ -211,8 +211,8 @@
 
     > div:first-child { flex: 1; gap: 4px 8px; }
     > div:first-child > .anticon { color: var(--color-primary, #006ae6); }
-    strong { font-size: 14px; font-weight: 600; }
-    > div:first-child > span:last-child { color: #737373; font-size: 11px; }
+    strong { font-size: 15px; font-weight: 600; }
+    > div:first-child > span:last-child { color: #737373; font-size: 12px; }
     > .ant-btn { flex: none; color: #737373; }
   }
 
@@ -229,7 +229,7 @@
   gap: 6px;
   padding: 10px 16px;
   color: #737373;
-  font-size: 10px;
+  font-size: 12px;
   border-bottom: 1px solid #f1f1ef;
 
   > span:first-child { width: 5px; height: 5px; border-radius: 50%; background: #738975; }
@@ -243,9 +243,9 @@
   margin: 0 auto;
   box-sizing: border-box;
 
-  &__eyebrow { color: var(--color-primary, #006ae6); font-size: 9px; font-weight: 600; letter-spacing: .12em; }
+  &__eyebrow { color: var(--color-primary, #006ae6); font-size: 11px; font-weight: 600; letter-spacing: .08em; }
   h2 { margin: 0 0 8px; color: #262626; font-family: inherit; font-size: clamp(22px, 2vw, 27px); line-height: 1.2; font-weight: 400; letter-spacing: -.025em; }
-  > p { color: #737373; font-size: 12px; line-height: 1.8; margin: 0 0 14px; }
+  > p { color: #737373; font-size: 14px; line-height: 1.65; margin: 0 0 16px; }
 }
 
 .paper-assistant-prompts {
@@ -269,9 +269,9 @@
     transition: border-color .15s, background .15s;
 
     &:hover { border-color: #c5a2aa; background: #fcf9fa; }
-    > strong { gap: 4px; width: 100%; font-size: 12px; font-weight: 500; display: flex; justify-content: space-between; }
+    > strong { gap: 4px; width: 100%; font-size: 14px; font-weight: 500; display: flex; justify-content: space-between; }
     > strong span { color: var(--color-primary, #006ae6); }
-    > span { font-size: 11px; color: #737373; line-height: 1.5; }
+    > span { font-size: 13px; color: #737373; line-height: 1.5; }
   }
 }
 
@@ -284,9 +284,9 @@
   border-radius: 5px;
 
   &__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  &__heading > button:first-child { border: 0; padding: 0; background: transparent; color: var(--color-primary, #006ae6); font: inherit; font-size: 10px; cursor: pointer; }
+  &__heading > button:first-child { border: 0; padding: 0; background: transparent; color: var(--color-primary, #006ae6); font: inherit; font-size: 12px; cursor: pointer; }
   &__heading > button:disabled { cursor: default; }
-  blockquote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 4px 0; color: #737373; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+  blockquote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 4px 0; color: #737373; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) { .paper-assistant-prompts > button { transition: none; } }

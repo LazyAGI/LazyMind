@@ -1,4 +1,5 @@
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
+import {PdfPaperOverview} from "./PdfPaperOverview";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
@@ -123,6 +124,7 @@ export default function RenderPdf({
   pdfNavigateToPage,
   pdfIRTarget,
   pdfSourceHash,
+  paperTitle,
   fileData,
   metadata,
   defaultPageWidth,
@@ -153,6 +155,8 @@ export default function RenderPdf({
   const {label:readerLabel}=usePaperReaderLabels();
   const preferenceKey = pdfSourceHash && pdfIRTarget ? `pdf-reader:${pdfIRTarget?.dataset || ""}:${pdfIRTarget?.document || ""}:${pdfSourceHash}` : undefined;
   const {zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
+  const [readerMode,setReaderMode] = useState<"overview" | "original">("original");
+  useEffect(()=>setReaderMode("original"),[fileData]);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
   const pdfFile = useMemo(()=>fileData instanceof ArrayBuffer ? fileData.slice(0) : fileData,[fileData]);
   const currentSource = useRef(fileData);
@@ -507,6 +511,7 @@ export default function RenderPdf({
   };
   useEffect(() => {
     if (!pdfNavigateToPage || !Number.isFinite(pdfNavigateToPage.page) || !pdfLoaded || pdfDocument.current?.source !== fileData) return;
+    setReaderMode("original");
     const key = `${pdfNavigateToPage.requestId}:${pdfNavigateToPage.page}`;
     if (lastPageNavigation.current === key) return;
     lastPageNavigation.current = key;
@@ -830,6 +835,7 @@ export default function RenderPdf({
 
   const navigateSourceBlock = (id:string) => {
     const block=formulaDocument?.blocks.find(item=>item.id===id);if(!block)return;
+    setReaderMode("original");
     navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
   };
   const openVisualStudy = (block:PdfIRBlock) => {
@@ -837,6 +843,7 @@ export default function RenderPdf({
   };
   useEffect(()=>{
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
+    setReaderMode("original");
     const request=`${pdfNavigateTo.requestId}:${pdfNavigateTo.id}`;
     if(lastRequestedNavigation.current===request || !formulaDocument.blocks.some(block=>block.id===pdfNavigateTo.id))return;
     lastRequestedNavigation.current=request;navigateSourceBlock(pdfNavigateTo.id);
@@ -953,10 +960,11 @@ export default function RenderPdf({
   );
 
   const readerHeader = (
-    <nav className="pdf-reader-modebar pdf-reader-header" aria-label={readerLabel("reading")}>
+    <nav className={`pdf-reader-modebar pdf-reader-header${pdfIRTarget ? " has-overview" : ""}`} aria-label={readerLabel("reading")}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
-      {pageControls}
+      {pdfIRTarget && <div role="tablist" className="pdf-reader-view-toggle" aria-label={readerLabel("reading")}><button type="button" role="tab" aria-selected={readerMode==="overview"} onClick={()=>setReaderMode("overview")}>{readerLabel("insight")}</button><button type="button" role="tab" aria-selected={readerMode==="original"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button></div>}
       <div className="pdf-reader-header-end">
+        {readerMode === "original" && pageControls}
         <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
           <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
           {readerTools}
@@ -970,7 +978,7 @@ export default function RenderPdf({
     return (
       <div className="pdf-reader-workspace" style={{height:style?.height || "100%",width:"100%"}}>
         {readerHeader}
-        <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>
+        {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
       </div>
     );
   }
@@ -984,7 +992,8 @@ export default function RenderPdf({
     <div className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     {readerHeader}
     <div className="pdf-reader-stage">
-    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:"flex"}}>
+    {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
+    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" aria-hidden={readerMode!=="original"} style={{height:"100%",width:"100%",display:"flex",visibility:readerMode==="original"?"visible":"hidden"}}>
     <div
       className={className}
       ref={containerRef}
