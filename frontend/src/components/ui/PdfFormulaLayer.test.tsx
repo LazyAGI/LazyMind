@@ -40,6 +40,16 @@ describe('PDF formula interaction', () => {
 });
 
 describe('formula hover grace',()=>{
+ it('keeps a clicked card open when the page leave event arrives after entering the portal',()=>{
+  vi.useFakeTimers();
+  render(<div data-testid="page"><PdfFormulaLayer blocks={[formula]}/></div>);
+  fireEvent.click(screen.getByRole('button',{name:'查看公式 1'}));
+  const card=screen.getByRole('dialog');
+  fireEvent.pointerEnter(card);
+  fireEvent.pointerLeave(screen.getByTestId('page'));
+  act(()=>vi.advanceTimersByTime(300));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+ });
  it('allows entering the card and cancels pending hover for selection or unmount',()=>{
   vi.useFakeTimers();
   const view=render(<div data-testid="page"><PdfFormulaLayer blocks={[formula]} /></div>);

@@ -26,3 +26,28 @@
 .pdf-selection-composer button:focus-visible{outline:2px solid var(--color-primary,#006ae6);outline-offset:2px;}
 
 @media(max-width:600px){.pdf-selection-icons .pdf-selection-primary-action{width:44px;height:44px;}.pdf-selection-icons .pdf-selection-send,.pdf-selection-icons .pdf-selection-icon{width:44px;height:44px;}}
+
+/* The selected-text tool is a compact contextual surface, with note colors at the first level. */
+.pdf-selection-composer{background:#242424;border-color:#575757;box-shadow:0 12px 34px #0006;color:#f5f5f5}
+.pdf-selection-composer.is-composing{border-color:#668fda;box-shadow:0 12px 34px #0006,0 0 0 2px #3274db50}
+.pdf-selection-composer.is-note-mode.is-composing{border-color:#ffb2b8;box-shadow:0 12px 34px #0006,0 0 0 2px #ffb2b838}
+.pdf-selection-composer textarea{color:#f5f5f5}
+.pdf-selection-composer textarea::placeholder{color:#aaa}
+.pdf-selection-composer button{color:#d0d0d0}
+.pdf-selection-modes{background:#363636}
+.pdf-selection-modes button[aria-pressed=true]{background:#eff5ff;color:#176bcb;box-shadow:none}
+.pdf-selection-composer.is-note-mode .pdf-selection-modes button[aria-pressed=true]{background:#ffb3b8;color:#222}
+.pdf-selection-icons .pdf-selection-primary-action{border-color:#626262}
+.pdf-selection-icons .pdf-selection-primary-action:hover:not(:disabled),.pdf-selection-icons .pdf-selection-icon:hover{background:#363d4b;color:#92bdff}
+.pdf-selection-icons .pdf-selection-send{background:#1973db;color:#fff}
+.pdf-selection-composer.is-note-mode .pdf-selection-icons .pdf-selection-send{background:#ffb3b8;color:#222}
+.pdf-selection-colors{display:flex;align-items:center;gap:5px;min-width:0}
+.pdf-selection-colors .pdf-selection-color{display:block;flex:none;width:17px;height:17px;padding:0;border:1px solid #ffffff24;border-radius:50%;box-shadow:0 1px 2px #0004}
+.pdf-selection-colors .pdf-selection-color[aria-pressed=true]{outline:2px solid #d4d4d4;outline-offset:2px}
+.pdf-selection-icons .pdf-selection-mark{display:inline-flex;align-items:center;justify-content:center;flex:none;width:30px;height:30px;margin-left:5px;padding:0;border-radius:50%;background:#ffb3b8;color:#222;font-size:16px}
+.pdf-selection-icons .pdf-selection-mark:hover{background:#ff9fa6}
+.pdf-selection-more>div{background:#2c2c2c;border-color:#555}
+.pdf-selection-more>div button:hover{background:#3a3a3a}
+.pdf-selection-help{color:#b6b6b6}
+.pdf-selection-help a{color:#91bdff}
+@media(max-width:600px){.pdf-selection-icons .pdf-selection-mark{width:40px;height:40px}.pdf-selection-colors .pdf-selection-color{width:20px;height:20px}}

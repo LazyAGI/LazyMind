@@ -26,10 +26,11 @@ export function PdfFormulaLayer({blocks,onExplain}: {blocks:PdfIRBlock[];onExpla
   const [copyStatus,setCopyStatus]=useState('');
   const openTimer=useRef<ReturnType<typeof setTimeout>>();
   const closeTimer=useRef<ReturnType<typeof setTimeout>>();
+  const pointerInCard=useRef(false);
   const candidates=useMemo(()=>blocks.filter(hasFormulaGeometry),[blocks]);
   const cancelClose=()=>clearTimeout(closeTimer.current);
-  const close=()=>{clearTimeout(openTimer.current);cancelClose();setActive(undefined);};
-  const scheduleClose=()=>{clearTimeout(openTimer.current);cancelClose();closeTimer.current=setTimeout(()=>setActive(undefined),250);};
+  const close=()=>{clearTimeout(openTimer.current);cancelClose();pointerInCard.current=false;setActive(undefined);};
+  const scheduleClose=()=>{clearTimeout(openTimer.current);cancelClose();if(pointerInCard.current)return;closeTimer.current=setTimeout(()=>{if(!pointerInCard.current)setActive(undefined);},250);};
   const open=(block:PdfIRBlock)=>{
     const rect=root.current?.parentElement?.getBoundingClientRect();
     if(!rect) return;
@@ -70,7 +71,7 @@ export function PdfFormulaLayer({blocks,onExplain}: {blocks:PdfIRBlock[];onExpla
   },[active]);
   return <div ref={root} className="pdf-formula-layer">
     {candidates.map((block,index)=><button key={block.id} className="pdf-formula-trigger" style={{left:`${Math.min(95,block.bbox![2]*100)}%`,top:`${block.bbox![1]*100}%`}} aria-label={t("pdfFormula.view", {number:index+1})} aria-haspopup="dialog" aria-expanded={active?.id===block.id} onClick={event=>{trigger.current=event.currentTarget;focusCard.current=true;cancelClose();clearTimeout(openTimer.current);open(block);}} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();card.current?.querySelector('button')?.focus();}}}>ƒ</button>)}
-    {active && createPortal(<div ref={card} className="pdf-formula-card" role="dialog" aria-label={t("pdfFormula.title")} onMouseUp={event=>event.stopPropagation()} style={position} onPointerEnter={cancelClose} onPointerLeave={scheduleClose} onFocus={cancelClose} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))scheduleClose();}}>
+    {active && createPortal(<div ref={card} className="pdf-formula-card" role="dialog" aria-label={t("pdfFormula.title")} onMouseUp={event=>event.stopPropagation()} style={position} onPointerEnter={()=>{pointerInCard.current=true;cancelClose();}} onPointerLeave={()=>{pointerInCard.current=false;scheduleClose();}} onFocus={cancelClose} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))scheduleClose();}}>
       <div className="pdf-formula-heading"><strong>{t("pdfFormula.formula")}</strong><button aria-label={t("pdfFormula.close")} onClick={()=>{close();trigger.current?.focus();}}>×</button></div>
       {preview ? <div className="pdf-formula-preview" dangerouslySetInnerHTML={{__html:preview}}/> : <p>{t("pdfFormula.previewError")}</p>}
       <details className="pdf-formula-raw"><summary>{t("pdfFormula.raw")}</summary><textarea readOnly value={active.latex} aria-label={t("pdfFormula.raw")} /></details>

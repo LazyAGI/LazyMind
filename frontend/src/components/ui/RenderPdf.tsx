@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
+import {pdfNoteHighlightBackground,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -93,6 +94,7 @@ interface SelectionAction {
   selection: PdfTextSelection;
   left: number;
   top: number;
+  highlightRects?: Array<[number,number,number,number]>;
   referenceAction?: PdfReferenceAction;
   referenceHover?: boolean;
 }
@@ -155,6 +157,9 @@ export default function RenderPdf({
   const {label:readerLabel}=usePaperReaderLabels();
   const preferenceKey = pdfSourceHash && pdfIRTarget ? `pdf-reader:${pdfIRTarget?.dataset || ""}:${pdfIRTarget?.document || ""}:${pdfSourceHash}` : undefined;
   const {zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
+  const noteHighlightKey = pdfIRTarget && pdfSourceHash ? `pdf-note-highlights:${pdfIRTarget.dataset}:${pdfIRTarget.document}:${pdfSourceHash}` : undefined;
+  const [noteHighlights,setNoteHighlights] = useState<PdfNoteHighlight[]>([]);
+  useEffect(()=>setNoteHighlights(readPdfNoteHighlights(noteHighlightKey)),[noteHighlightKey,fileData]);
   const [readerMode,setReaderMode] = useState<"overview" | "original">("original");
   useEffect(()=>setReaderMode("original"),[fileData]);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
@@ -400,6 +405,13 @@ export default function RenderPdf({
       ];
     }
     const containerRect = containerRef.current.getBoundingClientRect();
+    const highlightRects:SelectionAction['highlightRects']=pageRect?.width && pageRect.height ? Array.from(range.getClientRects())
+      .filter(rect=>rect.width>0&&rect.height>0&&rect.right>pageRect.left&&rect.left<pageRect.right&&rect.bottom>pageRect.top&&rect.top<pageRect.bottom)
+      .slice(0,50)
+      .map(rect=>{
+        const clamp=(value:number)=>Math.max(0,Math.min(1,value));
+        return [clamp((rect.left-pageRect.left)/pageRect.width),clamp((rect.top-pageRect.top)/pageRect.height),clamp((rect.right-pageRect.left)/pageRect.width),clamp((rect.bottom-pageRect.top)/pageRect.height)];
+      }).filter(rect=>rect[0]<rect[2]&&rect[1]<rect[3]) as Array<[number,number,number,number]> : [];
     setSelectionHighlights(Array.from(range.getClientRects())
       .filter((rect) => rect.width > 0 && rect.height > 0)
       .map((rect) => ({
@@ -421,6 +433,7 @@ export default function RenderPdf({
       ),
       top: containerRef.current.scrollTop
         + Math.max(selectionRect.top - containerRect.top - 44, 8),
+      highlightRects,
       referenceAction: (() => {
         const tagged = Array.from(pageElement?.querySelectorAll<HTMLElement>("[data-reference-id]") || [])
           .find((span) => range.intersectsNode(span));
@@ -907,6 +920,7 @@ export default function RenderPdf({
           }}
         />
         </div>
+        {noteHighlights.filter(highlight=>highlight.page===index+1).flatMap(highlight=>highlight.rects.map((rect,rectIndex)=><span key={`${highlight.id}:${rectIndex}`} data-pdf-note-highlight={highlight.color} style={{position:'absolute',left:`${rect[0]*100}%`,top:`${rect[1]*100}%`,width:`${(rect[2]-rect[0])*100}%`,height:`${(rect[3]-rect[1])*100}%`,background:pdfNoteHighlightBackground(highlight.color),mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}/>))}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
@@ -988,6 +1002,16 @@ export default function RenderPdf({
     GAP * Math.max(0, numPages - 1);
 
   const translationUnavailable=translateSelectionDisabled&&!isSingleEnglishWord(selectionAction?.selection.text||"");
+  const commitNoteHighlight=(color:PdfNoteColor)=>{
+    const rects=selectionAction?.highlightRects;
+    if(!rects?.length)return;
+    const page=selectionAction?.selection.page;
+    if(!page)return;
+    const signature=JSON.stringify(rects);
+    const next=[...noteHighlights.filter(item=>item.page!==page||JSON.stringify(item.rects)!==signature),{id:crypto.randomUUID(),page,color,rects}];
+    setNoteHighlights(next);
+    writePdfNoteHighlights(noteHighlightKey,next);
+  };
   return (
     <div className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     {readerHeader}
@@ -1043,6 +1067,7 @@ export default function RenderPdf({
             selection={selectionAction.selection}
             onAsk={onAskSelection}
             onNote={onNoteSelection}
+            onHighlight={onNoteSelection ? commitNoteHighlight : undefined}
             onClose={()=>{window.getSelection()?.removeAllRanges();setSelectionAction(null);}}
             onTranslate={onTranslateSelection ? ()=>onTranslateSelection(selectionAction.selection) : undefined}
             translationDisabled={translationUnavailable}

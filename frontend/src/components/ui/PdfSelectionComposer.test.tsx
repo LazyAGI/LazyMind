@@ -24,6 +24,29 @@ it('passes a note draft and quote without claiming it has been saved',()=>{
  expect(note).toHaveBeenCalledWith(selection,'My observation');
  expect(screen.queryByText('已保存')).toBeNull();
 });
+it('shows a color palette in note mode and applies the selected highlight before opening a note draft',()=>{
+ const note=vi.fn(),highlight=vi.fn(),close=vi.fn();
+ const selection={text:'Quoted evidence',page:1};
+ render(<PdfSelectionComposer selection={selection} onAsk={vi.fn()} onNote={note} onHighlight={highlight} onClose={close}/>);
+ expect(screen.queryByRole('group',{name:'高亮颜色'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'笔记'}));
+ expect(screen.getByRole('group',{name:'高亮颜色'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'蓝色'}));
+ expect(screen.getByRole('button',{name:'蓝色'})).toHaveAttribute('aria-pressed','true');
+ fireEvent.click(screen.getByRole('button',{name:'高亮并记笔记'}));
+ expect(highlight).toHaveBeenCalledWith('blue');
+ expect(note).toHaveBeenCalledWith(selection,'');
+ expect(close).toHaveBeenCalledOnce();
+});
+it('replaces the note palette with a send action while composing',()=>{
+ const note=vi.fn(),highlight=vi.fn();
+ render(<PdfSelectionComposer selection={{text:'Quote',page:2}} onNote={note} onHighlight={highlight} onClose={vi.fn()}/>);
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'My note'}});
+ expect(screen.queryByRole('group',{name:'高亮颜色'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'添加笔记草稿'}));
+ expect(highlight).toHaveBeenCalledWith('yellow');
+ expect(note).toHaveBeenCalledWith({text:'Quote',page:2},'My note');
+});
 it('closes on Escape and exposes optional actions in a compact menu',()=>{
  const close=vi.fn(),action=vi.fn();render(<PdfSelectionComposer selection={{text:'quote',page:1}} onClose={close} actions={[{key:'reference',label:'打开链接',onClick:action}]}/>);
  fireEvent.click(screen.getByText('更多操作'));fireEvent.click(screen.getByRole('button',{name:'打开链接'}));expect(action).toHaveBeenCalledOnce();
