@@ -21,6 +21,7 @@ import (
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	"lazymind/core/workflow/publication"
+	"lazymind/core/workflow/runstate"
 )
 
 const workflowDefinitionChangedCode = "WORKFLOW_DEFINITION_CHANGED"
@@ -520,36 +521,8 @@ func reconcileSessionProjection(ctx context.Context, db *gorm.DB, session *orm.W
 	if err != nil {
 		return err
 	}
-	status := SessionStatusWaiting
-	if session.Status == "pausing" {
-		status = "pausing"
-	} else if projected.Projection.Completed {
-		status = SessionStatusCompleted
-	} else {
-		for _, id := range projected.Projection.Current {
-			switch projected.Projection.Nodes[id].Execution {
-			case "pending", "queued", "claimed", "running":
-				status = SessionStatusActive
-			case "failed":
-				if status != SessionStatusActive {
-					status = SessionStatusFailed
-				}
-			}
-		}
-		// A ready successor is part of the already admitted execution. Keep
-		// its preparation interval open until the driver advances or explicitly
-		// yields; no worker running between steps is not itself a failure.
-		if session.Status == SessionStatusActive && len(projected.Projection.Current) == 0 &&
-			len(projected.Projection.Ready) > 0 && projected.Display.Status == "running" {
-			status = SessionStatusActive
-		}
-	}
-	updates := map[string]any{
-		"status":        status,
-		"state_version": gorm.Expr("state_version + 1"),
-		"updated_at":    time.Now().UTC(),
-	}
-	if err := db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Updates(updates).Error; err != nil {
+	status := runstate.AfterProjection(session.Status, projected.Projection, projected.Display.Status == "running")
+	if err := runstate.Write(db.WithContext(ctx), session, status, map[string]any{"state_version": gorm.Expr("state_version + 1")}); err != nil {
 		return err
 	}
 	session.Status, session.StateVersion = status, session.StateVersion+1

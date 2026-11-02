@@ -783,10 +783,9 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
-				if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Update("status", SessionStatusActive).Error; err != nil {
+				if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
 					return err
 				}
-				session.Status = SessionStatusActive
 				// Hosted retries bypass the native launcher's TaskCenter reset.
 				// Reopen only this owner's completed run; removed or canceled tasks stay closed.
 				if req.Operation == "retry" || req.Operation == "rewind" {

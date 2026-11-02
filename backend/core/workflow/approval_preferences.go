@@ -15,6 +15,7 @@ import (
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
+	"lazymind/core/workflow/runstate"
 )
 
 type approvalPreferenceRequest struct {
@@ -101,40 +102,21 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 				return err
 			}
 		}
-		status := SessionStatusActive
-		if req.Kind == "rewind" {
-			// Only transfer Chat ownership here. The existing transition command
-			// must still see completed/failed to apply its original recovery rules.
-			status = session.Status
-		}
-		if approval {
-			projected, err := projectSession(ctx, tx, &session)
-			if err != nil {
-				return err
-			}
-			if projected.Display.Status == "waiting" {
-				status = SessionStatusWaiting
-			} else if projected.Projection.Completed {
-				status = SessionStatusCompleted
-			}
-		}
 		binding, err := json.Marshal(nativeTurnBinding{HistoryID: req.HistoryID})
 		if err != nil {
 			return err
 		}
-		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND state_version = ?", session.ID, req.ExpectedStateVersion).
-			Updates(map[string]any{"status": status, "control_binding_json": string(binding), "state_version": gorm.Expr("state_version + 1"), "updated_at": time.Now().UTC()})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before approving")
+		if err := acceptRunControl(ctx, tx, &session, req.Kind,
+			map[string]any{"control_binding_json": string(binding), "state_version": gorm.Expr("state_version + 1")}, &req.ExpectedStateVersion); err != nil {
+			if err == runstate.ErrStateChanged {
+				return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before approving")
+			}
+			return err
 		}
 		session.StateVersion++
 		version = session.StateVersion
-		session.Status = status
 		session.ControlBindingJSON = string(binding)
-		payload, _ := json.Marshal(map[string]any{"status": status})
+		payload, _ := json.Marshal(map[string]any{"status": session.Status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
 	return version, err

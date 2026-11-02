@@ -24,6 +24,7 @@ import (
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/document"
+	"lazymind/core/workflow/runstate"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -31,10 +32,10 @@ import (
 // a failed attempt is reflected at session level so the UI does not present it as an
 // approval checkpoint.
 const (
-	SessionStatusActive    = "active"
-	SessionStatusCompleted = "completed"
-	SessionStatusFailed    = "failed"
-	SessionStatusWaiting   = "waiting"
+	SessionStatusActive    = runstate.Active
+	SessionStatusCompleted = runstate.Completed
+	SessionStatusFailed    = runstate.Failed
+	SessionStatusWaiting   = runstate.Waiting
 )
 
 func normalizeSessionWorkflowMode(value string) string {
@@ -321,12 +322,10 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 			return nil
 		}
 		if session.Status != SessionStatusActive {
-			session.Status = SessionStatusActive
-			session.StateVersion++
-			session.UpdatedAt = time.Now().UTC()
-			if err := tx.Model(&session).Updates(map[string]any{"status": session.Status, "state_version": session.StateVersion, "updated_at": session.UpdatedAt}).Error; err != nil {
+			if err := acceptRunControl(ctx, tx, &session, "continue", map[string]any{"state_version": session.StateVersion + 1}, &session.StateVersion); err != nil {
 				return err
 			}
+			session.StateVersion++
 			if err := appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"active"}`)); err != nil {
 				return err
 			}

@@ -173,6 +173,9 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			if err != nil {
 				return err
 			}
+			if err := acceptRunControl(ctx, tx, session, "continue", nil, nil); err != nil {
+				return err
+			}
 		case "retry", "rewind":
 			if session.Status == "stopped" {
 				if _, _, err := controlstore.ApplyLifecycle(tx, session, command.CommandID, false); err != nil {
@@ -404,6 +407,17 @@ func confirmWorkflowReview(ctx context.Context, tx *gorm.DB, session *orm.Workfl
 	if command.PreferenceScope != "" {
 		if _, err := saveWorkflowApprovalPreference(tx, owner, session.WorkflowID, review.StepID, command.PreferenceScope); err != nil {
 			return err
+		}
+	}
+	if command.Kind == "confirm_and_continue" {
+		binding, err := controlstore.DecodeBinding(*session)
+		if err != nil {
+			return err
+		}
+		if binding.DriverSession != "" {
+			if err := acceptRunControl(ctx, tx, session, "approve", nil, nil); err != nil {
+				return err
+			}
 		}
 	}
 	if err := freezeRouteDecision(ctx, tx, session.ID, review.StepID, review.AttemptID); err != nil {
