@@ -1,4 +1,4 @@
-# Paused translators: restore suppliers into model_catalog.yaml to re-enable.
+# Paused translators: restore suppliers into model_catalog.yaml and enable their runtime registry declaration after trial validation.
 # This file is intentionally not loaded at startup; implementations are retained.
 translation_providers:
   capabilities: [api_key_required]
@@ -80,18 +80,3 @@ translation_providers:
 
           API guide: https://cloud.tencent.com/document/product/1823/130079
       base_url: "https://tokenhub.tencentmaas.com/v1/"
-    - name: Tencent Translation
-      description:
-        zh-CN: |
-          腾讯云旧版机器翻译文本接口，已停止接纳新用户，并计划下线；现有账号仍可用 SecretId 和 SecretKey 接入。新用户建议使用 Tencent TokenHub Translation。
-
-          官方调整说明：https://cloud.tencent.com/document/product/551/104415
-
-          现有账号密钥：https://console.cloud.tencent.com/cam/capi
-        en-US: |
-          Legacy Tencent Cloud Machine Translation text API. It no longer accepts new users and is scheduled for retirement. Existing accounts can continue with a SecretId and SecretKey; new users should choose Tencent TokenHub Translation.
-
-          Official service update: https://cloud.tencent.com/document/product/551/104415
-
-          Existing-account credentials: https://console.cloud.tencent.com/cam/capi
-      base_url: "https://tmt.tencentcloudapi.com/"

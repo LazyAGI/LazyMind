@@ -26,7 +26,7 @@
 
 ## 暂停展示的调研来源
 
-以下来源的实现和既有连接数据保留，当前版本的配置列表和选择菜单不展示它们。
+以下 7 家来源先完成适配接入，保留实现和既有连接数据，但本期不开放配置或调用。后续根据实际账号试用中的额度、翻译质量和稳定性逐家开放；不是已承诺可用的免费服务。当前开放范围为上面的 5 家免密钥来源及百度、阿里云、小牛。
 
 | 来源 | 调研时的接入方式 |
 | --- | --- |
@@ -37,7 +37,10 @@
 | [DeepL API](https://support.deepl.com/hc/en-us/articles/360021200939-DeepL-API-plans) | API Key |
 | [彩云小译](https://docs.caiyunapp.com/lingocloud-api/index.html) | API Token |
 | [Tencent TokenHub](https://cloud.tencent.com/document/product/1823/130053) | TokenHub API Key |
-| [腾讯云旧版机器翻译](https://cloud.tencent.com/document/product/551/104415) | SecretId + SecretKey |
+
+腾讯云旧版 TMT 已停止支持并移除调用实现；旧连接数据保留以避免删除用户凭据，但不作为可用或兼容来源。TokenHub 是独立适配，不能复用 TMT 的 SecretId/SecretKey。
+
+运行时可用性、免密钥能力、文档支持、分块和限流统一由 `backend/core/modelprovider/translation_registry.go` 声明。目录与运行时声明由一致性测试校验；前端按后端返回的能力展示配置入口。全文任务只负责并发调度、进度及重试，机器翻译的分块、限流与片段拼接由 Provider 层负责。已开放的适配器传递显式中英文源语言，未指定时自动检测。
 
 本轮也验证了百度、有道等网页端请求。没有得到可重复、无需登录且无需绕过验证码的调用方式，因此未将其网页端伪装为可用翻译源。
 

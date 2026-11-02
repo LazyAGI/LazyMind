@@ -4800,6 +4800,14 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/translation/initialize",
+			Summary:     "Initialize free translation connections",
+			Description: "Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.",
+			Tags:        []string{"translation"},
+			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
 			Path:        "/translation:translate",
 			Summary:     "Translate selected document text",
 			Description: "Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.",

@@ -1,6 +1,8 @@
 package translation
 
 import (
+	"errors"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -9,7 +11,32 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
+	"lazymind/core/store"
 )
+
+func TestStatusDoesNotInitializeOrWriteConfiguration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:translation_readonly_status?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserSelectedProvider{}); err != nil {
+		t.Fatal(err)
+	}
+	previousDB, previousLazyDB, previousState := store.DB(), store.LazyLLMDB(), store.State()
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(previousDB, previousLazyDB, previousState) })
+	writes := 0
+	rejectWrite := func(tx *gorm.DB) { writes++; tx.AddError(errors.New("status must not write")) }
+	db.Callback().Create().Before("gorm:create").Register("reject-status-create", rejectWrite)
+	db.Callback().Update().Before("gorm:update").Register("reject-status-update", rejectWrite)
+	request := httptest.NewRequest("GET", "/translation/status", nil)
+	request.Header.Set("X-User-Id", "new-reader")
+	response := httptest.NewRecorder()
+	Status(response, request)
+	if response.Code != 200 || writes != 0 {
+		t.Fatalf("status=%d writes=%d body=%s", response.Code, writes, response.Body)
+	}
+}
 
 func TestDocumentProviderSnapshotUsesRequestedOwnedGroupWithoutChangingDefault(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:document_provider_by_group?mode=memory&cache=shared"), &gorm.Config{})

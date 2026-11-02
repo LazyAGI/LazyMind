@@ -54,16 +54,9 @@ import {
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import {
-  getTranslationServiceStatus,
-  getTranslationStatus,
-  isSingleEnglishWord,
   TranslationUnavailableError,
 } from "@/modules/knowledge/api/translation";
 import { usePdfSelectionTranslation } from "@/modules/knowledge/pages/knowledge/translationUiState";
-
-function loadTranslationStatus() {
-  return getTranslationStatus().catch(() => false);
-}
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -370,7 +363,6 @@ const AssistantMessage = (props: any) => {
   currentItemRef.current = item;
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
-  const translationConfiguredRef = useRef(false);
   const [translationSource, setTranslationSource] = useState("");
   const onTranslationError = useCallback((error: unknown) => {
     if (error instanceof TranslationUnavailableError && error.reason === "service_not_configured") {
@@ -384,7 +376,7 @@ const AssistantMessage = (props: any) => {
     loading: translationLoading,
     translate: translateSelectedText,
     clear: clearSelectedTranslation,
-  } = usePdfSelectionTranslation(getTranslationServiceStatus, onTranslationError);
+  } = usePdfSelectionTranslation(onTranslationError);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   const onOpenSideChatRef = useRef(onOpenSideChat);
@@ -553,19 +545,9 @@ const AssistantMessage = (props: any) => {
       );
       if (translateButton) {
         translateButton.textContent = t("knowledge.translateSelection");
-        const wordSelection=isSingleEnglishWord(text);
-        translateButton.classList.toggle("is-translation-disabled", !wordSelection);
-        translateButton.setAttribute("aria-disabled", String(!wordSelection));
-        translateButton.title = wordSelection?t("knowledge.translateSelection"):t("knowledge.translationConfigureTip");
-        void loadTranslationStatus().then((configured) => {
-          translationConfiguredRef.current = configured;
-          const disabled=!configured&&!isSingleEnglishWord(text);
-          translateButton.classList.toggle("is-translation-disabled", disabled);
-          translateButton.setAttribute("aria-disabled", String(disabled));
-          translateButton.title = !disabled
-            ? t("knowledge.translateSelection")
-            : `${t("knowledge.translationConfigureTip")} · ${t("knowledge.translationConfigureAction")}`;
-        });
+        translateButton.classList.remove("is-translation-disabled");
+        translateButton.setAttribute("aria-disabled", "false");
+        translateButton.title = t("knowledge.translateSelection");
       }
       actions.style.top = `${top}px`;
       actions.style.left = `${left}px`;

@@ -77,15 +77,16 @@ func translateWithConfigSource(ctx context.Context, client *http.Client, userID 
 	if text == "" {
 		return Response{}, errors.New("text is required")
 	}
-	if len([]rune(text)) > 5000 {
-		return Response{}, errors.New("text exceeds 5000 characters")
-	}
 	spec, ok := lookupProvider(config.ProviderName)
 	if !ok {
 		return Response{}, errors.New("unsupported translation provider")
 	}
 	if !spec.Keyless && strings.TrimSpace(config.APIKey) == "" {
 		return Response{}, errors.New("invalid translation credentials")
+	}
+	source = strings.ToLower(strings.TrimSpace(source))
+	if source != "" && source != "auto" && source != "en" && source != "zh" {
+		return Response{}, errors.New("unsupported translation source")
 	}
 	target = normalizeTarget(target, text)
 	parts, err := splitProviderText(text, spec)
@@ -107,33 +108,27 @@ func translateWithConfigSource(ctx context.Context, client *http.Client, userID 
 		}
 		output = append(output, translated)
 	}
-	return Response{TranslatedText: strings.Join(output, ""), Source: detectedSource, Target: target}, nil
+	return Response{TranslatedText: strings.Join(output, "\n"), Source: detectedSource, Target: target}, nil
 }
 
 func callSelectedProvider(ctx context.Context, client *http.Client, config modelconfig.TranslationConfig, name, text, source, target string) (string, string, error) {
 	switch name {
-	case "Tencent Translation":
-		credentials, err := parseTencentCredentials(config.APIKey)
-		if err != nil {
-			return "", "", err
-		}
-		return callTencent(ctx, config.BaseURL, credentials, text, target)
 	case "Google Translate Web":
-		return callGoogleTranslateWeb(ctx, client, text, target)
+		return callGoogleTranslateWeb(ctx, client, text, target, source)
 	case "Bing Translate Web":
-		return callBingTranslateWeb(ctx, client, text, target)
+		return callBingTranslateWeb(ctx, client, text, target, source)
 	case "Sogou Translate Web":
-		return callSogouTranslateWeb(ctx, client, text, target)
+		return callSogouTranslateWeb(ctx, client, text, target, source)
 	case "DeepL Web":
-		return callDeepLWeb(ctx, client, text, target)
+		return callDeepLWeb(ctx, client, text, target, source)
 	case "Tencent TranSmart Web":
-		return callTencentTranSmartWeb(ctx, client, text, target)
+		return callTencentTranSmartWeb(ctx, client, text, target, source)
 	case "Baidu Translation":
-		return callBaiduTranslation(ctx, client, config, text, target)
+		return callBaiduTranslation(ctx, client, config, text, target, source)
 	case "Niutrans":
-		return callNiutrans(ctx, client, config, text, target)
+		return callNiutrans(ctx, client, config, text, target, source)
 	case "Aliyun Translation":
-		return callAliyunTranslation(ctx, client, config, text, target)
+		return callAliyunTranslation(ctx, client, config, text, target, source)
 	case "Volcengine Translation":
 		return callVolcengineTranslation(ctx, client, config, text, target)
 	case "Microsoft Translator":
@@ -151,4 +146,12 @@ func callSelectedProvider(ctx context.Context, client *http.Client, config model
 	default:
 		return "", "", errors.New("unsupported translation provider")
 	}
+}
+
+// requestedSource preserves explicit language hints; an empty hint requests detection.
+func requestedSource(hints []string, automatic string) string {
+	if len(hints) == 0 || hints[0] == "" || hints[0] == "auto" {
+		return automatic
+	}
+	return hints[0]
 }

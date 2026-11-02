@@ -161,6 +161,7 @@ const KnowledgeDocumentContent = () => {
     configured: translationConfigured,
     provider: translationProvider,
     providerGroupId: translationProviderGroupId,
+    defaultProviderGroupId: defaultTranslationProviderGroupId,
     setProviderGroupId: setTranslationProviderGroupId,
     documentProviders: translationDocumentProviders,
     documentSupported: translationDocumentSupported,
@@ -207,7 +208,7 @@ const KnowledgeDocumentContent = () => {
     translate: translateSelectedText,
     translateWithLLM: retranslateSelectedTextWithLLM,
     clear: clearSelectedTranslation,
-  } = usePdfSelectionTranslation(refreshTranslationStatus, onTranslationError);
+  } = usePdfSelectionTranslation(onTranslationError);
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
   const [referenceImportSelection, setReferenceImportSelection] = useState<{ text: string; referenceId?: string; requestId: number }>();
@@ -1168,7 +1169,7 @@ const KnowledgeDocumentContent = () => {
                       </div>
                     )}
                     items={[
-                      { key: "translation", label: "翻译", children: <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={translationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} onRetranslateWithLLM={() => void retranslateSelectedTextWithLLM(translationSource)} /> },
+                      { key: "translation", label: "翻译", children: <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={defaultTranslationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} onRetranslateWithLLM={() => void retranslateSelectedTextWithLLM(translationSource)} /> },
                       {
                         key: "chat",
                         label: t("knowledge.pdfChatTab"),

@@ -194,7 +194,13 @@ func TestFreeAPIAdaptersRejectUntrustedBaseURLBeforeNetwork(t *testing.T) {
 		call func(context.Context, *http.Client, modelconfig.TranslationConfig, string, string) (string, string, error)
 		key  string
 	}{
-		{"Baidu", callBaiduTranslation, "id|secret"}, {"Alibaba", callAliyunTranslation, "id|secret"}, {"Volcengine", callVolcengineTranslation, "id|secret"}, {"Microsoft", callMicrosoftTranslator, "key|region"}, {"Google", callGoogleCloudTranslation, "key"}, {"Niutrans", callNiutrans, "key"},
+		{"Baidu", func(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string) (string, string, error) {
+			return callBaiduTranslation(ctx, client, cfg, text, target)
+		}, "id|secret"}, {"Alibaba", func(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string) (string, string, error) {
+			return callAliyunTranslation(ctx, client, cfg, text, target)
+		}, "id|secret"}, {"Volcengine", callVolcengineTranslation, "id|secret"}, {"Microsoft", callMicrosoftTranslator, "key|region"}, {"Google", callGoogleCloudTranslation, "key"}, {"Niutrans", func(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string) (string, string, error) {
+			return callNiutrans(ctx, client, cfg, text, target)
+		}, "key"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

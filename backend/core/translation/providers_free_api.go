@@ -98,7 +98,7 @@ func translationHTTPError(provider string, status int) error {
 	return fmt.Errorf("%s translation returned HTTP %d", provider, status)
 }
 
-func callBaiduTranslation(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string) (translated, source string, err error) {
+func callBaiduTranslation(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string, sourceHint ...string) (translated, source string, err error) {
 	const host = "fanyi-api.baidu.com"
 	if err := requireOfficialHost(cfg.BaseURL, host); err != nil {
 		return "", "", err
@@ -116,7 +116,7 @@ func callBaiduTranslation(ctx context.Context, client *http.Client, cfg modelcon
 		return "", "", errors.New("Baidu translation exceeds 1000 characters per request")
 	}
 	sum := md5.Sum([]byte(id + text + salt + secret))
-	form := url.Values{"q": {text}, "from": {"auto"}, "to": {target}, "appid": {id}, "salt": {salt}, "sign": {hex.EncodeToString(sum[:])}}
+	form := url.Values{"q": {text}, "from": {requestedSource(sourceHint, "auto")}, "to": {target}, "appid": {id}, "salt": {salt}, "sign": {hex.EncodeToString(sum[:])}}
 	req, err := newFreeAPIRequest(ctx, http.MethodPost, "https://"+host+"/api/trans/vip/translate", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", "", err
@@ -152,7 +152,7 @@ func callBaiduTranslation(ctx context.Context, client *http.Client, cfg modelcon
 	return strings.Join(parts, "\n"), out.From, nil
 }
 
-func callAliyunTranslation(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string) (translated, source string, err error) {
+func callAliyunTranslation(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string, sourceHint ...string) (translated, source string, err error) {
 	const host = "mt.cn-hangzhou.aliyuncs.com"
 	if err := requireOfficialHost(cfg.BaseURL, host); err != nil {
 		return "", "", err
@@ -165,7 +165,7 @@ func callAliyunTranslation(ctx context.Context, client *http.Client, cfg modelco
 	if err != nil {
 		return "", "", err
 	}
-	form := url.Values{"FormatType": {"text"}, "Scene": {"general"}, "SourceLanguage": {"auto"}, "SourceText": {text}, "TargetLanguage": {target}}
+	form := url.Values{"FormatType": {"text"}, "Scene": {"general"}, "SourceLanguage": {requestedSource(sourceHint, "auto")}, "SourceText": {text}, "TargetLanguage": {target}}
 	payload := []byte(form.Encode())
 	req, err := newFreeAPIRequest(ctx, http.MethodPost, "https://"+host+"/", "application/x-www-form-urlencoded", bytes.NewReader(payload))
 	if err != nil {
@@ -393,7 +393,7 @@ func callGoogleCloudTranslation(ctx context.Context, client *http.Client, cfg mo
 	return out.Data.Translations[0].TranslatedText, out.Data.Translations[0].DetectedSourceLanguage, nil
 }
 
-func callNiutrans(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string) (translated, source string, err error) {
+func callNiutrans(ctx context.Context, client *http.Client, cfg modelconfig.TranslationConfig, text, target string, sourceHint ...string) (translated, source string, err error) {
 	const host = "api.niutrans.com"
 	if err := requireOfficialHost(cfg.BaseURL, host); err != nil {
 		return "", "", err
@@ -402,7 +402,7 @@ func callNiutrans(ctx context.Context, client *http.Client, cfg modelconfig.Tran
 	if err != nil {
 		return "", "", err
 	}
-	form := url.Values{"apikey": {key}, "from": {"auto"}, "to": {target}, "src_text": {text}}
+	form := url.Values{"apikey": {key}, "from": {requestedSource(sourceHint, "auto")}, "to": {target}, "src_text": {text}}
 	req, err := newFreeAPIRequest(ctx, http.MethodPost, "https://"+host+"/NiuTransServer/translation", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", "", err

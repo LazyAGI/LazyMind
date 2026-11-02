@@ -898,12 +898,7 @@ func IsTranslationProviderAvailable(name string) bool {
 
 // Only built-in, fixed-endpoint translators may be selected without a secret.
 func isKeylessTranslationProvider(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "google translate web", "bing translate web", "sogou translate web", "deepl web", "tencent transmart web":
-		return true
-	default:
-		return false
-	}
+	return modelprovider.IsKeylessTranslationProvider(name)
 }
 
 func loadSelectedProviderConfig(

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 )
 
 type dispatchTransport func(*http.Request) (*http.Response, error)
@@ -92,7 +93,7 @@ func TestSplitProviderTextRespectsFreeBaiduLimit(t *testing.T) {
 	}
 }
 
-func TestProviderChunkReassemblyDoesNotInventNewlines(t *testing.T) {
+func TestProviderChunkReassemblySeparatesIndependentTranslations(t *testing.T) {
 	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
 		if err := req.ParseForm(); err != nil {
 			t.Fatal(err)
@@ -105,13 +106,13 @@ func TestProviderChunkReassemblyDoesNotInventNewlines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.TranslatedText != input {
+	if got.TranslatedText != strings.Repeat("a", 1000)+"\na" {
 		t.Fatalf("reassembled text differs: len=%d, newline=%v", len(got.TranslatedText), strings.Contains(got.TranslatedText, "\n"))
 	}
 }
 
 func TestTokenHubChunksStayBelowInputTokenLimit(t *testing.T) {
-	spec, ok := translationProviders["tencent tokenhub translation"]
+	spec, ok := modelprovider.TranslationProvider("tencent tokenhub translation")
 	if !ok {
 		t.Fatal("missing TokenHub provider")
 	}
@@ -126,5 +127,18 @@ func TestTokenHubChunksStayBelowInputTokenLimit(t *testing.T) {
 		if len([]byte(part)) > 3000 {
 			t.Fatalf("TokenHub chunk is %d UTF-8 bytes", len([]byte(part)))
 		}
+	}
+}
+
+func TestDispatchPreservesExplicitSourceLanguage(t *testing.T) {
+	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("sl") != "zh" {
+			t.Fatalf("source language was discarded: %s", req.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[["Hello","zh"]]`)), Header: make(http.Header)}, nil
+	})}
+	got, err := translateWithConfigSource(t.Context(), client, t.Name(), modelconfig.TranslationConfig{ProviderName: "Google Translate Web"}, "你好", "zh", "en")
+	if err != nil || got.TranslatedText != "Hello" {
+		t.Fatalf("result=%+v error=%v", got, err)
 	}
 }

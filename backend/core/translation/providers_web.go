@@ -46,7 +46,7 @@ func webTranslationBody(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
-func callGoogleTranslateWeb(ctx context.Context, client *http.Client, text, target string) (translated, source string, err error) {
+func callGoogleTranslateWeb(ctx context.Context, client *http.Client, text, target string, sourceHint ...string) (translated, source string, err error) {
 	if target != "zh" && target != "en" {
 		return "", "", errors.New("unsupported Google web translation target")
 	}
@@ -54,7 +54,7 @@ func callGoogleTranslateWeb(ctx context.Context, client *http.Client, text, targ
 	query := endpoint.Query()
 	query.Set("client", "gtx")
 	query.Set("dt", "t")
-	query.Set("sl", "auto")
+	query.Set("sl", requestedSource(sourceHint, "auto"))
 	query.Set("tl", target)
 	endpoint.RawQuery = query.Encode()
 	form := url.Values{"q": {text}}
@@ -82,7 +82,7 @@ func callGoogleTranslateWeb(ctx context.Context, client *http.Client, text, targ
 	return translated, source, nil
 }
 
-func callTencentTranSmartWeb(ctx context.Context, client *http.Client, text, target string) (translated, source string, err error) {
+func callTencentTranSmartWeb(ctx context.Context, client *http.Client, text, target string, sourceHint ...string) (translated, source string, err error) {
 	if target != "zh" && target != "en" {
 		return "", "", errors.New("unsupported TranSmart translation target")
 	}
@@ -94,7 +94,7 @@ func callTencentTranSmartWeb(ctx context.Context, client *http.Client, text, tar
 		"type":           "plain",
 		"model_category": "normal",
 		"source": map[string]any{
-			"lang": "auto", "text_list": []string{text},
+			"lang": requestedSource(sourceHint, "auto"), "text_list": []string{text},
 		},
 		"target": map[string]string{"lang": target},
 	}

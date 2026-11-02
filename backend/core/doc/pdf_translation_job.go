@@ -316,6 +316,9 @@ func updateTranslationRenderJob(ctx context.Context, payload pdfTranslationPaylo
 }
 
 func splitRunes(value string, size int) []string {
+	if size <= 0 {
+		return []string{value}
+	}
 	runes := []rune(value)
 	var result []string
 	for start := 0; start < len(runes); start += size {
@@ -336,45 +339,6 @@ type translationChunkTask struct {
 	text       string
 	weight     int64
 }
-
-type translationRateGate struct {
-	mu   sync.Mutex
-	next time.Time
-}
-
-func newTranslationRateGate(providerType string) *translationRateGate {
-	if providerType != "api" {
-		return nil
-	}
-	return &translationRateGate{}
-}
-
-func (gate *translationRateGate) Wait(ctx context.Context) error {
-	if gate == nil {
-		return nil
-	}
-	gate.mu.Lock()
-	now := time.Now()
-	wait := time.Duration(0)
-	if gate.next.After(now) {
-		wait = gate.next.Sub(now)
-	}
-	gate.next = now.Add(wait + 275*time.Millisecond)
-	gate.mu.Unlock()
-	if wait == 0 {
-		return nil
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func (gate *translationRateGate) Close() {}
 
 func documentTranslationConcurrency() int {
 	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("DOCUMENT_TRANSLATION_CONCURRENCY")))
@@ -494,7 +458,7 @@ func translateUnitsParallel(
 	}
 	result := make(map[string]string, len(units))
 	for index, unit := range units {
-		result[unit.ID] = strings.Join(chunksByUnit[index], "")
+		result[unit.ID] = strings.Join(chunksByUnit[index], "\n")
 	}
 	return result, nil
 }
@@ -636,17 +600,12 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 	for _, index := range translatable {
 		units = append(units, translationWorkUnit{ID: manifest.Blocks[index].ID, Text: manifest.Blocks[index].Text})
 	}
-	chunkSize := 1800
+	chunkSize := 0
 	if payload.ProviderType == "llm" {
 		chunkSize = 5000
 	}
-	rateGate := newTranslationRateGate(payload.ProviderType)
-	defer rateGate.Close()
 	translations, err := translateUnitsParallel(ctx, units, chunkSize, documentTranslationConcurrency(),
 		func(callCtx context.Context, text string) (string, error) {
-			if err := rateGate.Wait(callCtx); err != nil {
-				return "", err
-			}
 			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage, payload.TranslationConfig)
 		}, func(completed, total int64) error {
 			if err := reporter.Heartbeat(ctx); err != nil {
@@ -733,17 +692,12 @@ func executeBackendDocumentTranslation(ctx context.Context, job asyncjob.Job, re
 	for _, unit := range units {
 		workUnits = append(workUnits, translationWorkUnit{ID: unit.ID, Text: unit.Text})
 	}
-	chunkSize := 1800
+	chunkSize := 0
 	if payload.ProviderType == "llm" {
 		chunkSize = 5000
 	}
-	rateGate := newTranslationRateGate(payload.ProviderType)
-	defer rateGate.Close()
 	translations, err := translateUnitsParallel(ctx, workUnits, chunkSize, documentTranslationConcurrency(),
 		func(callCtx context.Context, text string) (string, error) {
-			if err := rateGate.Wait(callCtx); err != nil {
-				return "", err
-			}
 			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage, apiSnapshot)
 		}, func(completed, total int64) error {
 			if err := reporter.Heartbeat(ctx); err != nil {

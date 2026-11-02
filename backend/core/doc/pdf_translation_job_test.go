@@ -85,11 +85,27 @@ func TestTranslateUnitsParallelPreservesOrderAndReportsWeightedProgress(t *testi
 	if maximum.Load() < 2 {
 		t.Fatalf("expected parallel execution, max active=%d", maximum.Load())
 	}
-	if result["a"] != "[123][456]" || result["b"] != "[abc][def]" {
+	if result["a"] != "[123]\n[456]" || result["b"] != "[abc]\n[def]" {
 		t.Fatalf("unexpected ordered result: %#v", result)
 	}
 	if len(progress) != 4 || progress[len(progress)-1] != [2]int64{12, 12} {
 		t.Fatalf("unexpected progress: %#v", progress)
+	}
+}
+
+func TestDocumentAPIUnitsReachProviderWithoutResplitting(t *testing.T) {
+	text := strings.Repeat("paper text ", 600)
+	calls := 0
+	result, err := translateUnitsParallel(t.Context(), []translationWorkUnit{{ID: "paragraph", Text: text}}, 0, 1,
+		func(_ context.Context, input string) (string, error) {
+			calls++
+			if input != text {
+				t.Fatal("document layer split the provider input")
+			}
+			return "translated paragraph", nil
+		}, func(_, _ int64) error { return nil })
+	if err != nil || calls != 1 || result["paragraph"] != "translated paragraph" {
+		t.Fatalf("result=%v calls=%d error=%v", result, calls, err)
 	}
 }
 

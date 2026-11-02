@@ -34,11 +34,10 @@ export async function getTranslationStatus(): Promise<boolean> {
 	return (await getTranslationServiceStatus()).configured;
 }
 
-export async function getTranslationServiceStatus(): Promise<TranslationServiceStatus> {
-	const response = await axiosInstance.get<ApiEnvelope<Partial<TranslationServiceStatus>>>(
-    `${BASE_URL}/api/core/translation/status`,
-    { silentError: true } as never,
-  );
+export async function getTranslationServiceStatus(initialize = false): Promise<TranslationServiceStatus> {
+  const response = initialize
+    ? await axiosInstance.post<ApiEnvelope<Partial<TranslationServiceStatus>>>(`${BASE_URL}/api/core/translation/initialize`, {}, { silentError: true } as never)
+    : await axiosInstance.get<ApiEnvelope<Partial<TranslationServiceStatus>>>(`${BASE_URL}/api/core/translation/status`, { silentError: true } as never);
 	return {
 		configured: Boolean(response.data.data?.configured),
 		provider: response.data.data?.provider || "",
@@ -67,9 +66,14 @@ export async function translateSelectionText(text:string, source?:"en"|"zh"):Pro
     const entry=items.find(item=>item.senses?.some(sense=>sense.translation?.trim()));
     const translated=entry?.senses?.find(sense=>sense.translation?.trim())?.translation?.replace(/\\n/g,"\n").trim();
     if(translated)return{translated_text:translated,source:`dictionary:${entry?.source_name||"built-in"}`,target:"zh"};
-    if(!await getTranslationStatus())throw new TranslationUnavailableError("dictionary_not_found");
-  }else if(!await getTranslationStatus()){
-    throw new TranslationUnavailableError("service_not_configured");
+
   }
-  return translateText(value,source?(source==="zh"?"en":"zh"):undefined,source);
+  try {
+    return await translateText(value,source?(source==="zh"?"en":"zh"):undefined,source);
+  } catch (error) {
+    if ((error as { response?: { status?: number } }).response?.status === 412) {
+      throw new TranslationUnavailableError(!source && isSingleEnglishWord(value) ? "dictionary_not_found" : "service_not_configured");
+    }
+    throw error;
+  }
 }

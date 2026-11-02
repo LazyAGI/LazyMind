@@ -34,6 +34,7 @@ func init() {
 			"unsupported google web translation target",
 			"unsupported sogou web translation target",
 			"unsupported translation target",
+			"unsupported translation source",
 			"unsupported transmart translation target",
 		}},
 		{2005203, http.StatusBadGateway, "Translation provider request failed", []string{

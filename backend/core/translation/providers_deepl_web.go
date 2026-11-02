@@ -14,7 +14,7 @@ import (
 // It is undocumented for third-party use and may change or rate-limit requests.
 const deepLWebURL = "https://oneshot-free.www.deepl.com/v1/translate"
 
-func callDeepLWeb(ctx context.Context, client *http.Client, text, target string) (translated, source string, err error) {
+func callDeepLWeb(ctx context.Context, client *http.Client, text, target string, sourceHint ...string) (translated, source string, err error) {
 	var targetLanguage string
 	switch target {
 	case "zh":
@@ -26,9 +26,10 @@ func callDeepLWeb(ctx context.Context, client *http.Client, text, target string)
 	}
 
 	payload, err := json.Marshal(struct {
+		SourceLang string   `json:"source_lang,omitempty"`
 		Text       []string `json:"text"`
 		TargetLang string   `json:"target_lang"`
-	}{Text: []string{text}, TargetLang: targetLanguage})
+	}{SourceLang: requestedSource(sourceHint, ""), Text: []string{text}, TargetLang: targetLanguage})
 	if err != nil {
 		return "", "", err
 	}

@@ -1,19 +1,14 @@
 package translation
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 	"unicode"
 
 	"gorm.io/gorm"
@@ -22,13 +17,6 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
-)
-
-const (
-	tencentService = "tmt"
-	tencentVersion = "2018-03-21"
-	tencentAction  = "TextTranslate"
-	tencentRegion  = "ap-beijing"
 )
 
 type request struct {
@@ -92,28 +80,16 @@ func DocumentProviderSnapshot(ctx context.Context, db *gorm.DB, userID, groupID 
 	return nil, false, nil
 }
 
-type tencentCredentials struct {
-	SecretID  string
-	SecretKey string
-}
-
-type tencentResponse struct {
-	Response struct {
-		Source string `json:"Source"`
-		Target string `json:"Target"`
-		Text   string `json:"TargetText"`
-		Error  *struct {
-			Code    string `json:"Code"`
-			Message string `json:"Message"`
-		} `json:"Error,omitempty"`
-	} `json:"Response"`
-}
-
-func Status(w http.ResponseWriter, r *http.Request) {
+// Initialize provisions free connections explicitly, outside read-only status requests.
+func Initialize(w http.ResponseWriter, r *http.Request) {
 	if err := modelprovider.EnsureDefaultTranslationServices(r.Context(), store.DB(), store.UserID(r)); err != nil {
 		common.ReplyErr(w, "initialize free translation services failed", http.StatusInternalServerError)
 		return
 	}
+	Status(w, r)
+}
+
+func Status(w http.ResponseWriter, r *http.Request) {
 	groups, err := modelconfig.ListTranslationProviderGroups(r.Context(), store.DB(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, "load translation providers failed", http.StatusInternalServerError)
@@ -159,6 +135,13 @@ func Translate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config, err := modelconfig.LoadTranslationConfig(r.Context(), store.DB(), store.UserID(r))
+	if err == nil && config == nil {
+		err = modelprovider.EnsureDefaultTranslationServices(r.Context(), store.DB(), store.UserID(r))
+		if err == nil {
+			config, err = modelconfig.LoadTranslationConfig(r.Context(), store.DB(), store.UserID(r))
+		}
+	}
+
 	if err != nil {
 		common.ReplyErr(w, "load translation config failed", http.StatusInternalServerError)
 		return
@@ -252,15 +235,6 @@ func normalizeTarget(target, text string) string {
 	return "zh"
 }
 
-func parseTencentCredentials(raw string) (tencentCredentials, error) {
-	secretID, secretKey, ok := strings.Cut(strings.TrimSpace(raw), "|")
-	secretID, secretKey = strings.TrimSpace(secretID), strings.TrimSpace(secretKey)
-	if !ok || secretID == "" || secretKey == "" {
-		return tencentCredentials{}, errors.New("SecretId and SecretKey are required")
-	}
-	return tencentCredentials{SecretID: secretID, SecretKey: secretKey}, nil
-}
-
 func sha256Hex(value []byte) string {
 	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])
@@ -270,61 +244,4 @@ func hmacSHA256(key []byte, value string) []byte {
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte(value))
 	return mac.Sum(nil)
-}
-
-func callTencent(ctx context.Context, baseURL string, credentials tencentCredentials, text, target string) (string, string, error) {
-	payload, err := json.Marshal(map[string]any{
-		"SourceText": text, "Source": "auto", "Target": target, "ProjectId": 0,
-	})
-	if err != nil {
-		return "", "", err
-	}
-	endpoint, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || endpoint.Scheme != "https" || !strings.EqualFold(endpoint.Hostname(), "tmt.tencentcloudapi.com") {
-		return "", "", errors.New("invalid Tencent translation endpoint")
-	}
-	timestamp := time.Now().Unix()
-	date := time.Unix(timestamp, 0).UTC().Format("2006-01-02")
-	canonicalHeaders := "content-type:application/json; charset=utf-8\nhost:" + endpoint.Host + "\n"
-	signedHeaders := "content-type;host"
-	canonicalRequest := "POST\n/\n\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + sha256Hex(payload)
-	credentialScope := date + "/" + tencentService + "/tc3_request"
-	stringToSign := "TC3-HMAC-SHA256\n" + fmt.Sprint(timestamp) + "\n" + credentialScope + "\n" + sha256Hex([]byte(canonicalRequest))
-	secretDate := hmacSHA256([]byte("TC3"+credentials.SecretKey), date)
-	secretService := hmacSHA256(secretDate, tencentService)
-	secretSigning := hmacSHA256(secretService, "tc3_request")
-	signature := hex.EncodeToString(hmacSHA256(secretSigning, stringToSign))
-	authorization := "TC3-HMAC-SHA256 Credential=" + credentials.SecretID + "/" + credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + signature
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
-	if err != nil {
-		return "", "", err
-	}
-	req.Header.Set("Authorization", authorization)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Host", endpoint.Host)
-	req.Header.Set("X-TC-Action", tencentAction)
-	req.Header.Set("X-TC-Timestamp", fmt.Sprint(timestamp))
-	req.Header.Set("X-TC-Version", tencentVersion)
-	req.Header.Set("X-TC-Region", tencentRegion)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("Tencent translation request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", "", err
-	}
-	var decoded tencentResponse
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return "", "", fmt.Errorf("Tencent translation returned HTTP %d", resp.StatusCode)
-	}
-	if decoded.Response.Error != nil {
-		return "", "", fmt.Errorf("Tencent translation failed: %s", decoded.Response.Error.Message)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || decoded.Response.Text == "" {
-		return "", "", fmt.Errorf("Tencent translation returned HTTP %d", resp.StatusCode)
-	}
-	return decoded.Response.Text, decoded.Response.Source, nil
 }

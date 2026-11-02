@@ -32,7 +32,7 @@ type sogouTranslationState struct {
 	} `json:"textTranslate"`
 }
 
-func callSogouTranslateWeb(ctx context.Context, client *http.Client, text, target string) (translated, source string, err error) {
+func callSogouTranslateWeb(ctx context.Context, client *http.Client, text, target string, sourceHint ...string) (translated, source string, err error) {
 	var targetCode string
 	switch target {
 	case "zh":
@@ -45,7 +45,11 @@ func callSogouTranslateWeb(ctx context.Context, client *http.Client, text, targe
 	endpoint, _ := url.Parse(sogouTranslateWebURL)
 	query := endpoint.Query()
 	query.Set("keyword", text)
-	query.Set("transfrom", "auto")
+	from := requestedSource(sourceHint, "auto")
+	if from == "zh" {
+		from = "zh-CHS"
+	}
+	query.Set("transfrom", from)
 	query.Set("transto", targetCode)
 	query.Set("model", "general")
 	endpoint.RawQuery = query.Encode()

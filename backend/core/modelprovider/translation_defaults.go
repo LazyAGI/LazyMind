@@ -2,7 +2,6 @@ package modelprovider
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -10,15 +9,6 @@ import (
 
 	"lazymind/core/common/orm"
 )
-
-func IsTranslationProviderAvailable(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "google translate web", "bing translate web", "sogou translate web", "deepl web", "tencent transmart web", "baidu translation", "aliyun translation", "niutrans":
-		return true
-	default:
-		return false
-	}
-}
 
 // EnsureDefaultTranslationServices enables built-in free sources for every user.
 // Existing connections and the user's explicitly chosen default are preserved.
@@ -34,7 +24,7 @@ func EnsureDefaultTranslationServices(ctx context.Context, db *gorm.DB, userID s
 		now := time.Now().UTC()
 		defaultGroupID := ""
 		for _, provider := range providers {
-			if !IsTranslationProviderAvailable(provider.Name) || !provider.HasCapability("keyless_translation") {
+			if !IsKeylessTranslationProvider(provider.Name) {
 				continue
 			}
 			var group orm.UserModelProviderGroup

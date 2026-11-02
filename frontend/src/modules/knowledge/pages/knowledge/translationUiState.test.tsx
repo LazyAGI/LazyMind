@@ -38,6 +38,22 @@ describe("document translation service state", () => {
     expect(result.current.documentProviders).toHaveLength(2);
     act(() => result.current.setProviderGroupId("baidu"));
     expect(result.current.provider).toBe("Baidu Translation");
+    expect(result.current.defaultProviderGroupId).toBe("memory");
+  });
+
+  it("keeps the persisted default separate from a cancelled document choice", async () => {
+    const status = { configured: true, provider: "Google Translate Web", document_supported: true, selected_group_id: "google",
+      document_providers: [{ group_id: "google", group_name: "Google", provider_name: "Google Translate Web" },
+        { group_id: "bing", group_name: "Bing", provider_name: "Bing Translate Web" }] };
+    mocks.status.mockResolvedValue(status);
+    const { result } = renderHook(() => useDocumentTranslationService());
+    await waitFor(() => expect(result.current.defaultProviderGroupId).toBe("google"));
+    act(() => { result.current.setProviderGroupId("bing"); result.current.setModalOpen(false); });
+    expect(result.current.providerGroupId).toBe("bing");
+    expect(result.current.defaultProviderGroupId).toBe("google");
+    mocks.status.mockResolvedValue({ ...status, selected_group_id: "bing", provider: "Bing Translate Web" });
+    await act(async () => { await result.current.refreshStatus(); });
+    expect(result.current.defaultProviderGroupId).toBe("bing");
   });
 
   it("drops a removed document provider selection after refreshing", async () => {
@@ -99,8 +115,7 @@ describe("PDF selection translation", () => {
     let finishTranslation!: (value: { translated_text: string }) => void;
     const pending = new Promise<{ translated_text: string }>((resolve) => { finishTranslation = resolve; });
     mocks.translate.mockReturnValue(pending);
-    const refreshStatus = vi.fn().mockResolvedValue({ configured: true, provider: "Google Translate Web", document_supported: true });
-    const { result } = renderHook(() => usePdfSelectionTranslation(refreshStatus, vi.fn()));
+    const { result } = renderHook(() => usePdfSelectionTranslation(vi.fn()));
 
     act(() => { void result.current.translate("paper A"); });
     await waitFor(() => expect(mocks.translate).toHaveBeenCalledWith("paper A", undefined));
@@ -112,9 +127,8 @@ describe("PDF selection translation", () => {
   });
 
   it("keeps other providers on automatic source detection", async () => {
-    const refreshStatus = vi.fn().mockResolvedValue({ configured: true, provider: "DeepL", document_supported: true });
     mocks.translate.mockResolvedValue({ translated_text: "你好", source: "en", target: "zh" });
-    const { result } = renderHook(() => usePdfSelectionTranslation(refreshStatus, vi.fn()));
+    const { result } = renderHook(() => usePdfSelectionTranslation(vi.fn()));
 
     await act(async () => { await result.current.translate("hello"); });
 
@@ -122,14 +136,12 @@ describe("PDF selection translation", () => {
   });
 
   it("replaces the API result with an LLM translation of the current source", async () => {
-    const refreshStatus = vi.fn();
     mocks.translateWithLLM.mockResolvedValue("新的译文");
-    const { result } = renderHook(() => usePdfSelectionTranslation(refreshStatus, vi.fn()));
+    const { result } = renderHook(() => usePdfSelectionTranslation(vi.fn()));
 
     await act(async () => { await result.current.translateWithLLM("paper sentence"); });
 
     expect(mocks.translateWithLLM).toHaveBeenCalledWith("paper sentence", "zh");
     expect(result.current.result).toBe("新的译文");
-    expect(refreshStatus).not.toHaveBeenCalled();
   });
 });

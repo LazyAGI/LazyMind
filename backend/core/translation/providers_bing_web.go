@@ -23,7 +23,7 @@ var (
 
 // Bing's public translator page exposes a short-lived, anonymous session.
 // This website endpoint is undocumented and may change or rate-limit requests.
-func callBingTranslateWeb(ctx context.Context, client *http.Client, text, target string) (translated, source string, err error) {
+func callBingTranslateWeb(ctx context.Context, client *http.Client, text, target string, sourceHint ...string) (translated, source string, err error) {
 	to := target
 	if target == "zh" {
 		to = "zh-Hans"
@@ -71,7 +71,11 @@ func callBingTranslateWeb(ctx context.Context, client *http.Client, text, target
 	iid := iids[len(iids)-1][1]
 	query := url.Values{"isVertical": {"1"}, "IG": {string(ig[1])}, "IID": {string(iid)}}
 	endpoint := &url.URL{Scheme: pageURL.Scheme, Host: pageURL.Host, Path: "/ttranslatev3", RawQuery: query.Encode()}
-	form := url.Values{"fromLang": {"auto-detect"}, "to": {to}, "text": {text}, "token": {string(credentials[2])}, "key": {string(credentials[1])}}
+	from := requestedSource(sourceHint, "auto-detect")
+	if from == "zh" {
+		from = "zh-Hans"
+	}
+	form := url.Values{"fromLang": {from}, "to": {to}, "text": {text}, "token": {string(credentials[2])}, "key": {string(credentials[1])}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", "", err

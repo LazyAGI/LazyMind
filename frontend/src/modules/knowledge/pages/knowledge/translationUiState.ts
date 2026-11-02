@@ -24,12 +24,12 @@ export function useDocumentTranslationService() {
   const [refreshing, setRefreshing] = useState(false);
   const requestGeneration = useRef(0);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async (initialize = false) => {
     const generation = ++requestGeneration.current;
     setRefreshing(true);
     let nextStatus = unavailableStatus;
     try {
-      nextStatus = await getTranslationServiceStatus();
+      nextStatus = await getTranslationServiceStatus(initialize);
     } catch {
       // The API choice stays unavailable until a later successful refresh.
     }
@@ -47,7 +47,7 @@ export function useDocumentTranslationService() {
   }, []);
 
   useEffect(() => {
-    void refreshStatus();
+    void refreshStatus(true);
     return () => { requestGeneration.current += 1; };
   }, [refreshStatus]);
 
@@ -59,6 +59,7 @@ export function useDocumentTranslationService() {
   return {
     provider: documentProviders.find((item) => item.group_id === providerGroupId)?.provider_name || status.provider,
     providerGroupId,
+    defaultProviderGroupId: status.selected_group_id,
     setProviderGroupId,
     documentProviders,
     documentSupported: documentProviders.length > 0,
@@ -86,7 +87,6 @@ export function getTranslationProgressLabel(
 }
 
 export function usePdfSelectionTranslation(
-  refreshStatus: () => Promise<TranslationServiceStatus>,
   onError: (error: unknown) => void,
 ) {
   const [result, setResult] = useState("");
@@ -109,8 +109,6 @@ export function usePdfSelectionTranslation(
     setResult("");
     setLoading(true);
     try {
-      await refreshStatus();
-      if (requestGeneration.current !== generation) return;
       await performTranslation(text, generation);
     } catch (error) {
       if (requestGeneration.current === generation) {
@@ -118,7 +116,7 @@ export function usePdfSelectionTranslation(
         setLoading(false);
       }
     }
-  }, [onError, performTranslation, refreshStatus]);
+  }, [onError, performTranslation]);
 
   const translateWithLLM = useCallback(async (text: string) => {
     const source = text.trim();

@@ -280,12 +280,7 @@ function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
   return normalizeProviderName(service?.name || "") === "googlecustomsearch";
 }
 
-function isTencentTranslation(service?: ExternalServiceConfig | null) {
-  return normalizeProviderName(service?.name || "") === "tencenttranslation";
-}
-
 const translationCredentialPairs: Record<string, { first: string; second: string; secondRequired?: boolean }> = {
-  tencenttranslation: { first: "tencentSecretIdPlaceholder", second: "tencentSecretKeyPlaceholder" },
   baidutranslation: { first: "baiduAppIdPlaceholder", second: "baiduSecretPlaceholder" },
   aliyuntranslation: { first: "aliyunAccessKeyIdPlaceholder", second: "aliyunAccessKeySecretPlaceholder" },
   volcenginetranslation: { first: "volcengineAccessKeyIdPlaceholder", second: "volcengineSecretAccessKeyPlaceholder" },
@@ -305,7 +300,6 @@ const translationSetupUrls: Record<string, string> = {
   deepl: "https://developers.deepl.com/docs/getting-started/auth",
   caiyuntranslation: "https://platform.caiyunapp.com/",
   tencenttokenhubtranslation: "https://cloud.tencent.com/document/product/1823/130079",
-  tencenttranslation: "https://console.cloud.tencent.com/cam/capi",
 };
 
 function getTranslationSetupUrl(service: ExternalServiceConfig) {
@@ -1366,15 +1360,9 @@ export default function ExternalServicesPage({
                   ) : null}
                 </div>
                 <ol>
-                  <li>{t(isTencentTranslation(activeService)
-                    ? "modelProvider.external.tencentSetupStepEnable"
-                    : "modelProvider.external.translationGuideStepOpen")}</li>
-                  <li>{t(isTencentTranslation(activeService)
-                    ? "modelProvider.external.tencentSetupStepCredential"
-                    : "modelProvider.external.translationGuideStepCreate")}</li>
-                  <li>{t(isTencentTranslation(activeService)
-                    ? "modelProvider.external.tencentSetupStepPaste"
-                    : "modelProvider.external.translationGuideStepSave")}</li>
+                  <li>{t("modelProvider.external.translationGuideStepOpen")}</li>
+                  <li>{t("modelProvider.external.translationGuideStepCreate")}</li>
+                  <li>{t("modelProvider.external.translationGuideStepSave")}</li>
                 </ol>
               </section>
             ) : null}
@@ -1430,7 +1418,7 @@ export default function ExternalServicesPage({
               <Alert type="info" showIcon message={t("modelProvider.external.keylessTranslationNote")} />
             ) : <div className="model-provider-key-list">
               <div className="model-provider-key-list-label">
-                {isTencentTranslation(activeService) ? t("modelProvider.external.tencentCredentials") : t("modelProvider.external.credentials")}
+                {t("modelProvider.external.credentials")}
               </div>
               {keysError ? (
                 <Alert

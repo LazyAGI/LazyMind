@@ -1041,6 +1041,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}", []string{"model.write"}, modelprovider.ReplaceKey)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal", []string{"model.write"}, modelprovider.RevealKey)
 	handleAPI(r, "GET", "/translation/status", []string{"document.read"}, translation.Status)
+	handleAPI(r, "POST", "/translation/initialize", []string{"document.read"}, translation.Initialize)
 	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
 
 	// ----- Vocabulary / Anki provider -----
