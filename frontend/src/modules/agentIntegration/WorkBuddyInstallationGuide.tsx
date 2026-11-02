@@ -62,13 +62,13 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       if (current) onStatus(current);
       const connection = current?.connection;
       const configured = current?.state === "enabled" && connection?.mcp_configured;
-      const pluginReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
-      const ready = pluginReady && (agent !== "codex" || connection.control_ready && !current?.issue);
+      const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
+      const ready = connectorReady && (agent !== "codex" || connection.control_ready && !current?.issue);
       setControlUnavailable(Boolean(ready && (!connection?.control_ready || current?.issue)));
       setControlError(current?.issue ? (agent === "codex" ? text("controlUnavailableDescription") : workbuddyErrorMessage(current, t)) : "");
-      if (!ready && agent === "codex") setError(pluginReady && current?.issue?.code === "capability_unavailable"
+      if (!ready && agent === "codex") setError(connectorReady && current?.issue?.code === "capability_unavailable"
         ? t("agentIntegration.connectionErrors.capability_unavailable")
-        : text(pluginReady ? "controlUnavailableDescription" : "notReadyDescription"));
+        : text(connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
       else if (!ready && current?.issue) setError(workbuddyErrorMessage(current, t));
       else if (!ready) setError(text(!configured ? "configurationMissingDescription"
         : connection?.mcp_trusted === undefined || connection.mcp_enabled === undefined ? "checkFailedDescription"

@@ -2066,7 +2066,7 @@ const enUS = {
       checkFailedDescription: "Connection status is temporarily unavailable. Please try again.",
       notReadyTitle: "Setup is incomplete",
       notReadyDescription: "Confirm the plugin is enabled. Checking only reads status and does not start Codex. To start or restart it, choose Reconnect, save your work, and confirm connecting.",
-      successTitle: "Plugin setup complete",
+      successTitle: "Setup complete",
       successDescription: "LazyMind Workflow is installed and enabled, and Workflow session control is connected.",
       trustTitle: "Trust the first connection",
       trustDescription: "Click Trust if prompted. If no prompt appears, continue.",
