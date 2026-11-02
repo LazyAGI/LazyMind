@@ -3,7 +3,6 @@ package academic
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,7 +27,7 @@ type paperPDFClientKey struct{}
 func pdfLookupError(detail string) error { return fmt.Errorf("PDF 来源查询失败: %s", detail) }
 
 func newPaperPDFClient() *http.Client {
-	return &http.Client{Timeout: paperPDFProviderTimeout, Transport: zoteroTransport(false), CheckRedirect: func(r *http.Request, via []*http.Request) error {
+	return &http.Client{Timeout: paperPDFLookupTimeout, Transport: zoteroTransport(false), CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 3 || !zoteroAllowedURL(r.URL, false) {
 			return pdfLookupError("来源重定向不可用")
 		}
@@ -47,11 +46,10 @@ func lookupDOIPDF(ctx context.Context, doi string) paperPDFLookup {
 	return lookupDOIPDFSources(ctx, doi, sciHubSources(), client)
 }
 
-// Ten distinct, configurable HTTPS sources. A reachable paper page is not
+// Keep a small configurable shortlist. A reachable paper page is not
 // evidence of a PDF: every candidate must pass the bounded content probe.
 var defaultSciHubSources = []string{
-	"https://sci-hub.ee", "https://sci-hub.ru", "https://sci-hub.st", "https://sci-hub.al", "https://sci-hub.mk",
-	"https://sci-hub.box", "https://sci-hub.su", "https://sci-hub.red", "https://sci-hub.vg", "https://sci-hub.se",
+	"https://sci-hub.al", "https://sci-hub.mk", "https://sci-hub.ee",
 }
 
 func sciHubSources() []string {
@@ -100,21 +98,13 @@ func lookupDOIPDFSources(ctx context.Context, doi string, sources []string, clie
 	ctx, cancel := context.WithTimeout(ctx, paperPDFLookupTimeout)
 	defer cancel()
 	result := paperPDFLookup{}
-	// Prefer an open-access copy, reserving most of the shared budget for mirrors.
-	openCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-	candidate, err := lookupOpenPDF(openCtx, client, doi)
-	if err == nil && candidate.URL != "" {
-		candidate.URL, err = probePaperPDF(openCtx, client, candidate.URL)
-	}
-	if openCtx.Err() != nil {
-		err = openCtx.Err()
-	}
+	// Share a bounded OA budget across metadata and candidate probes.
+	openCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+	open := lookupOpenPDF(openCtx, client, doi)
 	stop()
-	if err != nil {
-		result.Warnings = append(result.Warnings, "Unpaywall: "+err.Error())
-	}
-	if err == nil && candidate.URL != "" {
-		result.Candidate = &candidate
+	result.Warnings = append(result.Warnings, open.Warnings...)
+	if open.Candidate != nil {
+		result.Candidate = open.Candidate
 		return result
 	}
 	type outcome struct {
@@ -137,10 +127,11 @@ func lookupDOIPDFSources(ctx context.Context, doi string, sources []string, clie
 				if ctx.Err() != nil {
 					return
 				}
-				budget := time.Second
-				if len(sources) == 1 {
-					budget = paperPDFProviderTimeout
-				}
+				// Page discovery and PDF validation share the remaining lookup
+				// deadline; reserve a fair share for any queued source waves.
+				deadline, _ := ctx.Deadline()
+				waves := (len(sources) - i + 2) / 3
+				budget := time.Until(deadline) / time.Duration(waves)
 				sourceCtx, done := context.WithTimeout(ctx, budget)
 				found, sourceErr := lookupSciHubPDF(sourceCtx, client, sources[i], doi)
 				if sourceErr == nil && found.URL != "" {
@@ -208,22 +199,6 @@ func fetchPaperSource(ctx context.Context, client *http.Client, address string, 
 		return nil, pdfLookupError(fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
 	return resp, nil
-}
-
-func lookupOpenPDF(ctx context.Context, client *http.Client, doi string) (FulltextCandidate, error) {
-	resp, err := fetchPaperSource(ctx, client, "https://api.unpaywall.org/v2/"+url.PathEscape(doi)+"?email=opensource%40lazyagi.org", false)
-	if err != nil {
-		return FulltextCandidate{}, err
-	}
-	defer resp.Body.Close()
-	var result unpaywallResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&result); err != nil {
-		return FulltextCandidate{}, err
-	}
-	if result.BestOALocation == nil {
-		return FulltextCandidate{}, nil
-	}
-	return FulltextCandidate{URL: strings.TrimSpace(result.BestOALocation.URLForPDF), SourceProvider: "unpaywall", SourceType: "open_access_pdf", License: result.BestOALocation.License, Version: result.BestOALocation.Version, ExpectedMIME: "application/pdf"}, nil
 }
 
 func lookupSciHubPDF(ctx context.Context, client *http.Client, base, doi string) (FulltextCandidate, error) {

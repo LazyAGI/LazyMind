@@ -139,7 +139,7 @@ describe('paper library behavior', () => {
         fireEvent.click(screen.getByRole('button', { name: '关闭通知' }));
         fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '从论文集移除' }));
-        const confirmation = await screen.findByRole('dialog', { name: '从论文集移除这篇题录？' });
+        const confirmation = await screen.findByRole('dialog', { name: '从论文集移除这篇文献？' });
         fireEvent.click(within(confirmation).getByRole('button', { name: /移\s*除/ }));
         await waitFor(() => expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument());
         fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
@@ -164,10 +164,10 @@ describe('paper library behavior', () => {
         fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: '查看详情' }));
         const drawer = await screen.findByRole('dialog', { name: '文献详情' });
-        fireEvent.click(within(drawer).getByRole('button', { name: '编辑题录' }));
+        fireEvent.click(within(drawer).getByRole('button', { name: '编辑文献信息' }));
         fireEvent.change(within(drawer).getByLabelText('DOI'), { target: { value: '10.1234/corrected' } });
-        fireEvent.click(within(drawer).getByRole('button', { name: '保存题录' }));
-        await waitFor(() => expect(within(drawer).queryByRole('button', { name: '保存题录' })).not.toBeInTheDocument());
+        fireEvent.click(within(drawer).getByRole('button', { name: '保存' }));
+        await waitFor(() => expect(within(drawer).queryByRole('button', { name: '保存' })).not.toBeInTheDocument());
         fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }));
         expect(screen.getByRole('button', { name: '阅读心得' })).toBeEnabled();
         expect(vi.mocked(PaperTasks).mock.lastCall?.[0].selected).toEqual(['stored-pdf-a']);
@@ -294,7 +294,7 @@ describe('paper library behavior', () => {
         expect(screen.queryByLabelText("子目录")).not.toBeInTheDocument();
         fireEvent.click(folderTitle(/子目录/));
         expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
-        fireEvent.click(browse().getByRole('button', { name: /重点论文/ }));
+        fireEvent.click(browse().getByRole('button', { name: /收藏/ }));
         expect(screen.getByRole('heading', { name: 'Other favorite' })).toBeInTheDocument();
         fireEvent.click(folderTitle(/我的论文知识库/));
         expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
@@ -383,7 +383,7 @@ describe('paper library behavior', () => {
         const open = vi.spyOn(window, "open").mockReturnValue(null);
         await renderLibrary();
         const title = screen.getByRole("heading", { name: "Folder paper" });
-        await act(async () => fireEvent.click(within(title.parentElement!).getByRole("button", { name: /取消收藏|取消重点|paperTasks.unmarkImportant/ })));
+        await act(async () => fireEvent.click(within(title.parentElement!).getByRole("button", { name: /取消收藏|取消收藏|paperTasks.unmarkImportant/ })));
         expect(setPaperImportance).toHaveBeenCalledWith(datasetId, 'a', false, true);
         expect(open).not.toHaveBeenCalled();
     });
@@ -404,7 +404,7 @@ describe('paper library behavior', () => {
         fireEvent.click(folderTitle(/第一个文件夹/));
         expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
         expect(screen.queryByRole("heading", { name: "Other favorite" })).not.toBeInTheDocument();
-        fireEvent.click(browse().getByRole("button", { name: /收藏|重点论文/ }));
+        fireEvent.click(browse().getByRole("button", { name: /收藏|收藏/ }));
         expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
         expect(screen.getByRole("heading", { name: "Other favorite" })).toBeInTheDocument();
         expect(screen.queryByRole("heading", { name: "Unfiled paper" })).not.toBeInTheDocument();
@@ -416,7 +416,7 @@ describe('paper library behavior', () => {
         fireEvent.click(screen.getByRole("checkbox", { name: "选择 Folder paper" }));
         const bulkActions = within(screen.getByRole("region", { name: "已选论文" }));
         expect(bulkActions.queryByRole("button", { name: /更\s*多/ })).not.toBeInTheDocument();
-        fireEvent.click(libraryTools().getByRole("button", { name: "导出题录" }));
+        fireEvent.click(libraryTools().getByRole("button", { name: "导出" }));
         fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(format === "bib" ? "BibTeX" : format.toUpperCase()) }));
         const content = await readDownload();
         expect(content).toContain("Folder paper");
@@ -429,7 +429,7 @@ describe('paper library behavior', () => {
         await renderLibrary();
         const tools = libraryTools();
         expect(tools.getAllByRole("button")).toHaveLength(4);
-        for (const name of ["搜索", "筛选", "导出题录"])
+        for (const name of ["搜索", "筛选", "导出"])
             expect(tools.getByRole("button", { name })).toBeInTheDocument();
         expect(tools.getByRole("button", { name: /通知/ })).toHaveAttribute("aria-expanded", "false");
         expect(screen.queryByRole("textbox", { name: "搜索文献" })).not.toBeInTheDocument();
@@ -465,7 +465,7 @@ describe('paper library behavior', () => {
                 expect(screen.getByRole("dialog", { name: panel })).toBeInTheDocument();
             });
         }
-        const exportButton = libraryTools().getByRole("button", { name: "导出题录" });
+        const exportButton = libraryTools().getByRole("button", { name: "导出" });
         fireEvent.mouseDown(exportButton);
         fireEvent.mouseUp(exportButton);
         fireEvent.click(exportButton);
@@ -604,6 +604,23 @@ describe('paper library behavior', () => {
         expect(within(menu).getByText(/Zotero/)).toBeInTheDocument();
         expect(within(menu).queryByText(/Semantic Scholar/)).not.toBeInTheDocument();
     });
+    it.each(['BibTeX', 'RIS', 'CSV'])('aligns %s batch preview with immediate metadata saving', async format => {
+        let release!: () => void;
+        vi.mocked(previewLibraryPapers).mockImplementationOnce((_id, papers) => new Promise(resolve => { release = () => resolve(papers); }));
+        await renderLibrary();
+        const dialog = await openImportDialog('BibTeX / RIS / CSV', '导入文献题录');
+        fireEvent.click(within(dialog).getByRole('radio', { name: format, exact: true }));
+        const entries = Array.from({ length: 10 }, (_, i) => format === 'BibTeX' ? `@article{p${i},title={Import sample ${i}},year={2024}}` : format === 'RIS' ? `TY  - JOUR\nTI  - Import sample ${i}\nPY  - 2024\nER  -` : `Import sample ${i},Author,2024`);
+        const content = (format === 'CSV' ? 'title,authors,year\n' : '') + entries.join('\n');
+        fireEvent.change(within(dialog).getByRole('textbox', { name: '文献题录内容' }), { target: { value: content } });
+        fireEvent.click(within(dialog).getByRole('button', { name: '识别题录' }));
+        expect(within(dialog).getByRole('status')).toHaveTextContent('正在识别文献并检查重复');
+        expect(within(dialog).getByRole('button', { name: /识别题录/ })).toBeDisabled();
+        await act(async () => release());
+        expect(within(dialog).getByRole('status')).toHaveTextContent('已识别 10 篇文献，可立即入库');
+        expect(within(dialog).getByRole('button', { name: '加入论文库' })).toBeEnabled();
+        expect(previewPaperPDF).not.toHaveBeenCalled();
+    });
     it("shows synchronous bibliography parse errors without leaving a candidate to save", async () => {
         vi.spyOn(paperModel, "parseBibTeX").mockImplementation(() => { throw new Error("BibTeX 缺少闭合括号"); });
         await renderLibrary();
@@ -669,9 +686,9 @@ describe('paper library behavior', () => {
         fireEvent.click(await screen.findByRole("menuitem", { name: "查看详情" }));
         const dialog = await screen.findByRole("dialog", { name: "文献详情" });
         const details = within(dialog);
-        fireEvent.click(details.getByRole("button", { name: "编辑题录" }));
+        fireEvent.click(details.getByRole("button", { name: "编辑文献信息" }));
         const titleInput = details.getByLabelText("题名");
-        const saveButton = details.getByRole("button", { name: "保存题录" });
+        const saveButton = details.getByRole("button", { name: "保存" });
         const closeButton = details.getByRole("button", { name: "关闭" });
         fireEvent.change(titleInput, { target: { value: "Keep this draft" } });
         fireEvent.click(saveButton);
@@ -702,7 +719,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
         expect(browse().getByRole("button", { name: /导入/ })).toBeDisabled();
         expect(browse().getByRole("button", { name: "在「论文库」中新建文件夹" })).toBeDisabled();
-        expect(within(screen.getByRole("heading", { name: "Folder paper" }).parentElement!).getByRole("button", { name: /取消收藏|取消重点|paperTasks.unmarkImportant/ })).toBeEnabled();
+        expect(within(screen.getByRole("heading", { name: "Folder paper" }).parentElement!).getByRole("button", { name: /取消收藏|取消收藏|paperTasks.unmarkImportant/ })).toBeEnabled();
         expect(screen.getByRole("alert")).toHaveTextContent("只读");
         expect(confirmLibraryPdf).not.toHaveBeenCalled();
     });
@@ -711,7 +728,7 @@ describe('paper library behavior', () => {
         vi.mocked(setPaperImportance).mockRejectedValueOnce(new Error('temporarily unavailable'));
         const error = vi.spyOn(message, 'error');
         await renderLibrary();
-        const star = within(screen.getByRole('heading', { name: 'Folder paper' }).parentElement!).getByRole('button', { name: /取消重点|paperTasks.unmarkImportant/ });
+        const star = within(screen.getByRole('heading', { name: 'Folder paper' }).parentElement!).getByRole('button', { name: /取消收藏|paperTasks.unmarkImportant/ });
         await act(async () => fireEvent.click(star));
         await waitFor(() => expect(screen.getByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument());
         expect(error).not.toHaveBeenCalled();
@@ -736,7 +753,7 @@ describe('DOI import workflow', () => {
         const dialog = await openImportDialog('链接', '通过链接导入');
         fireEvent.change(within(dialog).getByRole('textbox', { name: /链接或标识符/ }), { target: { value: '10.1234/example' } });
         fireEvent.click(within(dialog).getByRole('button', { name: '查找文献' }));
-        const save = await within(dialog).findByRole('button', { name: '立即保存题录' });
+        const save = await within(dialog).findByRole('button', { name: '立即加入文献库' });
         expect(save).toBeEnabled();
         fireEvent.click(save);
         await waitFor(() => expect(importPaperLink).toHaveBeenCalledWith(datasetId, expect.objectContaining({ preview_token: 'metadata-receipt', fulltext_candidates: [] }), expect.any(String), null, true));
@@ -765,7 +782,7 @@ describe('DOI import workflow', () => {
         expect(within(dialog).getByText('PDF lookup timeout')).toBeInTheDocument();
         expect(within(dialog).getByText(/未找到可用 PDF/)).toBeInTheDocument();
         expect(importPaperLink).not.toHaveBeenCalled();
-        fireEvent.click(within(dialog).getByRole('button', { name: '保存题录' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: '加入文献库' }));
         await waitFor(() => expect(importPaperLink).toHaveBeenCalledWith(datasetId, expect.objectContaining({ preview_token: 'metadata-receipt', fulltext_candidates: [] }), expect.any(String), null, true));
     });
     it('does not show success or offer saving when metadata lookup fails', async () => {
@@ -776,7 +793,7 @@ describe('DOI import workflow', () => {
         fireEvent.click(within(dialog).getByRole('button', { name: '查找文献' }));
         expect(await within(dialog).findByText('当前步骤失败，请查看错误详情后重试。')).toBeInTheDocument();
         expect(previewPaperPDF).not.toHaveBeenCalled();
-        expect(within(dialog).queryByRole('button', { name: '保存题录' })).not.toBeInTheDocument();
+        expect(within(dialog).queryByRole('button', { name: '加入文献库' })).not.toBeInTheDocument();
         expect(importPaperLink).not.toHaveBeenCalled();
     });
 });

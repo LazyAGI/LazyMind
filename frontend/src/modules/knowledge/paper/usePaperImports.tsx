@@ -11,7 +11,7 @@ import { computeFileSha256 } from '../utils/fileHash';
 import { isArxivInput } from './arxivImport';
 import { pdfIdentityMatch, pdfTargetCandidates, type PdfPaper } from './pdfAssociation';
 import PdfImportReview from './PdfImportReview';
-import PaperLinkProgress, { type PaperLinkPhase } from './PaperLinkProgress';
+import PaperLinkProgress, { PaperBibliographyProgress, type PaperLinkPhase } from './PaperLinkProgress';
 import type { PaperNotification } from './usePaperNotifications';
 type ImportMethod = 'upload' | 'identifier' | 'bibliography';
 const importTitles: Record<ImportMethod, string> = { upload: '上传文献', identifier: '通过链接导入', bibliography: '导入文献题录' };
@@ -229,9 +229,10 @@ export function usePaperImports(options: ImportOptions) {
         setImportTargetPaperId(existing?.id || null);
     };
     const importBibliography = async () => {
-        if (disabled || busyRef.current)
+        if (disabled || busyRef.current || searching)
             return;
         clearImportResult();
+        setSearching(true);
         try {
             const parsed = format === "ris"
                 ? parseRIS(bibliography, bibliographyKind)
@@ -244,6 +245,8 @@ export function usePaperImports(options: ImportOptions) {
         }
         catch (error) {
             showImportError(error, "题录解析失败，请检查内容和格式");
+        } finally {
+            if (isCurrentScope()) setSearching(false);
         }
     };
     const importIdentifier = async () => {
@@ -441,6 +444,7 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
         }} footer={null} width={560} centered destroyOnHidden className="paper-library-import-modal" closable={!searching && !saving && !confirmingImport} maskClosable={!searching && !saving && !confirmingImport} keyboard={!searching && !saving && !confirmingImport}>
         <div className="paper-library-import-content">
           {importError && <Alert type="error" showIcon message="导入未完成" description={importError} action={selectedFile && !pending ? <Button size="small" disabled={loading || saving || confirmingImport || searching} onClick={() => void importFile(selectedFile)}>重试识别</Button> : undefined}/>}
+          {(importMethod === 'bibliography' || (importMethod === 'upload' && selectedFile && /\.(bib|ris|csv)$/i.test(selectedFile.name))) && (searching || pending || importError || confirmingImport) && <PaperBibliographyProgress phase={confirmingImport ? 'submitting' : searching ? 'metadata' : importError ? 'failed' : 'ready'} count={(pending?.fresh.length || 0) + (pending?.skipped.length || 0)} />}
           {importMethod === "upload" && <>
             <p>{importTargetPaperId ? '为当前论文添加 PDF，核对题录和归属后确认上传。' : '选择 PDF 或文献文件，先识别题录；确认加入论文库后才会上传 PDF。'}</p>
             <Upload.Dragger accept={importTargetPaperId ? '.pdf' : '.pdf,.bib,.ris,.csv'} showUploadList={false} disabled={fileImportDisabled || searching} beforeUpload={async (file: File) => { await importFile(file); return false; }}>
@@ -451,9 +455,9 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
           </>}
           {importMethod === "identifier" && <>
             <p>粘贴 arXiv 链接、编号或 DOI，先确认文献信息再导入。</p>
-            {linkPhase && <PaperLinkProgress phase={linkPhase} failurePhase={linkFailurePhase} hasPDF={!!linkPreview?.fulltext_candidates.length} warnings={pdfWarnings} manualURLs={linkPreview?.manual_download_urls} />}
+            {linkPhase && <PaperLinkProgress phase={linkPhase} failurePhase={linkFailurePhase} hasPDF={!!linkPreview?.fulltext_candidates.length} warnings={pdfWarnings} manualURLs={linkPreview?.manual_download_urls} doi={linkPreview?.doi} />}
             <label className="paper-library-import-label" htmlFor="paper-import-identifier">链接或标识符
-              <Tooltip title={<div>支持 arXiv 编号、arXiv: 前缀、abs / pdf / html 链接、旧版分类编号，以及 arXiv DOI。系统从输入中提取编号，统一访问官方来源。v3 等版本号会保留；未指定版本时获取最新版。也支持普通 DOI 与 doi.org 链接。DOI 元信息最多查询 10 秒，PDF 来源总共最多查询 6 秒：优先开放来源，再查 Sci-Hub；无可用 PDF 时可仅保存题录。</div>}>
+              <Tooltip title={<div>支持 arXiv 编号、arXiv: 前缀、abs / pdf / html 链接、旧版分类编号，以及 arXiv DOI。系统从输入中提取编号，统一访问官方来源。v3 等版本号会保留；未指定版本时获取最新版。也支持普通 DOI 与 doi.org 链接。DOI 元信息最多查询 10 秒，PDF 来源总共最多查询 6 秒：优先开放来源，再查 Sci-Hub；无可用 PDF 时可仅加入文献库。</div>}>
                 <button type="button" className="paper-library-info" aria-label="支持的 DOI 与 arXiv 格式说明"><InfoCircleOutlined /></button>
               </Tooltip>
             </label>
@@ -482,16 +486,16 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
             }}/>
             </div>
             <Input.TextArea aria-label="文献题录内容" rows={7} value={bibliography} disabled={disabled || searching} placeholder={format === "csv" ? "题名,作者,出处,年份,DOI,arXiv,标签,文件夹" : format === "bib" ? "@article{...}\n\n在这里粘贴 BibTeX 题录" : "TY  - JOUR\nTI  - ...\nER  -"} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => { setBibliography(event.target.value); clearImportResult(); }}/>
-            <div className="paper-library-modal-actions"><Button type="primary" disabled={disabled || searching || !bibliography.trim()} onClick={importBibliography}>识别题录</Button></div>
+            <div className="paper-library-modal-actions"><Button type="primary" loading={searching} disabled={disabled || searching || !bibliography.trim()} onClick={importBibliography}>识别题录</Button></div>
           </>}
           {pendingArxiv && <section className="paper-library-import-confirm" aria-label="链接导入确认">
             <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.arxivVersion}</code></div>
             <h3>{pendingArxiv.metadata.title}</h3>
             <p className="paper-library-arxiv-authors"><PaperAuthors authors={pendingArxiv.metadata.authors} /> · {pendingArxiv.metadata.year}</p>
             {pendingArxiv.metadata.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.metadata.abstract}</p>}
-            <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先保存题录，后续补充 PDF。"}</p>
-            {linkPhase === 'pdf' && <p role="status">元信息已就绪，可以立即保存题录；等待查找完成后也可连同 PDF 一起导入。</p>}
-            <div className="paper-library-modal-actions"><Button className={linkPhase === 'pdf' || linkPhase === 'ready' ? 'paper-import-unlocked' : undefined} type="primary" loading={linkPhase === 'submitting' || saving} disabled={disabled} onClick={commitArxiv}>{linkPhase === 'submitting' ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : linkPhase === 'pdf' ? "立即保存题录" : "保存题录"}</Button></div>
+            <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先加入文献库，后续补充 PDF。"}</p>
+            {linkPhase === 'pdf' && <p role="status">元信息已就绪，可以立即加入文献库；等待查找完成后也可连同 PDF 一起导入。</p>}
+            <div className="paper-library-modal-actions"><Button className={linkPhase === 'pdf' || linkPhase === 'ready' ? 'paper-import-unlocked' : undefined} type="primary" loading={linkPhase === 'submitting' || saving} disabled={disabled} onClick={commitArxiv}>{linkPhase === 'submitting' ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : linkPhase === 'pdf' ? "立即加入文献库" : "加入文献库"}</Button></div>
           </section>}
           {pending && <section className="paper-library-import-confirm" aria-label="导入确认">
             <h3>{pending.attachTo ? "为已有文献添加 PDF" : pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>
@@ -502,7 +506,7 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
             </div>
             {pendingPdf && <PdfImportReview metadata={pendingPdf.metadata} target={pending.attachTo} papers={data.papers} candidateIds={pdfTargetCandidates(data.papers, pendingPdf.metadata).map(paper => paper.id)} file={pendingPdf.file} fixedTarget={!!importTargetPaperId} conflict={pdfConflict} requiresConfirmation={pdfRequiresConfirmation} sameVersion={samePdfVersion} confirmed={pdfConfirmed} disabled={disabled || searching || !!pendingPdf.documentId} onTargetChange={selectPdfTarget} onConfirmedChange={setPdfConfirmed}/>}
             {pendingPdf && pdfConflict && <Button disabled={disabled || searching} onClick={() => { setImportTargetPaperId(null); selectPdfTarget(null); }}>作为新论文导入</Button>}
-            {(!!pending.fresh.length || !!pending.skipped.length || pending.attachTo) && <div className="paper-library-modal-actions"><Button type="primary" loading={saving || confirmingImport} disabled={disabled || searching || (!!pendingPdf && !pdfReviewComplete)} onClick={commit}>{pending.attachTo ? "添加 PDF" : pending.fresh.length ? "加入论文库" : "确认导入"}</Button></div>}
+            {(!!pending.fresh.length || !!pending.skipped.length || pending.attachTo) && <div className="paper-library-modal-actions"><Button type="primary" className={!pendingPdf && !confirmingImport && !saving && pending.fresh.length ? 'paper-import-unlocked' : undefined} loading={saving || confirmingImport} disabled={disabled || searching || (!!pendingPdf && !pdfReviewComplete)} onClick={commit}>{pending.attachTo ? "添加 PDF" : pending.fresh.length ? "加入论文库" : "确认导入"}</Button></div>}
           </section>}
         </div>
       </Modal>;

@@ -121,3 +121,11 @@ describe('paper import operations', () => {
     expect(getAcademicImportBatch).toHaveBeenLastCalledWith('batch', 'papers-next');
   });
 });
+
+it('distinguishes saved bibliography from ongoing enrichment without expanding the batch', () => {
+ const item = operation('bibliography-batch', { entry_type: 'bibliography', status: 'running', summary: { total: 10, ready: 0, metadata_only: 0, skipped: 0, active: 10, failed: 0, canceled: 0, deleted: 0, removed: 0, resolved_later: 0, retryable: 0, needs_action: 0 } });
+ render(<Notice canWrite onRetry={vi.fn()} page={{items:[item], next_cursor:'', notification:{active:10,needs_action:0}}} />);
+ openNotice();
+ expect(screen.getByText('文献已入库 · 补全信息与获取附件中')).toBeInTheDocument();
+ expect(screen.getByText('后台处理中 10')).toBeInTheDocument();
+});

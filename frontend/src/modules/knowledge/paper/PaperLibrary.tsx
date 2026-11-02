@@ -5,7 +5,7 @@ import { usePaperImports, PaperImportDialog } from './usePaperImports';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
 import { Alert, Button, Dropdown, Input, Modal, Popover, Pagination, Select, Spin, Tooltip, message } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
-import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperLink, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
 import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, removeLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
@@ -410,7 +410,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         if (!folder || disabled)
             return;
         const descendants = descendantFolderIds(data.folders, folder.id), count = data.papers.filter(p => paperBelongsToFolders(p, descendants)).length;
-        Modal.confirm({ title: `删除「${folder.name}」及其子目录？`, content: `将移除 ${descendants.size} 个目录，把 ${count} 篇论文放回上一级；原文件、附件、笔记和星标保留。`, okText: '删除目录', okButtonProps: { danger: true }, onOk: async () => { await mutate(() => deleteLibraryFolder(datasetId, folder), { id: `folder-delete:${folder.id}`, title: `目录「${folder.name}」删除失败` }); if (folderId && descendants.has(folderId)) setFolderId(folder.parentId || null); } });
+        Modal.confirm({ title: `删除「${folder.name}」及其子目录？`, content: `将移除 ${descendants.size} 个目录，把 ${count} 篇论文放回上一级；原文件、附件、笔记和收藏保留。`, okText: '删除目录', okButtonProps: { danger: true }, onOk: async () => { await mutate(() => deleteLibraryFolder(datasetId, folder), { id: `folder-delete:${folder.id}`, title: `目录「${folder.name}」删除失败` }); if (folderId && descendants.has(folderId)) setFolderId(folder.parentId || null); } });
     };
     const dropPapers = async (ids: string[]) => {
         if (disabled || busyRef.current)
@@ -461,7 +461,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
             const saved = dataRef.current.papers.find(p => p.id === editing.id)!;
             editingRevisionRef.current = saved.revision;
             setEditing(saved);
-            message.success('题录已保存');
+            message.success('文献信息已保存');
             return true;
         }
         catch (error) {
@@ -486,7 +486,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
             return;
         restartRef.current?.onOpen({ dataset: datasetId, ids: [document], names: [item.metadata.title], title: '重新解析', processingLevel });
     };
-    const renderImportance = (item: PaperRecord) => (<PaperImportanceButton important={item.important} onError={error => { if (isCurrentScope()) notify({ id: `paper-star:${item.id}`, title: `《${item.metadata.title}》重点标记保存失败`, message: error instanceof Error ? error.message : "标记保存失败，请重试" }); }} onToggle={async (important) => {
+    const renderImportance = (item: PaperRecord) => (<PaperImportanceButton important={item.important} onError={error => { if (isCurrentScope()) notify({ id: `paper-star:${item.id}`, title: `《${item.metadata.title}》收藏状态保存失败`, message: error instanceof Error ? error.message : "标记保存失败，请重试" }); }} onToggle={async (important) => {
                 if (!item.academicWorkId)
                     throw new Error('论文身份尚未保存');
                 await setPaperImportance(datasetId, item.academicWorkId, important, true);
@@ -573,7 +573,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                         onClick: () => downloadPaperCitations({ papers: exportPapers, folders: data.folders }, exportFormat, title),
                     })), { key: 'csl', label: 'CSL JSON（.json）', onClick: () => downloadLibraryJson({ ...data, papers: exportPapers }, title) }],
                 }, { type: 'divider' }, { key: 'backup', label: '完整数据备份（JSON，不含 PDF 文件）', onClick: () => downloadLibraryJson(data, title, true, datasetId) }] }}>
-            <Button type="text" className="paper-library-tool" icon={<ExportOutlined />} aria-label="导出题录" title="导出题录或包含笔记、批注与附件引用的数据备份" disabled={!snapshotReady}>导出题录</Button>
+            <Button type="text" className="paper-library-tool" icon={<ExportOutlined />} aria-label="导出" title="导出题录或包含笔记、批注与附件引用的数据备份" disabled={!snapshotReady}>导出</Button>
           </Dropdown>
           <PaperImportStatus key={datasetId} datasetId={datasetId} page={importPage} notifications={libraryNotices} syncError={syncError} refreshing={loading} onRefresh={() => { void reload(); }} canWrite={canWrite} onOpenPaper={id => openDetail(id)} onResumeAssociation={resumeAssociation} open={activeTool === "imports"} onOpenChange={open => setActiveTool(current => open ? "imports" : current === "imports" ? null : current)} onRetry={async (batch) => { await retryAcademicImport(batch, true); setSyncRevision(value => value + 1); }}/>
         </div>
@@ -594,7 +594,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
           <div className="paper-library-folders">
           <div className="paper-library-browse-head"><span className="paper-library-rail-label">浏览视图</span></div>
           <FolderButton icon={<FileTextOutlined />} name="全部" count={data.papers.length} current={libraryView === "all"} onClick={() => selectView(null, 'all')}/>
-          <FolderButton icon={<StarOutlined />} name="重点论文" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
+          <FolderButton icon={<StarOutlined />} name="收藏" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
           <div className="paper-library-directory-head paper-library-browse-head">
 
           </div>
@@ -610,7 +610,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
           {selectedPapers.length > 0 && (<div className="paper-library-selection-bar" role="region" aria-label="已选论文">
           <div className="paper-library-selection-summary"><Button type="text" size="small" aria-label="取消选择" icon={<CloseOutlined />} onClick={() => setSelected([])}/><span>已选 <strong>{selectedPapers.length}</strong> 篇</span></div>
           <Dropdown trigger={["click"]} menu={{ items: folderOptions.map((folder) => ({ key: folder.value, label: folder.label, onClick: () => placePapers(selected, folder.value) })) }}><Button type="text" size="small" disabled={disabled} icon={<FolderOutlined />}>移动到<DownOutlined /></Button></Dropdown>
-          <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇题录？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
+          <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇文献？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
           </div>)}
           <div className="paper-library-table-scroll" tabIndex={0} aria-label="论文列表，可横向滚动" aria-busy={initialLoading || loading}>
           <table className="paper-library-table" aria-label="论文列表">
@@ -623,7 +623,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 element.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
         }} onChange={(event) => setSelected(event.target.checked ? [...new Set([...selected, ...visible.map((item) => item.id)])] : selected.filter((id) => !visible.some((item) => item.id === id)))}/>
                 </th>
-                <th scope="col">标题</th><th scope="col">年份</th><th scope="col">会议／期刊</th><th scope="col"><span className="paper-library-visually-hidden">文献操作</span></th>
+                <th scope="col">标题</th><th scope="col">年份</th><th scope="col">会议／期刊</th><th scope="col" className="paper-library-reading-heading">阅读状态</th>
               </tr>
             </thead>
             <tbody>
@@ -652,7 +652,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 return status && status !== 'succeeded' ? <button type="button" className="paper-library-state" onClick={() => openDetail(item.id)}>{status === 'failed' ? '论文信息识别失败' : '论文信息识别中'}</button> : null;
             })()}
                 <div className="paper-library-meta">
-                  {item.tags.filter((tag) => tag !== "paper" && !tag.startsWith("arxiv:")).map((tag) => (<span key={tag} className="paper-library-tag">{tag}</span>))}
+                  {item.tags.filter((tag) => tag !== "paper" && !tag.startsWith("arxiv:") && !/^\/?(?:unread|reading|read)$/i.test(tag.trim())).map((tag) => (<span key={tag} className="paper-library-tag">{tag}</span>))}
                   {item.incomplete && snapshotReady && <Tooltip title="尚未提取到正式论文题名，当前使用文件名。点击补全题名"><button type="button" className="paper-library-state" disabled={disabled} onClick={() => {
                     openDetail(item.id);
                     setDetailEditing(true);
@@ -663,7 +663,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                   {item.parse === "failed" && <Tooltip title={item.processingError || "正文解析失败，请检查导入任务"}><span className="paper-library-warn">正文解析失败</span></Tooltip>}
                   {item.parse === "parsing" && <span className="paper-library-source">正文解析中</span>}
                   {item.associationConflict && <button type="button" className="paper-library-warn" onClick={() => openDetail(item.id, 'attachments')}>附件归属待核对</button>}
-                  <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "attachments")}>{materialByPaper.get(item.id)?.pdfs.length ? `PDF · ${materialByPaper.get(item.id)!.pdfs.length} 份` : materialByPaper.get(item.id)?.links.length ? '原文链接' : materialByPaper.get(item.id)?.supplements.length ? '无 PDF' : '仅题录'}</button>
+                  <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "attachments")}>{materialByPaper.get(item.id)?.pdfs.length ? `PDF · ${materialByPaper.get(item.id)!.pdfs.length} 份` : materialByPaper.get(item.id)?.links.length ? '原文链接' : materialByPaper.get(item.id)?.supplements.length ? '无 PDF' : '暂无 PDF'}</button>
                   {!!materialByPaper.get(item.id)?.supplements.length && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, 'attachments')}>补充材料 · {materialByPaper.get(item.id)!.supplements.length} 份</button>}
                   {!!materialByPaper.get(item.id)?.notes && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "notes")}>{materialByPaper.get(item.id)?.notes} 条笔记</button>}
                 </div>
@@ -671,7 +671,8 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
               <td className="paper-library-year">{item.metadata.year || "—"}</td>
               <td className="paper-library-venue"><span title={venueName(item)}>{item.metadata.venue?.trim() ? venueName(item) : "—"}</span></td>
               <td><div className="paper-library-row-actions">
-                    <Select className="paper-library-status" size="small" value={item.status} disabled={disabled} aria-label={`${item.metadata.title} 的阅读状态`} options={(Object.keys(statusLabel) as ReadingStatus[]).map((key) => ({ value: key, label: statusLabel[key] }))} onChange={(value: ReadingStatus) => void updatePaper(item.id, { status: value })}/>
+                    <Select className={`paper-library-status paper-library-status--${item.status}`} variant="borderless" size="small" value={item.status} disabled={disabled} aria-label={`${item.metadata.title} 的阅读状态`} options={(Object.keys(statusLabel) as ReadingStatus[]).map((key) => ({ value: key, label: statusLabel[key] }))} onChange={(value: ReadingStatus) => void updatePaper(item.id, { status: value })}/>
+                  <Tooltip title="文献信息"><Button type="text" size="small" aria-label={`${item.metadata.title} 的文献信息`} icon={<InfoCircleOutlined />} onClick={() => openDetail(item.id)} /></Tooltip>
                   <Dropdown menu={{ items: [
                     { key: "detail", label: "查看详情", onClick: () => openDetail(item.id) },
                     { key: "citation", label: "复制引用", children: (Object.keys(citationLabel) as CitationStyle[]).map(style => ({
@@ -686,7 +687,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                         title: reparseDisabledReason(item), onClick: () => openReparse(item) },
                     { type: "divider" },
                     { key: "move", label: "移动到", disabled, children: folderOptions.map((option) => ({ key: option.value, label: option.label, onClick: () => placePapers([item.id], option.value) })) },
-                    { key: "remove", label: "从论文集移除", disabled, danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇题录？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
+                    { key: "remove", label: "从论文集移除", disabled, danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇文献？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
                 ] }}>
                     <button type="button" className="paper-library-more" aria-label={`${item.metadata.title} 的更多操作`}><EllipsisOutlined /></button>
                   </Dropdown>

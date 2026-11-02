@@ -41,8 +41,8 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
       <strong>筛选</strong>
       <button type="button" className="paper-filter-clear" aria-label="清除筛选" disabled={!hasPaperFilters(value)} onClick={() => onChange({ ...DEFAULT_PAPER_FILTERS })}>清除</button>
     </div>
-    <Choices label="星标" value={value.star} onChange={(next) => update("star", next)} options={[
-      { value: "all", label: "全部" }, { value: "starred", label: "已星标" }, { value: "unstarred", label: "未星标" },
+    <Choices label="收藏" value={value.star} onChange={(next) => update("star", next)} options={[
+      { value: "all", label: "全部" }, { value: "starred", label: "已收藏" }, { value: "unstarred", label: "未收藏" },
     ]} />
     <Choices label="PDF" value={value.pdf} onChange={(next) => update("pdf", next)} options={[
       { value: "all", label: "全部" }, { value: "has-pdf", label: "有 PDF" }, { value: "needs-pdf", label: "无 PDF" }, { value: "uploaded", label: "已上传" },

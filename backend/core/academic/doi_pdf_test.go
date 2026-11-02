@@ -163,16 +163,16 @@ func TestDOIPreviewSeparatesMetadataAndPDFAndIssuesReceipts(t *testing.T) {
 
 func TestDOIPDFLookupEnforcesItsOwnProviderAndTotalDeadlines(t *testing.T) {
 	calls := 0
+	start := time.Now()
 	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		deadline, ok := r.Context().Deadline()
-		if !ok || time.Until(deadline) > paperPDFProviderTimeout {
-			t.Fatal("missing provider deadline")
+		if !ok || deadline.After(start.Add(paperPDFLookupTimeout+50*time.Millisecond)) {
+			t.Error("provider escaped shared deadline")
 		}
 		<-r.Context().Done()
 		return nil, r.Context().Err()
 	})}
-	start := time.Now()
 	result := lookupDOIPDFWithClient(t.Context(), "10.1234/test", "https://mirror.example", client)
 	if elapsed := time.Since(start); elapsed > paperPDFLookupTimeout+time.Second || calls != 2 || result.Candidate != nil || len(result.Warnings) < 2 {
 		t.Fatalf("unbounded lookup: %v calls=%d %+v", elapsed, calls, result)
@@ -243,16 +243,16 @@ func TestDOIPDFMultipleSourcesRaceAndCancel(t *testing.T) {
 func TestSciHubSourceConfigAndManualLinks(t *testing.T) {
 	t.Setenv("ACADEMIC_SCIHUB_BASE_URL", "")
 	t.Setenv("ACADEMIC_SCIHUB_BASE_URLS", "")
-	if len(sciHubSources()) < 10 {
-		t.Fatal("expected ten default endpoints")
+	if got := strings.Join(sciHubSources(), ","); got != "https://sci-hub.al,https://sci-hub.mk,https://sci-hub.ee" {
+		t.Fatalf("unexpected default shortlist: %s", got)
 	}
 	hosts := map[string]bool{}
 	for _, source := range sciHubSources() {
 		u, _ := url.Parse(source)
 		hosts[u.Hostname()] = true
 	}
-	if len(hosts) < 10 {
-		t.Fatal("expected ten distinct domains")
+	if len(hosts) != 3 {
+		t.Fatal("expected three distinct domains")
 	}
 	t.Setenv("ACADEMIC_SCIHUB_BASE_URLS", "https://first.example/,https://first.example;https://second.example,http://127.0.0.1")
 	if len(sciHubSources()) != 3 {
@@ -261,5 +261,66 @@ func TestSciHubSourceConfigAndManualLinks(t *testing.T) {
 	links := sciHubManualURLs("10.1234/test")
 	if len(links) != 3 || links[1] != "https://first.example/10.1234/test" {
 		t.Fatal(links)
+	}
+}
+
+func TestUnpaywallFallsBackAcrossLocations(t *testing.T) {
+	var bad, good atomic.Int32
+	badDone := make(chan struct{})
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		switch r.URL.Host {
+		case "api.unpaywall.org":
+			return 200, `{"best_oa_location":{"url_for_pdf":"https://bad.example/p.pdf"},"oa_locations":[{"url_for_pdf":"https://bad.example/p.pdf#page=1"},{"url_for_pdf":"https://good.example/p.pdf","version":"acceptedVersion","license":"cc-by"}]}`
+		case "bad.example":
+			bad.Add(1)
+			close(badDone)
+			return 200, "<html>not a PDF</html>"
+		case "good.example":
+			<-badDone
+			good.Add(1)
+			return 206, "%PDF-1.7 manuscript"
+		}
+		return 404, ""
+	})
+	result := lookupDOIPDFWithClient(t.Context(), "10.1234/example", "https://mirror.example", client)
+	if result.Candidate == nil || result.Candidate.SourceProvider != "unpaywall" || result.Candidate.Version != "acceptedVersion" || result.Candidate.License != "cc-by" || bad.Load() != 1 || good.Load() != 1 {
+		t.Fatalf("candidate=%+v bad=%d good=%d warnings=%v", result.Candidate, bad.Load(), good.Load(), result.Warnings)
+	}
+}
+func TestUnpaywallUsesLocationsWhenBestHasNoPDF(t *testing.T) {
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.unpaywall.org" {
+			return 200, `{"best_oa_location":{"url_for_landing_page":"https://publisher.example/article"},"oa_locations":[{"url_for_pdf":"https://repo.example/p.pdf","version":"submittedVersion"}]}`
+		}
+		if r.URL.Host == "repo.example" {
+			return 206, "%PDF-1.7 test"
+		}
+		return 404, ""
+	})
+	result := lookupDOIPDFWithClient(t.Context(), "10.1234/example", "https://mirror.example", client)
+	if result.Candidate == nil || result.Candidate.Version != "submittedVersion" {
+		t.Fatalf("%+v", result)
+	}
+}
+
+func TestDOIPDFMultipleSourcesUseRemainingBudget(t *testing.T) {
+	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		status, body := 200, "%PDF-1.7 test"
+		if r.URL.Host == "api.unpaywall.org" {
+			status, body = 404, "not found"
+		} else if r.URL.Host == "available.example" {
+			select {
+			case <-time.After(600 * time.Millisecond):
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		} else {
+			status, body = 404, "not found"
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	got := lookupDOIPDFSources(t.Context(), "10.1234/test", []string{"https://available.example", "https://missing.example", "https://other.example"}, client)
+	if got.Candidate == nil {
+		t.Fatalf("discovery and PDF probe should share remaining total budget: %+v", got)
 	}
 }

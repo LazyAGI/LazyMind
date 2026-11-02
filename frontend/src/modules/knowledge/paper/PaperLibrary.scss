@@ -216,7 +216,7 @@
 .paper-library-controls-col { width: 64px; }
 .paper-library-year-col { width: 66px; }
 .paper-library-venue-col { width: 14%; }
-.paper-library-actions-col { width: 152px; }
+.paper-library-actions-col { width: 176px; }
 .paper-library-table th { height: 42px; padding: 0 12px; background: #f8f9fb; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 500; }
 .paper-library-table td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .paper-library-table tbody tr:last-child td { border-bottom: 0; }
@@ -510,3 +510,15 @@
 .paper-library-import-error p { margin: 6px 0 0; white-space: pre-wrap; }
 
 .paper-library-pagination { flex-shrink: 0; padding: 10px 16px; border-top: 1px solid var(--line); justify-content: flex-end; }
+
+.paper-library-status { width: 82px; border-radius: 5px; background: #f5f7fa; }
+.paper-library-status:hover, .paper-library-status.ant-select-focused { background: #edf2fa; }
+.paper-library-status--read .ant-select-selection-item { color: #527568; }
+.paper-library-status--reading .ant-select-selection-item { color: #2858b8; }
+
+.paper-directory-tree .ant-tree-indent-unit { width: 14px; }
+.paper-directory-tree .ant-tree-node-content-wrapper.ant-tree-node-selected { font-weight: 600; box-shadow: inset 2px 0 var(--blue); }
+.paper-directory-actions { background: inherit; }
+
+.paper-library-table th.paper-library-reading-heading { padding-left: 20px; }
+.paper-library-row-actions { justify-content: flex-start; }

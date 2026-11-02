@@ -8,6 +8,7 @@ export const PAPER_LIBRARY_ROOT = 'paper-library-root';
 interface DirectoryNode extends TreeDataNode {
     key: string;
     label: string;
+    path: string;
     folderId?: string | null;
     count?: number;
 }
@@ -32,7 +33,7 @@ function FolderTitle({ node, acceptsDrop, dropTarget, disabled, onCreateFolder, 
     onDeleteFolder: Props['onDeleteFolder'];
 }) {
     const { setNodeRef, isOver } = useDroppable({ id: node.key, disabled: !acceptsDrop });
-    return <span ref={setNodeRef} className={`paper-directory-folder-title ${dropTarget || isOver ? 'is-drop-target' : ''}`}><Tooltip title={node.label}><span className="paper-directory-node-name">{node.label}</span></Tooltip><span className="paper-directory-count" title={`含子目录共 ${node.count} 篇论文`}>{node.count}</span><span className="paper-directory-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+    return <span ref={setNodeRef} className={`paper-directory-folder-title ${dropTarget || isOver ? 'is-drop-target' : ''}`}><Tooltip title={node.path}><span className="paper-directory-node-name">{node.label}</span></Tooltip><span className="paper-directory-count" title={`含子目录共 ${node.count} 篇论文`}>{node.count}</span><span className="paper-directory-actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
       <Tooltip title="新建子目录"><Button type="text" size="small" disabled={disabled} icon={<PlusOutlined />} aria-label={`在「${node.label}」中新建文件夹`} onClick={() => onCreateFolder(node.folderId || null)} /></Tooltip>
       {node.folderId && <Tooltip title="删除目录"><Button type="text" size="small" disabled={disabled} icon={<DeleteOutlined />} aria-label={`删除文件夹「${node.label}」`} onClick={() => onDeleteFolder(node.folderId!)} /></Tooltip>}
     </span></span>;
@@ -66,11 +67,11 @@ export default function PaperDirectoryTree(props: Props) {
             const siblings = children.get(parent) || [];
             siblings.push(folder); children.set(parent, siblings);
         }
-        const build = (id: string | null, label: string): DirectoryNode => ({
-            key: id || PAPER_LIBRARY_ROOT, label, folderId: id,
+        const build = (id: string | null, label: string, parentPath = ''): DirectoryNode => ({
+            key: id || PAPER_LIBRARY_ROOT, label, path: parentPath ? `${parentPath} / ${label}` : label, folderId: id,
             icon: id ? <FolderOutlined /> : <DatabaseOutlined />,
             count: id ? counts.get(id) || 0 : data.papers.length,
-            children: (children.get(id) || []).map(folder => build(folder.id, folder.name)),
+            children: (children.get(id) || []).map(folder => build(folder.id, folder.name, parentPath ? `${parentPath} / ${label}` : label)),
         });
         return [build(null, title)];
     }, [data.papers, data.folders, title]);

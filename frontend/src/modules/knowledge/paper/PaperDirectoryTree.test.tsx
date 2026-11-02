@@ -24,3 +24,10 @@ it('keeps the library root without displaying unfiled papers', () => {
     expect(screen.getAllByRole('treeitem')).toHaveLength(1);
     expect(screen.queryByText('A study')).not.toBeInTheDocument();
 });
+
+it('shows the full folder path on hover', async () => {
+ const data = libraryFixture({folders:[{id:'a',name:'父目录',parentId:null},{id:'b',name:'子目录',parentId:'a'}]});
+ render(<DndContext><PaperDirectoryTree data={data} title="论文库" active folderId="b" disabled={false} draggedIds={[]} dropFolderId={null} onSelectFolder={vi.fn()} onCreateFolder={vi.fn()} onDeleteFolder={vi.fn()} /></DndContext>);
+ fireEvent.mouseOver(screen.getByText('子目录'));
+ expect(await screen.findByRole('tooltip')).toHaveTextContent('论文库 / 父目录 / 子目录');
+});

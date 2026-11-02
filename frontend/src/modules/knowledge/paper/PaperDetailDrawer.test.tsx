@@ -71,7 +71,9 @@ describe('durable paper notes', () => {
         render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} academic={{ state: { document_id: 'pdf', kind: 'unknown', status: 'failed', paper_id: '', manual: false, error: 'Model unavailable' }, is_important: false }} onClose={() => { }} onAddNote={vi.fn()} onRetryIdentification={retry} onSave={vi.fn().mockResolvedValue(true)}/></ConfigProvider>);
         expect(screen.getByRole('status', { name: '论文信息自动识别' })).toHaveTextContent('识别失败');
         expect(screen.getByRole('status', { name: '正文解析状态' })).toHaveTextContent('正文解析失败');
-        expect(screen.getByRole('button', { name: '编辑题录' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '编辑文献信息' })).toBeEnabled();
+        expect(screen.queryByRole('button', { name: '写笔记' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('combobox', { name: '论文阅读状态' })).not.toBeInTheDocument();
         expect(screen.queryByText('Model unavailable')).not.toBeInTheDocument();
         expect(screen.queryByText('invalid literal for int()')).not.toBeInTheDocument();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
