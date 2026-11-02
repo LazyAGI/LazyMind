@@ -112,6 +112,13 @@ class LazyMindObsidianProvider(ObsidianWriterProvider):
                 return Path(asset.local_path)
             raise ObsidianTargetError('OBSIDIAN_ATTACHMENT_UNAVAILABLE')
         path = ObsidianWriterProvider._asset_path(uri, assets)
+        if path is None:
+            from .host_files import staged_writer_input
+            # Markdown can retain the source path while the asset has been
+            # staged again. Resolve only to an asset approved for this call.
+            staged = staged_writer_input(uri)
+            if staged:
+                path = ObsidianWriterProvider._asset_path(staged, assets)
         if path is None and (not uri.startswith(('https://', 'http://', '//'))
                              or any(uri in {asset.uri, asset.local_path} for asset in assets)):
             raise ObsidianTargetError('OBSIDIAN_ATTACHMENT_UNAVAILABLE')

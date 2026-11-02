@@ -299,6 +299,8 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
         task.mkdir()
         source = self.root / 'input.png'
         Image.new('RGB', (2, 2), 'blue').save(source)
+        other = self.root / 'other.png'
+        Image.new('RGB', (2, 2), 'red').save(other)
         permission = WorkspaceContext.from_snapshot({
             'workspace_id': 'workspace', 'root': str(task), 'workspace_version': 1,
             'permission_mode': 'always_ask', 'permission_version': 1,
@@ -306,13 +308,18 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
         toolkit = WriterResourceToolkit()
         with tool_resolution_scope(ToolResolutionContext(managed_roots=(str(task.resolve()),))), \
                 workspace_permission_scope(permission):
-            for index, uri in enumerate(('https://example.test/image.png', str(source), None)):
-                with self.subTest(uri=uri):
+            cases = [(kind, uri) for kind in ('ir', 'markdown', 'markdown_file_uri')
+                     for uri in ('https://example.test/image.png', str(source), None)]
+            for index, (kind, uri) in enumerate(cases):
+                with self.subTest(kind=kind, uri=uri):
                     title = f'Illustrated{index}'
                     document = {'document_id': title, 'title': title, 'blocks': [{
                         'node_id': 'image-block', 'type': 'image',
                         'references': [{'type': 'media_asset', 'id': 'image'}],
                     }]}
+                    if kind != 'ir':
+                        reference = source.as_uri() if kind == 'markdown_file_uri' else str(source)
+                        document = f'# {title}\n\n![Example]({reference})\n'
                     assets = {'library_id': 'images', 'assets': {'image': {
                         'media_asset_id': 'image', 'asset_type': 'image', 'source_type': 'input_resource',
                         'uri': uri, 'local_path': str(source),
@@ -341,6 +348,19 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
                     self.assertEqual(result['provider'], 'obsidian')
                     self.assertEqual(result['target_document']['title'], title)
                     self.assertIn('![[assets/lazymind/', written)
+                    # Neither a previous approval nor the original image's existence
+                    # may authorize copying it when this call has no declared asset.
+                    if kind != 'ir':
+                        for unapproved in ({}, {'library_id': 'other', 'assets': {'other': {
+                            'media_asset_id': 'other', 'asset_type': 'image', 'source_type': 'input_resource',
+                            'local_path': str(other),
+                        }}}):
+                            with self.assertRaisesRegex(ValueError, 'OBSIDIAN_ATTACHMENT_UNAVAILABLE'):
+                                invoke(toolkit.write_document, {
+                                    'converted_document_json': json.dumps(converted), 'title': f'{title}-undeclared',
+                                    'media_assets_json': json.dumps(unapproved),
+                                })
+                            self.assertFalse((self.note.parent / f'{title}-undeclared.md').exists())
         copies = list((self.note.parent / 'assets/lazymind').glob('*.png'))
         self.assertEqual(len(copies), 1)
         self.assertEqual(copies[0].read_bytes(), source.read_bytes())

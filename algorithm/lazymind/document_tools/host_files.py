@@ -242,6 +242,18 @@ def resolve_writer_files(arguments: dict, *, operation: str = '') -> object:
 _WRITER_STAGING = ContextVar('writer_approved_input_staging', default=None)
 
 
+def staged_writer_input(uri):
+    """Find an input already staged by this call; never grant access or stage it here."""
+    staged = _WRITER_STAGING.get()
+    if not staged:
+        return None
+    try:
+        original = FileResolution().local(uri)
+    except ToolExecutionError:
+        return None
+    return staged.get(original)
+
+
 def _stage_writer_inputs(method):
     """Stage approved bytes once before passing paths to third-party parsers."""
     signature = inspect.signature(method)
