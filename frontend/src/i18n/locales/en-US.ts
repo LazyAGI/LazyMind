@@ -283,7 +283,7 @@ const enUS = {
     "targetHint": "Only the selected page is observed, without following other tabs. Recorded input is passed to the model as entered. Share the corresponding page or window in the screen picker.",
     "selectTarget": "Select a page first. Connect the browser extension or open a LazyMind managed browser.",
     "eventsUnavailable": "Mouse and keyboard capture did not complete. Check Accessibility and Input Monitoring permissions on macOS, restart the desktop app if needed, and record again.",
-    "helperInputPermission": "Allow LazyMind Recorder under System Settings → Privacy & Security → Accessibility. Click Start again after granting access; only the recording helper restarts.",
+    "helperInputPermission": "Allow LazyMind Recorder under System Settings → Privacy & Security → Input Monitoring to record mouse and keyboard actions. Screen Recording or Accessibility alone is not sufficient. Click Start again after granting access; the recording helper restarts.",
     "helperScreenPermission": "Allow LazyMind Recorder under System Settings → Privacy & Security → Screen & System Audio Recording. Click Start again after granting access; LazyMind can keep running.",
     "inputPermission": "Allow LazyMind (Electron in development) under System Settings → Privacy & Security → Accessibility, then start again.",
     "openInputSettings": "Open permission settings",

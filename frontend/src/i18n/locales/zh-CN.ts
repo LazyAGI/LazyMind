@@ -282,7 +282,7 @@ const zhCN = {
     "targetHint": "仅采集选定页面的操作和 DOM，不跟踪其他标签页；输入内容原样提供给模型。请在屏幕选择器中共享对应的页面或窗口。",
     "selectTarget": "请先选择录制页面。需要已连接的浏览器扩展或 LazyMind 受控浏览器。",
     "eventsUnavailable": "鼠标键盘采集未能完成，请确认系统权限后重新录制。macOS 请检查辅助功能和输入监控权限，必要时重启客户端。",
-    "helperInputPermission": "请在系统设置 → 隐私与安全性 → 辅助功能中允许“LazyMind Recorder”。授权后再次点击开始即可，录制组件会自动重启，主程序保持后台运行。",
+    "helperInputPermission": "请在系统设置 → 隐私与安全性 → 输入监控中允许“LazyMind Recorder”记录鼠标和键盘操作。仅开启屏幕录制或辅助功能并不足够。授权后再次点击开始，录制组件会自动重启。",
     "helperScreenPermission": "请在系统设置 → 隐私与安全性 → 录屏与系统录音中允许“LazyMind Recorder”。授权后再次点击开始即可，无需退出 LazyMind。",
     "inputPermission": "请在系统设置 → 隐私与安全性 → 辅助功能中允许 LazyMind（开发模式为 Electron），然后重新开始录制。",
     "openInputSettings": "打开系统授权设置",

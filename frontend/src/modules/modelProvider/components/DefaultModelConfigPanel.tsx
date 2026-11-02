@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import { useFocusModality } from "../hooks/useFocusModality";
+import { revealModelSetting } from "../utils/revealModelSetting";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -292,10 +293,7 @@ export default function DefaultModelConfigPanel({
     const frame = window.requestAnimationFrame(() => {
       if (!highlightedRowRef.current) return;
       focusedHighlightRef.current = highlightTarget;
-      highlightedRowRef.current?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "center",
-      });
+      revealModelSetting(highlightedRowRef.current);
       highlightedRowRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);

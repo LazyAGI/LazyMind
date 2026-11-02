@@ -317,7 +317,7 @@ describe("default capability configuration groups", () => {
     expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
     expect(target).toHaveClass("is-config-highlighted");
     await waitFor(() => expect(target).toHaveFocus());
-    expect(target.scrollIntoView).toHaveBeenCalled();
+    expect(target.scrollIntoView).not.toHaveBeenCalled();
     expect(resolved).not.toHaveBeenCalled();
   });
 

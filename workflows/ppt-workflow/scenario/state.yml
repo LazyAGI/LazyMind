@@ -987,7 +987,9 @@ steps:
 
       {{runtime_instruction}}
 
-      First call ppt_find_deck(). Then call ppt_generate_background_images once.
+      Call ppt_generate_background_images once, omitting deck_dir. The tool
+      resolves the current workflow's prepared deck automatically. Do not look
+      up a deck or pass deck_id/task_ref; these are not generation arguments.
       The tool normalizes every saved background to the exact 1280x720 slide
       canvas. Do not treat a provider's square source image as the final asset.
       Never call ppt_generate_background_images more than once in the same step.
@@ -1016,7 +1018,6 @@ steps:
       If generation fails or returns no file, report the exact model/tool reason
       and fail the step. After success, continue automatically.
     tools:
-      - ppt_find_deck
       - ppt_generate_background_images
     inputs:
       - material: background_prompts

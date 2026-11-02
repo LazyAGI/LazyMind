@@ -106,6 +106,7 @@ WORKFLOW_TOOL_FAILURE_LIMITS = {
     'validate_proposal_from_inputs': 1,
 }
 WORKFLOW_TOOL_CALL_LIMITS = {
+    'ppt_generate_background_images': 1,
     'get_artifact': 6,
     'save_artifacts': 8,
     'validate_and_allocate_outline': 1,

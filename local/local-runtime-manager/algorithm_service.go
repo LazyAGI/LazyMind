@@ -619,8 +619,25 @@ func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot str
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
 	exportSrc := filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx")
 	exportDeps := filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt")
-	if err := ensureEditablePPTNodeModulesLink(exportSrc, exportDeps); err != nil {
-		fmt.Fprintf(os.Stderr, "editable-ppt node_modules link skipped: %v\n", err)
+	linkExporterDependencies := cfg.Profile != "desktop"
+	if cfg.Profile == "desktop" {
+		staged, err := stageEditablePPTExporter(exportSrc, exportDeps)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "editable-ppt exporter staging failed: %v\n", err)
+			// Do not expose the sealed source as a fallback: the exporter itself
+			// can install dependencies beside its entry point when executed.
+			exportSrc = filepath.Join(exportDeps, "export-runtime", "unavailable")
+		} else {
+			exportSrc = staged
+			linkExporterDependencies = !pathIsUnderRoot(exportSrc, paths.RepoRoot)
+		}
+	}
+	// Packaged application resources are sealed by code signing. Never create
+	// dependency links in them, including when staging the writable copy fails.
+	if linkExporterDependencies {
+		if err := ensureEditablePPTNodeModulesLink(exportSrc, exportDeps); err != nil {
+			fmt.Fprintf(os.Stderr, "editable-ppt node_modules link skipped: %v\n", err)
+		}
 	}
 	pythonPaths := append([]string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}, pythonComponentSites(paths)...)
 	lazyLLMSource := filepath.Join(paths.RepoRoot, "algorithm", "lazyllm")
@@ -742,7 +759,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1",
 		"LAZYMIND_WORKFLOWS_DIR=" + filepath.Join(paths.RepoRoot, "workflows"),
-		"LAZYMIND_PPT_EXPORT_CLI=" + filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx", "html_to_pptx.mjs"),
+		"LAZYMIND_PPT_EXPORT_CLI=" + filepath.Join(exportSrc, "html_to_pptx.mjs"),
 		"LAZYMIND_PPT_EXPORT_DEPS=" + filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt"),
 		"LAZYMIND_PPT_EXPORT_NODE=" + envText("LAZYMIND_NODE_EXECUTABLE", "node"),
 		"LAZYMIND_NODE_RUN_AS_NODE=" + envText("LAZYMIND_NODE_RUN_AS_NODE", "false"),
@@ -784,7 +801,7 @@ func ensureEditablePPTNodeModulesLink(exportSrc, exportDeps string) error {
 		return err
 	}
 	if current, ok := directoryLinkTarget(link); ok {
-		if filepath.Clean(current) == filepath.Clean(target) {
+		if sameExporterDirectory(current, target) {
 			return nil
 		}
 		_ = os.Remove(link)
@@ -1036,4 +1053,13 @@ func tcpOK(ctx context.Context, host string, port int, timeout time.Duration) bo
 	}
 	_ = conn.Close()
 	return true
+}
+
+func sameExporterDirectory(left, right string) bool {
+	a, err := os.Stat(left)
+	if err != nil {
+		return false
+	}
+	b, err := os.Stat(right)
+	return err == nil && os.SameFile(a, b)
 }

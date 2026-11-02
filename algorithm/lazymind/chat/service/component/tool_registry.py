@@ -109,11 +109,18 @@ MEDIA_GENERATION_NO_FALLBACK_POLICY = (
     '# Explicit media generation requests (mandatory, no fallback)\n'
     'When the user explicitly requests an image, an image edit, or a video as the final '
     'deliverable, you MUST call the corresponding `image_generator`, `image_editor`, or '
-    '`video_generator` tool. Treat that tool itself as the authoritative availability check; '
+    '`video_generator` tool. For simple image generation, call `image_generator` directly '
+    'without `create_subagent`, `search_skill`, or `get_skill`. Use reasonable defaults '
+    'instead of asking for optional style or size details. '
+    'Treat that tool itself as the authoritative availability check; '
     'do not use skill discovery, workspace inspection, web search, or another media tool to '
     'guess whether the requested capability is configured. For a text-only video request, '
     'when the configured video provider or model is `unknown`, call `video_generator` directly '
     'before calling any other tool.\n'
+    'Use tool names exactly as declared, including case. Claim generation or editing '
+    'succeeded only when that call returned an output file. A failed call is not success, '
+    'and an image from an earlier call is not the result of the failed edit. Never invent '
+    'file_id references to replace missing output links.\n'
     'If the requested media tool returns `MEDIA_CAPABILITY_DEPENDENCY_MISSING`, stop immediately. '
     'Do not call another tool, do not call `ask_user`, and do not replace the requested result '
     'with still images, keyframes, a GIF, a script, search results, links, or any other fallback. '
@@ -1217,8 +1224,12 @@ def filter_tools(
         patterns = _TOOL_CAPABILITY_REQUEST_PATTERNS.get(cfg.name, ())
         if terms and user_query and _capability_is_denied(user_query, terms, patterns):
             continue
+        # Chat's discoverable configuration surface must expose media tools even
+        # for short requests and clarification replies without routing keywords.
+        # The tool returns the authoritative missing-model configuration card.
         if not tool_is_active(cfg) and not (include_unready and cfg.name in {
             'mail', 'cloud_files', 'web_search', 'academic_search',
+            *_ON_DEMAND_MODEL_TOOLS,
         }):
             if not (
                 cfg.name in _ON_DEMAND_MODEL_TOOLS
