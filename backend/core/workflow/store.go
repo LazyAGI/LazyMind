@@ -1336,6 +1336,16 @@ func UpdateSelectedHumanArtifactValue(
 	contentType string, value json.RawMessage, caption *string,
 	expectedRevision *int, expectedDraftVersion *int64,
 ) (*orm.WorkflowSlotRevision, int64, bool, error) {
+	return updateSelectedHumanArtifactValue(ctx, db, sessionID, slotID, listIndex, contentType, value, caption, expectedRevision, expectedDraftVersion, false, false)
+}
+
+func updateSelectedHumanArtifactValue(
+	ctx context.Context, db *gorm.DB,
+	sessionID, slotID string, listIndex *int,
+	contentType string, value json.RawMessage, caption *string,
+	expectedRevision *int, expectedDraftVersion *int64,
+	outlineScope, numberingOnly bool,
+) (*orm.WorkflowSlotRevision, int64, bool, error) {
 	value = common.CanonicalizeTextArtifactValue(contentType, value)
 	var selected orm.WorkflowSlotRevision
 	var draftVersion int64
@@ -1408,7 +1418,16 @@ func UpdateSelectedHumanArtifactValue(
 			}
 			return nil
 		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, sessionID, selected.ID); err != nil {
+		revisionIDs, err := outlineSaveRevisionIDs(tx, sessionID, outlineScope, selected.ID)
+		if err != nil {
+			return err
+		}
+		if numberingOnly {
+			err = artifactgraph.CheckConsumers(ctx, tx, sessionID, revisionIDs...)
+		} else {
+			err = artifactgraph.InvalidateConsumers(ctx, tx, sessionID, revisionIDs...)
+		}
+		if err != nil {
 			return err
 		}
 
@@ -1473,7 +1492,10 @@ func writeSlotRevisionWithHumanArtifact(
 	expectedRevision *int, expectedDraftVersion *int64,
 	preserveConsumers bool,
 	preservedProducer *orm.WorkflowSlotRevision,
+	outlineSave ...bool,
 ) (*orm.WorkflowSlotRevision, error) {
+	outlineScope := len(outlineSave) > 0 && outlineSave[0]
+	numberingOnly := len(outlineSave) > 1 && outlineSave[1]
 
 	if changeSource == "" {
 		changeSource = "human"
@@ -1560,7 +1582,11 @@ func writeSlotRevisionWithHumanArtifact(
 		if err != nil {
 			return err
 		}
-		if preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
+		replacedRevisionIDs, err = outlineSaveRevisionIDs(tx, sessionID, outlineScope, replacedRevisionIDs...)
+		if err != nil {
+			return err
+		}
+		if numberingOnly || preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
 			err = artifactgraph.CheckConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
 		} else if preservedProducer == nil {
 			err = artifactgraph.InvalidateConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
@@ -1706,6 +1732,52 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
 	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft bool,
 ) (*orm.WorkflowSlotRevision, int64, bool, error) {
+	return saveHumanArtifactValue(ctx, db, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, baseRevision, baseDraft, draft, false, false)
+}
+
+func outlineSaveRevisionIDs(tx *gorm.DB, sessionID string, outlineScope bool, currentIDs ...string) ([]string, error) {
+	ids := append([]string(nil), currentIDs...)
+	if !outlineScope {
+		return ids, nil
+	}
+	var draft orm.WorkflowSlotRevision
+	err := tx.Select("producer_attempt_id", "step_id", "attempt").
+		Where("session_id = ? AND slot_id = ? AND selected = ? AND validity = ?", sessionID, "draft_document", true, "effective").
+		Take(&draft).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ids, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	attemptID := draft.ProducerAttemptID
+	if attemptID == "" {
+		var attempt orm.WorkflowSessionStep
+		err = tx.Select("id").Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, draft.StepID, draft.Attempt).Take(&attempt).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ids, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		attemptID = attempt.ID
+	}
+	var bindings []orm.WorkflowAttemptInputBinding
+	if err := tx.Select("material_revision_id").Where("session_id = ? AND attempt_id = ? AND material_id = ?", sessionID, attemptID, "outline_document").Find(&bindings).Error; err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if binding.MaterialRevisionID != "" {
+			ids = append(ids, binding.MaterialRevisionID)
+		}
+	}
+	return ids, nil
+}
+
+func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
+	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
+	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft, outlineScope, numberingOnly bool,
+) (*orm.WorkflowSlotRevision, int64, bool, error) {
 	frozen, directory, err := publication.SnapshotEdit(db.WithContext(ctx), sessionID, contentType, value)
 	if err != nil {
 		return nil, 0, false, err
@@ -1725,13 +1797,13 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 		inPlace = false
 		if draft {
 			var err error
-			revision, version, inPlace, err = UpdateSelectedHumanArtifactValue(ctx, tx, sessionID, slotID, listIndex, contentType, value, caption, baseRevision, baseDraft)
+			revision, version, inPlace, err = updateSelectedHumanArtifactValue(ctx, tx, sessionID, slotID, listIndex, contentType, value, caption, baseRevision, baseDraft, outlineScope, numberingOnly)
 			if err != nil || inPlace {
 				return err
 			}
 		}
 		var err error
-		revision, err = WriteSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft)
+		revision, err = writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft, false, nil, outlineScope, numberingOnly)
 		if err == nil {
 			version = 1
 		}
@@ -1743,7 +1815,37 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 	return revision, version, inPlace, nil
 }
 
+func markdownUnchangedBeforeNumbering(ctx context.Context, baseArtifact, editedArtifact json.RawMessage) (bool, error) {
+	base, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{
+		Reference: "builtin:document.render_document.v1", Phase: "preview", Artifact: baseArtifact,
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		return false, documentUpstreamFailure(status, err)
+	}
+	edited, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{
+		Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact,
+		Arguments: map[string]any{"base_artifact": json.RawMessage(baseArtifact)},
+	})
+	if err != nil {
+		return false, documentUpstreamFailure(status, err)
+	}
+	var baseline struct {
+		Document json.RawMessage `json:"document"`
+	}
+	var normalized struct {
+		Source json.RawMessage `json:"source_document"`
+	}
+	var before, after string
+	if json.Unmarshal(base.Result, &baseline) != nil || json.Unmarshal(edited.Result, &normalized) != nil ||
+		json.Unmarshal(baseline.Document, &before) != nil || json.Unmarshal(normalized.Source, &after) != nil {
+		return false, documentFailure("DOCUMENT_ACTION_RESULT_INVALID", 502)
+	}
+	return strings.TrimRight(before, "\r\n") == strings.TrimRight(after, "\r\n"), nil
+}
+
 func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id string, baseRevision int, baseDraft *int64, contentType string, value json.RawMessage, caption *string, draft bool, numbering ...json.RawMessage) (*orm.WorkflowSlotRevision, error) {
+	numberingOnly := false
 	if len(numbering) > 0 && len(numbering[0]) > 0 {
 		request := documentActionRequest{baseRevision: &baseRevision, baseDraftVersion: baseDraft}
 		target, err := prepareDocumentAction(ctx, owner, id, request, true)
@@ -1755,7 +1857,14 @@ func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id strin
 			return nil, documentFailure("DOCUMENT_ACTION_INVALID", 400)
 		}
 		editedArtifact, _ := json.Marshal(map[string]any{"data": edited.Value})
-		reply, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact, Arguments: map[string]any{"base_artifact": map[string]any{"data": target.content.Value}, "numbering_update": numbering[0]}})
+		baseArtifact, _ := json.Marshal(map[string]any{"data": target.content.Value})
+		if target.session.WorkflowID == "writer-workflow" && target.revision.SlotID == "outline_document" && target.content.Representation == "markdown" {
+			numberingOnly, err = markdownUnchangedBeforeNumbering(ctx, baseArtifact, editedArtifact)
+			if err != nil {
+				return nil, err
+			}
+		}
+		reply, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact, Arguments: map[string]any{"base_artifact": json.RawMessage(baseArtifact), "numbering_update": numbering[0]}})
 		if err != nil {
 			return nil, documentUpstreamFailure(status, err)
 		}
@@ -1799,7 +1908,8 @@ func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id strin
 		if current.ListIndex != nil {
 			cardinality = "list"
 		}
-		result, _, _, err = SaveHumanArtifactValue(ctx, tx, current.SessionID, current.SlotID, current.Slot, current.StepID, current.Attempt, cardinality, current.ListIndex, contentType, value, caption, &baseRevision, baseDraft, draft)
+		outlineScope := session.WorkflowID == "writer-workflow" && current.SlotID == "outline_document" && contentType == "text/markdown"
+		result, _, _, err = saveHumanArtifactValue(ctx, tx, current.SessionID, current.SlotID, current.Slot, current.StepID, current.Attempt, cardinality, current.ListIndex, contentType, value, caption, &baseRevision, baseDraft, draft, outlineScope, numberingOnly && outlineScope)
 		return err
 	})
 	if err != nil {

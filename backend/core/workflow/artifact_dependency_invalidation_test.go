@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/algo"
 	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
 )
@@ -238,6 +239,93 @@ func TestHumanRevisionInvalidatesTerminalConsumersRecursively(t *testing.T) {
 	requireAttemptValidity(t, fixture, fixture.unrelatedAttemptID, "effective")
 	requireRevisionState(t, fixture, fixture.unrelatedOutputID, "effective", true)
 	requireDecisionValidity(t, fixture, fixture.unrelatedDecisionID, "effective")
+}
+
+func TestMarkdownNumberingComparisonUsesExistingDocumentActions(t *testing.T) {
+	for _, tc := range []struct {
+		name, edited string
+		want         bool
+	}{
+		{"numbering only", "# Title\n\n## Section\n\nBody.", true},
+		{"numbering and body", "# Title\n\n## Section\n\nChanged body.", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				var request algo.DocumentActionInvokeRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch request.Reference {
+				case "builtin:document.render_document.v1":
+					_, _ = w.Write([]byte(`{"result":{"document":"# Title\n\n## Section\n\nBody.\n"}}`))
+				case "builtin:document.save_document.v1":
+					_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"source_document": tc.edited}})
+				default:
+					t.Errorf("unexpected action: %s", request.Reference)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			base := json.RawMessage(`{"data":"# Title\n\n## Section\n\nBody.\n"}`)
+			got, err := markdownUnchangedBeforeNumbering(t.Context(), base, base)
+			if err != nil || got != tc.want || calls != 2 {
+				t.Fatalf("unchanged=%v want=%v calls=%d err=%v", got, tc.want, calls, err)
+			}
+		})
+	}
+}
+
+func writerOutlineNumberingFixture(t *testing.T) artifactDependencyFixture {
+	t.Helper()
+	fixture := seedArtifactDependencyFixture(t, StepStatusSucceeded, "", false)
+	updates := []struct {
+		model any
+		id    string
+		data  map[string]any
+	}{
+		{&orm.WorkflowSession{}, "session-dependency", map[string]any{"plugin_id": "writer-workflow"}},
+		{&orm.WorkflowHumanArtifact{}, fixture.sourceHumanID, map[string]any{
+			"slot": "outline_document", "content_type": "text/markdown",
+			"value": json.RawMessage(`{"schema":"text/markdown","data":"# Title\n\n## Section\n\nBody.\n"}`),
+		}},
+		{&orm.WorkflowSlotRevision{}, fixture.sourceRevisionID, map[string]any{"slot_id": "outline_document", "slot": "outline_document"}},
+		{&orm.WorkflowSessionStep{}, fixture.directAttemptID, map[string]any{"step_id": "write_document"}},
+		{&orm.WorkflowAttemptInputBinding{}, "binding-direct", map[string]any{"material_id": "outline_document"}},
+		{&orm.WorkflowSlotRevision{}, fixture.directOutputID, map[string]any{
+			"slot_id": "draft_document", "slot": "draft_document", "step_id": "write_document",
+		}},
+	}
+	for _, update := range updates {
+		if err := fixture.db.Model(update.model).Where("id = ?", update.id).Updates(update.data).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	return fixture
+}
+
+func TestWriterOutlineNumberingKeepsDraftUntilContentChanges(t *testing.T) {
+	fixture := writerOutlineNumberingFixture(t)
+	baseRevision, baseDraftVersion := 1, int64(1)
+	numbered := json.RawMessage(`{"schema":"text/markdown","data":"# Title\n\n## Section\n\nBody.\n<!-- numbering: chinese -->\n"}`)
+	saved, _, inPlace, err := saveHumanArtifactValue(t.Context(), fixture.db.DB, "session-dependency", "outline_document", "outline_document", "source-step", 1, "single", nil, "text/markdown", numbered, nil, &baseRevision, &baseDraftVersion, true, true, true)
+	if err != nil || saved == nil || inPlace || saved.Revision != 2 {
+		t.Fatalf("numbering save: revision=%#v in_place=%v err=%v", saved, inPlace, err)
+	}
+	requireAttemptValidity(t, fixture, fixture.directAttemptID, "effective")
+	requireRevisionState(t, fixture, fixture.directOutputID, "effective", true)
+
+	baseRevision = saved.Revision
+	changed := json.RawMessage(`{"schema":"text/markdown","data":"# Title\n\n## Section\n\nChanged body.\n<!-- numbering: chinese -->\n"}`)
+	_, _, _, err = saveHumanArtifactValue(t.Context(), fixture.db.DB, "session-dependency", "outline_document", "outline_document", "source-step", 1, "single", nil, "text/markdown", changed, nil, &baseRevision, &baseDraftVersion, true, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireAttemptValidity(t, fixture, fixture.directAttemptID, "stale")
+	requireRevisionState(t, fixture, fixture.directOutputID, "stale", false)
 }
 
 func TestHumanRevisionRejectsEveryLiveDirectConsumer(t *testing.T) {
