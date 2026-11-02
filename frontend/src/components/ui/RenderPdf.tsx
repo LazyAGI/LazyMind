@@ -944,23 +944,6 @@ export default function RenderPdf({
         {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} onExplain={explainFormula} />}
         {formulaDocument && <PdfFigureLayer blocks={imageBlocks.filter(block=>block.page===index)} allBlocks={formulaDocument.blocks} onSelect={openVisualStudy}/> }
         {tablesEnabled && formulaDocument && tablePages.has(index) && <PdfTableLayer key={`tables:${studySourceKey}`} blocks={tablePages.get(index)!} onSelect={openTableStudy} />}
-        <div
-          style={{
-            position: "absolute",
-            bottom: 6,
-            right: 10,
-            padding: "2px 8px",
-            fontSize: 12,
-            background: "rgba(0,0,0,0.45)",
-            color: "#fff",
-            borderRadius: 12,
-            lineHeight: 1.2,
-            pointerEvents: "none",
-            fontFamily: "system-ui, sans-serif",
-          }}
-        >
-          {index + 1}/{numPages}
-        </div>
       </div>
     );
   };

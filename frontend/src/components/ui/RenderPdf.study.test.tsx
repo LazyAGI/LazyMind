@@ -145,6 +145,13 @@ it('renders the default PDF at the former 140% size while the toolbar reads 100%
  expect(page).toHaveStyle({width:'840px'});
 });
 
+it('keeps page navigation in the toolbar without covering each PDF page with a page badge',()=>{
+ const view=render(<RenderPdf fileData="page-badge.pdf" defaultPageWidth={600}/>);
+ expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1);
+ expect(view.container.querySelector('.pdf-reader-page-total')).toHaveTextContent('/ 3');
+ expect(view.container.querySelector('[data-pdf-page-index="0"]')).not.toHaveTextContent('1/3');
+});
+
 it('opens formula and table reading in a floating source dialog instead of a reader sidebar',()=>{
  const view=render(<RenderPdf fileData="source-popup.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
  fireEvent.click(view.container.querySelector('.pdf-formula-trigger')!);
