@@ -24,7 +24,7 @@ const pdfIRMaxArtifactBytes int64 = 32 << 20
 const pdfIRTooLargeCode = "pdf_ir_too_large"
 const pdfIRTooLargeMessage = "PDF reading structure exceeds the 32 MiB limit. Use a smaller PDF or split the original PDF into smaller documents."
 
-var errPDFIRTooLarge = errors.New(pdfIRTooLargeMessage)
+var errPDFIRTooLarge = errors.New("PDF reading structure exceeds the 32 MiB limit. Use a smaller PDF or split the original PDF into smaller documents.")
 
 type pdfIRPayload struct {
 	Revision     string `json:"revision"`

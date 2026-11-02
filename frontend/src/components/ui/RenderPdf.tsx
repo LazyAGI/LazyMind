@@ -36,6 +36,7 @@ export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  paperMode?: boolean;
   pdfHeaderStart?: React.ReactNode;
   pdfHeaderEnd?: React.ReactNode;
   paperTitle?: string;
@@ -121,6 +122,7 @@ function hasUsablePdfText(value: string): boolean {
 
 export default function RenderPdf({
   onPreviewError,
+  paperMode = false,
   pdfHeaderStart,
   pdfHeaderEnd,
   onStudyOpenChange,
@@ -288,14 +290,15 @@ export default function RenderPdf({
   const [scrollTop, setScrollTop] = useState(0);
 
   const pageWidthPx = useMemo(() => {
+    const baseScale = paperMode ? PDF_READING_BASE_SCALE : 1;
     if (defaultPageWidth) {
-      return Math.round(defaultPageWidth * PDF_READING_BASE_SCALE * zoom);
+      return Math.round(defaultPageWidth * baseScale * zoom);
     }
     if (!containerWidth) {
-      return Math.round(900 * PDF_READING_BASE_SCALE * zoom);
+      return Math.round(900 * baseScale * zoom);
     }
-    return Math.round(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * PDF_READING_BASE_SCALE * zoom);
-  }, [defaultPageWidth, containerWidth, zoom]);
+    return Math.round(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * baseScale * zoom);
+  }, [defaultPageWidth, containerWidth, zoom, paperMode]);
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
   const [pendingHighlight, setPendingHighlight] = useState(false);
@@ -971,7 +974,7 @@ export default function RenderPdf({
   );
 
   const readerHeader = (
-    <nav className={`pdf-reader-modebar pdf-reader-header${pdfIRTarget ? " has-overview" : ""}`} aria-label={readerLabel("reading")}>
+    <nav className={`pdf-reader-modebar pdf-reader-header${pdfIRTarget ? " has-overview" : ""}`} aria-label={paperMode ? readerLabel("reading") : t("paperShell.document",{defaultValue:"Document"})}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
       {pdfIRTarget && <div role="tablist" className="pdf-reader-view-toggle" aria-label={readerLabel("reading")}><button type="button" role="tab" aria-selected={readerMode==="overview"} onClick={()=>setReaderMode("overview")}>{readerLabel("insight")}</button><button type="button" role="tab" aria-selected={readerMode==="original"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button></div>}
       <div className="pdf-reader-header-end">

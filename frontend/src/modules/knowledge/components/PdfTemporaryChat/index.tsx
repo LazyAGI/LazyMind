@@ -27,6 +27,7 @@ interface PdfTemporaryChatProps {
   datasetId: string;
   documentId: string;
   fileName: string;
+  paperMode?: boolean;
   selection?: DocumentChatSelection;
   conversationToLoad?: string;
   translationRequest?: DocumentTranslationRequest | null;
@@ -52,6 +53,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   datasetId,
   documentId,
   fileName,
+  paperMode = false,
   selection,
   conversationToLoad,
   translationRequest,
@@ -80,7 +82,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
       ["Limitations", "Look beyond the headline", "What are the limitations and open questions in this paper? Distinguish stated limitations from your own inferences."],
     ],
   };
-  const isPaper = /\.pdf$/i.test(fileName);
+  const isPaper = paperMode;
   const [dismissedSelection, setDismissedSelection] = useState<DocumentChatSelection>();
   const activeSelection = selection !== dismissedSelection ? selection : undefined;
   const chatRef = useRef<ChatImperativeProps>(null);
@@ -97,6 +99,9 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   const [chatConfig, setChatConfig] = useState<ChatConfig>({ knowledgeBaseId: [datasetId] });
   const [parseState, setParseState] = useState<DocumentParseResult["status"] | "loading">("loading");
   const [parseError, setParseError] = useState("");
+  const parseErrorDescription = /dynamic_ocr_auth|ocr_auth.{0,40}mineru.{0,40}not set/i.test(parseError)
+    ? <span>{t("knowledge.pdfChatParserRequired")} <a href="/settings?section=model_defaults&service=parsing">{t("pdfFormula.configureService")}</a></span>
+    : parseError;
   const [parseAttempt, setParseAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
 
@@ -374,7 +379,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           <Alert className="pdf-temporary-chat__parse-status" type="success" showIcon message={t("knowledge.pdfChatParsed")} />
         ) : null}
         {parseState === "failed" ? (
-          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseError} action={<Button size="small" loading={retrying} onClick={async () => {
+          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseErrorDescription} action={<Button size="small" loading={retrying} onClick={async () => {
             setRetrying(true);
             try { await retryDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
             catch (error) { setParseError(getLocalizedErrorMessage(error)); }
@@ -386,7 +391,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           type={parseState === "loading" ? "info" : "warning"}
           showIcon
           message={t(parseState === "loading" ? "knowledge.pdfChatChecking" : parseState === "not_requested" ? "knowledge.pdfChatNotParsed" : "knowledge.pdfChatUnknown")}
-          description={parseError}
+          description={parseErrorDescription}
           action={parseState !== "loading" ? <Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button> : undefined}
         />}
         <ChatContainerComponent
@@ -423,9 +428,9 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           showThinkingDepth={false}
           showSkillDeposit={false}
           showConversationConfig={false}
-          showModelSelector
-          composerVariant="paper"
-          modelSelectionDraft={!conversationCreated}
+          showModelSelector={isPaper}
+          composerVariant={isPaper ? "paper" : "default"}
+          modelSelectionDraft={isPaper && !conversationCreated}
           allowLocalWorkspace={false}
           fixedThinkingDepth="low"
         />

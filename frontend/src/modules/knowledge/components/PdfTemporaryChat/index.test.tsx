@@ -106,9 +106,18 @@ describe("document question context", () => {
     expect(screen.queryByText("Reader could not decode the PDF")).not.toBeInTheDocument();
   });
 
+  it("explains how to configure a missing parser without showing internal configuration text", async () => {
+    ensureDocumentParsed.mockResolvedValueOnce({status:"failed",error:{message:'dynamic_ocr_auth["mineru"] is not set in globals.config'}});
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="parser-missing" fileName="manual.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText('knowledge.pdfChatParserRequired')).toBeInTheDocument();
+    expect(screen.getByRole('link',{name:'pdfFormula.configureService'})).toHaveAttribute('href',expect.stringContaining('section=model_defaults&service=parsing'));
+    expect(screen.queryByText(/dynamic_ocr_auth/)).toBeNull();
+  });
+
   it("distinguishes chat text readiness from formula parsing", async () => {
     ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
-    render(<PdfTemporaryChat datasetId="dataset-a" documentId="ready-pdf" fileName="ready.pdf" onClose={() => {}} />);
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="ready-pdf" fileName="ready.pdf" paperMode onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("status")).toHaveTextContent("Paper ready");
     expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
@@ -130,7 +139,7 @@ describe("document question context", () => {
 
   it("refreshes an unknown status without requesting a new parse attempt", async () => {
     ensureDocumentParsed.mockRejectedValueOnce(new Error("Status service unavailable")).mockResolvedValueOnce({ status: "parsed" });
-    render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" onClose={() => {}} />);
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" paperMode onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRefreshStatus" }));
     await act(async () => { await Promise.resolve(); });
@@ -294,7 +303,7 @@ describe("document question context", () => {
 
 
 it("uses the paper composer and a draft model catalog without disabling keyboard invocations",()=>{
- render(<PdfTemporaryChat datasetId="d" documentId="draft-paper-test" fileName="paper.pdf" onClose={vi.fn()}/>);
+ render(<PdfTemporaryChat datasetId="d" documentId="draft-paper-test" fileName="paper.pdf" paperMode onClose={vi.fn()}/>);
  expect(chatActions.composer).toMatchObject({composerVariant:"paper",showModelSelector:true,modelSelectionDraft:true});
  expect(chatActions.composer.allowMentions).not.toBe(false);
 });
@@ -302,7 +311,7 @@ it("uses the paper composer and a draft model catalog without disabling keyboard
 
 it('removes the fixed new/save action row only from paper chat',()=>{
  const props={datasetId:'d',documentId:'paper-actions-test',onClose:vi.fn()};
- const {rerender,container}=render(<PdfTemporaryChat {...props} fileName="paper.pdf"/>);
+ const {rerender,container}=render(<PdfTemporaryChat {...props} fileName="paper.pdf" paperMode/>);
  expect(container.querySelector(".pdf-temporary-chat--paper")).not.toBeNull();
  expect(screen.getByRole('button',{name:/knowledge.pdfChatNew/})).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:/knowledge.pdfChatSave/})).not.toBeInTheDocument();
@@ -312,9 +321,17 @@ it('removes the fixed new/save action row only from paper chat',()=>{
  expect(screen.getByRole('button',{name:/knowledge.pdfChatSave/})).toBeInTheDocument();
 });
 
+it('keeps ordinary PDFs in document chat when the library is not a paper collection',()=>{
+ const {container}=render(<PdfTemporaryChat datasetId="d" documentId="manual" fileName="manual.pdf" paperMode={false} onClose={vi.fn()}/>);
+ expect(container.querySelector('.pdf-temporary-chat--paper')).toBeNull();
+ expect(screen.getByRole('button',{name:/knowledge.pdfChatSave/})).toBeInTheDocument();
+ expect(screen.queryByText('Make sense of this paper')).toBeNull();
+ expect(chatActions.composer).toMatchObject({composerVariant:'default',showModelSelector:false,modelSelectionDraft:false});
+});
+
 it('lets the workspace title bar start a new paper conversation without remounting chat',()=>{
  const ref=createRef<PdfTemporaryChatHandle>();
- const view=render(<PdfTemporaryChat ref={ref} datasetId="d" documentId="toolbar-new-chat" fileName="paper.pdf" onClose={vi.fn()}/>);
+ const view=render(<PdfTemporaryChat ref={ref} datasetId="d" documentId="toolbar-new-chat" fileName="paper.pdf" paperMode onClose={vi.fn()}/>);
  const pane=view.container.querySelector('.pdf-temporary-chat');
  act(()=>ref.current?.startNewConversation());
  expect(chatActions.createNewChat).toHaveBeenCalledOnce();
@@ -323,7 +340,7 @@ it('lets the workspace title bar start a new paper conversation without remounti
 
 
 it.each([ChatConversationsRequestActionEnum.ChatActionNext,ChatConversationsRequestActionEnum.ChatActionRegeneration])('keeps current paper scope on %s without an attached file or selected text',action=>{
- render(<PdfTemporaryChat datasetId="paper-dataset" documentId="current-paper" fileName="current.pdf" onClose={vi.fn()}/>);
+ render(<PdfTemporaryChat datasetId="paper-dataset" documentId="current-paper" fileName="current.pdf" paperMode onClose={vi.fn()}/>);
  chatActions.openSSE?.([{query:'Explain the core contribution of this paper.'}],action,{}, {
   document_context:{dataset_id:'stale-dataset',document_id:'stale-paper'},
   conversation:{search_config:{dataset_list:[]}},
@@ -339,7 +356,7 @@ it.each([ChatConversationsRequestActionEnum.ChatActionNext,ChatConversationsRequ
 
 describe("paper assistant workspace", () => {
   it("prepares each suggested question without sending it", () => {
-    render(<PdfTemporaryChat datasetId="d" documentId="suggestions" fileName="paper.pdf" onClose={vi.fn()} />);
+    render(<PdfTemporaryChat datasetId="d" documentId="suggestions" fileName="paper.pdf" paperMode onClose={vi.fn()} />);
     for (const label of ["Core contribution", "Explain the method", "Key results", "Limitations"]) {
       fireEvent.click(screen.getByRole("button", { name: new RegExp(label) }));
       expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: expect.any(String), appendCitations: true });
@@ -351,7 +368,7 @@ describe("paper assistant workspace", () => {
 
   it("starts a fresh paper conversation from the header", () => {
     const onConversationChange = vi.fn();
-    render(<PdfTemporaryChat datasetId="d" documentId="new-paper" fileName="paper.pdf" onClose={vi.fn()} onConversationChange={onConversationChange} />);
+    render(<PdfTemporaryChat datasetId="d" documentId="new-paper" fileName="paper.pdf" paperMode onClose={vi.fn()} onConversationChange={onConversationChange} />);
     fireEvent.click(screen.getByRole("button", { name: /knowledge.pdfChatNew/ }));
     expect(chatActions.createNewChat).toHaveBeenCalledOnce();
     expect(onConversationChange).toHaveBeenCalledWith(undefined);
@@ -361,7 +378,7 @@ describe("paper assistant workspace", () => {
     vi.useFakeTimers();
     const onClearSelection = vi.fn();
     const selection = { source: "pdf" as const, text: "A quoted result", page: 4 };
-    render(<PdfTemporaryChat datasetId="d" documentId="quote" fileName="paper.pdf" selection={selection} onClearSelection={onClearSelection} onClose={vi.fn()} />);
+    render(<PdfTemporaryChat datasetId="d" documentId="quote" fileName="paper.pdf" paperMode selection={selection} onClearSelection={onClearSelection} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Remove source quote" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(onClearSelection).toHaveBeenCalledOnce();
@@ -375,7 +392,7 @@ describe("paper assistant workspace", () => {
 it("localizes paper assistant and suggested questions in Chinese", async () => {
   locale.language = "zh-CN";
   ensureDocumentParsed.mockResolvedValueOnce({status:"parsed"});
-  render(<PdfTemporaryChat datasetId="d" documentId="p" fileName="p.pdf" onClose={vi.fn()} />);
+  render(<PdfTemporaryChat datasetId="d" documentId="p" fileName="p.pdf" paperMode onClose={vi.fn()} />);
   await screen.findByText("论文已就绪");
   expect(screen.getByText("论文助手")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name:/核心贡献/}));
@@ -385,7 +402,7 @@ it("localizes paper assistant and suggested questions in Chinese", async () => {
 
 it('prepares the selection question with its citation without sending it',async()=>{
  vi.useFakeTimers();
- render(<PdfTemporaryChat datasetId="d" documentId="question-draft" fileName="paper.pdf" selection={{source:'pdf',text:'Original quote',page:2,question:'Why is this true?'}} onClose={vi.fn()}/>);
+ render(<PdfTemporaryChat datasetId="d" documentId="question-draft" fileName="paper.pdf" paperMode selection={{source:'pdf',text:'Original quote',page:2,question:'Why is this true?'}} onClose={vi.fn()}/>);
  await act(async()=>{await vi.advanceTimersByTimeAsync(50)});
  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({text:'Why is this true?',citeMessage:'Original quote',appendCitations:true});
  expect(chatActions.sendMessage).not.toHaveBeenCalled();
@@ -393,7 +410,7 @@ it('prepares the selection question with its citation without sending it',async(
 
  it('does not overwrite the chat draft when a quoted selection has a blank question',async()=>{
  vi.useFakeTimers();
- render(<PdfTemporaryChat datasetId="d" documentId="quote-preserves-draft" fileName="paper.pdf" selection={{source:'pdf',text:'Additional quote',page:2,question:'   '}} onClose={vi.fn()}/>);
+ render(<PdfTemporaryChat datasetId="d" documentId="quote-preserves-draft" fileName="paper.pdf" paperMode selection={{source:'pdf',text:'Additional quote',page:2,question:'   '}} onClose={vi.fn()}/>);
  await act(async()=>{await vi.advanceTimersByTimeAsync(50)});
  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({citeMessage:'Additional quote',appendCitations:true});
  expect(chatActions.sendMessage).not.toHaveBeenCalled();

@@ -87,7 +87,7 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  vi.stubGlobal('ResizeObserver',class{constructor(callback:()=>void){callbacks.push(callback)}observe(){}disconnect(){}});
  const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
  const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
- const view=render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ const view=render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash" paperMode/>);
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  const page=screen.getAllByTestId('rendered-pdf-page')[0];
  const source=state.pdfFile;
@@ -115,7 +115,7 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
 
 
 it('navigates pages and changes zoom without search controls',async()=>{
- const view=render(<RenderPdf fileData="test.pdf" defaultPageWidth={600}/>);
+ const view=render(<RenderPdf fileData="test.pdf" defaultPageWidth={600} paperMode/>);
  await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
@@ -132,8 +132,8 @@ it('navigates pages and changes zoom without search controls',async()=>{
  view.unmount();
 });
 
-it('renders the default PDF at the former 140% size while the toolbar reads 100%',()=>{
- const view=render(<RenderPdf fileData="base-scale.pdf" defaultPageWidth={600}/>);
+it('renders paper PDFs at the former 140% size while the toolbar reads 100%',()=>{
+ const view=render(<RenderPdf fileData="base-scale.pdf" defaultPageWidth={600} paperMode/>);
  const page=view.container.querySelector('[data-pdf-page-index]');
  expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
  expect(page).toHaveStyle({width:'840px'});
@@ -143,6 +143,14 @@ it('renders the default PDF at the former 140% size while the toolbar reads 100%
  fireEvent.click(screen.getByRole('button',{name:'110%'}));
  expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
  expect(page).toHaveStyle({width:'840px'});
+});
+
+it('fits ordinary documents to their available width at the default zoom',()=>{
+ const view=render(<RenderPdf fileData="ordinary.pdf" defaultPageWidth={600}/>);
+ const page=view.container.querySelector('[data-pdf-page-index]');
+ expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
+ expect(page).toHaveStyle({width:'600px'});
+ expect(screen.getByRole('navigation',{name:'paperShell.document'})).toBeInTheDocument();
 });
 
 it('keeps page navigation in the toolbar without covering each PDF page with a page badge',()=>{
@@ -318,7 +326,7 @@ it('sends reading progress to the outer page after scrolling settles',async()=>{
 it('preserves the reading anchor when a newly mounted page reveals a different height',async()=>{
  const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
  const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
- const view=render(<RenderPdf fileData="mixed-pages.pdf" defaultPageWidth={600}/>);await act(async()=>{});
+ const view=render(<RenderPdf fileData="mixed-pages.pdf" defaultPageWidth={600} paperMode/>);await act(async()=>{});
  fireEvent.change(screen.getByRole('spinbutton',{name:'pdfReader.page'}),{target:{value:'3'}});
  const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
  const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();

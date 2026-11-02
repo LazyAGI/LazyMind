@@ -49,6 +49,7 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  paperMode?: boolean;
   onPdfNoteSelection?: (selection: PdfTextSelection, note: string) => void;
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode;
@@ -406,6 +407,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            paperMode={props.paperMode}
             pdfHeaderStart={props.pdfHeaderStart}
             pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
@@ -532,6 +534,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     pdfFingerprint,
     props.pdfIRTarget,
+    props.paperMode,
     props.onPdfIRDocumentChange,
     props.onPdfOutlineChange,
     props.pdfNavigateTo,

@@ -34,6 +34,7 @@ func init() {
 	registerAdditionalErrorAlias("selected mineru credential is missing", "unauthorized", http.StatusUnauthorized, 2000104)
 	for _, source := range []string{
 		"pdf ir requires an original pdf", "pdf exceeds 128 mib limit",
+		"pdf reading structure exceeds the 32 mib limit. use a smaller pdf or split the original pdf into smaller documents.",
 		"select a mineru ocr credential in model settings",
 		"selected local/custom mineru service does not support pdf ir; no cloud upload was performed",
 	} {

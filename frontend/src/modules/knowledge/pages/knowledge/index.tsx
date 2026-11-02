@@ -1,7 +1,7 @@
 import FileUtils from "@/modules/knowledge/utils/file";
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
 import { Button, Input, message, Modal, Popover, Progress, Segmented, Tag, Tooltip, Select, Switch, Spin } from "antd";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
@@ -159,12 +159,22 @@ async function writeTextToClipboard(text: string) {
 const KnowledgeDocumentContent = () => {
   const { t, i18n } = useTranslation();
   const displayTranslationName = (name: string) => translationProviderDisplayName(name, i18n.resolvedLanguage || i18n.language || "zh-CN");
-  const [knowledgeDetail, setKnowledgeDetail] = useState<KnowledgeDetail>();
+  const [loadedDocument, setLoadedDocument] = useState<{key:string;detail:KnowledgeDetail}>();
   const [documentLoadFailed, setDocumentLoadFailed] = useState(false);
   const [documentLoadAttempt, setDocumentLoadAttempt] = useState(0);
-  const documentReady = Boolean(knowledgeDetail);
-
   const { knowledgeBaseId = "", knowledgeId = "" } = useParams();
+  const documentKey=`${knowledgeBaseId}:${knowledgeId}`;
+  const knowledgeDetail=loadedDocument?.key===documentKey?loadedDocument.detail:undefined;
+  const currentDataset=useDatasetPermissionStore(state=>state.currentDataset);
+  const requestedDatasetId=useDatasetPermissionStore(state=>state.requestedDatasetId);
+  const datasetError=useDatasetPermissionStore(state=>state.datasetError);
+  const documentExtension = (knowledgeDetail?.display_name || "").split(".").pop()?.toLowerCase() || "";
+  const isPdfDocument = documentExtension === "pdf";
+  const datasetIdentified=currentDataset?.dataset_id===knowledgeBaseId;
+  const datasetFailed=requestedDatasetId===knowledgeBaseId&&Boolean(datasetError);
+  // Wait for the library scene so a paper PDF never flashes the generic workspace.
+  const documentReady=Boolean(knowledgeDetail)&&(!isPdfDocument||datasetIdentified);
+  const isPaperDocument=isPdfDocument&&datasetIdentified&&isPaperLibrary(currentDataset?.scene);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [segmentDetail, setSegmentDetail] = useState<Segment>();
@@ -201,6 +211,7 @@ const KnowledgeDocumentContent = () => {
   const handleStudyOpenChange = useCallback((open: boolean) => { if (open) setPreviewSideCollapsed(true); }, []);
   const [workspaceWidth, setWorkspaceWidth] = useState(1440);
   const [previewSideCollapsed, setPreviewSideCollapsed] = useState(false);
+  const [activatedDocumentChatKey,setActivatedDocumentChatKey] = useState<string>();
   useEffect(() => {
     const element=workspaceRef.current;if(!element)return;
     let previous=1440;
@@ -216,7 +227,7 @@ const KnowledgeDocumentContent = () => {
     const observer=new ResizeObserver(entries=>update(entries[0]?.contentRect.width||0));observer.observe(element);
     return()=>observer.disconnect();
   }, [documentReady]);
-  useEffect(()=>{setPaperDetailsOpened(false);setPanelLayout("right");setNoteDraftRequest(undefined);setPreviewSideTab("chat");setPaperIR(undefined);setNativePdfOutline([]);setPdfNavigateTo(undefined);setPdfNavigateToPage(undefined);setPaperNavTab("outline");},[knowledgeId]);
+  useEffect(()=>{setPaperDetailsOpened(false);setPanelLayout("right");setNoteDraftRequest(undefined);setPreviewSideTab("chat");setPaperIR(undefined);setNativePdfOutline([]);setPdfNavigateTo(undefined);setPdfNavigateToPage(undefined);setPaperNavTab("outline");},[knowledgeBaseId,knowledgeId]);
   const navigatePaperPage=useCallback((page:number)=>{setPdfNavigateToPage({page,requestId:++navigationSequence.current});setPdfSourceView("original");},[]);
   const navigatePaperBlock=useCallback((id:string)=>{
     setPdfNavigateTo({id,requestId:++navigationSequence.current});
@@ -437,10 +448,11 @@ const KnowledgeDocumentContent = () => {
 
   const askPdfSelection = useCallback((selection: PdfTextSelection) => {
 
+    setActivatedDocumentChatKey(documentKey);
     setPreviewSideTab("chat");
     setDocumentChatSelection({ source: "pdf", ...selection });
     setPreviewSideCollapsed(false);
-  }, []);
+  }, [documentKey]);
 
   const notePdfSelection = useCallback((selection:PdfTextSelection,note:string)=>{
     const quote=selection.text.split('\n').map(line=>`> ${line}`).join('\n');
@@ -530,6 +542,7 @@ const KnowledgeDocumentContent = () => {
     const rawPage = Number(metadata.page);
     const rawBbox = metadata.bbox;
     setPreviewSideTab("chat");
+    setActivatedDocumentChatKey(documentKey);
     setDocumentChatSelection({
       source: "segment",
       text: selectedText || segment.display_content || segment.content || "",
@@ -542,7 +555,7 @@ const KnowledgeDocumentContent = () => {
       group: segmentGroup,
     });
     setPreviewSideCollapsed(false);
-  }, []);
+  }, [documentKey]);
 
   const {
     getDatasetDetail: getKbDetail,
@@ -567,14 +580,14 @@ const KnowledgeDocumentContent = () => {
       .documentServiceGetDocument({dataset: knowledgeBaseId, document: knowledgeId})
       .then((res) => {
         if (!res.data) throw new Error("Missing document metadata");
-        if (!cancelled) setKnowledgeDetail(res.data);
+        if (!cancelled) setLoadedDocument({key:documentKey,detail:res.data});
       })
       .catch(() => { if (!cancelled) setDocumentLoadFailed(true); });
     void loadDataset(knowledgeBaseId).then(dataset => {
       if (!cancelled) setProcessingLevel((dataset as KnowledgeDatasetWithProcessingLevel).processing_level || "indexed");
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [documentLoadAttempt, knowledgeBaseId, knowledgeId, loadDataset]);
+  }, [documentKey, documentLoadAttempt, knowledgeBaseId, knowledgeId, loadDataset]);
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -941,9 +954,12 @@ const KnowledgeDocumentContent = () => {
     });
   }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.searchable_artifact, refreshPdfCapabilities, selectedPdfArtifact?.id]);
 
-  const documentExtension = (knowledgeDetail?.display_name || "").split(".").pop()?.toLowerCase() || "";
-  const isPdfDocument = documentExtension === "pdf";
-  useEffect(() => { setPaperNavCollapsed(isPdfDocument);  }, [isPdfDocument, knowledgeId]);
+  useEffect(() => { setPaperNavCollapsed(isPaperDocument);setPaperNavTab(isPaperDocument?"outline":"references");  }, [isPaperDocument, knowledgeId]);
+  useLayoutEffect(() => {
+    if (!documentReady) return;
+    const width = workspaceRef.current?.getBoundingClientRect().width || 1440;
+    setPreviewSideCollapsed(!isPaperDocument || width < 900);
+  }, [documentKey,documentReady,isPaperDocument]);
   const canTranslateDocument = translatableDocumentExtensions.includes(documentExtension);
   const translationInProgress = translationPreparing || Boolean(pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)) ||
     Boolean(latestActiveTranslationJob(pdfCapabilities?.jobs || []));
@@ -1136,14 +1152,14 @@ const KnowledgeDocumentContent = () => {
         ];
 
   // Unknown file types must not fall through to the legacy non-PDF layout.
-  if (!knowledgeDetail) {
+  if (!documentReady) {
     const zh = i18n.language.startsWith("zh");
     return <div className="paper-document-loading">
       <div className="paper-document-loading-surface">
         <Button type="text" icon={<ArrowLeftOutlined/>} onClick={() => navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}>{zh ? "返回" : "Back"}</Button>
-        <div className="paper-document-loading-status" role={documentLoadFailed ? "alert" : "status"}>
-          {documentLoadFailed ? <>
-            <span>{zh ? "文档加载失败，请重试" : "Could not load the document. Please retry."}</span>
+        <div className="paper-document-loading-status" role={documentLoadFailed || datasetFailed ? "alert" : "status"}>
+          {documentLoadFailed || datasetFailed ? <>
+            <span>{datasetFailed && !documentLoadFailed ? (zh ? "资料库加载失败，请重试" : "Could not load the library. Please retry.") : (zh ? "文档加载失败，请重试" : "Could not load the document. Please retry.")}</span>
             <Button onClick={() => setDocumentLoadAttempt(value => value + 1)}>{zh ? "重试" : "Retry"}</Button>
           </> : <><Spin/><span>{zh ? "正在加载文档…" : "Loading document…"}</span></>}
         </div>
@@ -1152,17 +1168,16 @@ const KnowledgeDocumentContent = () => {
   }
 
   return (
-    <div className={`knowledge-container !h-full !items-start${isPdfDocument ? " is-paper-document" : ""}`}>
-      {!isPdfDocument && getKbDetail()?.dataset_id === knowledgeBaseId && isPaperLibrary(getKbDetail()?.scene) && <PaperBreadcrumb
+    <div className={`knowledge-container !h-full !items-start${isPaperDocument ? " is-paper-document" : ""}`}>
+      {!isPaperDocument && datasetIdentified && isPaperLibrary(currentDataset?.scene) && <PaperBreadcrumb
         libraryName={getKbDetail()?.display_name || "论文库"}
         libraryHref={`/lib/knowledge/detail/${knowledgeBaseId}`}
         onKnowledgeClick={() => navigate("/lib/knowledge/list")}
         onLibraryClick={() => navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}
         paperTitle={knowledgeDetail?.display_name}
       />}
-      {!isPdfDocument && <DetailPageHeader
-        className={isPdfDocument ? "paper-document-header" : undefined}
-        breadcrumbs={getKbDetail()?.dataset_id === knowledgeBaseId && isPaperLibrary(getKbDetail()?.scene) ? undefined : [
+      {!isPaperDocument && <DetailPageHeader
+        breadcrumbs={datasetIdentified && isPaperLibrary(currentDataset?.scene) ? undefined : [
           { title: t("layout.knowledgeBase"), href: "/lib/knowledge/list" },
           {
             title: getKbDetail()?.display_name || t("knowledge.detail"),
@@ -1211,21 +1226,20 @@ const KnowledgeDocumentContent = () => {
               </Tooltip>
             </div>
           ) : null}
-          {isPdfDocument && <Popover trigger="click" placement="bottomRight" content={<dl className="paper-document-metadata">{documentMetadata.filter(item=>!item.hidden).map(item=><div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>}><Button size="small">{t("paperShell.documentDetails",{defaultValue:"Document details"})}</Button></Popover>}
         </>}
-        extraContent={isPdfDocument ? undefined : documentMetadata}
+        extraContent={documentMetadata}
       />}
-      <div ref={workspaceRef} className="knowledge-preview-layout knowledge-paper-workspace" data-panel-layout={panelLayout} data-panel-open={!previewSideCollapsed} data-narrow={workspaceWidth<1100} data-compact={workspaceWidth<900} style={isPdfDocument ? {"--paper-assistant-width": `${Math.min(paperAssistantWidth, Math.max(320, workspaceWidth * .48))}px`} as React.CSSProperties : undefined}>
-        {!isPdfDocument && <div className={`paper-nav-pane${paperNavCollapsed?" is-collapsed":""}`}>
-          <PaperReaderSidebar currentPage={pdfViewPosition.page} isPdf={isPdfDocument} document={paperIR} nativeOutline={nativePdfOutline} activeTab={paperNavTab} onTabChange={setPaperNavTab} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage} onCollapse={()=>setPaperNavCollapsed(true)} referenceCount={referenceCount}
+      <div ref={workspaceRef} className="knowledge-preview-layout knowledge-paper-workspace" data-panel-layout={panelLayout} data-panel-open={!previewSideCollapsed} data-narrow={workspaceWidth<1100} data-compact={workspaceWidth<900} style={isPaperDocument ? {"--paper-assistant-width": `${Math.min(paperAssistantWidth, Math.max(320, workspaceWidth * .48))}px`} as React.CSSProperties : undefined}>
+        {!isPaperDocument && <div className={`paper-nav-pane${paperNavCollapsed?" is-collapsed":""}`}>
+          <PaperReaderSidebar paperMode={datasetIdentified&&isPaperLibrary(currentDataset?.scene)} currentPage={pdfViewPosition.page} isPdf={isPdfDocument} document={paperIR} nativeOutline={nativePdfOutline} activeTab={paperNavTab} onTabChange={setPaperNavTab} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage} onCollapse={()=>setPaperNavCollapsed(true)} referenceCount={referenceCount}
             references={<DocumentReferencesPanel documentId={knowledgeId} targetDatasetId={knowledgeBaseId} importSelection={referenceImportSelection} onActionsChange={setReferenceActions} onReferenceCountChange={setReferenceCount}/>}
             vocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined}
             segments={canShowSegments&&knowledgeDetail?<><div className="paper-segment-options"><Select value={segmentViewKey||undefined} options={segmentViewOptions} onChange={setSegmentViewKey}/><label>{t("knowledge.sequence")} <Switch size="small" checked={showSegmentSequence} onChange={setShowSegmentSequence}/></label></div><KnowledgeTabs knowledgeDetail={knowledgeDetail} onGetItemInfo={setSegmentDetail} onAskSegment={askSegment} activeKey={segmentViewKey} onActiveKeyChange={setSegmentViewKey} onOptionsChange={handleSegmentViewOptionsChange} showSequence={showSegmentSequence}/></>:undefined}
           />
-          {!isPdfDocument&&paperNavCollapsed&&<button className="paper-workspace-rail" aria-label={t("paperShell.openNavigation",{defaultValue:"Open paper navigation"})} onClick={()=>{setPaperNavCollapsed(false);if(workspaceWidth<900)setPreviewSideCollapsed(true);}}><MenuOutlined/><span>{t("paperShell.navigation",{defaultValue:"Paper navigation"})}</span></button>}
+          {paperNavCollapsed&&<button className="paper-workspace-rail" aria-label={t("paperShell.openDocumentNavigation",{defaultValue:"Open document navigation"})} onClick={()=>{setPaperNavCollapsed(false);if(workspaceWidth<900)setPreviewSideCollapsed(true);}}><MenuOutlined/><span>{t("paperShell.documentNavigation",{defaultValue:"Document navigation"})}</span></button>}
         </div>}
         <div className="knowledge-preview-file-column paper-reader-pane">
-          {isPdfDocument && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
+          {isPaperDocument && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
           {pdfTask?.kind === "SEARCHABLE_PDF" && pdfTask.status !== "READY" ? (
             <div className={`pdf-processing-card is-${pdfTask.status.toLowerCase()}`}>
               <div><strong>{pdfTask.status === "FAILED" ? "转换失败" : "正在生成可搜索 PDF"}</strong><span>{pdfTaskDetail}</span></div>
@@ -1235,12 +1249,13 @@ const KnowledgeDocumentContent = () => {
           ) : null}
             <FileViewer
               ref={fileViewerRef}
-              pdfHeaderStart={isPdfDocument ? <button className="paper-library-back" type="button" onClick={()=>navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}><svg className="paper-library-back-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>{i18n.language.startsWith("zh")?"论文集":"Paper collection"}</span></button> : undefined}
-              pdfHeaderEnd={isPdfDocument ? <div className="paper-workspace-header-actions">
+              paperMode={isPaperDocument}
+              pdfHeaderStart={isPaperDocument ? <button className="paper-library-back" type="button" onClick={()=>navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}><svg className="paper-library-back-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>{i18n.language.startsWith("zh")?"论文集":"Paper collection"}</span></button> : undefined}
+              pdfHeaderEnd={isPaperDocument ? <div className="paper-workspace-header-actions">
           <Popover trigger="click" placement="bottomRight" overlayClassName="paper-document-actions-popover" content={<div className="paper-document-actions">{pageTitle}</div>}><Button type="text" icon={<MoreOutlined/>} aria-label={i18n.language.startsWith("zh") ? "文档操作与翻译" : "Document actions and translation"}/></Popover>
         </div> : undefined}
               onPdfStudyOpenChange={handleStudyOpenChange}
-              pdfIRTarget={pdfSourceView === "original" ? {dataset: knowledgeBaseId, document: knowledgeId, canWrite: hasWritePermission} : undefined}
+              pdfIRTarget={isPaperDocument && pdfSourceView === "original" ? {dataset: knowledgeBaseId, document: knowledgeId, canWrite: hasWritePermission} : undefined}
               onPdfIRDocumentChange={setPaperIR}
               onPdfOutlineChange={setNativePdfOutline}
               pdfNavigateTo={pdfNavigateTo}
@@ -1250,9 +1265,9 @@ const KnowledgeDocumentContent = () => {
               segment={segmentDetail}
               onExportReadyChange={setCanExportImagePdf}
               onPdfKindDetected={pdfSourceView === "original" ? handleOriginalPdfKindDetected : undefined}
-              onImportReferenceSelection={!isPdfDocument ? importReferenceSelection : undefined}
+              onImportReferenceSelection={!isPaperDocument ? importReferenceSelection : undefined}
               referenceActions={referenceActions}
-              onPdfNoteSelection={isPaperLibrary(getKbDetail()?.scene) && hasWritePermission ? notePdfSelection : undefined}
+              onPdfNoteSelection={isPaperDocument && hasWritePermission ? notePdfSelection : undefined}
               onPdfSelection={askPdfSelection}
               onPdfTranslateSelection={translatePdfSelection}
               onPdfRetranslateSelection={pdfCapabilities?.translations.length
@@ -1270,21 +1285,21 @@ const KnowledgeDocumentContent = () => {
             />
 
         </div>
-        {isPdfDocument && !previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.48))} maxWidth={Math.min(640, Math.max(320,workspaceWidth*.48))} onChange={resizePaperAssistant} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
-        <div ref={panelRef} style={panelLayout==="floating"?{"--paper-panel-x":`${floatingPosition.x}px`,"--paper-panel-y":`${floatingPosition.y}px`} as React.CSSProperties:undefined} className={`paper-chat-pane knowledge-preview-panel-column${previewSideCollapsed?" is-collapsed":""}`} aria-hidden={previewSideCollapsed}>
+        {isPaperDocument && !previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.48))} maxWidth={Math.min(640, Math.max(320,workspaceWidth*.48))} onChange={resizePaperAssistant} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
+        <div ref={panelRef} style={panelLayout==="floating"?{"--paper-panel-x":`${floatingPosition.x}px`,"--paper-panel-y":`${floatingPosition.y}px`} as React.CSSProperties:undefined} className={`paper-chat-pane knowledge-preview-panel-column${previewSideCollapsed?" is-collapsed":""}`} aria-hidden={isPaperDocument && previewSideCollapsed}>
           {knowledgeDetail&&<>
-            <div className="paper-chat-open-content" hidden={!isPdfDocument && previewSideCollapsed}>
+            <div className="paper-chat-open-content" hidden={!isPaperDocument && previewSideCollapsed}>
               <div className="paper-chat-toolbar" tabIndex={panelLayout==='floating'?0:undefined} aria-label={panelLayout==='floating'?(i18n.language.startsWith("zh")?"移动浮动面板":"Move floating panel"):undefined}
                 onPointerDown={event=>{if(panelLayout!=='floating'||event.button!==0||!event.currentTarget.contains(event.target as Node)||(event.target as HTMLElement).closest('button,input,select'))return;panelDrag.current={x:event.clientX,y:event.clientY,left:floatingPosition.x,top:floatingPosition.y};event.currentTarget.setPointerCapture(event.pointerId);}}
                 onPointerMove={event=>{const start=panelDrag.current;if(start)moveFloatingPanel(start.left+event.clientX-start.x,start.top+event.clientY-start.y);}}
                 onPointerUp={()=>{panelDrag.current=undefined;}} onPointerCancel={()=>{panelDrag.current=undefined;}} onLostPointerCapture={()=>{panelDrag.current=undefined;}}
                 onKeyDown={event=>{if(panelLayout!=='floating'||event.target!==event.currentTarget)return;const offset=event.key==='ArrowLeft'?[-24,0]:event.key==='ArrowRight'?[24,0]:event.key==='ArrowUp'?[0,-24]:event.key==='ArrowDown'?[0,24]:undefined;if(offset){event.preventDefault();moveFloatingPanel(floatingPosition.x+offset[0],floatingPosition.y+offset[1]);}}}
-              ><strong>{previewSideTab==="translation"?<TranslationOutlined/>:previewSideTab==="info"?<InfoCircleOutlined/>:previewSideTab==="notes"?<EditOutlined/>:<MessageOutlined/>} {previewSideTab==="translation" ? (i18n.language.startsWith("zh") ? "翻译" : "Translation") : previewSideTab==="info" ? (i18n.language.startsWith("zh") ? "论文信息" : "Paper information") : previewSideTab==="notes" ? (i18n.language.startsWith("zh") ? "笔记" : "Notes") : t("paperShell.assistant",{defaultValue:"Paper assistant"})}</strong><div>
-                {previewSideTab === "chat" && <Button type="text" icon={<PlusOutlined/>} aria-label={t("knowledge.pdfChatNew")} onClick={()=>paperChatRef.current?.startNewConversation()}/>}
+              ><strong>{previewSideTab==="translation"?<TranslationOutlined/>:previewSideTab==="info"?<InfoCircleOutlined/>:previewSideTab==="notes"?<EditOutlined/>:<MessageOutlined/>} {previewSideTab==="translation" ? (i18n.language.startsWith("zh") ? "翻译" : "Translation") : previewSideTab==="info" ? (i18n.language.startsWith("zh") ? "论文信息" : "Paper information") : previewSideTab==="notes" ? (i18n.language.startsWith("zh") ? "笔记" : "Notes") : isPaperDocument?t("paperShell.assistant",{defaultValue:"Paper assistant"}):t("paperShell.documentAssistant",{defaultValue:"Document assistant"})}</strong><div>
+                {isPaperDocument && previewSideTab === "chat" && <Button type="text" icon={<PlusOutlined/>} aria-label={t("knowledge.pdfChatNew")} onClick={()=>paperChatRef.current?.startNewConversation()}/>}
                 {previewSideTab === "chat" && <Popover trigger="click" placement="bottomRight" open={chatHistoryPopoverOpen} onOpenChange={setChatHistoryPopoverOpen} content={<Select allowClear className="knowledge-preview-chat-history-select" placeholder={t("knowledge.pdfChatHistoryPlaceholder")} value={selectedDocumentConversation} options={documentChatHistory.map(conversation=>({value:conversation.conversation_id||"",label:`${conversation.display_name||t("knowledge.pdfChatPanelLabel")} · ${moment(conversation.update_time).format("MM-DD HH:mm")}`})).filter(option=>Boolean(option.value))} onChange={(value:string|undefined)=>{setSelectedDocumentConversation(value||undefined);if(value)touchCachedPdfChat(knowledgeId,value);setChatHistoryPopoverOpen(false);}}/>}>
                   <Button type="text" icon={<HistoryOutlined/>} aria-label={t("paperShell.history",{defaultValue:"Conversation history"})}/>
                 </Popover>}
-                <PaperPanelLayoutMenu value={panelLayout} onChange={choosePanelLayout}/><Button type="text" icon={<CloseOutlined/>} aria-label={t("paperShell.collapseChat",{defaultValue:"Collapse assistant"})} onClick={()=>setPreviewSideCollapsed(true)}/>
+                {isPaperDocument&&<PaperPanelLayoutMenu value={panelLayout} onChange={choosePanelLayout}/>}<Button type="text" icon={<CloseOutlined/>} aria-label={isPaperDocument?t("paperShell.collapseChat",{defaultValue:"Collapse assistant"}):t("paperShell.collapseDocumentAssistant",{defaultValue:"Collapse document assistant"})} onClick={()=>setPreviewSideCollapsed(true)}/>
               </div></div>
               <PdfTranslationNotice documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} />
               <div className="paper-assistant-pane" hidden={previewSideTab !== "translation"}>
@@ -1292,13 +1307,13 @@ const KnowledgeDocumentContent = () => {
               </div>
               {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} draftRequest={noteDraftRequest} initialTab={previewSideTab==="notes"?"notes":"info"} onNavigatePage={page=>{setPdfSourceView("original");setPdfNavigateToPage({page,requestId:++navigationSequence.current});}}/></div>}
               <div className="paper-assistant-pane" hidden={previewSideTab !== "chat"}>
-              <PdfTemporaryChat ref={paperChatRef} key={`${knowledgeBaseId}:${knowledgeId}`} onClearSelection={()=>setDocumentChatSelection(null)} onNavigateSelection={selection=>{if(selection.page){setPdfSourceView("original");handlePdfViewPositionChange({page:selection.page,progress:0});setPdfNavigateToPage({page:selection.page,requestId:++navigationSequence.current});}}} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} selection={documentChatSelection||undefined} conversationToLoad={selectedDocumentConversation} onConversationChange={setSelectedDocumentConversation} onHistoryChange={refreshDocumentChatHistory} onClose={()=>{setDocumentChatSelection(null);setPreviewSideCollapsed(true);}}/>
+              {(isPaperDocument || activatedDocumentChatKey===documentKey) && <PdfTemporaryChat ref={paperChatRef} key={`${knowledgeBaseId}:${knowledgeId}`} paperMode={isPaperDocument} onClearSelection={()=>setDocumentChatSelection(null)} onNavigateSelection={selection=>{if(selection.page){setPdfSourceView("original");handlePdfViewPositionChange({page:selection.page,progress:0});setPdfNavigateToPage({page:selection.page,requestId:++navigationSequence.current});}}} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} selection={documentChatSelection||undefined} conversationToLoad={selectedDocumentConversation} onConversationChange={setSelectedDocumentConversation} onHistoryChange={refreshDocumentChatHistory} onClose={()=>{setDocumentChatSelection(null);setPreviewSideCollapsed(true);}}/>}
               </div>
             </div>
-            {!isPdfDocument&&previewSideCollapsed&&<button className="paper-workspace-rail" aria-label={t("paperShell.openChat",{defaultValue:"Open paper assistant"})} onClick={()=>{setPreviewSideCollapsed(false);if(workspaceWidth<900)setPaperNavCollapsed(true);}}><MessageOutlined/><span>{t("paperShell.assistant",{defaultValue:"Paper assistant"})}</span></button>}
+            {!isPaperDocument&&previewSideCollapsed&&<button className="paper-workspace-rail" aria-label={t("paperShell.openDocumentAssistant",{defaultValue:"Open document assistant"})} onClick={()=>{setActivatedDocumentChatKey(documentKey);setPreviewSideTab("chat");setPreviewSideCollapsed(false);if(workspaceWidth<900)setPaperNavCollapsed(true);}}><MessageOutlined/><span>{t("paperShell.documentAssistant",{defaultValue:"Document assistant"})}</span></button>}
           </>}
         </div>
-        {isPdfDocument && <PaperToolDock label={i18n.language.startsWith("zh")?"阅读工具":"Reading tools"} activeTool={previewSideCollapsed ? undefined : previewSideTab}
+        {isPaperDocument && <PaperToolDock label={i18n.language.startsWith("zh")?"阅读工具":"Reading tools"} activeTool={previewSideCollapsed ? undefined : previewSideTab}
           tools={[
             ...(isPaperLibrary(getKbDetail()?.scene)?[{id:"info",label:t("paperShell.documentDetails"),icon:<InfoCircleOutlined/>},{id:"notes",label:i18n.language.startsWith("zh")?"笔记":"Notes",icon:<EditOutlined/>}]:[]),
             {id:"translation",label:i18n.language.startsWith("zh")?"翻译":"Translation",icon:<TranslationOutlined/>},
@@ -1306,7 +1321,6 @@ const KnowledgeDocumentContent = () => {
           ]}
           onChange={tool=>{if(!tool){setPreviewSideCollapsed(true);return;}setPreviewSideTab(tool);setPreviewSideCollapsed(false);if(workspaceWidth<900)setPaperNavCollapsed(true);}}
         >
-          {!isPaperLibrary(getKbDetail()?.scene) && <Popover trigger="click" placement="leftTop" content={<dl className="paper-document-metadata">{documentMetadata.filter(item=>!item.hidden).map(item=><div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>}><button type="button" aria-label={t("paperShell.documentDetails")} title={t("paperShell.documentDetails")}><InfoCircleOutlined/></button></Popover>}
         </PaperToolDock>}
       </div>
       <Modal
@@ -1428,7 +1442,7 @@ const KnowledgeDocumentContent = () => {
         segmentId={segmentDetail?.segment_id}
         context={vocabularySelection?.context || segmentDetail?.content || vocabularySelection?.text || undefined}
         onClose={() => setVocabularySelection(null)}
-        onAdded={() => {  setVocabularyRefreshToken((value) => value + 1); if(!isPdfDocument){setPaperNavTab("vocabulary"); setPaperNavCollapsed(false);} }}
+        onAdded={() => {  setVocabularyRefreshToken((value) => value + 1); if(!isPaperDocument){setPaperNavTab("vocabulary"); setPaperNavCollapsed(false);} }}
       /> : null}
       <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={()=>{setVocabularyRefreshToken(v=>v+1);setPreviewSideCollapsed(false)}} />
     </div>
