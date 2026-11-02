@@ -17,7 +17,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
   const { t } = useTranslation();
   const text = (key: string) => t(`agentIntegration.${agent === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.${key}`);
   const confirmationStage = agent === "codex" ? "enable" : "entry";
-  const [stage, setStage] = useState<Stage>(status?.state === "enabled" && status.connection?.mcp_configured && (agent !== "codex" || status.connection.control_ready && !status.issue) ? confirmationStage : "prepare");
+  // An installed plugin survives a normal Codex launch without CDP. It must
+  // still go through the explicit connection/restart step before confirmation.
+  const [stage, setStage] = useState<Stage>(status?.state === "enabled" && status.connection?.mcp_configured
+    && (agent !== "codex" || status.connection.control_ready && !status.issue) ? confirmationStage : "prepare");
   const [error, setError] = useState("");
   const [zoomed, setZoomed] = useState(false);
   const [controlUnavailable, setControlUnavailable] = useState(false);
@@ -34,13 +37,16 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       const result = await onConnect();
       if (!mounted.current) return;
       if (result?.state !== "enabled" || !result.connection?.mcp_configured) {
-        setError(result?.issue ? (agent === "workbuddy" ? workbuddyErrorMessage(result, t) : text("installFailedDescription")) : result?.message || text("installFailedDescription"));
+        setError(agent === "workbuddy" && result?.issue ? workbuddyErrorMessage(result, t) : result?.message || text("installFailedDescription"));
         setStage("installFailed"); return;
       }
       // Connect includes restart and installation checks. Trust is a separate step.
       setStage(confirmationStage);
-    } catch {
-      if (mounted.current) { setError(text("installFailedDescription")); setStage("installFailed"); }
+    } catch (cause) {
+      if (mounted.current) {
+        setError(agent === "codex" && cause instanceof Error && cause.message ? cause.message : text("installFailedDescription"));
+        setStage("installFailed");
+      }
     } finally { busy.current = false; }
   };
 
@@ -56,10 +62,13 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       if (current) onStatus(current);
       const connection = current?.connection;
       const configured = current?.state === "enabled" && connection?.mcp_configured;
-      const ready = configured && connection?.mcp_enabled && (agent === "codex" ? connection.control_ready && !current?.issue : connection.mcp_trusted);
+      const pluginReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
+      const ready = pluginReady && (agent !== "codex" || connection.control_ready && !current?.issue);
       setControlUnavailable(Boolean(ready && (!connection?.control_ready || current?.issue)));
       setControlError(current?.issue ? (agent === "codex" ? text("controlUnavailableDescription") : workbuddyErrorMessage(current, t)) : "");
-      if (!ready && agent === "codex") setError(text("controlUnavailableDescription"));
+      if (!ready && agent === "codex") setError(pluginReady && current?.issue?.code === "capability_unavailable"
+        ? t("agentIntegration.connectionErrors.capability_unavailable")
+        : text(pluginReady ? "controlUnavailableDescription" : "notReadyDescription"));
       else if (!ready && current?.issue) setError(workbuddyErrorMessage(current, t));
       else if (!ready) setError(text(!configured ? "configurationMissingDescription"
         : connection?.mcp_trusted === undefined || connection.mcp_enabled === undefined ? "checkFailedDescription"
@@ -93,7 +102,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       <Button onClick={onClose} disabled={installing || checking}>{text(stage === "prepare" ? "cancel" : stage === "success" ? "close" : "later")}</Button>
       <Space wrap key={stage}>
         {agent === "workbuddy" && (stage === "trust" || stage === "enable") && <Button onClick={() => setStage(stage === "trust" ? "entry" : "trust")}>{text("back")}</Button>}
-        {["verify", "notReady"].includes(stage) && <Button onClick={() => setStage(agent === "codex" ? stage === "notReady" ? "prepare" : "enable" : "trust")}>{text("viewEnableSteps")}</Button>}
+        {["verify", "notReady"].includes(stage) && <Button onClick={() => setStage(agent === "codex" ? stage === "notReady" ? "prepare" : "enable" : "trust")}>{text(agent === "codex" && stage === "notReady" ? "reconnect" : "viewEnableSteps")}</Button>}
         {primary}
       </Space>
     </div>}>

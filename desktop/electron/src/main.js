@@ -178,6 +178,7 @@ const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
+const agentConnectorCodexInstallTimeoutMs = 90 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -728,7 +729,8 @@ function runAgentConnector(agent, action) {
   const installWorkflow = ["deepseek-harness", "workbuddy", "codex"].includes(agent) && action === "connect";
   const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs : agentConnectorInstallTimeoutMs)
+    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs
+      : agent === "codex" ? agentConnectorCodexInstallTimeoutMs : agentConnectorInstallTimeoutMs)
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
