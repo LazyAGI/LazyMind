@@ -26,7 +26,7 @@
 .pdf-study-dialog .pdf-visual-view-switch{display:flex;gap:4px;background:#f2f5f9;border-radius:20px;padding:4px;width:fit-content;margin-bottom:12px}
 .pdf-study-dialog .pdf-visual-view-switch button{border:0;border-radius:16px;background:transparent;font-size:13px;padding:5px 12px;color:#62758b}
 .pdf-study-dialog .pdf-visual-view-switch button[aria-pressed=true]{color:var(--color-primary,#006ae6);background:white;box-shadow:0 1px 3px #203b5614}
-.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll{max-height:40vh;border-color:#dbe7f4}
+.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll{max-height:none;margin:8px 0;border-color:#dbe7f4}
 .pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll table{font-size:13px}
 .pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll th{background:#f4f8fd;color:#365b83}
 .pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-cell-detail{background:#f5f9fe;border-color:#dbe7f4}
@@ -34,7 +34,6 @@
 .pdf-study-dialog .pdf-visual-preview:not(.is-expanded) img{max-height:38vh;width:auto;object-fit:contain}
 @media(max-width:600px){.pdf-study-dialog .pdf-visual-preview:not(.is-expanded) img{max-height:32vh}}
 .pdf-study-dialog .pdf-table-study.is-embedded .pdf-study-body>section{padding:0;border:0}
-.pdf-study-dialog .pdf-table-study.is-embedded .pdf-table-scroll{max-height:32vh;margin:8px 0}
 .pdf-study-dialog .pdf-table-study.is-embedded .pdf-study-disclaimer{margin:8px 0;font-size:11px}
 /* Wide table cells scroll inside their own viewport, never the study dialog. */
 .pdf-study-dialog:has(>.pdf-visual-study){overflow-x:hidden}

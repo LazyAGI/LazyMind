@@ -29,3 +29,12 @@
 
 .pdf-table-clue-badge{font-size:10px;color:#805d25;background:#fbf1de;padding:2px 6px;border-radius:4px;}
 .pdf-table-data-clues blockquote{border-left-color:#b99a60;}
+/* Dense academic-table layout; wide content scrolls within the table viewport. */
+.pdf-study-dialog:has(.pdf-table-study,.pdf-visual-view-switch){width:min(1120px,calc(100vw - 36px));max-height:90vh}
+.pdf-study-dialog .pdf-table-study .pdf-table-scroll{max-height:none}
+.pdf-study-dialog .pdf-table-study .pdf-table-scroll button{min-height:26px;padding:3px 9px;line-height:1.45}
+.pdf-table-copy-actions,.pdf-table-cell-heading{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:6px 0}
+.pdf-table-copy-actions [role=status]{font-size:12px;color:#526b84}
+.pdf-table-cell-heading h4{margin:0}
+@media(max-width:600px){.pdf-study-dialog:has(.pdf-table-study,.pdf-visual-view-switch){width:100%;max-height:calc(100vh - 16px)}}
+@media(pointer:coarse){.pdf-study-dialog .pdf-table-study .pdf-table-scroll button{min-height:34px;padding-top:5px;padding-bottom:5px}}

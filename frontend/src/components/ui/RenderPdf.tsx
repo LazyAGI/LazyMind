@@ -648,8 +648,10 @@ export default function RenderPdf({
     if (pageIndex >= 0 && pageIndex < numPages) {
       set.add(pageIndex);
     }
+    // Render an offscreen study source for its preview without scrolling to it.
+    if(visualSelection && visualSelection.page>=0 && visualSelection.page<numPages)set.add(visualSelection.page);
     return Array.from(set).sort((a, b) => a - b);
-  }, [visibleRange, pageIndex, numPages, pageSlotHeight, viewportHeight]);
+  }, [visibleRange, pageIndex, numPages, pageSlotHeight, viewportHeight,visualSelection?.page]);
   useEffect(()=>{
     if(!visualSelection){setVisualPreview(undefined);return;}
     const preview=cropPdfBlockPreview(pageRefs.current[visualSelection.page],visualSelection.bbox);
@@ -891,7 +893,7 @@ export default function RenderPdf({
   }, [pendingStudyNavigation,pageTops,pageHeightsPx,pageSizesMap]);
   const openTableStudy = (block: PdfIRBlock) => {
     setVisualSelection(undefined);setStudyOpen(false); setTableStudyOpen(true); setTableSelection(block);
-    navigateStudyEvidence({id:block.id,text:block.table?.captions.join("\n") || "",page:block.page,bbox:block.bbox});
+    setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
   };
   const closeStudy = () => {
     setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
@@ -911,7 +913,8 @@ export default function RenderPdf({
     navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
   };
   const openVisualStudy = (block:PdfIRBlock) => {
-    setStudyOpen(false);setTableStudyOpen(false);setVisualPreview(undefined);setVisualSelection(block);navigateSourceBlock(block.id);
+    setStudyOpen(false);setTableStudyOpen(false);setVisualPreview(undefined);setVisualSelection(block);
+    setPendingStudyNavigation(undefined);setStudyHighlight(undefined);setStudyReturn(undefined);
   };
   useEffect(()=>{
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;

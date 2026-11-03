@@ -6,6 +6,7 @@ const state=vi.hoisted(()=>({nativeClick:undefined as undefined|((item:{pageNumb
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
+vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:()=> <aside aria-label="visual-study"/>}));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
 import RenderPdf from './RenderPdf';
 function render(ui:ReactNode){const view=renderView(ui);const tools=screen.queryByRole('button',{name:'阅读工具'});if(tools)fireEvent.click(tools);return view;}
@@ -349,12 +350,13 @@ it('preserves the reading anchor when a newly mounted page reveals a different h
 });
 
 
-it('closes the study dialog when returning to the reading position',async()=>{
+it('closes a table study without navigating away from the reading position',async()=>{
  const view=render(<RenderPdf fileData="return.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
  fireEvent.click(screen.getByRole('button',{name:'pdfTable.openCatalog'}));
  fireEvent.change(screen.getByRole('combobox',{name:'pdfTable.catalog'}),{target:{value:'table'}});
  expect(screen.getByRole('dialog')).toBeInTheDocument();
- fireEvent.click(screen.getByRole('button',{name:'pdfFormula.returnReading'}));
+ expect(screen.queryByRole('button',{name:'pdfFormula.returnReading'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'关闭原文解读'}));
  expect(screen.queryByRole('dialog')).toBeNull();
  view.unmount();
  await act(async()=>{});
@@ -395,4 +397,17 @@ it('keeps native link navigation working through the callback retained by react-
  await act(async()=>{retainedClick?.({pageNumber:2,dest:[1,{name:'Fit'}]});});
  await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2));
  expect(position).toHaveBeenLastCalledWith({page:2,progress:0});
+});
+
+it('opens a figure from the catalog without moving the PDF viewport',async()=>{
+ state.document={...document(),blocks:[...document().blocks,{id:'figure',type:'image',page:2,bbox:[.1,.1,.8,.8],image:{number:'1',captions:['Figure 1'],footnotes:[],related_blocks:[]}}]};
+ const view=render(<RenderPdf fileData="still.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ await act(async()=>{});
+ const viewport=view.container.querySelector('.pdf-reader-with-study > div') as HTMLElement;
+ const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
+ fireEvent.change(screen.getByRole('combobox',{name:'pdfReader.visuals'}),{target:{value:'figure'}});
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,150));});
+ expect(screen.getByRole('complementary',{name:'visual-study'})).toBeInTheDocument();
+ expect(scroll).not.toHaveBeenCalled();
+ expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1);
 });

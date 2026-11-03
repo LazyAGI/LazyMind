@@ -35,3 +35,15 @@ export function tableCellHeaders(rows:PlacedTableCell[][],selected:PlacedTableCe
  }
  return {rows:Array.from(new Set(rowHeaders)),columns:Array.from(new Set(columns))};
 }
+
+/** TSV retains empty slots covered by merged cells, so paste preserves column alignment. */
+export function tableToTSV(table:PdfIRTable):string {
+ const rows=layoutTable(table);
+ const width=rows.reduce((max,row)=>row.reduce((value,cell)=>Math.max(value,cell.column+cell.colSpan),max),0);
+ const quote=(text:string)=>/[\t\r\n"]/.test(text)?`"${text.replace(/"/g,'""')}"`:text;
+ return rows.map(row=>{
+  const values=Array<string>(width).fill('');
+  for(const cell of row)values[cell.column]=quote(cell.cell.text);
+  return values.join('\t');
+ }).join('\n');
+}

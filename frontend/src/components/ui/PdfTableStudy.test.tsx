@@ -3,7 +3,7 @@ import {afterEach,beforeAll,describe,expect,it,vi} from 'vitest';
 import i18n from '@/i18n';
 import type {PdfIRBlock} from '@/modules/knowledge/api/pdfIR';
 import {PdfTableStudy} from './PdfTableStudy';
-import {layoutTable,tableCellHeaders} from './pdfTableGeometry';
+import {layoutTable,tableCellHeaders,tableToTSV} from './pdfTableGeometry';
 const block:PdfIRBlock={id:'table',type:'table',page:1,bbox:[.1,.2,.8,.7],table:{number:'2',captions:['Table 2. Results'],footnotes:['Measured in seconds.'],related_blocks:[{block_id:'mention',relation:'mention'},{block_id:'missing',relation:'caption'}],rows:[{cells:[{text:'Method',row_span:2,col_span:1,header:true},{text:'Results',row_span:1,col_span:2,header:true}]},{cells:[{text:'Fast',row_span:1,col_span:1,header:true},{text:'Slow',row_span:1,col_span:1,header:true}]},{cells:[{text:'Baseline',row_span:1,col_span:1,header:true},{text:'7',row_span:1,col_span:1},{text:'<img src=x onerror=alert(1)>',row_span:1,col_span:1}]}]}};
 const mention:PdfIRBlock={id:'mention',type:'text',page:3,text:'Table 2 reports the measured results.',bbox:[.1,.1,.8,.2]};
 const props={sourceKey:'source',blocks:[block],allBlocks:[block,mention],selected:block,onSelect:vi.fn(),onNavigate:vi.fn(),onReturn:vi.fn(),canReturn:true,onClose:vi.fn()};
@@ -88,4 +88,26 @@ describe('table context clues and reading position',()=>{
   view.rerender(<PdfTableStudy {...props} sourceKey="another-source"/>);act(()=>vi.advanceTimersByTime(30));expect(scroll).toHaveBeenCalledTimes(2);expect(screen.queryByRole('region',{name:'Selected cell'})).toBeNull();
   view.rerender(<PdfTableStudy {...props} sourceKey="another-source" selected={{...block,id:'another-table'}}/>);act(()=>vi.advanceTimersByTime(30));expect(scroll).toHaveBeenCalledTimes(3);
  });
+});
+
+it('copies the complete table with merged-cell positions preserved',async()=>{
+ const writeText=vi.fn().mockResolvedValue(undefined);
+ Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText}});
+ render(<PdfTableStudy {...props}/>);
+ await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Copy table'})));
+ expect(writeText).toHaveBeenCalledWith('Method\tResults\t\n\tFast\tSlow\nBaseline\t7\t<img src=x onerror=alert(1)>');
+ expect(screen.getByRole('status')).toHaveTextContent('Copied');
+ fireEvent.click(screen.getByRole('button',{name:'7'}));
+ await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Copy cell'})));
+ expect(writeText).toHaveBeenLastCalledWith('7');
+});
+
+it('quotes tabs, line breaks and quotes when copying spreadsheet cells',()=>{
+ expect(tableToTSV({captions:[],footnotes:[],related_blocks:[],rows:[{cells:[{text:'A\tB',row_span:1,col_span:1},{text:'line 1\n"line 2"',row_span:1,col_span:1}]}]})).toBe('"A\tB"\t"line 1\n""line 2"""');
+});
+it('reports clipboard failure without claiming a copy succeeded',async()=>{
+ Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockRejectedValue(new Error('denied'))}});
+ render(<PdfTableStudy {...props}/>);
+ await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Copy table'})));
+ expect(screen.getByRole('status')).toHaveTextContent('Could not copy');
 });
