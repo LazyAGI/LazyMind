@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
@@ -79,7 +80,7 @@ func TestSchedulerUpdateDrainChild(t *testing.T) {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
-		if err := db.Create(&orm.ChatHistory{ID: "drain-history-" + request.ConversationID, Seq: 1, ConversationID: request.ConversationID, Result: "fixture result"}).Error; err != nil {
+		if err := db.Create(&orm.ChatHistory{ID: uuid.NewString(), Seq: 1, ConversationID: request.ConversationID, Result: "fixture result"}).Error; err != nil {
 			t.Error(err)
 			w.WriteHeader(500)
 			return
