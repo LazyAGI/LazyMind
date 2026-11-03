@@ -275,6 +275,9 @@ class WeChatConnectionRepository(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def archive_account(self, owner: str, account_id: str) -> None:
+        ...
+
     def disconnect_account(
         self,
         owner_user_id: str,

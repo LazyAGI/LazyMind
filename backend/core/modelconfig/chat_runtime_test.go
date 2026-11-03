@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -196,6 +197,13 @@ func TestChatRuntimeDecryptsSharedGroupOnceAcrossRolesAndCandidates(t *testing.T
 	}
 	if secureStore.reads != 2 {
 		t.Fatal("credential reuse escaped its execution lifetime")
+	}
+	// Legacy-envelope compatibility must not revive an explicitly disabled key.
+	if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "provider-a").Update("active_key_initialized", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadChatRuntimeConfig(t.Context(), db, "user"); !errors.Is(err, modelprovider.ErrProviderKeyDisabled) {
+		t.Fatalf("disabled supplier remained usable through the compatibility path: %v", err)
 	}
 }
 func TestChatRuntimeCloudCandidatesRequireExplicitSelection(t *testing.T) {

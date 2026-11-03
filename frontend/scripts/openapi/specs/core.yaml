@@ -14241,6 +14241,8 @@ components:
             properties:
                 base_url:
                     type: string
+                credential_status:
+                    type: string
                 has_api_key:
                     type: boolean
                 id:

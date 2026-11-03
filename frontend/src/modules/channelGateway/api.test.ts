@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelConnectionSession, createConnectionSession, listChannelAccounts, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
+import { CHANNEL_ACCOUNTS_CHANGED_EVENT, archiveChannelAccount, channelAccountConnectionStatus, isChannelAccountAvailable, cancelConnectionSession, createConnectionSession, listChannelAccounts, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
 
 const http = vi.hoisted(() => ({ request: vi.fn(), post: vi.fn(), defaults: {} }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
@@ -94,4 +94,45 @@ it('keeps legacy accounts usable before robot identity metadata is available', (
   const a = { id: 'legacy-a', provider: 'wecom', label: '旧机器人' } as ChannelAccount;
   expect(channelAccountLabel(a)).toBe('旧机器人');
   expect(channelAccountLabel(a, [a, { ...a, id: 'legacy-b' }])).not.toContain('连接');
+});
+
+
+it.each(['stopped', 'failed', 'degraded', 'unsupported'] as const)('does not show a %s runtime as connected', runtime_status => {
+  const account = { ...feishu('Bot'), runtime_status } as ChannelAccount;
+  expect(channelAccountConnectionStatus(account)).toBe('disconnected');
+  expect(isChannelAccountAvailable(account)).toBe(false);
+});
+
+it('refreshes other configuration screens only after removal succeeds', async () => {
+  const changed = vi.fn();
+  window.addEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, changed);
+  try {
+    http.request.mockRejectedValueOnce(new Error('unavailable'));
+    await expect(archiveChannelAccount('robot')).rejects.toThrow('unavailable');
+    expect(changed).not.toHaveBeenCalled();
+    await archiveChannelAccount('robot');
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(http.request.mock.lastCall![0]).toMatchObject({ method: 'POST', url: '/api/channel-gateway/v1/channel-accounts/robot:archive' });
+  } finally {
+    window.removeEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, changed);
+  }
+});
+
+it('keeps a Feishu message connection available when only its bot menu is degraded', () => {
+  const account = { ...feishu('Bot'), runtime_status: 'degraded', capabilities: { connection_ready: true, bot_menu_ready: false } } as ChannelAccount;
+  expect(channelAccountConnectionStatus(account)).toBe('connected');
+  expect(isChannelAccountAvailable(account)).toBe(true);
+  expect(channelAccountConnectionStatus({ ...account, status: 'disconnected' })).toBe('disconnected');
+  expect(channelAccountConnectionStatus({ ...account, runtime_status: 'failed' })).toBe('disconnected');
+  expect(channelAccountConnectionStatus({ ...account, capabilities: { connection_ready: false } })).toBe('disconnected');
+  expect(channelAccountConnectionStatus({ ...account, provider: 'wecom' })).toBe('disconnected');
+});
+
+it('distinguishes WeCom authorization requirements from a network disconnection', () => {
+  const account = { ...feishu('Bot'), provider: 'wecom', binding_status: 'connected', capabilities: { authorization_required: true } } as ChannelAccount;
+  expect(channelAccountConnectionStatus(account)).toBe('authorization_required');
+  expect(isChannelAccountAvailable(account)).toBe(false);
+  expect(channelAccountConnectionStatus({ ...account, capabilities: { authorization_required: false } })).toBe('connected');
+  expect(channelAccountConnectionStatus({ ...account, binding_status: 'paused', status: 'disconnected' })).toBe('disconnected');
+  expect(channelAccountConnectionStatus({ ...account, capabilities: {}, runtime_status: 'failed' })).toBe('disconnected');
 });

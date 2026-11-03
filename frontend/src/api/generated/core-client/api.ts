@@ -5409,6 +5409,7 @@ export interface ListModelProviderGroupModelsOpenAPIResponse {
 }
 export interface ListModelProviderGroupsOpenAPIItem {
     'base_url': string;
+    'credential_status'?: string;
     'has_api_key': boolean;
     'id': string;
     'is_verified': boolean;

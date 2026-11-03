@@ -223,7 +223,12 @@ class FeishuAccountService:
 
     def archive_account(self, owner: str, account_id: str) -> None:
         with self._lifecycle_lock:
+            account = self._store.get_account(owner, account_id)
+            if account:
+                self._with_identity(account)
             self._store.archive_account(owner, account_id)
+            if self._on_account_disconnected:
+                self._on_account_disconnected(account_id)
 
     def disconnect_account(
         self,
