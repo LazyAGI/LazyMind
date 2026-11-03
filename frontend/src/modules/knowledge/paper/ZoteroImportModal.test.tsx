@@ -17,7 +17,7 @@ function mount(canWrite = true) {
   return render(<ConfigProvider theme={{ token: { motion: false } }}><ZoteroImportModal open datasetId="dataset" canWrite={canWrite} onCancel={onCancel} onImport={onImport} /></ConfigProvider>);
 }
 async function load() {
-  fireEvent.click(screen.getByRole('button', { name: '读取本地数据库' }));
+  fireEvent.click(await screen.findByRole('button', { name: '读取本地数据库' }));
   await screen.findByText('Real paper');
 }
 function selectPaper() { fireEvent.click(screen.getByRole('checkbox', { name: '选择 Real paper' })); }

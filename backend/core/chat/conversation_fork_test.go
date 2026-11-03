@@ -19,7 +19,7 @@ func forkFixture(t *testing.T, count int) (*gorm.DB, orm.Conversation, []orm.Cha
 	db := orm.MigrateTestDB(t,
 		&orm.ArtifactBinding{}, &orm.ArtifactBlob{}, &orm.ArtifactV2{},
 		&orm.AsyncJob{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{},
-		&orm.Conversation{}, &orm.ConversationArchiveFolder{}, &orm.ConversationArtifact{},
+		&orm.Conversation{}, &orm.ConversationArchiveFolder{}, &orm.ConversationArtifact{}, &orm.ConversationFollowUp{},
 		&orm.ConversationForkOrigin{}, &orm.ConversationForkRequest{}, &orm.ConversationGroup{},
 		&orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationIdleEvent{},
 		&orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.ConversationToolGrant{},

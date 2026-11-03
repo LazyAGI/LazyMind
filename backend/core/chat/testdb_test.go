@@ -57,6 +57,7 @@ func newChatExecutionTestDB(t *testing.T) *orm.DB {
 	// Keep downstream tables present even when the scenario seeds no rows there.
 	return orm.MigrateTestDB(t,
 		&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.ChatRunPerformance{},
+		&orm.ConversationFollowUp{},
 		&orm.ConversationForkOrigin{}, &orm.ConversationForkRequest{}, &orm.ConversationOpening{},
 		&orm.ConversationArchiveFolder{}, &orm.ConversationIdleEvent{},
 		&orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{},
