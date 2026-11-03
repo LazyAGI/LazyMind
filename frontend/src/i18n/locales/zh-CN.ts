@@ -10571,7 +10571,7 @@ const zhCN = {
       "manualDirectionsHint": "调研完成后，等待你选择方向并确认继续。",
       "preparingAll": "你可以离开此页面，调研完成后会按全部方向自动继续；需要补充信息时会通知你。",
       "preparingManual": "你可以离开此页面，调研完成后会通知你选择方向并确认继续。",
-      "steps": {"directSearch": "直接检索", "prioritizedList": "按优先级推荐", "research": "初步调研", "chooseDirection": "选择研究方向", "search": "检索与拓展", "screen": "筛选与补充", "groupedList": "按方向交付清单", "report": "关系核验 · 图与报告"},
+      "steps": {"directSearch": "直接检索", "prioritizedList": "按优先级推荐", "research": "初步调研", "chooseDirection": "选择研究方向", "search": "检索与拓展", "screen": "筛选与补充", "groupedList": "论文清单", "report": "关系核验 · 图与报告"},
       "fast": {"label": "快速扩展", "summary": "聚焦最相关的论文"},
       "balanced": {"label": "标准扩展", "summary": "按方向筛选并补查"},
       "deep": {"label": "深入分析", "summary": "同标准档，再核验关系"}

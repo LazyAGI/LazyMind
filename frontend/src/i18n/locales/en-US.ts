@@ -10828,7 +10828,7 @@ const enUS = {
       "manualDirectionsHint": "Wait for you to choose directions and confirm after initial research.",
       "preparingAll": "You can leave this page. Research will continue with all directions; you will be notified if more information is needed.",
       "preparingManual": "You can leave this page. You will be notified to choose directions and confirm after initial research.",
-      "steps": {"directSearch": "Search directly", "prioritizedList": "Prioritized recommendations", "research": "Preliminary research", "chooseDirection": "Select research directions", "search": "Search and expansion", "screen": "Screening and follow-up", "groupedList": "Reading list by direction", "report": "Verify links · Graph and report"},
+      "steps": {"directSearch": "Search directly", "prioritizedList": "Prioritized recommendations", "research": "Preliminary research", "chooseDirection": "Select research directions", "search": "Search and expansion", "screen": "Screening and follow-up", "groupedList": "Paper list", "report": "Verify links · Graph and report"},
       "fast": {"label": "Quick expansion", "summary": "Focus on the most relevant papers"},
       "balanced": {"label": "Standard expansion", "summary": "Screen and follow up by direction"},
       "deep": {"label": "Deep analysis", "summary": "Same search, plus relationship verification"}
