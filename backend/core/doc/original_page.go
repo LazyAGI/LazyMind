@@ -62,6 +62,9 @@ func bindPageOriginal(ctx context.Context, caller DatasetCatalogCaller, req Impo
 		if updated.RowsAffected != 1 {
 			return resourceErr("CONFLICT", "upload was already bound")
 		}
+		if err := recordPaperUpload(ctx, tx, result.Task, prepared.source, prepared.metadata.OriginalFilename); err != nil {
+			return err
+		}
 		bodyCompleted = true
 		return nil
 	})

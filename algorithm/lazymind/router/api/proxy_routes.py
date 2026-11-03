@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Annotated, Optional
@@ -59,6 +60,18 @@ async def proxy_chat_context_usage(request: Request):
 async def proxy_chat_context_prompt(request: Request):
     caller_algo_id = await _parse_algo_id(request)
     return await _select_and_forward(request, caller_algo_id)
+
+
+@router.post('/api/chat/steer', summary='Proxy: steer an active chat run (router mode)')
+async def proxy_chat_steer(
+    request: Request,
+    x_lazymind_internal_token: Annotated[
+        Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)
+    ] = None,
+):
+    require_internal_token(x_lazymind_internal_token)
+    caller_algo_id = await _parse_algo_id(request)
+    return await _find_and_forward_chat_steer(request, caller_algo_id)
 
 
 @router.post('/internal/documents:read', summary='Proxy: cloud document read (router mode)')
@@ -126,6 +139,94 @@ async def _select_and_forward_internal_json(request: Request, caller_algo_id: Op
         response_headers['X-Algorithm-Id'] = algorithm_id
     if instance.host:
         response_headers['X-Instance-Host'] = instance.host
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=response_headers,
+        media_type=upstream.headers.get('content-type', 'application/json'),
+    )
+
+
+async def _find_and_forward_chat_steer(request: Request, caller_algo_id: Optional[str]):
+    """Deliver steering to the worker that owns the in-memory run inbox.
+
+    Normal chat routing is round-robin within an algorithm version. Steering
+    cannot use that policy because an active run belongs to exactly one worker,
+    so probe the healthy workers until that owner accepts the idempotent steer.
+    """
+    algorithm_id = await get_ab_router().select_algorithm(caller_algo_id)
+    instances = [
+        instance for instance in get_global_registry().get_all_instances(algorithm_id)
+        if instance.status == 'healthy'
+    ]
+    if not instances:
+        raise HTTPException(
+            status_code=503,
+            detail=f'No healthy instance available for algorithm "{algorithm_id}"',
+        )
+
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in (
+            'host', 'content-length', 'transfer-encoding', 'connection',
+            INTERNAL_TOKEN_HEADER.lower(),
+        )
+    }
+    headers[INTERNAL_TOKEN_HEADER] = expected_internal_token()
+    body = await request.body()
+    responses: list[httpx.Response | None] = [None] * len(instances)
+    async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+        async def probe(index, instance):
+            target_url = instance.url.rstrip('/') + request.url.path
+            if request.url.query:
+                target_url += '?' + request.url.query
+            try:
+                upstream = await client.request(
+                    request.method, target_url, headers=headers, content=body,
+                )
+            except httpx.HTTPError:
+                upstream = None
+            return index, instance, upstream
+
+        tasks = [
+            asyncio.create_task(probe(index, instance))
+            for index, instance in enumerate(instances)
+        ]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                index, instance, upstream = await completed
+                responses[index] = upstream
+                if upstream is None:
+                    continue
+                try:
+                    if upstream.status_code == 200 and bool(upstream.json().get('accepted')):
+                        return _internal_json_response(upstream, algorithm_id, instance.host)
+                except (ValueError, AttributeError):
+                    pass
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    last_response = next(
+        (response for response in reversed(responses) if response is not None),
+        None,
+    )
+    if last_response is None:
+        raise HTTPException(status_code=503, detail='No algorithm instance accepted the request')
+    return _internal_json_response(last_response, algorithm_id, '')
+
+
+def _internal_json_response(upstream: httpx.Response, algorithm_id: str, instance_host: str):
+    response_headers = {
+        key: value for key, value in upstream.headers.items()
+        if key.lower() not in ('content-length', 'transfer-encoding', 'connection')
+    }
+    response_headers['X-Algorithm-Id'] = algorithm_id
+    if instance_host:
+        response_headers['X-Instance-Host'] = instance_host
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,

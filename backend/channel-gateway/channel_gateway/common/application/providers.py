@@ -85,7 +85,12 @@ class AccountApplicationService:
         return rename(owner_user_id, account_id, label)
 
     def archive_account(self, owner_user_id: str, account_id: str) -> None:
-        self._adapter('feishu').archive_account(owner_user_id, account_id)
+        account = self._store.get_account_internal(account_id)
+        if not account or account['owner_user_id'] != owner_user_id:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        if account.get('archived_at'):
+            return
+        self._adapter(str(account['provider'])).archive_account(owner_user_id, account_id)
 
     def _feishu_account(self, owner_user_id: str, account_id: str):
         account = self._store.get_account(owner_user_id, account_id)

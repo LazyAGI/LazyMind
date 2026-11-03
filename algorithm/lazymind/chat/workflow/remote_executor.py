@@ -139,9 +139,11 @@ class RemoteWorkflowExecutor:
                 target=heartbeat, name=f'workflow-heartbeat-{attempt_id}', daemon=True)
             heartbeat_thread.start()
             artifacts: list[Dict[str, Any]] = []
+            check_artifacts: list[Dict[str, Any]] = []
             summary = ''
             control: Dict[str, Any] = {}
             failure: Optional[str] = None
+            failure_code = 'LAZYMIND_EXECUTION_FAILED'
             terminal_event: Optional[Dict[str, Any]] = None
             post_step_checkpoint = None
             try:
@@ -206,6 +208,7 @@ class RemoteWorkflowExecutor:
                     agentic_config['_subagent_workspace'] = workspace
                     lazyllm.globals['agentic_config'] = agentic_config
                     artifacts = list(checkpoint['artifacts'])
+                    check_artifacts = list(checkpoint.get('check_artifacts', artifacts))
                     summary = str(checkpoint.get('summary') or '')
                     control = dict(checkpoint.get('control') or {})
                     for artifact in artifacts:
@@ -248,9 +251,11 @@ class RemoteWorkflowExecutor:
                             if kind == 'artifact':
                                 artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
                                             'seq': event.get('seq', 1), 'value': event.get('value')}
-                                artifact['value'] = await self._persist_files(
+                                stored_value = await self._persist_files(
                                     client, attempt_id, lease, artifact['value'],
                                     str(artifact.get('content_type') or ''), workspace)
+                                check_artifact = self._inline_post_step_artifact(artifact, params, workspace)
+                                artifact = {**artifact, 'value': stored_value}
                                 # The ordinary Task Center projection must receive the same
                                 # host-neutral value as the Workflow artifact sink.  A raw
                                 # path here points into this executor's temporary workspace
@@ -260,6 +265,7 @@ class RemoteWorkflowExecutor:
                                 })
                                 await self.runtime.artifact(client, attempt_id, lease, artifact)
                                 artifacts.append(artifact)
+                                check_artifacts.append(check_artifact or artifact)
                             elif kind not in {'done', 'error'}:
                                 await self.runtime.task_event(client, task_id, lease, event)
 
@@ -278,10 +284,11 @@ class RemoteWorkflowExecutor:
                             elif kind == 'error':
                                 terminal_event = event
                                 failure = str(event.get('message') or 'LazyMind SubAgent failed')
+                                failure_code = str(event.get('error_code') or 'LAZYMIND_EXECUTION_FAILED')
                 if not failure and not lease_lost.is_set() and not self._was_interrupted(terminal_event):
                     try:
                         await self._run_post_step_checks(
-                            client, task_id, lease, params, artifacts,
+                            client, task_id, lease, params, check_artifacts,
                         )
                     except Exception as exc:
                         failure = str(exc)
@@ -289,6 +296,7 @@ class RemoteWorkflowExecutor:
                             post_step_checkpoint = {
                                 'workflow_revision': context.get('workflow_revision') or '',
                                 'summary': summary, 'artifacts': artifacts, 'control': control,
+                                'check_artifacts': check_artifacts,
                             }
                         terminal_event = {
                             'type': 'error', 'status': 'failed', 'message': failure,
@@ -315,13 +323,12 @@ class RemoteWorkflowExecutor:
                 if self._was_interrupted(terminal_event):
                     await self.runtime.cancel(client, attempt_id, lease)
                 elif failure:
+                    failure_options = {}
+                    if failure_code != 'LAZYMIND_EXECUTION_FAILED':
+                        failure_options['error_code'] = failure_code
                     if post_step_checkpoint is not None:
-                        await self.runtime.fail(
-                            client, attempt_id, lease, failure,
-                            post_step_checkpoint=post_step_checkpoint,
-                        )
-                    else:
-                        await self.runtime.fail(client, attempt_id, lease, failure)
+                        failure_options['post_step_checkpoint'] = post_step_checkpoint
+                    await self.runtime.fail(client, attempt_id, lease, failure, **failure_options)
                 else:
                     await self.runtime.complete(client, attempt_id, lease, {
                         'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts,
@@ -343,6 +350,38 @@ class RemoteWorkflowExecutor:
     @staticmethod
     def _was_interrupted(event: Optional[Dict[str, Any]]) -> bool:
         return bool(event and event.get('status') in {'interrupted', 'cancelled', 'canceled'})
+
+    @staticmethod
+    def _inline_post_step_artifact(
+        artifact: Dict[str, Any], params: Dict[str, Any], workspace: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Keep scalar checks independent of the Host/Core file storage location."""
+        slot = str(artifact.get('slot') or '')
+        declared_type = (params.get('output_slot_types') or {}).get(slot)
+        value = artifact.get('value')
+        if (artifact.get('content_type') != 'file' or declared_type not in {'text', 'json'}
+                or not isinstance(value, dict) or value.get('type') != declared_type):
+            return None
+        checks = (params.get('workflow_runtime') or {}).get('post_step_checks') or []
+        if not any(
+            check.get('step_id') == params.get('step_id')
+            and slot in (check.get('arguments') or {}).values()
+            for check in checks
+        ):
+            return None
+        raw_path = value.get('path')
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError(f'post-step check artifact {slot!r} has no local file')
+        root = pathlib.Path(workspace).resolve()
+        path = pathlib.Path(raw_path)
+        path = (path if path.is_absolute() else root / path).resolve(strict=True)
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError(f'post-step check artifact {slot!r} is outside its task workspace')
+        # Read the generated Host-local file, never the uploaded Core path, which
+        # may belong to another machine. The published artifact stays a file.
+        content = path.read_text(encoding='utf-8')
+        scalar = {'data': json.loads(content)} if declared_type == 'json' else {'text': content}
+        return {**artifact, 'content_type': declared_type, 'value': scalar}
 
     @staticmethod
     def _post_step_artifact_value(artifact: Dict[str, Any]) -> Any:

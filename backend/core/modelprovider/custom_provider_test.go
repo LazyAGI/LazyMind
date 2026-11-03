@@ -166,3 +166,39 @@ func TestModelSupplierCapabilitiesDoNotAdvertiseGroups(t *testing.T) {
 		t.Fatal("non-model capabilities changed")
 	}
 }
+
+func TestResetBuiltInSupplierPreservesTemplateAndClearsConfiguration(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	template := orm.DefaultModelProvider{ID: "default", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", Category: "model"}
+	provider := orm.UserModelProvider{ID: "builtin", DefaultModelProviderID: template.ID, Name: "OpenAI", ProtocolName: "Claude", Category: "model", Capabilities: "has_models", BaseURL: "https://custom.example/v1", RequestConfig: `{"headers":{"test":"value"}}`, ActiveKeyID: "key", ActiveKeyGroupID: "group", ActiveKeyInitialized: true, BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	group := orm.UserModelProviderGroup{ID: "group", UserModelProviderID: provider.ID, BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	model := orm.UserModelProviderGroupModel{ID: "model", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, ModelType: "llm", BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	for _, row := range []any{&template, &provider, &group, &model} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := httptest.NewRecorder()
+	ResetProvider(rec, customProviderRequest(http.MethodPost, provider.ID, ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reset: %d %s", rec.Code, rec.Body.String())
+	}
+	db.First(&provider, "id = ?", provider.ID)
+	db.First(&group, "id = ?", group.ID)
+	db.First(&model, "id = ?", model.ID)
+	if provider.DeletedAt != nil || provider.IsCustom || provider.BaseURL != template.BaseURL || provider.RequestConfig != "" || provider.ProtocolName != "" || provider.ActiveKeyID != "" || provider.ActiveKeyGroupID != "" {
+		t.Fatalf("bad reset: %#v", provider)
+	}
+	if group.DeletedAt == nil || model.DeletedAt == nil {
+		t.Fatal("reset left active configuration")
+	}
+	req := customProviderRequest(http.MethodPost, provider.ID, "")
+	req.Header.Set("X-User-Id", "other")
+	rec = httptest.NewRecorder()
+	ResetProvider(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-user reset: %d", rec.Code)
+	}
+}

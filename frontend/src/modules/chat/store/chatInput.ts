@@ -4,6 +4,9 @@ import type { ChatMention } from "../components/ChatInput/MentionEditor";
 import type { FeaturedSelection } from "./featuredSelection";
 import type { ComposerFileCandidate } from '../components/ChatInput/composerReferences';
 
+/** Draft bucket used by the composer before a conversation has been created. */
+export const NEW_CHAT_INPUT_DRAFT_KEY = "__new_chat__";
+
 export interface ChatModeDraft {
   text: string;
   mentions: ChatMention[];

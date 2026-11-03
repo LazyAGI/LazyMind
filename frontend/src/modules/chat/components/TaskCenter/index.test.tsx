@@ -9,6 +9,7 @@ import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
 import { ordinary } from "./ordinaryTestFixtures";
 import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 
 vi.mock("@/modules/knowledge/components/FileViewer", () => ({ default: () => <div>File viewer</div> }));
 
@@ -161,7 +162,7 @@ describe("TaskCenter display modes", () => {
     expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
   });
   beforeEach(() => {
-    useWorkflowStore.setState({ sessionByConversation: {} });
+    useWorkflowStore.setState({ sessionByConversation: {}, workflowUIByWorkflow: {} });
     useTaskCenterStore.setState({
       tasksByConversation: { "conversation-1": tasks },
       _loadingTasks: {},
@@ -179,6 +180,29 @@ describe("TaskCenter display modes", () => {
       _taskLoadErrors: {},
       runsByConversation: {},
     });
+  });
+
+  it('reads task presentation from the session-pinned revision rather than the workflow cache', () => {
+    useTaskCenterStore.setState({ tasksByConversation: { 'conversation-1': tasks.map(value => ({
+      ...value, ordinary: ordinary(value.task_id, { status: value.status }),
+    })) } });
+    useWorkflowStore.setState({
+      sessionByConversation: { 'conversation-1': {
+        session_id: 'run-1', workflow_id: 'smoke', pinned_revision_id: 'v1', conversation_id: 'conversation-1',
+        workflow_mode: 'auto', status: 'active', current_step_id: '', created_at: '', updated_at: '',
+      } },
+      workflowUIByWorkflow: {
+        'smoke:en-US': { task_presentation: { grouped: false } },
+        [workflowUICacheKey('smoke', 'v1', 'en-US')]: { task_presentation: { grouped: true } },
+        [workflowUICacheKey('smoke', 'v2', 'en-US')]: { task_presentation: { grouped: false } },
+      },
+    });
+    const view = render(<TaskCenter sessionId='conversation-1' />);
+    expect(view.container.querySelector('.ordinary-task-count')).toHaveTextContent('1');
+    act(() => useWorkflowStore.setState(state => ({ sessionByConversation: {
+      'conversation-1': { ...state.sessionByConversation['conversation-1']!, session_id: 'run-2', pinned_revision_id: 'v2' },
+    } })));
+    expect(view.container.querySelector('.ordinary-task-count')).toHaveTextContent('4');
   });
 
   it("shows authoritative initialization timing before the first child exists", () => {

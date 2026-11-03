@@ -4,10 +4,13 @@ import { ConfigProvider, Modal } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 
 import RecoverySettings from "./RecoverySettings";
 import { CHAT_CONVERSATION_LIST_REFRESH_EVENT } from "@/modules/chat/constants/chat";
 import { RECOVERY_ARCHIVE_PATH } from "./recoveryRoute";
+
+setupAntdStaticCleanup();
 
 const mocks = vi.hoisted(() => ({
   listArchiveFolders: vi.fn(),

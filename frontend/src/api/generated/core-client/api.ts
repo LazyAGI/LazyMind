@@ -45,6 +45,364 @@ export interface AbortUploadResponse {
     'upload_id'?: string;
     'upload_state'?: string;
 }
+/**
+ * @type AcademicContentRead
+ */
+export type AcademicContentRead = AcademicContentReadOneOf | AcademicContentReadOneOf1 | ApiCoreAcademicPaperContentsRetryPostRequest;
+
+export interface AcademicContentReadOneOf {
+    'handoff_id': string;
+    'paper_id': string;
+}
+export interface AcademicContentReadOneOf1 {
+    'cursor': string;
+    'expansion_id'?: string;
+    'handoff_id'?: string;
+}
+export interface AcademicContentResponse {
+    'content_hash': string;
+    'content_level': AcademicContentResponseContentLevelEnum;
+    'next_cursor': string;
+    'pages': Array<AcademicContentResponsePagesInner>;
+    'paper': AcademicPaperRef;
+    'parser_version'?: string;
+    'source_kind'?: AcademicContentResponseSourceKindEnum;
+    'source_version'?: string;
+    'status': AcademicContentResponseStatusEnum;
+    'warnings': Array<string>;
+}
+
+export const AcademicContentResponseContentLevelEnum = {
+    None: 'none',
+    Fulltext: 'fulltext'
+} as const;
+
+export type AcademicContentResponseContentLevelEnum = typeof AcademicContentResponseContentLevelEnum[keyof typeof AcademicContentResponseContentLevelEnum];
+export const AcademicContentResponseSourceKindEnum = {
+    Kb: 'kb',
+    External: 'external',
+    Legacy: 'legacy'
+} as const;
+
+export type AcademicContentResponseSourceKindEnum = typeof AcademicContentResponseSourceKindEnum[keyof typeof AcademicContentResponseSourceKindEnum];
+export const AcademicContentResponseStatusEnum = {
+    Processing: 'processing',
+    Ready: 'ready',
+    Unavailable: 'unavailable',
+    Failed: 'failed'
+} as const;
+
+export type AcademicContentResponseStatusEnum = typeof AcademicContentResponseStatusEnum[keyof typeof AcademicContentResponseStatusEnum];
+
+export interface AcademicContentResponsePagesInner {
+    'page': number;
+    'text': string;
+}
+export interface AcademicDocumentIdentity {
+    'kind'?: AcademicDocumentIdentityKindEnum;
+    'paper'?: AcademicDocumentIdentityPaper;
+    'reidentify'?: boolean;
+}
+
+export const AcademicDocumentIdentityKindEnum = {
+    Paper: 'paper',
+    Other: 'other',
+    Unknown: 'unknown'
+} as const;
+
+export type AcademicDocumentIdentityKindEnum = typeof AcademicDocumentIdentityKindEnum[keyof typeof AcademicDocumentIdentityKindEnum];
+
+export interface AcademicDocumentIdentityPaper {
+    'abstract'?: string;
+    'arxiv_id'?: string;
+    'authors'?: Array<string>;
+    'doi'?: string;
+    'title'?: string;
+    'venue'?: string;
+    'year'?: number;
+}
+export interface AcademicDocumentState {
+    'document_id'?: string;
+    'error'?: string;
+    'kind'?: AcademicDocumentStateKindEnum;
+    'manual'?: boolean;
+    'paper_id'?: string;
+    'revision'?: number;
+    'status'?: string;
+}
+
+export const AcademicDocumentStateKindEnum = {
+    Paper: 'paper',
+    Other: 'other',
+    Unknown: 'unknown'
+} as const;
+
+export type AcademicDocumentStateKindEnum = typeof AcademicDocumentStateKindEnum[keyof typeof AcademicDocumentStateKindEnum];
+
+export interface AcademicExpansion {
+    'conversation_id': string;
+    'created_at'?: string;
+    'dataset_id': string;
+    'discovery_mode'?: AcademicExpansionDiscoveryModeEnum;
+    'goal'?: string;
+    'id': string;
+    'progress'?: object;
+    'result': AcademicReviewInput;
+    'status': string;
+    'title'?: string;
+    'updated_at'?: string;
+    'version': number;
+}
+
+export const AcademicExpansionDiscoveryModeEnum = {
+    External: 'external'
+} as const;
+
+export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscoveryModeEnum[keyof typeof AcademicExpansionDiscoveryModeEnum];
+
+/**
+ * @type AcademicHandoffInput
+ */
+export type AcademicHandoffInput = AcademicPaperTaskInput | AcademicReviewInput;
+
+export interface AcademicImportCandidate {
+    'expected_mime'?: string;
+    'source_provider'?: string;
+    'source_type'?: string;
+    'url'?: string;
+    'version'?: string;
+}
+export interface AcademicImportCreate {
+    'entry_type'?: AcademicImportCreateEntryTypeEnum;
+    'file_name'?: string;
+    'folder_id'?: string;
+    'folders'?: Array<PaperLibraryFolder>;
+    'format'?: AcademicImportCreateFormatEnum;
+    'idempotency_key'?: string;
+    'items': Array<AcademicImportItem>;
+    'preview_token'?: string;
+    'source_document_ids'?: Array<string>;
+    'target_dataset_id': string;
+    'target_pid'?: string;
+}
+
+export const AcademicImportCreateEntryTypeEnum = {
+    SingleReference: 'single_reference',
+    PaperReferences: 'paper_references',
+    CollectionReferences: 'collection_references',
+    PaperLink: 'paper_link',
+    Bibliography: 'bibliography',
+    PdfUpload: 'pdf_upload'
+} as const;
+
+export type AcademicImportCreateEntryTypeEnum = typeof AcademicImportCreateEntryTypeEnum[keyof typeof AcademicImportCreateEntryTypeEnum];
+export const AcademicImportCreateFormatEnum = {
+    Bib: 'bib',
+    Ris: 'ris',
+    Csv: 'csv'
+} as const;
+
+export type AcademicImportCreateFormatEnum = typeof AcademicImportCreateFormatEnum[keyof typeof AcademicImportCreateFormatEnum];
+
+export interface AcademicImportItem {
+    'candidate'?: AcademicImportCandidate;
+    'confirmed'?: boolean;
+    'document_id'?: string;
+    'paper'?: PaperLibraryPaper;
+    'reference_ids'?: Array<string>;
+    'revision'?: number;
+    'work_id'?: string;
+}
+export interface AcademicImportOperation {
+    'created_at'?: string;
+    'entry_type'?: string;
+    'id'?: string;
+    'source'?: object;
+    'status'?: string;
+    'summary'?: AcademicImportOperationSummary;
+    'target_dataset_id'?: string;
+}
+export interface AcademicImportOperationItem {
+    'batch_id'?: string;
+    'can_retry'?: boolean;
+    'content_sha256'?: string;
+    'current_document'?: object;
+    'current_state'?: string;
+    'document_deleted'?: boolean;
+    'document_id'?: string;
+    'item_id'?: string;
+    'library_paper_id'?: string;
+    'pending_paper'?: object;
+    'resolved_later'?: boolean;
+    'result_kind'?: string;
+    'status'?: string;
+    'title'?: string;
+    'upload_request_key'?: string;
+}
+export interface AcademicImportOperationSummary {
+    'active'?: number;
+    'canceled'?: number;
+    'deleted'?: number;
+    'failed'?: number;
+    'metadata_only'?: number;
+    'needs_action'?: number;
+    'ready'?: number;
+    'removed'?: number;
+    'resolved_later'?: number;
+    'retryable'?: number;
+    'skipped'?: number;
+    'total'?: number;
+}
+export interface AcademicImportPreview {
+    'items'?: Array<AcademicImportPreviewItemsInner>;
+    'preview_token'?: string;
+    'target_dataset_id'?: string;
+    'total'?: number;
+}
+export interface AcademicImportPreviewItemsInner {
+    'disposition'?: string;
+    'fulltext_candidates'?: Array<AcademicImportCandidate>;
+    'manual_download_urls'?: Array<string>;
+    'paper'?: AcademicPaperRef;
+    'presence'?: AcademicPresence;
+    'reference_ids'?: Array<string>;
+    'title'?: string;
+    'warnings'?: Array<string>;
+    'work_id'?: string;
+}
+export interface AcademicImportQueueItem {
+    'batch_failed_items'?: number;
+    'batch_id'?: string;
+    'batch_status'?: string;
+    'created_at'?: string;
+    'current_document'?: AcademicImportQueueItemCurrentDocument;
+    'document_id'?: string;
+    'error_code'?: string;
+    'error_message'?: string;
+    'item_id'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+    'stage'?: string;
+    'status'?: string;
+    'target_dataset_id'?: string;
+    'title'?: string;
+    'updated_at'?: string;
+    'work_id'?: string;
+}
+export interface AcademicImportQueueItemCurrentDocument {
+    'document_id'?: string;
+    'processing_error'?: string;
+    'processing_status'?: string;
+}
+export interface AcademicPaperRef {
+    'abstract': string | null;
+    'arxiv_id'?: string;
+    'authors'?: Array<string>;
+    'citation_count'?: number;
+    'document_id'?: string;
+    'doi'?: string;
+    'paper_id': string;
+    'paper_url'?: string;
+    'pdf_url'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+    'title'?: string;
+    'venue'?: string;
+    'year'?: number;
+}
+export interface AcademicPaperTaskInput {
+    'notes'?: Array<AcademicPaperTaskNote>;
+    'papers': Array<AcademicPaperRef>;
+    'user_instruction': string;
+}
+export interface AcademicPaperTaskNote {
+    'content': string;
+    'id': string;
+    'paper_id': string;
+    'title': string;
+}
+export interface AcademicPresence {
+    'coverage_complete'?: boolean;
+    'current_dataset'?: Array<AcademicPresenceDocument>;
+    'importing'?: boolean;
+    'metadata_only'?: boolean;
+    'other_datasets'?: Array<AcademicPresenceDocument>;
+    'status'?: string;
+    'work_id'?: string;
+}
+export interface AcademicPresenceDocument {
+    'content_sha256'?: string;
+    'dataset_id'?: string;
+    'dataset_name'?: string;
+    'document_id'?: string;
+    'document_name'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+}
+export interface AcademicResolvedPapers {
+    'contents': Array<AcademicResolvedPapersContentsInner>;
+    'papers': Array<AcademicWorkflowPaper>;
+}
+export interface AcademicResolvedPapersContentsInner {
+    'error'?: string;
+    'paper_id': string;
+    'source_kind'?: string;
+    'source_version': string;
+    'status': string;
+}
+export interface AcademicReviewInput {
+    'candidate_directions': Array<string>;
+    'papers': Array<AcademicWorkflowPaper>;
+    'selected_directions': Array<string>;
+    'user_instruction': string;
+}
+export interface AcademicSourceImportItem {
+    'batch_id': string;
+    'created_library': boolean;
+    'document_id'?: string;
+    'error_message'?: string;
+    'item_id': string;
+    'paper_key': string;
+    'processing_status'?: string;
+    'retry_batch_id'?: string;
+    'retry_item_id'?: string;
+    'retryable': boolean;
+    'stage': string;
+    'status': string;
+    'target_dataset_id': string;
+    'target_name': string;
+    'title': string;
+}
+export interface AcademicTaskLaunch {
+    'dataset_id'?: string;
+    'direction'?: string;
+    'document_ids'?: Array<string>;
+    'expansion_id'?: string;
+    'expansion_version'?: number;
+    'kind': AcademicTaskLaunchKindEnum;
+    'paper_ids'?: Array<string>;
+    'reflection_first'?: boolean;
+    'request_key': string;
+    'user_instruction'?: string;
+}
+
+export const AcademicTaskLaunchKindEnum = {
+    Expansion: 'expansion',
+    Review: 'review',
+    Reflection: 'reflection',
+    Ppt: 'ppt'
+} as const;
+
+export type AcademicTaskLaunchKindEnum = typeof AcademicTaskLaunchKindEnum[keyof typeof AcademicTaskLaunchKindEnum];
+
+export interface AcademicWorkflowPaper {
+    'direction_relation'?: string;
+    'is_important': boolean;
+    'is_seed': boolean;
+    'key_contribution'?: string;
+    'paper': AcademicPaperRef;
+    'seed_relation'?: string;
+}
 export interface AddACLData {
     'acl_id'?: number;
 }
@@ -420,6 +778,239 @@ export interface Algo {
 }
 export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
+}
+export interface ApiCoreAcademicChatContextGet200Response {
+    'contents'?: ApiCoreAcademicChatContextGet200ResponseContents;
+    'dataset_id'?: string;
+    'expansion_id'?: string;
+    'handoff_id'?: string;
+    'input'?: AcademicHandoffInput;
+    'kind'?: string;
+    'next_conversation_id'?: string;
+    'paper_count'?: number;
+    'ready_count'?: number;
+    'source_available'?: boolean;
+    'source_conversation_id'?: string;
+    'status'?: string;
+    'version'?: number;
+}
+/**
+ * @type ApiCoreAcademicChatContextGet200ResponseContents
+ */
+export type ApiCoreAcademicChatContextGet200ResponseContents = Array<object> | object;
+
+export interface ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response {
+    'status'?: string;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdDelete200Response {
+    'deleted'?: boolean;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdDeleteRequest {
+    'confirm': boolean;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
+    'chat_status'?: ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum;
+    'contents'?: Array<object>;
+    'handoffs'?: Array<object>;
+    'paper_importance'?: { [key: string]: boolean; };
+    'presence'?: Array<AcademicPresence>;
+    'record'?: AcademicExpansion;
+    'rounds'?: Array<object>;
+}
+
+export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = {
+    Available: 'available',
+    Trashed: 'trashed',
+    Deleted: 'deleted'
+} as const;
+
+export type ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum];
+
+export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
+    'paper_ids': Array<string>;
+}
+export interface ApiCoreAcademicExpansionsGet200Response {
+    'items'?: Array<AcademicExpansion>;
+}
+/**
+ * @type ApiCoreAcademicImportsBatchIdGet200Response
+ */
+export type ApiCoreAcademicImportsBatchIdGet200Response = ApiCoreAcademicImportsBatchIdGet200ResponseOneOf | ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1;
+
+export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf {
+    'batch'?: object;
+    'items'?: Array<object>;
+}
+export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1 {
+    'items'?: Array<AcademicImportOperationItem>;
+    'next_cursor'?: string;
+    'operation'?: AcademicImportOperation;
+}
+/**
+ * @type ApiCoreAcademicImportsGet200Response
+ */
+export type ApiCoreAcademicImportsGet200Response = ApiCoreAcademicImportsGet200ResponseOneOf | ApiCoreAcademicImportsGet200ResponseOneOf1 | ApiCoreAcademicImportsGet200ResponseOneOf2;
+
+export interface ApiCoreAcademicImportsGet200ResponseOneOf {
+    'items': Array<AcademicImportQueueItem>;
+    'total': number;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf1 {
+    'items': Array<AcademicSourceImportItem>;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf2 {
+    'items'?: Array<AcademicImportOperation>;
+    'next_cursor'?: string;
+    'notification'?: ApiCoreAcademicImportsGet200ResponseOneOf2Notification;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf2Notification {
+    'active'?: number;
+    'needs_action'?: number;
+}
+/**
+ * @type ApiCoreAcademicImportsPost200Response
+ */
+export type ApiCoreAcademicImportsPost200Response = ApiCoreAcademicImportsPost200ResponseOneOf | PaperLibraryChanges;
+
+export interface ApiCoreAcademicImportsPost200ResponseOneOf {
+    'batch_id'?: string;
+    'status'?: string;
+}
+export interface ApiCoreAcademicImportsPreviewPostRequest {
+    'expansion_id'?: string;
+    'identifier'?: string;
+    'lookup_fulltext'?: boolean;
+    'papers'?: Array<PaperLibraryPaper>;
+    'reference_ids'?: Array<string>;
+    'resolve_external'?: boolean;
+    'source_document_ids'?: Array<string>;
+    'target_dataset_id': string;
+    'work_ids'?: Array<string>;
+    'works'?: Array<object>;
+}
+export interface ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest {
+    'revision': number;
+}
+export interface ApiCoreAcademicLibraryFoldersFolderIdPatchRequest {
+    'name': string;
+    'revision': number;
+}
+export interface ApiCoreAcademicLibraryFoldersPostRequest {
+    'id': string;
+    'name': string;
+    'parent_id'?: string;
+}
+export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
+    'content': string;
+    'id': string;
+}
+export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
+    'metadata'?: PaperLibraryMetadata;
+    'revision': number;
+    'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
+    'tags'?: Array<string>;
+}
+
+export const ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum = {
+    Unread: 'unread',
+    Reading: 'reading',
+    Read: 'read'
+} as const;
+
+export type ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum = typeof ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum[keyof typeof ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum];
+
+export interface ApiCoreAcademicLibraryPapersMovePostRequest {
+    'folder_id': string;
+    'items': Array<PaperLibraryTarget>;
+}
+export interface ApiCoreAcademicLibraryPapersRemovePostRequest {
+    'items': Array<PaperLibraryTarget>;
+}
+export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response {
+    'feedback'?: string;
+    'input'?: AcademicHandoffInput;
+    'kind'?: string;
+    'papers'?: Array<AcademicPaperRef>;
+    'reflection_markdown'?: string;
+    'status'?: string;
+}
+export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest {
+    'reflection_markdown'?: string;
+}
+export interface ApiCoreAcademicPaperContentsRetryPostRequest {
+    'expansion_id': string;
+    'paper_id': string;
+}
+export interface ApiCoreAcademicPaperSelectionsResolvePost200Response {
+    'invalid'?: Array<ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner>;
+    'papers'?: Array<AcademicWorkflowPaper>;
+}
+export interface ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner {
+    'document_id'?: string;
+    'reason'?: string;
+}
+export interface ApiCoreAcademicPaperSelectionsResolvePostRequest {
+    'dataset_id': string;
+    'document_ids': Array<string>;
+}
+export interface ApiCoreAcademicPapersPaperIdImportancePut200Response {
+    'is_important'?: boolean;
+}
+export interface ApiCoreAcademicPapersPaperIdImportancePutRequest {
+    'dataset_id': string;
+    'is_important': boolean;
+}
+export interface ApiCoreAcademicPapersSearchPost200Response {
+    'mock'?: boolean;
+    'papers'?: Array<AcademicPaperRef>;
+    'source'?: string;
+}
+export interface ApiCoreAcademicPapersSearchPostRequest {
+    'expansion_id': string;
+    'max_results'?: number;
+    'query': string;
+}
+export interface ApiCoreAcademicWorkflowLaunchesPost200Response {
+    'conversation_id'?: string;
+    'expansion_id'?: string;
+    'handoff_id'?: string;
+}
+export interface ApiCoreAcademicZoteroAttachmentTransferPost200Response {
+    'attachment_id': string;
+    'document_id': string;
+}
+export interface ApiCoreAcademicZoteroAttachmentTransferPostRequest {
+    'api_key'?: string;
+    'attachment_id': string;
+    'expected_md5'?: string;
+    'item_key': string;
+    'library_id'?: string;
+    'library_type'?: ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum;
+    'local_url'?: string;
+    'paper_id': string;
+    'source': ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum;
+    'webdav'?: ApiCoreAcademicZoteroAttachmentTransferPostRequestWebdav;
+}
+
+export const ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum = {
+    Users: 'users',
+    Groups: 'groups'
+} as const;
+
+export type ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum = typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum[keyof typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum];
+export const ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum = {
+    Database: 'database',
+    Remote: 'remote',
+    Webdav: 'webdav',
+    Local: 'local'
+} as const;
+
+export type ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum = typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum[keyof typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum];
+
+export interface ApiCoreAcademicZoteroAttachmentTransferPostRequestWebdav {
+    'password'?: string;
+    'url'?: string;
+    'username'?: string;
 }
 export interface ApiCoreConversationsConversationIdEventsGet200Response {
     'payload'?: object;
@@ -1611,12 +2202,9 @@ export interface ConversationArchiveRequest {
 }
 export interface ConversationArchiveResponse {
     'archived_at': string;
+    'archived_ids': Array<string>;
     'conversation_id': string;
     'newly_archived': boolean;
-    /**
-     * All affected conversation IDs, including dependent side chats.
-     */
-    'archived_ids': Array<string>;
 }
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
@@ -1991,12 +2579,9 @@ export const ConversationItemThinkingDepthEnum = {
 export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingDepthEnum[keyof typeof ConversationItemThinkingDepthEnum];
 
 export interface ConversationListResponse {
-    /**
-     * True only for the complete lightweight selection snapshot. Such a response has no next page.
-     */
-    'selection_complete'?: boolean;
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
+    'selection_complete'?: boolean;
     'total_size'?: number;
 }
 export interface ConversationOpeningState {
@@ -2406,9 +2991,11 @@ export interface CreateTaskItem {
 }
 export interface CreateTaskRequest {
     'items': Array<CreateTaskItem>;
+    'paper_import'?: PaperUploadContext;
     'parent'?: string;
 }
 export interface CreateTasksResponse {
+    'paper_import_batch_id'?: string;
     'tasks'?: Array<TaskResponse>;
 }
 export interface CreateWordGroupFromConflictRequest {
@@ -2768,7 +3355,9 @@ export interface Dataset {
     'is_owner': boolean;
     'name': string;
     'operation_result'?: ResourceOperationResult;
+    'paper_count'?: number;
     'parsers'?: Array<ParserConfig>;
+    'pdf_attachment_count'?: number;
     'processing_level'?: string;
     'processing_revision'?: number;
     'profile_id'?: string;
@@ -4751,6 +5340,10 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
     'base_url'?: string;
     'brand_key'?: string;
     'capabilities'?: Array<string>;
+    /**
+     * False when the saved model is disabled. Disabled models keep their configuration.
+     */
+    'enabled': boolean;
     'group_name'?: string;
     'id': string;
     /**
@@ -4816,6 +5409,7 @@ export interface ListModelProviderGroupModelsOpenAPIResponse {
 }
 export interface ListModelProviderGroupsOpenAPIItem {
     'base_url': string;
+    'credential_status'?: string;
     'has_api_key': boolean;
     'id': string;
     'is_verified': boolean;
@@ -5475,6 +6069,120 @@ export interface Pages {
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;
 }
+export interface PaperLibraryAttachment {
+    'academicState'?: AcademicDocumentState;
+    'addedAt': string;
+    'available': boolean;
+    'contentHash'?: string;
+    'contentRef'?: string;
+    'expansionId'?: string;
+    'expansionVersion'?: number;
+    'id': string;
+    'importMethod'?: string;
+    'isPrimary': boolean;
+    'kind': string;
+    'name': string;
+    'paperId': string;
+    'source'?: string;
+    'sourceProvider'?: string;
+    'sourceUrl'?: string;
+    'sourceVersion'?: string;
+}
+export interface PaperLibraryChanges {
+    'batch_id'?: string;
+    'data': PaperLibraryData;
+    'removedFolderIds'?: Array<string>;
+    'removedPaperIds'?: Array<string>;
+    'status'?: string;
+}
+export interface PaperLibraryData {
+    'attachments': Array<PaperLibraryAttachment>;
+    'folders': Array<PaperLibraryFolder>;
+    'notes': Array<PaperLibraryNote>;
+    'papers': Array<PaperLibraryPaper>;
+}
+export interface PaperLibraryFolder {
+    'id': string;
+    'name': string;
+    'parentId': string | null;
+    'revision': number;
+}
+export interface PaperLibraryMetadata {
+    'abstract'?: string;
+    'authors': Array<string>;
+    'citationCount'?: number;
+    'identifiers': PaperLibraryMetadataIdentifiers;
+    'title': string;
+    'venue': string;
+    'year': number;
+}
+export interface PaperLibraryMetadataIdentifiers {
+    'arxiv'?: string;
+    'doi'?: string;
+}
+export interface PaperLibraryNote {
+    'content': string;
+    'createdAt': string;
+    'id': string;
+    'kind': string;
+    'paperId': string;
+    'title': string;
+    'updatedAt': string;
+}
+export interface PaperLibraryPaper {
+    'academicWorkId'?: string;
+    'arxivVersion'?: string;
+    'associationConflict'?: string;
+    'attachmentIds': Array<string>;
+    'folderId': string | null;
+    'id': string;
+    'importMethod'?: string;
+    'important': boolean;
+    'incomplete'?: boolean;
+    'metadata': PaperLibraryMetadata;
+    'noteIds': Array<string>;
+    'parse': PaperLibraryPaperParseEnum;
+    'processingError'?: string;
+    'revision': number;
+    'source': string;
+    'sourceUrl'?: string;
+    'status': PaperLibraryPaperStatusEnum;
+    'tags': Array<string>;
+}
+
+export const PaperLibraryPaperParseEnum = {
+    Ready: 'ready',
+    Parsing: 'parsing',
+    Failed: 'failed'
+} as const;
+
+export type PaperLibraryPaperParseEnum = typeof PaperLibraryPaperParseEnum[keyof typeof PaperLibraryPaperParseEnum];
+export const PaperLibraryPaperStatusEnum = {
+    Unread: 'unread',
+    Reading: 'reading',
+    Read: 'read'
+} as const;
+
+export type PaperLibraryPaperStatusEnum = typeof PaperLibraryPaperStatusEnum[keyof typeof PaperLibraryPaperStatusEnum];
+
+export interface PaperLibraryResponse {
+    'active': boolean;
+    'can_write': boolean;
+    'data': PaperLibraryData;
+    'paper_count': number;
+    'pdf_attachment_count': number;
+}
+export interface PaperLibraryTarget {
+    'id': string;
+    'revision': number;
+}
+export interface PaperUploadContext {
+    'idempotency_key': string;
+    'library_paper_id': string;
+    'paper'?: any;
+    'source_version'?: string;
+    'title': string;
+}
 export interface ParserConfig {
     'name': string;
     'params'?: { [key: string]: object; };
@@ -5584,6 +6292,9 @@ export const PreferenceOrganizerReceiptStatusEnum = {
 export type PreferenceOrganizerReceiptStatusEnum = typeof PreferenceOrganizerReceiptStatusEnum[keyof typeof PreferenceOrganizerReceiptStatusEnum];
 
 export interface PreferenceOrganizerResult {
+    'final_state'?: PreferenceOrganizerState;
+    'initial_state'?: PreferenceOrganizerState;
+    'observed_state'?: PreferenceOrganizerState;
     'outcome'?: PreferenceOrganizerResultOutcomeEnum;
     'passes'?: Array<PreferenceOrganizerPass>;
     'passes_attempted'?: number;
@@ -5608,23 +6319,43 @@ export type PreferenceOrganizerResultOutcomeEnum = typeof PreferenceOrganizerRes
 export interface PreferenceOrganizerState {
     'etag': string;
     'full_projection_chars': number;
+    'max_chars'?: number;
     'projected_chars': number;
     'projected_items': number;
     'projection_truncated': boolean;
     'stored_items': number;
+    'updated_at'?: string;
 }
 export interface PreferenceOrganizerTaskData {
     'created_at': string;
+    'current_state'?: PreferenceOrganizerState;
     'error_code'?: string;
     'error_message'?: string;
     'finished_at'?: string;
+    'invalidation_reason'?: PreferenceOrganizerTaskDataInvalidationReasonEnum;
     'result'?: PreferenceOrganizerResult;
+    'result_validity'?: PreferenceOrganizerTaskDataResultValidityEnum;
     'started_at'?: string;
     'status': PreferenceOrganizerTaskDataStatusEnum;
     'task_id': string;
     'waiting_reason'?: PreferenceOrganizerTaskDataWaitingReasonEnum;
 }
 
+export const PreferenceOrganizerTaskDataInvalidationReasonEnum = {
+    StateUnavailable: 'state_unavailable',
+    MissingSnapshot: 'missing_snapshot',
+    PreferenceChanged: 'preference_changed',
+    BudgetChanged: 'budget_changed'
+} as const;
+
+export type PreferenceOrganizerTaskDataInvalidationReasonEnum = typeof PreferenceOrganizerTaskDataInvalidationReasonEnum[keyof typeof PreferenceOrganizerTaskDataInvalidationReasonEnum];
+export const PreferenceOrganizerTaskDataResultValidityEnum = {
+    Current: 'current',
+    Stale: 'stale',
+    Unknown: 'unknown'
+} as const;
+
+export type PreferenceOrganizerTaskDataResultValidityEnum = typeof PreferenceOrganizerTaskDataResultValidityEnum[keyof typeof PreferenceOrganizerTaskDataResultValidityEnum];
 export const PreferenceOrganizerTaskDataStatusEnum = {
     Pending: 'pending',
     Running: 'running',
@@ -5928,6 +6659,29 @@ export interface PublicSource {
 export interface Publication {
     'artifact': WorkflowExecutionArtifact;
     'execution_handle': string;
+}
+export interface PublicationPreflightResponse {
+    'code': number;
+    'data': PublicationPreflightResult;
+}
+export interface PublicationPreflightResult {
+    'targets': Array<PublicationTargetCheck>;
+}
+export interface PublicationTargetCheck {
+    'code'?: string;
+    'provider': string;
+    'state': string;
+    'target_document'?: any;
+    'vaults': Array<PublicationVault>;
+}
+export interface PublicationTargetCheckResponse {
+    'code': number;
+    'data': PublicationTargetCheck;
+}
+export interface PublicationVault {
+    'id': string;
+    'name': string;
+    'writable': boolean;
 }
 export interface QuestionTypeOption {
     'label': string;
@@ -6281,6 +7035,7 @@ export interface ServerResponse {
     'url': string;
 }
 export interface SessionDTO {
+    'controller_host': string;
     'conversation_id': string;
     'created_at': string;
     'current_step_id': string;
@@ -7167,6 +7922,7 @@ export interface Snapshot {
     'active_execution_ids'?: Array<string>;
     'active_executions': number;
     'admission': Admission;
+    'automatic_retry_steps'?: Array<string>;
     'available_actions'?: Array<string>;
     'binding': BindingView;
     'continuation': string;
@@ -7578,7 +8334,13 @@ export interface TransferBinding {
     'target_document_id'?: string;
     'target_lazy_doc_id'?: string;
 }
+export interface TranslationDocumentProviderOpenAPIItem {
+    'group_id': string;
+    'group_name': string;
+    'provider_name': string;
+}
 export interface TranslationOpenAPIRequest {
+    'source'?: string;
     'target'?: string;
     'text': string;
 }
@@ -7589,6 +8351,10 @@ export interface TranslationOpenAPIResponse {
 }
 export interface TranslationStatusOpenAPIResponse {
     'configured': boolean;
+    'document_providers'?: Array<TranslationDocumentProviderOpenAPIItem>;
+    'document_supported': boolean;
+    'provider'?: string;
+    'selected_group_id'?: string;
 }
 export interface UnsetDefaultDatasetRequest {
     'name': string;
@@ -7656,6 +8422,10 @@ export interface UpdateModelProviderGroupModelOpenAPIRequest {
      * Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
      */
     'customize'?: boolean;
+    /**
+     * Optional saved-model enablement. Disabled models keep their UUID and configuration and stay out of default selection.
+     */
+    'enabled'?: boolean;
     /**
      * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
@@ -8258,6 +9028,2366 @@ export interface WriterDocumentWriteBackOpenAPIRequest {
     'source_document'?: any;
     'template'?: string;
 }
+
+/**
+ * AcademicWorkflowsApi - axios parameter creator
+ */
+export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicChatContextGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreAcademicChatContextGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/academic/chat-context`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Correct document identity or retry recognition
+         * @param {string} documentId
+         * @param {AcademicDocumentIdentity} academicDocumentIdentity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicDocumentsDocumentIdIdentityPatch: async (documentId: string, academicDocumentIdentity: AcademicDocumentIdentity, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'documentId' is not null or undefined
+            assertParamExists('apiCoreAcademicDocumentsDocumentIdIdentityPatch', 'documentId', documentId)
+            // verify required parameter 'academicDocumentIdentity' is not null or undefined
+            assertParamExists('apiCoreAcademicDocumentsDocumentIdIdentityPatch', 'academicDocumentIdentity', academicDocumentIdentity)
+            const localVarPath = `/api/core/academic/documents/{document_id}/identity`
+                .replace(`{${"document_id"}}`, encodeURIComponent(String(documentId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicDocumentIdentity, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Confirm deletion of results and trash/cancel the expansion Chat
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdDeleteRequest} apiCoreAcademicExpansionsExpansionIdDeleteRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdDelete: async (expansionId: string, apiCoreAcademicExpansionsExpansionIdDeleteRequest: ApiCoreAcademicExpansionsExpansionIdDeleteRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdDelete', 'expansionId', expansionId)
+            // verify required parameter 'apiCoreAcademicExpansionsExpansionIdDeleteRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdDelete', 'apiCoreAcademicExpansionsExpansionIdDeleteRequest', apiCoreAcademicExpansionsExpansionIdDeleteRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicExpansionsExpansionIdDeleteRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read saved rounds, current papers, content states and Chat availability
+         * @param {string} expansionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdGet: async (expansionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdGet', 'expansionId', expansionId)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdPapersResolvePost: async (expansionId: string, apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest: ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdPapersResolvePost', 'expansionId', expansionId)
+            // verify required parameter 'apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdPapersResolvePost', 'apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest', apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}/papers:resolve`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List current user\'s expansion records
+         * @param {string} datasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsGet: async (datasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'datasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsGet', 'datasetId', datasetId)
+            const localVarPath = `/api/core/academic/expansions`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (datasetId !== undefined) {
+                localVarQueryParameter['dataset_id'] = datasetId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdGet: async (batchId: string, view?: ApiCoreAcademicImportsBatchIdGetViewEnum, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchId' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsBatchIdGet', 'batchId', batchId)
+            const localVarPath = `/api/core/academic/imports/{batch_id}`
+                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {string} [targetDatasetId]
+         * @param {string} [sourceDocumentId]
+         * @param {string} [conversationId]
+         * @param {string} [historyId]
+         * @param {string} [taskId]
+         * @param {string} [workflowSessionId]
+         * @param {string} [workDisplayKey]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsGet: async (view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/imports`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            if (sourceDocumentId !== undefined) {
+                localVarQueryParameter['source_document_id'] = sourceDocumentId;
+            }
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            if (historyId !== undefined) {
+                localVarQueryParameter['history_id'] = historyId;
+            }
+
+            if (taskId !== undefined) {
+                localVarQueryParameter['task_id'] = taskId;
+            }
+
+            if (workflowSessionId !== undefined) {
+                localVarQueryParameter['workflow_session_id'] = workflowSessionId;
+            }
+
+            if (workDisplayKey !== undefined) {
+                localVarQueryParameter['work_display_key'] = workDisplayKey;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+         * @param {AcademicImportCreate} academicImportCreate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPost: async (academicImportCreate: AcademicImportCreate, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'academicImportCreate' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsPost', 'academicImportCreate', academicImportCreate)
+            const localVarPath = `/api/core/academic/imports`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicImportCreate, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Preview reference or identifier import into the current collection
+         * @param {ApiCoreAcademicImportsPreviewPostRequest} apiCoreAcademicImportsPreviewPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPreviewPost: async (apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicImportsPreviewPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsPreviewPost', 'apiCoreAcademicImportsPreviewPostRequest', apiCoreAcademicImportsPreviewPostRequest)
+            const localVarPath = `/api/core/academic/imports:preview`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicImportsPreviewPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdDeletePost: async (targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'folderId', folderId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest', apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest)
+            const localVarPath = `/api/core/academic/library/folders/{folder_id}:delete`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdPatchRequest} apiCoreAcademicLibraryFoldersFolderIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdPatch: async (targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'folderId', folderId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdPatchRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'apiCoreAcademicLibraryFoldersFolderIdPatchRequest', apiCoreAcademicLibraryFoldersFolderIdPatchRequest)
+            const localVarPath = `/api/core/academic/library/folders/{folder_id}`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdPatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryFoldersPostRequest} apiCoreAcademicLibraryFoldersPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersPost: async (targetDatasetId: string, apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersPost', 'apiCoreAcademicLibraryFoldersPostRequest', apiCoreAcademicLibraryFoldersPostRequest)
+            const localVarPath = `/api/core/academic/library/folders`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
+         * @param {string} targetDatasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryGet: async (targetDatasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryGet', 'targetDatasetId', targetDatasetId)
+            const localVarPath = `/api/core/academic/library`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} attachmentId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost: async (targetDatasetId: string, libraryPaperId: string, attachmentId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'attachmentId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'attachmentId', attachmentId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest', apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/attachments/{attachment_id}:detach`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)))
+                .replace(`{${"attachment_id"}}`, encodeURIComponent(String(attachmentId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Add a note idempotently by stable note ID
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest', apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/notes`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdPatch: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest', apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersMovePostRequest} apiCoreAcademicLibraryPapersMovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersMovePost: async (targetDatasetId: string, apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersMovePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersMovePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersMovePost', 'apiCoreAcademicLibraryPapersMovePostRequest', apiCoreAcademicLibraryPapersMovePostRequest)
+            const localVarPath = `/api/core/academic/library/papers:move`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersMovePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersRemovePostRequest} apiCoreAcademicLibraryPapersRemovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersRemovePost: async (targetDatasetId: string, apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersRemovePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersRemovePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersRemovePost', 'apiCoreAcademicLibraryPapersRemovePostRequest', apiCoreAcademicLibraryPapersRemovePostRequest)
+            const localVarPath = `/api/core/academic/library/papers:remove`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersRemovePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+         * @param {string} handoffId
+         * @param {ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicMockHandoffsHandoffIdSubmitPost: async (handoffId: string, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'handoffId' is not null or undefined
+            assertParamExists('apiCoreAcademicMockHandoffsHandoffIdSubmitPost', 'handoffId', handoffId)
+            // verify required parameter 'apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicMockHandoffsHandoffIdSubmitPost', 'apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest', apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest)
+            const localVarPath = `/api/core/academic/mock-handoffs/{handoff_id}:submit`
+                .replace(`{${"handoff_id"}}`, encodeURIComponent(String(handoffId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read real full text without importing; continue using cursor only
+         * @param {AcademicContentRead} academicContentRead
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsReadPost: async (academicContentRead: AcademicContentRead, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'academicContentRead' is not null or undefined
+            assertParamExists('apiCoreAcademicPaperContentsReadPost', 'academicContentRead', academicContentRead)
+            const localVarPath = `/api/core/academic/paper-contents:read`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicContentRead, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry failed full text download and parsing
+         * @param {ApiCoreAcademicPaperContentsRetryPostRequest} apiCoreAcademicPaperContentsRetryPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsRetryPost: async (apiCoreAcademicPaperContentsRetryPostRequest: ApiCoreAcademicPaperContentsRetryPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicPaperContentsRetryPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPaperContentsRetryPost', 'apiCoreAcademicPaperContentsRetryPostRequest', apiCoreAcademicPaperContentsRetryPostRequest)
+            const localVarPath = `/api/core/academic/paper-contents:retry`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPaperContentsRetryPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Expand folders completely and resolve distinct confirmed papers
+         * @param {ApiCoreAcademicPaperSelectionsResolvePostRequest} apiCoreAcademicPaperSelectionsResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperSelectionsResolvePost: async (apiCoreAcademicPaperSelectionsResolvePostRequest: ApiCoreAcademicPaperSelectionsResolvePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicPaperSelectionsResolvePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPaperSelectionsResolvePost', 'apiCoreAcademicPaperSelectionsResolvePostRequest', apiCoreAcademicPaperSelectionsResolvePostRequest)
+            const localVarPath = `/api/core/academic/paper-selections:resolve`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPaperSelectionsResolvePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Set current user\'s personal importance
+         * @param {string} paperId
+         * @param {ApiCoreAcademicPapersPaperIdImportancePutRequest} apiCoreAcademicPapersPaperIdImportancePutRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersPaperIdImportancePut: async (paperId: string, apiCoreAcademicPapersPaperIdImportancePutRequest: ApiCoreAcademicPapersPaperIdImportancePutRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'paperId' is not null or undefined
+            assertParamExists('apiCoreAcademicPapersPaperIdImportancePut', 'paperId', paperId)
+            // verify required parameter 'apiCoreAcademicPapersPaperIdImportancePutRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPapersPaperIdImportancePut', 'apiCoreAcademicPapersPaperIdImportancePutRequest', apiCoreAcademicPapersPaperIdImportancePutRequest)
+            const localVarPath = `/api/core/academic/papers/{paper_id}/importance`
+                .replace(`{${"paper_id"}}`, encodeURIComponent(String(paperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPapersPaperIdImportancePutRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersSearchPost: async (apiCoreAcademicPapersSearchPostRequest: ApiCoreAcademicPapersSearchPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicPapersSearchPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPapersSearchPost', 'apiCoreAcademicPapersSearchPostRequest', apiCoreAcademicPapersSearchPostRequest)
+            const localVarPath = `/api/core/academic/papers:search`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPapersSearchPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Idempotently start expansion or a separate downstream Chat
+         * @param {AcademicTaskLaunch} academicTaskLaunch
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicWorkflowLaunchesPost: async (academicTaskLaunch: AcademicTaskLaunch, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'academicTaskLaunch' is not null or undefined
+            assertParamExists('apiCoreAcademicWorkflowLaunchesPost', 'academicTaskLaunch', academicTaskLaunch)
+            const localVarPath = `/api/core/academic/workflow-launches`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicTaskLaunch, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicZoteroAttachmentTransferPostRequest} apiCoreAcademicZoteroAttachmentTransferPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentTransferPost: async (targetDatasetId: string, apiCoreAcademicZoteroAttachmentTransferPostRequest: ApiCoreAcademicZoteroAttachmentTransferPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicZoteroAttachmentTransferPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicZoteroAttachmentTransferPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicZoteroAttachmentTransferPost', 'apiCoreAcademicZoteroAttachmentTransferPostRequest', apiCoreAcademicZoteroAttachmentTransferPostRequest)
+            const localVarPath = `/api/core/academic/zotero/attachment/transfer`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicZoteroAttachmentTransferPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * AcademicWorkflowsApi - functional programming interface
+ */
+export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = AcademicWorkflowsApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicChatContextGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicChatContextGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicChatContextGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicChatContextGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Correct document identity or retry recognition
+         * @param {string} documentId
+         * @param {AcademicDocumentIdentity} academicDocumentIdentity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicDocumentsDocumentIdIdentityPatch(documentId: string, academicDocumentIdentity: AcademicDocumentIdentity, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicDocumentsDocumentIdIdentityPatch(documentId, academicDocumentIdentity, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicDocumentsDocumentIdIdentityPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Confirm deletion of results and trash/cancel the expansion Chat
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdDeleteRequest} apiCoreAcademicExpansionsExpansionIdDeleteRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdDelete(expansionId: string, apiCoreAcademicExpansionsExpansionIdDeleteRequest: ApiCoreAcademicExpansionsExpansionIdDeleteRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsExpansionIdDelete200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdDelete(expansionId, apiCoreAcademicExpansionsExpansionIdDeleteRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read saved rounds, current papers, content states and Chat availability
+         * @param {string} expansionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdGet(expansionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsExpansionIdGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdGet(expansionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdPapersResolvePost(expansionId: string, apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest: ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicResolvedPapers>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdPapersResolvePost(expansionId, apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdPapersResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List current user\'s expansion records
+         * @param {string} datasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsGet(datasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsGet(datasetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsBatchIdGet(batchId: string, view?: ApiCoreAcademicImportsBatchIdGetViewEnum, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsBatchIdGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdGet(batchId, view, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsBatchIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {string} [targetDatasetId]
+         * @param {string} [sourceDocumentId]
+         * @param {string} [conversationId]
+         * @param {string} [historyId]
+         * @param {string} [taskId]
+         * @param {string} [workflowSessionId]
+         * @param {string} [workDisplayKey]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsGet(view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+         * @param {AcademicImportCreate} academicImportCreate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsPost(academicImportCreate: AcademicImportCreate, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPost(academicImportCreate, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Preview reference or identifier import into the current collection
+         * @param {ApiCoreAcademicImportsPreviewPostRequest} apiCoreAcademicImportsPreviewPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsPreviewPost(apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicImportPreview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPreviewPost(apiCoreAcademicImportsPreviewPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersFolderIdDeletePost(targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersFolderIdDeletePost(targetDatasetId, folderId, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersFolderIdDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdPatchRequest} apiCoreAcademicLibraryFoldersFolderIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersFolderIdPatch(targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersFolderIdPatch(targetDatasetId, folderId, apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersFolderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryFoldersPostRequest} apiCoreAcademicLibraryFoldersPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersPost(targetDatasetId: string, apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersPost(targetDatasetId, apiCoreAcademicLibraryFoldersPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
+         * @param {string} targetDatasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryGet(targetDatasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} attachmentId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(targetDatasetId: string, libraryPaperId: string, attachmentId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(targetDatasetId, libraryPaperId, attachmentId, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Add a note idempotently by stable note ID
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdPatch(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdPatch(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersMovePostRequest} apiCoreAcademicLibraryPapersMovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersMovePost(targetDatasetId: string, apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersMovePost(targetDatasetId, apiCoreAcademicLibraryPapersMovePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersMovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersRemovePostRequest} apiCoreAcademicLibraryPapersRemovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersRemovePost(targetDatasetId: string, apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersRemovePost(targetDatasetId, apiCoreAcademicLibraryPapersRemovePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersRemovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+         * @param {string} handoffId
+         * @param {ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId: string, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicMockHandoffsHandoffIdSubmitPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read real full text without importing; continue using cursor only
+         * @param {AcademicContentRead} academicContentRead
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPaperContentsReadPost(academicContentRead: AcademicContentRead, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicContentResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPaperContentsReadPost(academicContentRead, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPaperContentsReadPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry failed full text download and parsing
+         * @param {ApiCoreAcademicPaperContentsRetryPostRequest} apiCoreAcademicPaperContentsRetryPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPaperContentsRetryPost(apiCoreAcademicPaperContentsRetryPostRequest: ApiCoreAcademicPaperContentsRetryPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPaperContentsRetryPost(apiCoreAcademicPaperContentsRetryPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPaperContentsRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Expand folders completely and resolve distinct confirmed papers
+         * @param {ApiCoreAcademicPaperSelectionsResolvePostRequest} apiCoreAcademicPaperSelectionsResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPaperSelectionsResolvePost(apiCoreAcademicPaperSelectionsResolvePostRequest: ApiCoreAcademicPaperSelectionsResolvePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicPaperSelectionsResolvePost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPaperSelectionsResolvePost(apiCoreAcademicPaperSelectionsResolvePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPaperSelectionsResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Set current user\'s personal importance
+         * @param {string} paperId
+         * @param {ApiCoreAcademicPapersPaperIdImportancePutRequest} apiCoreAcademicPapersPaperIdImportancePutRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPapersPaperIdImportancePut(paperId: string, apiCoreAcademicPapersPaperIdImportancePutRequest: ApiCoreAcademicPapersPaperIdImportancePutRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicPapersPaperIdImportancePut200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPapersPaperIdImportancePut(paperId, apiCoreAcademicPapersPaperIdImportancePutRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPapersPaperIdImportancePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPapersSearchPost(apiCoreAcademicPapersSearchPostRequest: ApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicPapersSearchPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPapersSearchPost(apiCoreAcademicPapersSearchPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPapersSearchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Idempotently start expansion or a separate downstream Chat
+         * @param {AcademicTaskLaunch} academicTaskLaunch
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicWorkflowLaunchesPost(academicTaskLaunch: AcademicTaskLaunch, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicWorkflowLaunchesPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicWorkflowLaunchesPost(academicTaskLaunch, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicWorkflowLaunchesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicZoteroAttachmentTransferPostRequest} apiCoreAcademicZoteroAttachmentTransferPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicZoteroAttachmentTransferPost(targetDatasetId: string, apiCoreAcademicZoteroAttachmentTransferPostRequest: ApiCoreAcademicZoteroAttachmentTransferPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicZoteroAttachmentTransferPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicZoteroAttachmentTransferPost(targetDatasetId, apiCoreAcademicZoteroAttachmentTransferPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicZoteroAttachmentTransferPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * AcademicWorkflowsApi - factory interface
+ */
+export const AcademicWorkflowsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = AcademicWorkflowsApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicChatContextGet200Response> {
+            return localVarFp.apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Correct document identity or retry recognition
+         * @param {AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response> {
+            return localVarFp.apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters.documentId, requestParameters.academicDocumentIdentity, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Confirm deletion of results and trash/cancel the expansion Chat
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdDelete(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsExpansionIdDelete200Response> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdDelete(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdDeleteRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read saved rounds, current papers, content states and Chat availability
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsExpansionIdGet200Response> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdGet(requestParameters.expansionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicResolvedPapers> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List current user\'s expansion records
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsGet200Response> {
+            return localVarFp.apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsBatchIdGet200Response> {
+            return localVarFp.apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, requestParameters.view, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsGet200Response> {
+            return localVarFp.apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsPost200Response> {
+            return localVarFp.apiCoreAcademicImportsPost(requestParameters.academicImportCreate, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Preview reference or identifier import into the current collection
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPreviewPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicImportPreview> {
+            return localVarFp.apiCoreAcademicImportsPreviewPost(requestParameters.apiCoreAcademicImportsPreviewPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryFoldersPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
+            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Add a note idempotently by stable note ID
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersMovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersMovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersMovePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersRemovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersRemovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersRemovePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+         * @param {AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response> {
+            return localVarFp.apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters.handoffId, requestParameters.apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read real full text without importing; continue using cursor only
+         * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsReadPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicContentResponse> {
+            return localVarFp.apiCoreAcademicPaperContentsReadPost(requestParameters.academicContentRead, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry failed full text download and parsing
+         * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response> {
+            return localVarFp.apiCoreAcademicPaperContentsRetryPost(requestParameters.apiCoreAcademicPaperContentsRetryPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Expand folders completely and resolve distinct confirmed papers
+         * @param {AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperSelectionsResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPaperSelectionsResolvePost200Response> {
+            return localVarFp.apiCoreAcademicPaperSelectionsResolvePost(requestParameters.apiCoreAcademicPaperSelectionsResolvePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Set current user\'s personal importance
+         * @param {AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersPaperIdImportancePut(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPapersPaperIdImportancePut200Response> {
+            return localVarFp.apiCoreAcademicPapersPaperIdImportancePut(requestParameters.paperId, requestParameters.apiCoreAcademicPapersPaperIdImportancePutRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersSearchPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPapersSearchPost200Response> {
+            return localVarFp.apiCoreAcademicPapersSearchPost(requestParameters.apiCoreAcademicPapersSearchPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Idempotently start expansion or a separate downstream Chat
+         * @param {AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicWorkflowLaunchesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicWorkflowLaunchesPost200Response> {
+            return localVarFp.apiCoreAcademicWorkflowLaunchesPost(requestParameters.academicTaskLaunch, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+         * @param {AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentTransferPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicZoteroAttachmentTransferPost200Response> {
+            return localVarFp.apiCoreAcademicZoteroAttachmentTransferPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicZoteroAttachmentTransferPostRequest, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreAcademicChatContextGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicDocumentsDocumentIdIdentityPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest {
+    readonly documentId: string
+
+    readonly academicDocumentIdentity: AcademicDocumentIdentity
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdDelete operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest {
+    readonly expansionId: string
+
+    readonly apiCoreAcademicExpansionsExpansionIdDeleteRequest: ApiCoreAcademicExpansionsExpansionIdDeleteRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest {
+    readonly expansionId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdPapersResolvePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
+    readonly expansionId: string
+
+    readonly apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest: ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest {
+    readonly datasetId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsBatchIdGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest {
+    readonly batchId: string
+
+    readonly view?: ApiCoreAcademicImportsBatchIdGetViewEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
+    readonly view?: ApiCoreAcademicImportsGetViewEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
+
+    readonly targetDatasetId?: string
+
+    readonly sourceDocumentId?: string
+
+    readonly conversationId?: string
+
+    readonly historyId?: string
+
+    readonly taskId?: string
+
+    readonly workflowSessionId?: string
+
+    readonly workDisplayKey?: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsPostRequest {
+    readonly academicImportCreate: AcademicImportCreate
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsPreviewPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest {
+    readonly apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersFolderIdDeletePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest {
+    readonly targetDatasetId: string
+
+    readonly folderId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersFolderIdPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest {
+    readonly targetDatasetId: string
+
+    readonly folderId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
+    readonly targetDatasetId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly attachmentId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersMovePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersRemovePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicMockHandoffsHandoffIdSubmitPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest {
+    readonly handoffId: string
+
+    readonly apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPaperContentsReadPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest {
+    readonly academicContentRead: AcademicContentRead
+}
+
+/**
+ * Request parameters for apiCoreAcademicPaperContentsRetryPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest {
+    readonly apiCoreAcademicPaperContentsRetryPostRequest: ApiCoreAcademicPaperContentsRetryPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPaperSelectionsResolvePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest {
+    readonly apiCoreAcademicPaperSelectionsResolvePostRequest: ApiCoreAcademicPaperSelectionsResolvePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPapersPaperIdImportancePut operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest {
+    readonly paperId: string
+
+    readonly apiCoreAcademicPapersPaperIdImportancePutRequest: ApiCoreAcademicPapersPaperIdImportancePutRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPapersSearchPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest {
+    readonly apiCoreAcademicPapersSearchPostRequest: ApiCoreAcademicPapersSearchPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicWorkflowLaunchesPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest {
+    readonly academicTaskLaunch: AcademicTaskLaunch
+}
+
+/**
+ * Request parameters for apiCoreAcademicZoteroAttachmentTransferPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicZoteroAttachmentTransferPostRequest: ApiCoreAcademicZoteroAttachmentTransferPostRequest
+}
+
+/**
+ * AcademicWorkflowsApi - object-oriented interface
+ */
+export class AcademicWorkflowsApi extends BaseAPI {
+    /**
+     *
+     * @summary Read owned academic Chat progress and complete frozen handoff
+     * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Correct document identity or retry recognition
+     * @param {AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters.documentId, requestParameters.academicDocumentIdentity, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Confirm deletion of results and trash/cancel the expansion Chat
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdDelete(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdDelete(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdDeleteRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read saved rounds, current papers, content states and Chat availability
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdGet(requestParameters.expansionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List current user\'s expansion records
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read a batch or its complete operation summary and a page of items
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, requestParameters.view, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read source-scoped imports or a page of import operations
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsPost(requestParameters.academicImportCreate, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Preview reference or identifier import into the current collection
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsPreviewPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsPreviewPost(requestParameters.apiCoreAcademicImportsPreviewPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete a folder subtree and move its papers into the parent folder
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Rename a logical folder with revision validation
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a logical paper-library folder
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryFoldersPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read paper entries, logical folders and active materials
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Detach a material without deleting its original or scholarly file facts
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Add a note idempotently by stable note ID
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Update one paper with its revision and validate every active attachment
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically move selected paper entries without moving files
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersMovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersMovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersMovePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically remove selected entries while retaining materials and history
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersRemovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersRemovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersRemovePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+     * @param {AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters.handoffId, requestParameters.apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read real full text without importing; continue using cursor only
+     * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPaperContentsReadPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPaperContentsReadPost(requestParameters.academicContentRead, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry failed full text download and parsing
+     * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPaperContentsRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPaperContentsRetryPost(requestParameters.apiCoreAcademicPaperContentsRetryPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Expand folders completely and resolve distinct confirmed papers
+     * @param {AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPaperSelectionsResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPaperSelectionsResolvePost(requestParameters.apiCoreAcademicPaperSelectionsResolvePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Set current user\'s personal importance
+     * @param {AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPapersPaperIdImportancePut(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPapersPaperIdImportancePut(requestParameters.paperId, requestParameters.apiCoreAcademicPapersPaperIdImportancePutRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Search external arXiv candidates and pin their versions to an owned expansion
+     * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPapersSearchPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPapersSearchPost(requestParameters.apiCoreAcademicPapersSearchPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Idempotently start expansion or a separate downstream Chat
+     * @param {AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicWorkflowLaunchesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicWorkflowLaunchesPost(requestParameters.academicTaskLaunch, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+     * @param {AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicZoteroAttachmentTransferPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicZoteroAttachmentTransferPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicZoteroAttachmentTransferPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreAcademicImportsBatchIdGetViewEnum = {
+    Operations: 'operations'
+} as const;
+export type ApiCoreAcademicImportsBatchIdGetViewEnum = typeof ApiCoreAcademicImportsBatchIdGetViewEnum[keyof typeof ApiCoreAcademicImportsBatchIdGetViewEnum];
+export const ApiCoreAcademicImportsGetViewEnum = {
+    Operations: 'operations'
+} as const;
+export type ApiCoreAcademicImportsGetViewEnum = typeof ApiCoreAcademicImportsGetViewEnum[keyof typeof ApiCoreAcademicImportsGetViewEnum];
+
 
 /**
  * AgentApi - axios parameter creator
@@ -14837,39 +17967,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdGet: async (batchId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'batchId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportsBatchIdGet', 'batchId', batchId)
-            const localVarPath = `/api/core/academic/imports/{batch_id}`
-                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {string} batchId
          * @param {*} [options] Override http request option.
@@ -14880,93 +17977,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             assertParamExists('apiCoreAcademicImportsBatchIdRetryPost', 'batchId', batchId)
             const localVarPath = `/api/core/academic/imports/{batch_id}:retry`
                 .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/imports`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/imports`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /academic/imports:preview
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPreviewPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/imports:preview`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -15083,6 +18093,122 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          */
         apiCoreAcademicWorksPresencePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/works:presence`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/attachment
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/zotero/attachment`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/attachment/store
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentStorePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/zotero/attachment/store`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/import
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroImportPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/zotero/import`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/preview
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroPreviewPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/zotero/preview`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -17566,8 +20692,8 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
-         * @param {boolean} [selectionSnapshot] Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
-         * @param {string} [selectionGroupId] Restrict a selection snapshot to this owned group.
+         * @param {boolean} [selectionSnapshot]
+         * @param {string} [selectionGroupId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -24671,6 +27797,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkflowEventsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/workflow-events`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {string} taskId
@@ -25107,6 +28262,1535 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /vocabulary/capabilities
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCapabilitiesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/capabilities`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/dictionary:lookup
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDictionaryLookupGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/dictionary:lookup`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/documents/{document_id}/words
+         * @param {string} documentId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDocumentsDocumentIdWordsGet: async (documentId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'documentId' is not null or undefined
+            assertParamExists('apiCoreVocabularyDocumentsDocumentIdWordsGet', 'documentId', documentId)
+            const localVarPath = `/api/core/vocabulary/documents/{document_id}/words`
+                .replace(`{${"document_id"}}`, encodeURIComponent(String(documentId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}
+         * @param {string} documentId
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete: async (documentId: string, wordId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'documentId' is not null or undefined
+            assertParamExists('apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete', 'documentId', documentId)
+            // verify required parameter 'wordId' is not null or undefined
+            assertParamExists('apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete', 'wordId', wordId)
+            const localVarPath = `/api/core/vocabulary/documents/{document_id}/words/{word_id}`
+                .replace(`{${"document_id"}}`, encodeURIComponent(String(documentId)))
+                .replace(`{${"word_id"}}`, encodeURIComponent(String(wordId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}/word
+         * @param {string} documentId
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete: async (documentId: string, wordId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'documentId' is not null or undefined
+            assertParamExists('apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete', 'documentId', documentId)
+            // verify required parameter 'wordId' is not null or undefined
+            assertParamExists('apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete', 'wordId', wordId)
+            const localVarPath = `/api/core/vocabulary/documents/{document_id}/words/{word_id}/word`
+                .replace(`{${"document_id"}}`, encodeURIComponent(String(documentId)))
+                .replace(`{${"word_id"}}`, encodeURIComponent(String(wordId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/examples/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyExamplesIdDelete: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyExamplesIdDelete', 'id', id)
+            const localVarPath = `/api/core/vocabulary/examples/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/examples/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyExamplesIdPatch: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyExamplesIdPatch', 'id', id)
+            const localVarPath = `/api/core/vocabulary/examples/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/fsrs/profile
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyFsrsProfileGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/fsrs/profile`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PUT /vocabulary/fsrs/profile
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyFsrsProfilePut: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/fsrs/profile`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProviderGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/provider`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PUT /vocabulary/provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProviderPut: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/provider`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/providers/anki/decks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiDecksGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/providers/anki/decks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/providers/anki/decks/{name}
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiDecksNameDelete: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreVocabularyProvidersAnkiDecksNameDelete', 'name', name)
+            const localVarPath = `/api/core/vocabulary/providers/anki/decks/{name}`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki/decks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiDecksPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/providers/anki/decks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:initialize
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiInitializePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/providers/anki:initialize`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:request-permission
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiRequestPermissionPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/providers/anki:request-permission`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/providers/anki/status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiStatusGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/providers/anki/status`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:sync
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiSyncPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/providers/anki:sync`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/logs:export
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewLogsExportGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/review/logs:export`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/next
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewNextGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/review/next`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/active/candidates
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsActiveCandidatesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/review/sessions/active/candidates`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/active
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsActiveGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/review/sessions/active`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/active/words:issue
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsActiveWordsIssuePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/review/sessions/active/words:issue`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/review/sessions`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/answers
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdAnswersPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreVocabularyReviewSessionsSessionIdAnswersPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/vocabulary/review/sessions/{session_id}/answers`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/answers:register
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/vocabulary/review/sessions/{session_id}/answers:register`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}:complete
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdCompletePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreVocabularyReviewSessionsSessionIdCompletePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/vocabulary/review/sessions/{session_id}:complete`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/{session_id}/questions:next
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/vocabulary/review/sessions/{session_id}/questions:next`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/questions:prepare
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/vocabulary/review/sessions/{session_id}/questions:prepare`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/selection:resolve
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularySelectionResolvePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/selection:resolve`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/stats
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyStatsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/stats`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/wordbooks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/wordbooks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/wordbooks/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksIdDelete: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordbooksIdDelete', 'id', id)
+            const localVarPath = `/api/core/vocabulary/wordbooks/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/wordbooks/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksIdPatch: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordbooksIdPatch', 'id', id)
+            const localVarPath = `/api/core/vocabulary/wordbooks/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/wordbooks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/wordbooks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/words`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}/examples
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdExamplesPost: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdExamplesPost', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}/examples`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdGet: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdGet', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/words/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdPatch: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdPatch', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}:reset
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdResetPost: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdResetPost', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}:reset`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}:resume
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdResumePost: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdResumePost', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}:resume`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words/{id}/review-history
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdReviewHistoryGet: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdReviewHistoryGet', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}/review-history`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}/tags
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdTagsPost: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdTagsPost', 'id', id)
+            const localVarPath = `/api/core/vocabulary/words/{id}/tags`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/words/{id}/tags/{tag}
+         * @param {string} id
+         * @param {string} tag
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdTagsTagDelete: async (id: string, tag: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdTagsTagDelete', 'id', id)
+            // verify required parameter 'tag' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsIdTagsTagDelete', 'tag', tag)
+            const localVarPath = `/api/core/vocabulary/words/{id}/tags/{tag}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"tag"}}`, encodeURIComponent(String(tag)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/words`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words:reset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsResetPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/words:reset`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/words/{word_id}
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsWordIdDelete: async (wordId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'wordId' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsWordIdDelete', 'wordId', wordId)
+            const localVarPath = `/api/core/vocabulary/words/{word_id}`
+                .replace(`{${"word_id"}}`, encodeURIComponent(String(wordId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{word_id}:master
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsWordIdMasterPost: async (wordId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'wordId' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsWordIdMasterPost', 'wordId', wordId)
+            const localVarPath = `/api/core/vocabulary/words/{word_id}:master`
+                .replace(`{${"word_id"}}`, encodeURIComponent(String(wordId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{word_id}:review
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsWordIdReviewPost: async (wordId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'wordId' is not null or undefined
+            assertParamExists('apiCoreVocabularyWordsWordIdReviewPost', 'wordId', wordId)
+            const localVarPath = `/api/core/vocabulary/words/{word_id}:review`
+                .replace(`{${"word_id"}}`, encodeURIComponent(String(wordId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary DELETE /workflow-artifacts/{artifact_id}
          * @param {string} artifactId
          * @param {*} [options] Override http request option.
@@ -25463,6 +30147,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdCancelGenerationPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:cancel-generation`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelRepairPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdCancelRepairPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:cancel-repair`
                 .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -26573,6 +31290,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdPausePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdPausePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:pause`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
          * @param {string} sessionId
          * @param {string} stage
@@ -27520,19 +32270,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsBatchIdGet(batchId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdGet(batchId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {string} batchId
          * @param {*} [options] Override http request option.
@@ -27542,42 +32279,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdRetryPost(batchId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdRetryPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /academic/imports:preview
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsPreviewPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPreviewPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsPreviewPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -27626,6 +32327,54 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicWorksPresencePost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicWorksPresencePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/attachment
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicZoteroAttachmentPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicZoteroAttachmentPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicZoteroAttachmentPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/attachment/store
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicZoteroAttachmentStorePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicZoteroAttachmentStorePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicZoteroAttachmentStorePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/import
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicZoteroImportPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicZoteroImportPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicZoteroImportPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/preview
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicZoteroPreviewPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicZoteroPreviewPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicZoteroPreviewPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -28580,8 +33329,8 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
-         * @param {boolean} [selectionSnapshot] Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
-         * @param {string} [selectionGroupId] Restrict a selection snapshot to this owned group.
+         * @param {boolean} [selectionSnapshot]
+         * @param {string} [selectionGroupId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -31273,6 +36022,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkflowEventsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkflowEventsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {string} taskId
@@ -31435,6 +36196,621 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /vocabulary/capabilities
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCapabilitiesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCapabilitiesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyCapabilitiesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/dictionary:lookup
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyDictionaryLookupGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyDictionaryLookupGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyDictionaryLookupGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/documents/{document_id}/words
+         * @param {string} documentId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyDocumentsDocumentIdWordsGet(documentId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyDocumentsDocumentIdWordsGet(documentId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyDocumentsDocumentIdWordsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}
+         * @param {string} documentId
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete(documentId: string, wordId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete(documentId, wordId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}/word
+         * @param {string} documentId
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete(documentId: string, wordId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete(documentId, wordId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/examples/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyExamplesIdDelete(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyExamplesIdDelete(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyExamplesIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/examples/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyExamplesIdPatch(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyExamplesIdPatch(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyExamplesIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/fsrs/profile
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyFsrsProfileGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyFsrsProfileGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyFsrsProfileGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PUT /vocabulary/fsrs/profile
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyFsrsProfilePut(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyFsrsProfilePut(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyFsrsProfilePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProviderGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProviderGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProviderGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PUT /vocabulary/provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProviderPut(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProviderPut(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProviderPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/providers/anki/decks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiDecksGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiDecksGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiDecksGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/providers/anki/decks/{name}
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiDecksNameDelete(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiDecksNameDelete(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiDecksNameDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki/decks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiDecksPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiDecksPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiDecksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:initialize
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiInitializePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiInitializePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiInitializePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:request-permission
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiRequestPermissionPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiRequestPermissionPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiRequestPermissionPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/providers/anki/status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiStatusGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiStatusGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:sync
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyProvidersAnkiSyncPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyProvidersAnkiSyncPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyProvidersAnkiSyncPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/logs:export
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewLogsExportGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewLogsExportGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewLogsExportGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/next
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewNextGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewNextGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewNextGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/active/candidates
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsActiveCandidatesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsActiveCandidatesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsActiveCandidatesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/active
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsActiveGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsActiveGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsActiveGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/active/words:issue
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsActiveWordsIssuePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsActiveWordsIssuePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsActiveWordsIssuePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/answers
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsSessionIdAnswersPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsSessionIdAnswersPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsSessionIdAnswersPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/answers:register
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}:complete
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsSessionIdCompletePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsSessionIdCompletePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsSessionIdCompletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/{session_id}/questions:next
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/questions:prepare
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/selection:resolve
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularySelectionResolvePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularySelectionResolvePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularySelectionResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/stats
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyStatsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyStatsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyStatsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/wordbooks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordbooksGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordbooksGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordbooksGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/wordbooks/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordbooksIdDelete(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordbooksIdDelete(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordbooksIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/wordbooks/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordbooksIdPatch(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordbooksIdPatch(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordbooksIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/wordbooks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordbooksPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordbooksPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordbooksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}/examples
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdExamplesPost(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdExamplesPost(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdExamplesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdGet(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdGet(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/words/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdPatch(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdPatch(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}:reset
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdResetPost(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdResetPost(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdResetPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}:resume
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdResumePost(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdResumePost(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdResumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words/{id}/review-history
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdReviewHistoryGet(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdReviewHistoryGet(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdReviewHistoryGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}/tags
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdTagsPost(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdTagsPost(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdTagsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/words/{id}/tags/{tag}
+         * @param {string} id
+         * @param {string} tag
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsIdTagsTagDelete(id: string, tag: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsIdTagsTagDelete(id, tag, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsIdTagsTagDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words:reset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsResetPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsResetPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsResetPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/words/{word_id}
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsWordIdDelete(wordId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsWordIdDelete(wordId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsWordIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{word_id}:master
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsWordIdMasterPost(wordId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsWordIdMasterPost(wordId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsWordIdMasterPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{word_id}:review
+         * @param {string} wordId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyWordsWordIdReviewPost(wordId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyWordsWordIdReviewPost(wordId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreVocabularyWordsWordIdReviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary DELETE /workflow-artifacts/{artifact_id}
          * @param {string} artifactId
          * @param {*} [options] Override http request option.
@@ -31583,6 +36959,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdCancelGenerationPost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdCancelGenerationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdCancelRepairPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdCancelRepairPost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdCancelRepairPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -32013,6 +37402,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdPausePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdPausePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdPausePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
          * @param {string} sessionId
          * @param {string} stage
@@ -32394,16 +37796,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {DefaultApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdGet(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -32411,33 +37803,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /academic/imports:preview
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPreviewPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsPreviewPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32474,6 +37839,42 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicWorksPresencePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicWorksPresencePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/attachment
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicZoteroAttachmentPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/attachment/store
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentStorePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicZoteroAttachmentStorePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/import
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroImportPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicZoteroImportPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/zotero/preview
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroPreviewPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicZoteroPreviewPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -35169,6 +40570,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreTaskCenterWorkflowEventsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
@@ -35286,6 +40696,471 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /vocabulary/capabilities
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCapabilitiesGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyCapabilitiesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/dictionary:lookup
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDictionaryLookupGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyDictionaryLookupGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/documents/{document_id}/words
+         * @param {DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDocumentsDocumentIdWordsGet(requestParameters: DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyDocumentsDocumentIdWordsGet(requestParameters.documentId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}
+         * @param {DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete(requestParameters: DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete(requestParameters.documentId, requestParameters.wordId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}/word
+         * @param {DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete(requestParameters: DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete(requestParameters.documentId, requestParameters.wordId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/examples/{id}
+         * @param {DefaultApiApiCoreVocabularyExamplesIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyExamplesIdDelete(requestParameters: DefaultApiApiCoreVocabularyExamplesIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyExamplesIdDelete(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/examples/{id}
+         * @param {DefaultApiApiCoreVocabularyExamplesIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyExamplesIdPatch(requestParameters: DefaultApiApiCoreVocabularyExamplesIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyExamplesIdPatch(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/fsrs/profile
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyFsrsProfileGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyFsrsProfileGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PUT /vocabulary/fsrs/profile
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyFsrsProfilePut(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyFsrsProfilePut(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProviderGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProviderGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PUT /vocabulary/provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProviderPut(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProviderPut(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/providers/anki/decks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiDecksGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiDecksGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/providers/anki/decks/{name}
+         * @param {DefaultApiApiCoreVocabularyProvidersAnkiDecksNameDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiDecksNameDelete(requestParameters: DefaultApiApiCoreVocabularyProvidersAnkiDecksNameDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiDecksNameDelete(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki/decks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiDecksPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiDecksPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:initialize
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiInitializePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiInitializePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:request-permission
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiRequestPermissionPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiRequestPermissionPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/providers/anki/status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiStatusGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiStatusGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/providers/anki:sync
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyProvidersAnkiSyncPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyProvidersAnkiSyncPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/logs:export
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewLogsExportGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewLogsExportGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/next
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewNextGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewNextGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/active/candidates
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsActiveCandidatesGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsActiveCandidatesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/active
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsActiveGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsActiveGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/active/words:issue
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsActiveWordsIssuePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsActiveWordsIssuePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/answers
+         * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdAnswersPost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsSessionIdAnswersPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/answers:register
+         * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}:complete
+         * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdCompletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdCompletePost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdCompletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsSessionIdCompletePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/review/sessions/{session_id}/questions:next
+         * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsNextGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsNextGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/review/sessions/{session_id}/questions:prepare
+         * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/selection:resolve
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularySelectionResolvePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularySelectionResolvePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/stats
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyStatsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyStatsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/wordbooks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordbooksGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/wordbooks/{id}
+         * @param {DefaultApiApiCoreVocabularyWordbooksIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksIdDelete(requestParameters: DefaultApiApiCoreVocabularyWordbooksIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordbooksIdDelete(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/wordbooks/{id}
+         * @param {DefaultApiApiCoreVocabularyWordbooksIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksIdPatch(requestParameters: DefaultApiApiCoreVocabularyWordbooksIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordbooksIdPatch(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/wordbooks
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordbooksPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordbooksPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}/examples
+         * @param {DefaultApiApiCoreVocabularyWordsIdExamplesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdExamplesPost(requestParameters: DefaultApiApiCoreVocabularyWordsIdExamplesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdExamplesPost(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words/{id}
+         * @param {DefaultApiApiCoreVocabularyWordsIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdGet(requestParameters: DefaultApiApiCoreVocabularyWordsIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdGet(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /vocabulary/words/{id}
+         * @param {DefaultApiApiCoreVocabularyWordsIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdPatch(requestParameters: DefaultApiApiCoreVocabularyWordsIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdPatch(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}:reset
+         * @param {DefaultApiApiCoreVocabularyWordsIdResetPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdResetPost(requestParameters: DefaultApiApiCoreVocabularyWordsIdResetPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdResetPost(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}:resume
+         * @param {DefaultApiApiCoreVocabularyWordsIdResumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdResumePost(requestParameters: DefaultApiApiCoreVocabularyWordsIdResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdResumePost(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /vocabulary/words/{id}/review-history
+         * @param {DefaultApiApiCoreVocabularyWordsIdReviewHistoryGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdReviewHistoryGet(requestParameters: DefaultApiApiCoreVocabularyWordsIdReviewHistoryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdReviewHistoryGet(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{id}/tags
+         * @param {DefaultApiApiCoreVocabularyWordsIdTagsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdTagsPost(requestParameters: DefaultApiApiCoreVocabularyWordsIdTagsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdTagsPost(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/words/{id}/tags/{tag}
+         * @param {DefaultApiApiCoreVocabularyWordsIdTagsTagDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsIdTagsTagDelete(requestParameters: DefaultApiApiCoreVocabularyWordsIdTagsTagDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsIdTagsTagDelete(requestParameters.id, requestParameters.tag, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words:reset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsResetPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsResetPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /vocabulary/words/{word_id}
+         * @param {DefaultApiApiCoreVocabularyWordsWordIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsWordIdDelete(requestParameters: DefaultApiApiCoreVocabularyWordsWordIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsWordIdDelete(requestParameters.wordId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{word_id}:master
+         * @param {DefaultApiApiCoreVocabularyWordsWordIdMasterPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsWordIdMasterPost(requestParameters: DefaultApiApiCoreVocabularyWordsWordIdMasterPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsWordIdMasterPost(requestParameters.wordId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /vocabulary/words/{word_id}:review
+         * @param {DefaultApiApiCoreVocabularyWordsWordIdReviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyWordsWordIdReviewPost(requestParameters: DefaultApiApiCoreVocabularyWordsWordIdReviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreVocabularyWordsWordIdReviewPost(requestParameters.wordId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary DELETE /workflow-artifacts/{artifact_id}
          * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -35399,6 +41274,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -35724,6 +41609,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdPausePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdPausePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -35991,13 +41886,6 @@ export interface DefaultApiApiCoreAcademicDocumentsDocumentIdReferencesGetReques
  * Request parameters for apiCoreAcademicImportsBatchIdCancelPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest {
-    readonly batchId: string
-}
-
-/**
- * Request parameters for apiCoreAcademicImportsBatchIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAcademicImportsBatchIdGetRequest {
     readonly batchId: string
 }
 
@@ -36408,14 +42296,8 @@ export interface DefaultApiApiCoreConversationsGetRequest {
 
     readonly pageToken?: string
 
-    /**
-     * Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
-     */
     readonly selectionSnapshot?: boolean
 
-    /**
-     * Restrict a selection snapshot to this owned group.
-     */
     readonly selectionGroupId?: string
 }
 
@@ -37660,6 +43542,180 @@ export interface DefaultApiApiCoreV1InternalProviderConnectionsAuthConnectionIdA
 }
 
 /**
+ * Request parameters for apiCoreVocabularyDocumentsDocumentIdWordsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsGetRequest {
+    readonly documentId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdDeleteRequest {
+    readonly documentId: string
+
+    readonly wordId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDeleteRequest {
+    readonly documentId: string
+
+    readonly wordId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyExamplesIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyExamplesIdDeleteRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyExamplesIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyExamplesIdPatchRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyProvidersAnkiDecksNameDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyProvidersAnkiDecksNameDeleteRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyReviewSessionsSessionIdAnswersPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyReviewSessionsSessionIdCompletePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyReviewSessionsSessionIdCompletePostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsNextGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordbooksIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordbooksIdDeleteRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordbooksIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordbooksIdPatchRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdExamplesPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdExamplesPostRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdGetRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdPatchRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdResetPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdResetPostRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdResumePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdResumePostRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdReviewHistoryGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdReviewHistoryGetRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdTagsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdTagsPostRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsIdTagsTagDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsIdTagsTagDeleteRequest {
+    readonly id: string
+
+    readonly tag: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsWordIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsWordIdDeleteRequest {
+    readonly wordId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsWordIdMasterPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsWordIdMasterPostRequest {
+    readonly wordId: string
+}
+
+/**
+ * Request parameters for apiCoreVocabularyWordsWordIdReviewPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreVocabularyWordsWordIdReviewPostRequest {
+    readonly wordId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowArtifactsArtifactIdDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest {
@@ -37712,6 +43768,13 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest {
  * Request parameters for apiCoreWorkflowDraftsDraftIdCancelGenerationPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdCancelRepairPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest {
     readonly draftId: string
 }
 
@@ -37897,6 +43960,13 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetReque
  * Request parameters for apiCoreWorkflowSessionsSessionIdInputBindingsPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdPausePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest {
     readonly sessionId: string
 }
 
@@ -38138,17 +44208,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /academic/imports/{batch_id}
-     * @param {DefaultApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsBatchIdGet(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary POST /academic/imports/{batch_id}:retry
      * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -38156,36 +44215,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /academic/imports
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /academic/imports
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /academic/imports:preview
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsPreviewPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsPreviewPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -38226,6 +44255,46 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicWorksPresencePost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicWorksPresencePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/zotero/attachment
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicZoteroAttachmentPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicZoteroAttachmentPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/zotero/attachment/store
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicZoteroAttachmentStorePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicZoteroAttachmentStorePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/zotero/import
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicZoteroImportPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicZoteroImportPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/zotero/preview
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicZoteroPreviewPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicZoteroPreviewPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -41200,6 +47269,16 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     *
+     * @summary GET /task-center/workflow-events
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkflowEventsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
      * @summary Read public stage artifacts
      * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
@@ -41329,6 +47408,520 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /vocabulary/capabilities
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCapabilitiesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyCapabilitiesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/dictionary:lookup
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyDictionaryLookupGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyDictionaryLookupGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/documents/{document_id}/words
+     * @param {DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyDocumentsDocumentIdWordsGet(requestParameters: DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyDocumentsDocumentIdWordsGet(requestParameters.documentId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}
+     * @param {DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete(requestParameters: DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyDocumentsDocumentIdWordsWordIdDelete(requestParameters.documentId, requestParameters.wordId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/documents/{document_id}/words/{word_id}/word
+     * @param {DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete(requestParameters: DefaultApiApiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyDocumentsDocumentIdWordsWordIdWordDelete(requestParameters.documentId, requestParameters.wordId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/examples/{id}
+     * @param {DefaultApiApiCoreVocabularyExamplesIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyExamplesIdDelete(requestParameters: DefaultApiApiCoreVocabularyExamplesIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyExamplesIdDelete(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /vocabulary/examples/{id}
+     * @param {DefaultApiApiCoreVocabularyExamplesIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyExamplesIdPatch(requestParameters: DefaultApiApiCoreVocabularyExamplesIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyExamplesIdPatch(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/fsrs/profile
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyFsrsProfileGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyFsrsProfileGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PUT /vocabulary/fsrs/profile
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyFsrsProfilePut(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyFsrsProfilePut(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/provider
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProviderGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProviderGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PUT /vocabulary/provider
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProviderPut(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProviderPut(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/providers/anki/decks
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiDecksGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiDecksGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/providers/anki/decks/{name}
+     * @param {DefaultApiApiCoreVocabularyProvidersAnkiDecksNameDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiDecksNameDelete(requestParameters: DefaultApiApiCoreVocabularyProvidersAnkiDecksNameDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiDecksNameDelete(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/providers/anki/decks
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiDecksPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiDecksPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/providers/anki:initialize
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiInitializePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiInitializePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/providers/anki:request-permission
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiRequestPermissionPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiRequestPermissionPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/providers/anki/status
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiStatusGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiStatusGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/providers/anki:sync
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyProvidersAnkiSyncPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyProvidersAnkiSyncPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/review/logs:export
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewLogsExportGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewLogsExportGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/review/next
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewNextGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewNextGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/review/sessions/active/candidates
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsActiveCandidatesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsActiveCandidatesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/review/sessions/active
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsActiveGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsActiveGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/review/sessions/active/words:issue
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsActiveWordsIssuePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsActiveWordsIssuePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/review/sessions
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/review/sessions/{session_id}/answers
+     * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsSessionIdAnswersPost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsSessionIdAnswersPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/review/sessions/{session_id}/answers:register
+     * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsSessionIdAnswersRegisterPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/review/sessions/{session_id}:complete
+     * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdCompletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsSessionIdCompletePost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdCompletePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsSessionIdCompletePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/review/sessions/{session_id}/questions:next
+     * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsNextGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsNextGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsSessionIdQuestionsNextGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/review/sessions/{session_id}/questions:prepare
+     * @param {DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost(requestParameters: DefaultApiApiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyReviewSessionsSessionIdQuestionsPreparePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/selection:resolve
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularySelectionResolvePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularySelectionResolvePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/stats
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyStatsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyStatsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/wordbooks
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordbooksGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordbooksGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/wordbooks/{id}
+     * @param {DefaultApiApiCoreVocabularyWordbooksIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordbooksIdDelete(requestParameters: DefaultApiApiCoreVocabularyWordbooksIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordbooksIdDelete(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /vocabulary/wordbooks/{id}
+     * @param {DefaultApiApiCoreVocabularyWordbooksIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordbooksIdPatch(requestParameters: DefaultApiApiCoreVocabularyWordbooksIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordbooksIdPatch(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/wordbooks
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordbooksPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordbooksPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/words
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words/{id}/examples
+     * @param {DefaultApiApiCoreVocabularyWordsIdExamplesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdExamplesPost(requestParameters: DefaultApiApiCoreVocabularyWordsIdExamplesPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdExamplesPost(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/words/{id}
+     * @param {DefaultApiApiCoreVocabularyWordsIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdGet(requestParameters: DefaultApiApiCoreVocabularyWordsIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdGet(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /vocabulary/words/{id}
+     * @param {DefaultApiApiCoreVocabularyWordsIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdPatch(requestParameters: DefaultApiApiCoreVocabularyWordsIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdPatch(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words/{id}:reset
+     * @param {DefaultApiApiCoreVocabularyWordsIdResetPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdResetPost(requestParameters: DefaultApiApiCoreVocabularyWordsIdResetPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdResetPost(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words/{id}:resume
+     * @param {DefaultApiApiCoreVocabularyWordsIdResumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdResumePost(requestParameters: DefaultApiApiCoreVocabularyWordsIdResumePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdResumePost(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /vocabulary/words/{id}/review-history
+     * @param {DefaultApiApiCoreVocabularyWordsIdReviewHistoryGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdReviewHistoryGet(requestParameters: DefaultApiApiCoreVocabularyWordsIdReviewHistoryGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdReviewHistoryGet(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words/{id}/tags
+     * @param {DefaultApiApiCoreVocabularyWordsIdTagsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdTagsPost(requestParameters: DefaultApiApiCoreVocabularyWordsIdTagsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdTagsPost(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/words/{id}/tags/{tag}
+     * @param {DefaultApiApiCoreVocabularyWordsIdTagsTagDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsIdTagsTagDelete(requestParameters: DefaultApiApiCoreVocabularyWordsIdTagsTagDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsIdTagsTagDelete(requestParameters.id, requestParameters.tag, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words:reset
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsResetPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsResetPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /vocabulary/words/{word_id}
+     * @param {DefaultApiApiCoreVocabularyWordsWordIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsWordIdDelete(requestParameters: DefaultApiApiCoreVocabularyWordsWordIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsWordIdDelete(requestParameters.wordId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words/{word_id}:master
+     * @param {DefaultApiApiCoreVocabularyWordsWordIdMasterPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsWordIdMasterPost(requestParameters: DefaultApiApiCoreVocabularyWordsWordIdMasterPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsWordIdMasterPost(requestParameters.wordId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /vocabulary/words/{word_id}:review
+     * @param {DefaultApiApiCoreVocabularyWordsWordIdReviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyWordsWordIdReviewPost(requestParameters: DefaultApiApiCoreVocabularyWordsWordIdReviewPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreVocabularyWordsWordIdReviewPost(requestParameters.wordId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary DELETE /workflow-artifacts/{artifact_id}
      * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -41453,6 +48046,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -41808,6 +48412,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:pause
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdPausePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdPausePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -49000,6 +55615,40 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+         * @summary Reset a built-in model supplier
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdResetPost: async (modelProviderId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdResetPost', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/reset`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -49665,6 +56314,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+         * @summary Reset a built-in model supplier
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdResetPost(modelProviderId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdResetPost(modelProviderId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdResetPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -50021,6 +56683,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+         * @summary Reset a built-in model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdResetPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdResetPost(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
@@ -50339,6 +57011,13 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestCon
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdResetPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest {
+    readonly modelProviderId: string
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelsGetRequest {
@@ -50640,6 +57319,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+     * @summary Reset a built-in model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdResetPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdResetPost(requestParameters.modelProviderId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -60822,7 +67512,37 @@ export class ToolsApi extends BaseAPI {
 export const TranslationApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.
+         * @summary Initialize free translation connections
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationInitializePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/translation/initialize`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
          * @summary Get translation configuration status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60852,7 +67572,7 @@ export const TranslationApiAxiosParamCreator = function (configuration?: Configu
             };
         },
         /**
-         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -60896,7 +67616,19 @@ export const TranslationApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = TranslationApiAxiosParamCreator(configuration)
     return {
         /**
-         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.
+         * @summary Initialize free translation connections
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTranslationInitializePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TranslationStatusOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTranslationInitializePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TranslationApi.apiCoreTranslationInitializePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
          * @summary Get translation configuration status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60908,7 +67640,7 @@ export const TranslationApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -60930,7 +67662,16 @@ export const TranslationApiFactory = function (configuration?: Configuration, ba
     const localVarFp = TranslationApiFp(configuration)
     return {
         /**
-         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.
+         * @summary Initialize free translation connections
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationInitializePost(options?: RawAxiosRequestConfig): AxiosPromise<TranslationStatusOpenAPIResponse> {
+            return localVarFp.apiCoreTranslationInitializePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
          * @summary Get translation configuration status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -60939,7 +67680,7 @@ export const TranslationApiFactory = function (configuration?: Configuration, ba
             return localVarFp.apiCoreTranslationStatusGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -60963,7 +67704,17 @@ export interface TranslationApiApiCoreTranslationTranslatePostRequest {
  */
 export class TranslationApi extends BaseAPI {
     /**
-     * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+     * Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.
+     * @summary Initialize free translation connections
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTranslationInitializePost(options?: RawAxiosRequestConfig) {
+        return TranslationApiFp(this.configuration).apiCoreTranslationInitializePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
      * @summary Get translation configuration status
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -60973,7 +67724,7 @@ export class TranslationApi extends BaseAPI {
     }
 
     /**
-     * Translates up to 5000 characters with the current user\'s server-side translation credential.
+     * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
      * @summary Translate selected document text
      * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -62945,6 +69696,36 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Inspect configured Obsidian vault availability on the executor
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDocumentProvidersObsidianStatusGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/document-providers/obsidian/status`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Cancel a publication before its external write
          * @param {string} operationId
          * @param {*} [options] Override http request option.
@@ -63501,6 +70282,45 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Check saved document destinations without writing documents
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost: async (artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost', 'artifactId', artifactId)
+            // verify required parameter 'documentPublicationGroupRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost', 'documentPublicationGroupRequest', documentPublicationGroupRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications:preflight`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentPublicationGroupRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -63958,6 +70778,18 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Inspect configured Obsidian vault availability on the executor
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDocumentProvidersObsidianStatusGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PublicationTargetCheckResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDocumentProvidersObsidianStatusGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreDocumentProvidersObsidianStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Cancel a publication before its external write
          * @param {string} operationId
          * @param {*} [options] Override http request option.
@@ -64163,6 +70995,20 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Check saved document destinations without writing documents
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PublicationPreflightResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(artifactId, documentPublicationGroupRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -64347,6 +71193,15 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
+         * @summary Inspect configured Obsidian vault availability on the executor
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDocumentProvidersObsidianStatusGet(options?: RawAxiosRequestConfig): AxiosPromise<PublicationTargetCheckResponse> {
+            return localVarFp.apiCoreDocumentProvidersObsidianStatusGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Cancel a publication before its external write
          * @param {WorkflowApiApiCoreDocumentPublicationsOperationIdCancelPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -64494,6 +71349,16 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
          */
         apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
             return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Check saved document destinations without writing documents
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PublicationPreflightResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -64738,6 +71603,15 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRe
 }
 
 /**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest {
+    readonly artifactId: string
+
+    readonly documentPublicationGroupRequest: DocumentPublicationGroupRequest
+}
+
+/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactsGet operation in WorkflowApi.
  */
 export interface WorkflowApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest {
@@ -64873,6 +71747,16 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreDocumentProvidersGet(options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreDocumentProvidersGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Inspect configured Obsidian vault availability on the executor
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDocumentProvidersObsidianStatusGet(options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreDocumentProvidersObsidianStatusGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -65038,6 +71922,17 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Check saved document destinations without writing documents
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

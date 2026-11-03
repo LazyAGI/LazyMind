@@ -75,12 +75,27 @@ describe("knowledge operation receipts", () => {
       screen.getByText(/当次操作回执：已创建 · 处理中 · 已提交解析/),
     ).toBeInTheDocument();
     expect(get).toHaveBeenCalledTimes(1);
+    const refreshButton = screen.getByRole("button", {
+      name: /刷新当前状态/,
+    });
+    await waitFor(() =>
+      expect(refreshButton).not.toHaveClass("ant-btn-loading"),
+    );
     get.mockRejectedValueOnce(new Error("network"));
-    fireEvent.click(screen.getByRole("button", { name: /刷新当前状态/ }));
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(get).toHaveBeenNthCalledWith(
+      2,
+      "/api/core/datasets/kb/documents/doc",
+      expect.anything(),
+    );
     await waitFor(() =>
       expect(screen.getByText(/保留上次查询结果/)).toBeInTheDocument(),
     );
     expect(screen.getByText(/当前处理状态：加入失败/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/当次操作回执：已创建 · 处理中 · 已提交解析/),
+    ).toBeInTheDocument();
   });
   it("does not label an existing failed document as newly added", () => {
     expect(

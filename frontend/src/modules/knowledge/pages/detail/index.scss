@@ -224,3 +224,7 @@
     .toolbar-actions { width: 100%; margin-left: 0; }
   }
 }
+
+.knowledge-detail-page--paper { flex: 1; min-height: 0; overflow: hidden; }
+.knowledge-detail-page--paper > .paper-library-page { flex: 1; min-height: 0; }
+.knowledge-detail-page--paper > .knowledge-parsing-notice { flex: none; max-height: 160px; overflow-y: auto; }

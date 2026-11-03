@@ -13,6 +13,8 @@ import {
 } from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import AssistantMessage from "../../AssistantMessage";
+import ChatImages from "../../ChatImages";
+import ChatFiles from "../../ChatFiles";
 import type { PreferenceType } from "../../MultiAnswerDisplay";
 import "../index.scss";
 import dayjs from "dayjs";
@@ -415,7 +417,7 @@ const MessageList: React.FC<MessageListProps> = ({
   };
 
   const renderUser = (item: any, index: number) => {
-    const isLastUserMessage = index === lastUserIndex;
+    const isLastUserMessage = index === lastUserIndex && !item.steering_message;
     const isEditing = editingUserMessageIndex === index;
     const citeMessageList = isEditing
       ? editingUserMessageCites
@@ -534,12 +536,16 @@ const MessageList: React.FC<MessageListProps> = ({
                 </Space>
                 </div>
               ) : Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-                <div className="chat-user-mention-text">
-                  <UserMessageWithMentions
-                    mentions={item.mentions}
-                    text={item.display_delta || item.delta || ""}
-                  />
-                </div>
+                <>
+                  {item.images?.length > 0 && <ChatImages images={item.images} />}
+                  {item.files?.length > 0 && <ChatFiles files={item.files} />}
+                  <div className="chat-user-mention-text">
+                    <UserMessageWithMentions
+                      mentions={item.mentions}
+                      text={item.display_delta || item.delta || ""}
+                    />
+                  </div>
+                </>
               ) : (
                 renderText(item)
               )}
@@ -588,6 +594,11 @@ const MessageList: React.FC<MessageListProps> = ({
         messageList.map((item, index) => {
           // Retried attempts remain in history, but only the current reply is shown.
           if (item.role === RoleTypes.ASSISTANT && item.archived_failure) return null;
+          const next = messageList[index + 1];
+          if (item.role === RoleTypes.ASSISTANT && next?.steering_pending
+            && next.history_id === item.history_id
+            && !String(item.display_delta || item.delta || "").trim()
+            && !item.ask_pending && !item.answers?.length && !item.images?.length && !item.files?.length) return null;
           const historyId = item.history_id || item.id;
           const pending = item.ask_pending;
           const hasMailDraft = Boolean(

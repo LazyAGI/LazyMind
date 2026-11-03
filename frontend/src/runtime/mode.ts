@@ -45,6 +45,6 @@ export function isDesktopRuntime(): boolean {
 
 export function isVocabularyEnabled(env: RuntimeEnv = readRuntimeEnv()): boolean {
   return ["1", "true", "yes", "on"].includes(
-    String(env.VITE_VOCABULARY_ENABLED || "").trim().toLowerCase(),
+    String(env.VITE_VOCABULARY_ENABLED || "true").trim().toLowerCase(),
   );
 }

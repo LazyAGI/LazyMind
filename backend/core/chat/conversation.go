@@ -1137,6 +1137,7 @@ func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, f
 		"thinking_duration_s": last.ThinkingDurationS,
 	}
 	addModelOutputSnapshot(snapshot, last)
+	addSteeringResumeSnapshot(snapshot, last)
 	writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 	writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 }
@@ -1159,6 +1160,7 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"thinking_duration_s": last.ThinkingDurationS,
 		}
 		addModelOutputSnapshot(snapshot, last)
+		addSteeringResumeSnapshot(snapshot, last)
 		writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 		return
@@ -1210,6 +1212,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		return nil
 	}
 	var fullDelta, fullReasoning string
+	var toolCallTurns *int
 	var intentUpdated *IntentUpdatedEvent
 	var modelRoute *chatModelRoute
 	var sources []any
@@ -1247,11 +1250,16 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 			}
 			if modelOutput == nil && metadata.CallIndex == 0 || modelOutput != nil && metadata.RunID != modelOutput.RunID {
 				fullDelta, fullReasoning, sources, exports, modelSwitches = "", "", nil, nil, nil
+				toolCallTurns = nil
 			}
 			if modelOutput == nil || metadata.Phase != "" {
 				copy := *metadata
 				modelOutput = &copy
 			}
+		}
+		if ch.ToolCallTurns != nil && (toolCallTurns == nil || *ch.ToolCallTurns > *toolCallTurns) {
+			count := *ch.ToolCallTurns
+			toolCallTurns = &count
 		}
 		if ch.DeltaMode == ChatDeltaModeReplace {
 			fullDelta = ch.Delta
@@ -1301,6 +1309,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		Delta:            fullDelta,
 		DeltaMode:        ChatDeltaModeReplace,
 		ReasoningContent: fullReasoning,
+		ToolCallTurns:    toolCallTurns,
 		Sources:          sources,
 		Exports:          exports,
 		IntentUpdated:    intentUpdated,
@@ -1343,7 +1352,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 		outputRunID = first.ModelOutput.RunID
 	}
 	if first != nil {
-		sendChunk(w, flusher, first)
+		sendChunk(w, flusher, steeringResumeChunk(chunks, first))
 	} else {
 		sendChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
@@ -1900,6 +1909,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"run_id":            h.RunID,
 		"run_status":        h.RunStatus,
 	}
+	hydrateSteeringTimeline(h, item)
 	var forkFlags struct {
 		ReadOnly bool `json:"fork_read_only"`
 	}
@@ -2247,6 +2257,10 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 		nextToken = encodeListPageToken(nextOffset, pageSize, total)
 	}
 	historyItems := conversationHistoryResponseItems(page)
+	if err := hydrateConversationSteeringHistory(r.Context(), store.DB(), convID, userID, historyItems); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("load conversation steering history: %v", err), http.StatusInternalServerError)
+		return
+	}
 	if err := hydrateHistoryPerformance(r.Context(), store.DB(), userID, convID, historyItems); err != nil {
 		log.Logger.Warn().Err(err).Str("conversation_id", convID).
 			Msg("failed to hydrate chat performance history")

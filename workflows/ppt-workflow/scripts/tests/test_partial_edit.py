@@ -216,9 +216,9 @@ class DeckInitializationTests(unittest.TestCase):
         })
 
         self.assertIn('# 季度经营复盘', markdown)
-        self.assertIn('## 第 1 页｜封面', markdown)
+        self.assertIn('## 封面', markdown)
         self.assertIn('页面描述：建立汇报主题与基调', markdown)
-        self.assertIn('## 第 2 页｜核心指标', markdown)
+        self.assertIn('## 核心指标', markdown)
         self.assertIn('页面描述：说明收入与利润变化', markdown)
 
     def test_page_count_is_not_capped_at_twelve(self):
@@ -511,30 +511,6 @@ class WholePageInsertionTests(unittest.TestCase):
                     (5, [{'id': 'keep-4'}]),
                 ],
             )
-
-    def test_ordered_publication_inserts_only_one_new_stable_index(self):
-        order = [10, 11, 12, 13]
-        with mock.patch.object(
-            TOOLS, '_reserve_ui_slot_position', return_value=99,
-        ) as reserve, mock.patch.object(
-            TOOLS, '_save_artifact', return_value={'status': 'ok'},
-        ) as save:
-            result = TOOLS._publish_ordered_ppt_artifact(
-                slot='slide_outline',
-                page_no=4,
-                value='new prompt',
-                content_type='text',
-                source_tool='ppt_publish_outline',
-                caption='Inserted',
-                order_list=order,
-                insert_before=4,
-                expected_total=5,
-            )
-
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(order, [10, 11, 12, 99, 13])
-        reserve.assert_called_once()
-        self.assertEqual(save.call_args.kwargs['publisher_list_index'], 99)
 
     def test_page_prompt_body_has_no_positional_page_header(self):
         brief = TOOLS._format_slide_outline_brief({
@@ -1280,18 +1256,18 @@ class PartialEditTests(unittest.TestCase):
             self.assertFalse(result['ok'])
             self.assertIn('preview_html publish failed', result['error'])
 
-    def test_page_publisher_defers_later_page_when_prior_position_is_missing(self):
+    def test_page_publisher_reserves_failed_page_before_publishing_later_page(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck, _page = make_deck(Path(tmp))
             page_two = deck / 'pages' / 'page_002.html'
             page_two.write_text(PAGE_HTML.replace('Old title', 'Page two'), encoding='utf-8')
-            with mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]):
-                with mock.patch.object(TOOLS, '_save_artifact') as save:
+            with mock.patch.object(TOOLS, '_ui_slot_order_list', side_effect=lambda _slot: []):
+                with mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}) as save:
                     result = TOOLS._publish_one_page(deck, 2)
-            self.assertFalse(result['ok'])
-            self.assertTrue(result['deferred'])
-            self.assertIn('page 2 deferred', result['error'])
-            save.assert_not_called()
+            self.assertTrue(result['ok'])
+            self.assertEqual([call.kwargs['publisher_list_index'] for call in save.call_args_list], [0, 0, 1, 1])
+            self.assertIn('未生成', save.call_args_list[0].kwargs['value'])
+            self.assertIn('Page two', save.call_args_list[2].kwargs['value'])
 
     def test_multi_page_publisher_allocates_distinct_indices_from_one_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1396,7 +1372,7 @@ class PartialEditTests(unittest.TestCase):
 
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(result['published_count'], 2)
-            self.assertEqual(published, [1, 2])
+            self.assertEqual(published, [2, 1])
             self.assertEqual(attempts, {1: 2, 2: 1})
             self.assertEqual(result['retry_count'], 1)
             self.assertEqual(result['retries'][0]['page'], 1)
@@ -1461,7 +1437,7 @@ class PartialEditTests(unittest.TestCase):
 
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(result['published_count'], 2)
-            self.assertEqual(published, [1, 2, 1, 2])
+            self.assertEqual(published, [2, 1, 2, 1, 2])
             self.assertEqual(attempts, {1: 2, 2: 1})
             self.assertEqual(result['retry_count'], 0)
             self.assertEqual(len(list(deck.glob('.page_retry_*.json'))), 2)
@@ -1770,8 +1746,8 @@ class CompletionGateTests(unittest.TestCase):
                 first = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
                 self.assertEqual(first['status'], 'partial')
                 self.assertEqual(first['ok'], 4)
-                self.assertEqual(first['published_count'], 1)
-                self.assertEqual(first['unpublished_pages'], [2, 3, 4, 5])
+                self.assertEqual(first['published_count'], 4)
+                self.assertEqual(first['unpublished_pages'], [2])
                 second = TOOLS._batch_page_html_publish_progressive(deck, concurrency=1)
             self.assertEqual(second['status'], 'ok')
             self.assertEqual([item['page'] for item in second['published']], [1, 2, 3, 4, 5])

@@ -8,6 +8,20 @@ export interface TranslationResult {
   target: string;
 }
 
+export interface TranslationServiceStatus {
+  configured: boolean;
+  provider: string;
+  document_supported: boolean;
+  selected_group_id?: string;
+  document_providers?: DocumentTranslationProvider[];
+}
+
+export interface DocumentTranslationProvider {
+  group_id: string;
+  provider_name: string;
+  group_name: string;
+}
+
 export class TranslationUnavailableError extends Error {
   constructor(public readonly reason:"dictionary_not_found"|"service_not_configured"){super(reason)}
 }
@@ -17,24 +31,33 @@ export function isSingleEnglishWord(text:string):boolean {
 }
 
 export async function getTranslationStatus(): Promise<boolean> {
-  const response = await axiosInstance.get<ApiEnvelope<{ configured: boolean }>>(
-    `${BASE_URL}/api/core/translation/status`,
-    { silentError: true } as never,
-  );
-  return Boolean(response.data.data?.configured);
+	return (await getTranslationServiceStatus()).configured;
 }
 
-export async function translateText(text: string, target?: string): Promise<TranslationResult> {
+export async function getTranslationServiceStatus(initialize = false): Promise<TranslationServiceStatus> {
+  const response = initialize
+    ? await axiosInstance.post<ApiEnvelope<Partial<TranslationServiceStatus>>>(`${BASE_URL}/api/core/translation/initialize`, {}, { silentError: true } as never)
+    : await axiosInstance.get<ApiEnvelope<Partial<TranslationServiceStatus>>>(`${BASE_URL}/api/core/translation/status`, { silentError: true } as never);
+	return {
+		configured: Boolean(response.data.data?.configured),
+		provider: response.data.data?.provider || "",
+		document_supported: Boolean(response.data.data?.document_supported),
+		selected_group_id: response.data.data?.selected_group_id || undefined,
+		document_providers: response.data.data?.document_providers || [],
+	};
+}
+
+export async function translateText(text: string, target?: string, source?: "en" | "zh"): Promise<TranslationResult> {
   const response = await axiosInstance.post<ApiEnvelope<TranslationResult>>(
     `${BASE_URL}/api/core/translation:translate`,
-    { text, target },
+    { text, target, ...(source ? { source } : {}) },
   );
   return response.data.data;
 }
 
-export async function translateSelectionText(text:string):Promise<TranslationResult> {
+export async function translateSelectionText(text:string, source?:"en"|"zh"):Promise<TranslationResult> {
   const value=text.trim();
-  if(isSingleEnglishWord(value)){
+  if(!source&&isSingleEnglishWord(value)){
     let items:Array<{source_name:string;senses:Array<{translation:string}>}>=[];
     try{
       const response=await axiosInstance.get<ApiEnvelope<{items:typeof items}>>(`${BASE_URL}/api/core/vocabulary/dictionary:lookup`,{params:{language:"en",term:value},silentError:true} as never);
@@ -43,9 +66,14 @@ export async function translateSelectionText(text:string):Promise<TranslationRes
     const entry=items.find(item=>item.senses?.some(sense=>sense.translation?.trim()));
     const translated=entry?.senses?.find(sense=>sense.translation?.trim())?.translation?.replace(/\\n/g,"\n").trim();
     if(translated)return{translated_text:translated,source:`dictionary:${entry?.source_name||"built-in"}`,target:"zh"};
-    if(!await getTranslationStatus())throw new TranslationUnavailableError("dictionary_not_found");
-  }else if(!await getTranslationStatus()){
-    throw new TranslationUnavailableError("service_not_configured");
+
   }
-  return translateText(value);
+  try {
+    return await translateText(value,source?(source==="zh"?"en":"zh"):undefined,source);
+  } catch (error) {
+    if ((error as { response?: { status?: number } }).response?.status === 412) {
+      throw new TranslationUnavailableError(!source && isSingleEnglishWord(value) ? "dictionary_not_found" : "service_not_configured");
+    }
+    throw error;
+  }
 }

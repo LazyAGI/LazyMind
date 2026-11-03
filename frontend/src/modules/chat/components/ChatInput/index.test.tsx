@@ -520,6 +520,80 @@ describe("ChatInput model switch save lock", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("queues keyboard input while a response is streaming", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    render(
+      <ChatInput
+        value="adjust the direction"
+        onChange={vi.fn()}
+        onSend={onSend}
+        onStopGeneration={vi.fn()}
+        isChatContent
+        isStreaming
+        sessionId="conversation-1"
+        showConversationConfig={false}
+        showHistoryButton={false}
+        showPromptSuggestions={false}
+        showSkillDeposit={false}
+        showThinkingDepth={false}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "message editor" }), { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "adjust the direction" }),
+    ));
+    expect(screen.getByRole("button", { name: "chat.send" })).toBeInTheDocument();
+  });
+
+  it("switches the streaming action between stop and send with the draft", () => {
+    const props = {
+      onChange: vi.fn(),
+      onSend: vi.fn(),
+      onStopGeneration: vi.fn(),
+      isChatContent: true,
+      isStreaming: true,
+      sessionId: "conversation-1",
+      showConversationConfig: false,
+      showHistoryButton: false,
+      showPromptSuggestions: false,
+      showSkillDeposit: false,
+      showThinkingDepth: false,
+    };
+    const { rerender } = render(<ChatInput {...props} value="" />);
+
+    expect(screen.getByRole("button", { name: "chat.stopGenerate" })).toBeInTheDocument();
+
+    rerender(<ChatInput {...props} value="guide this answer" />);
+    expect(screen.getByRole("button", { name: "chat.send" })).toBeInTheDocument();
+
+    rerender(<ChatInput {...props} value="" />);
+    expect(screen.getByRole("button", { name: "chat.stopGenerate" })).toBeInTheDocument();
+  });
+
+  it("keeps the draft when queue submission is refused", async () => {
+    const onChange = vi.fn();
+    render(
+      <ChatInput
+        value="keep this draft"
+        onChange={onChange}
+        onSend={vi.fn().mockResolvedValue(false)}
+        isChatContent
+        isStreaming
+        sessionId="conversation-1"
+        showConversationConfig={false}
+        showHistoryButton={false}
+        showPromptSuggestions={false}
+        showSkillDeposit={false}
+        showThinkingDepth={false}
+      />,
+    );
+    onChange.mockClear();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "message editor" }), { key: "Enter" });
+    await act(async () => { await Promise.resolve(); });
+    expect(onChange).not.toHaveBeenCalledWith("");
+  });
+
   it.each([false, true])('keeps stop clickable regardless of send readiness (streaming: %s)', (isStreaming) => {
     const onStopGeneration = vi.fn();
     const { rerender } = render(<ChatInput value="" onChange={vi.fn()} isChatContent
@@ -612,9 +686,9 @@ describe("ChatInput model switch save lock", () => {
     expect(screen.getByTestId("local-workspace-control")).toHaveTextContent("conversation-1");
   });
 
-  it("reports whether the resource picker is open and closes after choosing an action", async () => {
+  it("reports whether the compact resource picker is open, aligns its action icons, and closes after choosing an action", async () => {
     render(<ChatInput value="" onChange={vi.fn()} isChatContent
-      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} showSkillDeposit={false} />);
 
     const trigger = screen.getByRole("button", { name: "chat.addResource" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -622,7 +696,17 @@ describe("ChatInput model switch save lock", () => {
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     const attachment = await screen.findByRole("button", { name: /chat\.addAttachment/ });
-    expect(document.getElementById(trigger.getAttribute("aria-controls")!)).toContainElement(attachment);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    expect(menu).toContainElement(attachment);
+    const actions = within(menu).getAllByRole("button");
+    expect(actions).toHaveLength(4);
+    for (const action of actions) {
+      expect.soft(action.firstElementChild).toHaveClass("chat-add-resource-menu-icon");
+    }
+    const popoverInner = menu.closest<HTMLElement>(".ant-popover-inner")!;
+    expect(popoverInner).not.toBeNull();
+    expect.soft(popoverInner.style.height).toBe("");
+    expect.soft(menu.closest<HTMLElement>(".ant-popover-inner-content")!.style.height).toBe("");
 
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "false");

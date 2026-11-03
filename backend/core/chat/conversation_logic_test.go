@@ -1209,6 +1209,36 @@ func TestBuildChatHistoryExtPreservesDocumentSelectionContext(t *testing.T) {
 	}
 }
 
+func TestBuildChatHistoryExtPreservesSyntheticSource(t *testing.T) {
+	for _, source := range []string{"", "driver", "auto_continue"} {
+		name := source
+		if name == "" {
+			name = "user"
+		}
+		t.Run(name, func(t *testing.T) {
+			query := "请重试本步，保留已选论文。"
+			raw := map[string]any{"query": query}
+			if source != "" {
+				raw["workflow_context"] = map[string]any{"synthetic_source": source}
+			}
+			ext := buildChatHistoryExt(raw, query)
+			var payload struct {
+				SyntheticSource string `json:"synthetic_source"`
+			}
+			if err := json.Unmarshal(ext, &payload); err != nil || payload.SyntheticSource != source {
+				t.Fatalf("history lost message source: %s %v", ext, err)
+			}
+			previous := orm.ChatHistory{Ext: ext}
+			regenerated := buildChatHistoryExtWithTrail(map[string]any{"query": query}, query, nil,
+				chatPersistTarget{IsRegeneration: true, Existing: &previous})
+			payload.SyntheticSource = ""
+			if err := json.Unmarshal(regenerated, &payload); err != nil || payload.SyntheticSource != source {
+				t.Fatalf("regeneration changed message source: %s %v", regenerated, err)
+			}
+		})
+	}
+}
+
 func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
 		"input": []any{
@@ -1768,7 +1798,7 @@ func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
 }
 
 func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{}, &orm.ConversationFollowUp{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -1811,6 +1841,17 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create history: %v", err)
 	}
+	// Old accepted steering is no longer actionable queue state, but it must
+	// remain part of the durable transcript returned after a service restart.
+	acceptedAt := now.Add(-time.Hour)
+	seedFollowUp(t, db, orm.ConversationFollowUp{
+		ID: "steer-1", ConversationID: "conv-1", Mode: followUpModeSteer, Status: followUpAccepted,
+		TargetRunID: "run-history-performance", TargetHistoryID: "h_1", AcceptedAt: &acceptedAt,
+	})
+	if err := db.Model(&orm.ConversationFollowUp{}).Where("id = ?", "steer-1").
+		Update("content", json.RawMessage(`{"text":"guide","_steering_assistant_snapshot":"partial answer before guidance"}`)).Error; err != nil {
+		t.Fatalf("persist steering snapshot: %v", err)
+	}
 	if err := persistRunPerformance(context.Background(), db.DB, runPerformanceRecord{
 		RunID: "run-history-performance", ConversationID: "conv-1", HistoryID: "h_1", UserID: "u1",
 		Status: "completed", Metrics: &RunPerformanceMetrics{
@@ -1836,6 +1877,13 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 			Input              []map[string]any      `json:"input"`
 			ToolCallTurns      int                   `json:"tool_call_turns"`
 			PerformanceMetrics RunPerformanceMetrics `json:"performance_metrics"`
+			SteeringMessages   []struct {
+				ID                string     `json:"id"`
+				Text              string     `json:"text"`
+				TargetHistoryID   string     `json:"target_history_id"`
+				AssistantSnapshot string     `json:"assistant_snapshot"`
+				AcceptedAt        *time.Time `json:"accepted_at"`
+			} `json:"steering_messages"`
 		} `json:"history"`
 		TotalSize int `json:"total_size"`
 	}
@@ -1859,6 +1907,14 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if got := resp.History[0].ToolCallTurns; got != 8 {
 		t.Fatalf("expected tool_call_turns 8, got %d", got)
+	}
+	if len(resp.History[0].SteeringMessages) != 1 ||
+		resp.History[0].SteeringMessages[0].ID != "steer-1" ||
+		resp.History[0].SteeringMessages[0].Text != "guide" ||
+		resp.History[0].SteeringMessages[0].TargetHistoryID != "h_1" ||
+		resp.History[0].SteeringMessages[0].AssistantSnapshot != "partial answer before guidance" ||
+		resp.History[0].SteeringMessages[0].AcceptedAt == nil {
+		t.Fatalf("expected accepted steering message in history, got %#v", resp.History[0].SteeringMessages)
 	}
 	if resp.History[0].PerformanceMetrics.ModelMS == nil || *resp.History[0].PerformanceMetrics.ModelMS != 500 ||
 		resp.History[0].PerformanceMetrics.TokS == nil || *resp.History[0].PerformanceMetrics.TokS != 20 {

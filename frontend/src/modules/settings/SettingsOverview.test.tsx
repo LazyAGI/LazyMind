@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { createInstance } from "i18next";
+import type { ReactNode } from "react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,9 +58,10 @@ vi.mock("./QuickModelSettings", () => ({ default: () => <div>Model configuration
 vi.mock("./MemoryCapabilitySettings", () => ({ default: () => <h1>Memory configuration</h1> }));
 vi.mock("./KnowledgeDataSettings", () => ({ default: () => <h1>Knowledge configuration</h1> }));
 vi.mock("@/modules/modelProvider/pages/ExternalServicesPage", () => ({
-  default: ({ visibleCategories }: { visibleCategories: string[] }) => (
+  default: ({ visibleCategories, parsingControl }: { visibleCategories: string[]; parsingControl?: ReactNode }) => <>
     <output aria-label="Service categories">{visibleCategories.join(",")}</output>
-  ),
+    {parsingControl}
+  </>,
 }));
 
 function CurrentRoute() {
@@ -134,9 +136,11 @@ describe("Settings overview", () => {
       expect(memory.getByRole("button", { name: t("settingsPage.goToDetailAria", { title }) })).toBeEnabled();
     }
     expect(memory.queryByRole("switch")).not.toBeInTheDocument();
-    const knowledge = card(t("settingsPage.sections.knowledge"));
-    expect(knowledge.getByRole("switch", { name: t("settingsPage.controls.documentParsing.title") })).toHaveAttribute("aria-checked", "true");
-    expect(knowledge.getAllByText(t("settingsPage.quickConfig"))).toHaveLength(2);
+    const defaultModels = card(t("settingsPage.sections.defaultModels"));
+    expect(defaultModels.getByText(t("settingsPage.controls.documentParsing.title"))).toBeInTheDocument();
+    expect(defaultModels.getByRole("button", { name: t("settingsPage.quickConfig") })).toBeEnabled();
+    expect(defaultModels.queryByRole("switch")).not.toBeInTheDocument();
+    expect(card(t("settingsPage.sections.knowledge")).getAllByText(t("settingsPage.quickConfig"))).toHaveLength(1);
   });
 
   it.each(["vocabulary", "read", "edit"])("opens the existing memory settings from %s without writing preferences", async (capability) => {
@@ -153,13 +157,14 @@ describe("Settings overview", () => {
 
   it("opens document parsing directly, preserving the return route and the switch value", async () => {
     const t = await renderOverview();
-    fireEvent.click(card(t("settingsPage.sections.knowledge")).getByRole("button", {
-      name: t("settingsPage.goToDetailAria", { title: t("settingsPage.controls.documentParsing.title") }),
+    fireEvent.click(card(t("settingsPage.sections.defaultModels")).getByRole("button", {
+      name: t("settingsPage.quickConfig"),
     }));
-    await screen.findByRole("heading", { level: 1, name: t("settingsPage.knowledge.documentParsing") });
+    await screen.findByLabelText("Service categories");
     expect(screen.getByLabelText("Service categories")).toHaveTextContent("parsing");
-    expect(routeParams().get("section")).toBe("knowledge");
-    expect(routeParams().get("tool")).toBe("document-parsing");
+    expect(screen.getByRole("switch", { name: t("settingsPage.knowledge.documentParsingAria") })).toBeChecked();
+    expect(routeParams().get("section")).toBe("model_defaults");
+    expect(routeParams().get("service")).toBe("parsing");
     expect(routeParams().get("return_to")).toBe("/agent/chat/home/test-conversation");
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();
   });
@@ -178,36 +183,42 @@ describe("Settings overview", () => {
 
   it("retains confirmation and persistence when disabling document parsing", async () => {
     const t = await renderOverview();
-    const toggle = card(t("settingsPage.sections.knowledge")).getByRole("switch", {
-      name: t("settingsPage.controls.documentParsing.title"),
-    });
+    fireEvent.click(card(t("settingsPage.sections.defaultModels")).getByRole("button", { name: t("settingsPage.quickConfig") }));
+    const toggle = await screen.findByRole("switch", { name: t("settingsPage.knowledge.documentParsingAria") });
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();
     mocks.fetchSettingsOverview.mockResolvedValue({ controls: { document_parsing_enabled: false }, sections: [], issues: [] });
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: t("settingsPage.confirmDisable") }));
+    const confirmation = (await screen.findAllByRole("dialog")).find((dialog) =>
+      within(dialog).queryByRole("button", { name: t("settingsPage.confirmDisable") }),
+    );
+    expect(confirmation).toBeDefined();
+    fireEvent.click(within(confirmation!).getByRole("button", { name: t("settingsPage.confirmDisable") }));
     await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
     expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
     expect(mocks.applySettingsChange).toHaveBeenCalledWith({ key: "document_parsing_enabled", enabled: false });
-    expect(routeParams().get("section")).toBe("overview");
+    expect(routeParams().get("section")).toBe("model_defaults");
   });
 
   it("retains the current parsing value after a failed save and allows retry", async () => {
     mocks.applySettingsChange.mockRejectedValueOnce(new Error("Test save failure"));
     const t = await renderOverview();
-    const toggle = card(t("settingsPage.sections.knowledge")).getByRole("switch", {
-      name: t("settingsPage.controls.documentParsing.title"),
-    });
+    fireEvent.click(card(t("settingsPage.sections.defaultModels")).getByRole("button", { name: t("settingsPage.quickConfig") }));
+    const toggle = await screen.findByRole("switch", { name: t("settingsPage.knowledge.documentParsingAria") });
     fireEvent.click(toggle);
-    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: t("settingsPage.confirmDisable") }));
-    const dialog = await screen.findByRole("dialog");
-    await within(dialog).findByText(t("settingsPage.change.saveFailed"));
+    const confirmation = (await screen.findAllByRole("dialog")).find((dialog) =>
+      within(dialog).queryByRole("button", { name: t("settingsPage.confirmDisable") }),
+    );
+    expect(confirmation).toBeDefined();
+    fireEvent.click(within(confirmation!).getByRole("button", { name: t("settingsPage.confirmDisable") }));
+    const failureMessage = await screen.findByText(t("settingsPage.change.saveFailed"));
+    const dialog = failureMessage.closest('[role="dialog"]')!;
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(within(dialog).getByRole("button", { name: t("settingsPage.retry") })).toBeEnabled();
     mocks.fetchSettingsOverview.mockResolvedValue({ controls: { document_parsing_enabled: false }, sections: [], issues: [] });
     fireEvent.click(within(dialog).getByRole("button", { name: t("settingsPage.retry") }));
     await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
     expect(mocks.applySettingsChange).toHaveBeenCalledTimes(2);
-    expect(routeParams().get("section")).toBe("overview");
+    expect(routeParams().get("section")).toBe("model_defaults");
   });
 });

@@ -32,6 +32,7 @@ const publicationApi = vi.hoisted(() => ({
   listDocumentProviders: vi.fn(async () => ({ data: { data: { providers: [{ id: 'future-provider', capabilities: ['create', 'replace'] }] } } })),
   publishDocument: vi.fn(async (..._args: unknown[]) => ({ data: { data: { artifact_id: 'saved-artifact', revision: 4, draft_version: 1, provider: 'future-provider', provider_synced: true, artifact_saved: true } } })),
   getPublicationTargets: vi.fn(async () => ({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } } })),
+  preflightPublication: vi.fn(async () => ({ data: { data: { targets: [] } } })),
   createPublicationGroup: vi.fn(async (..._args: unknown[]) => ({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } } })),
 }));
 const confirm = vi.hoisted(() => vi.fn());
@@ -67,6 +68,8 @@ it('connects an arbitrary slot to the generic publication API using the server d
   fireEvent.click(screen.getByRole('button', { name: 'Publish to future-provider' }));
   await waitFor(() => expect(publicationApi.createPublicationGroup).toHaveBeenCalledTimes(1));
   const sent = publicationApi.createPublicationGroup.mock.calls[0];
+  expect(publicationApi.preflightPublication).toHaveBeenCalledWith(...sent);
+  expect(publicationApi.preflightPublication.mock.invocationCallOrder[0]).toBeLessThan(publicationApi.createPublicationGroup.mock.invocationCallOrder[0]);
   expect(sent[0]).toBe('unknown-artifact');
   expect(sent[1]).toEqual(expect.objectContaining({
     base_revision: 3, base_draft_version: 7, idempotency_key: expect.any(String),

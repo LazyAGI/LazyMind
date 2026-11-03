@@ -10,6 +10,8 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import yaml
 
+from lazymind.document_tools import execution, writing
+
 
 _ROOT = Path(__file__).resolve().parents[3]
 _SCRIPTS_PATH = _ROOT / "workflows" / "writer-workflow" / "scripts"
@@ -248,3 +250,351 @@ def test_corrupt_checkpoint_fails_closed_to_fresh_state(tmp_path):
     assert restored["fingerprint"] == fingerprint
     assert restored["result"] == {}
     assert restored["completed"] is False
+
+
+@pytest.mark.parametrize('operation', ['create', 'update'])
+@pytest.mark.parametrize('fail', [False, True])
+def test_inline_context_cleanup_preserves_facts_and_other_artifacts(monkeypatch, tmp_path, operation, fail):
+    root = tmp_path / 'call'
+    root.mkdir()
+    checkpoint = tmp_path / 'checkpoint.json'
+    checkpoint.write_text('{"version": 1}')
+    monkeypatch.setattr(writing, '_temp_root', lambda: root)
+    toolkit = writing.WriterWritingCapabilities()
+    context = {'context_id': 'ctx', 'facts': [
+        {'fact_id': 'f', 'key': 'evidence', 'value': 'Supported fact', 'source': ['reference'], 'locked': True}]}
+    if fail:
+        def cannot_read(result):
+            raise OSError('handoff failed')
+        monkeypatch.setattr(writing, '_primary_data', cannot_read)
+
+    def run():
+        if operation == 'create':
+            return toolkit.create_writing_context(
+                json.dumps({'query': 'Write', 'task_type': 'write'}),
+                json.dumps([{'resource_id': 'evidence', 'resource_role': 'background',
+                             'key_facts': ['Supported fact']}]),
+            )
+        return toolkit.update_writing_context('# Draft\n\nEdited text.', json.dumps(context))
+
+    if fail:
+        with pytest.raises(OSError, match='handoff failed'):
+            run()
+        assert root.exists() and list(root.iterdir())
+    else:
+        result = json.loads(run())
+        assert not root.exists()
+        if operation == 'create':
+            assert result['facts'][0]['source'] == ['evidence']
+        else:
+            assert result['facts'][0]['value'] == 'Supported fact'
+            assert result['facts'][0]['source'] == ['reference']
+            assert result['facts'][0]['locked'] is True
+            assert 'Edited text.' in result['document_summary']['summary']
+    assert checkpoint.read_text() == '{"version": 1}'
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_whole_document_source_released_only_after_save(monkeypatch, tmp_path, fail):
+    source = tmp_path / 'whole-document-source'
+    target = tmp_path / 'published.md'
+    snapshot = tmp_path / 'input.json'
+    snapshot.write_text('{}')
+    task = {'task_type': 'write', 'constraints': {'target_chars': 1500},
+            'output': {'representation': 'markdown'}}
+    monkeypatch.setattr(execution, '_read_json_file', lambda _: task)
+    monkeypatch.setattr(execution, '_run_root', lambda name: tmp_path / name)
+    monkeypatch.setattr(execution, 'require_context', lambda: SimpleNamespace(emit=lambda _: None))
+    def generate(*args, **kwargs):
+        source.mkdir()
+        (source / 'draft.md').write_text('# Title\nBody')
+        return '# Title\nBody'
+    def save(*args, **kwargs):
+        if fail:
+            raise OSError('save failed')
+        target.write_text(args[1])
+        return str(target)
+    monkeypatch.setattr(execution, 'stream_whole_document', generate)
+    monkeypatch.setattr(execution, '_save_writer_document', save)
+    def run():
+        return execution.invoke({}, '_writer_generate_draft_document', {
+            'writing_task_path': 'task', 'section_instructions_path': 'instructions',
+            'writing_context_path': 'context'})
+    if fail:
+        with pytest.raises(OSError, match='save failed'):
+            run()
+        assert (source / 'draft.md').exists()
+    else:
+        assert run()['draft_document'] == str(target)
+        assert target.read_text() == '# Title\nBody'
+        assert not source.exists()
+    assert snapshot.exists()
+
+
+def test_no_image_collection_keeps_required_artifact_only(monkeypatch, tmp_path):
+    saved = []
+    monkeypatch.setattr(execution, 'require_context', lambda: SimpleNamespace(params={}))
+    monkeypatch.setattr(execution, '_read_json_file', lambda _: {
+        'constraints': {'visual_policy': {'allow_visuals': False}}})
+    monkeypatch.setattr(execution, '_run_root', lambda _: tmp_path)
+    def save(name, content, schema, **kwargs):
+        path = tmp_path / (name + '.json')
+        path.write_text(content)
+        saved.append(name)
+        return str(path)
+    monkeypatch.setattr(execution, '_save_json_artifact', save)
+    result = execution._writer_collect_available_media('task')
+    from lazyllm.tools.writer.data_models.multimodal import MediaAssetLibrary
+    library = MediaAssetLibrary.model_validate_json((tmp_path / 'media_assets.json').read_text())
+    assert library.library_id and library.assets == {}
+    assert result['media_assets'] == str(tmp_path / 'media_assets.json')
+    assert result['profile_input_resources'] == ''
+    assert saved == ['media_assets']
+
+
+@pytest.mark.parametrize('has_visuals', [False, True])
+@pytest.mark.parametrize('representation', ['markdown', 'ir'])
+def test_section_plan_preserves_required_ir_visual_artifact(monkeypatch, has_visuals, representation):
+    saved = []
+    payload = {'section_instructions': {'instructions': []},
+               'visual_plan': {'instructions': [{'need_id': 'image'}] if has_visuals else []}}
+    monkeypatch.setattr(execution, 'WriterCreateToolkit', lambda: SimpleNamespace(
+        generate_section_instructions=lambda **kw: json.dumps(payload)))
+    monkeypatch.setattr(execution, '_read_json_string',
+                        lambda _: json.dumps({'output': {'representation': representation}}))
+    monkeypatch.setattr(execution, '_save_json_artifact',
+                        lambda name, *a, **kw: saved.append(name) or name + '.json')
+    result = execution._writer_generate_section_instructions('task', 'outline', 'context')
+    assert result['visual_need_count'] == int(has_visuals)
+    keep_plan = has_visuals or representation == 'ir'
+    assert result['visual_plan'] == ('visual_plan.json' if keep_plan else '')
+    assert saved == ['section_instructions'] + (['visual_plan'] if keep_plan else [])
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_section_tool_releases_only_its_own_successful_directory(monkeypatch, tmp_path, fail):
+    root = tmp_path / 'temporary'
+    root.mkdir()
+    snapshot = tmp_path / 'checkpoint.json'
+    snapshot.write_text('{}')
+    def plan(**kw):
+        (root / 'section_instructions.json').write_text('{}')
+        if fail:
+            raise ValueError('planning failed')
+        return {'instructions': []}
+    monkeypatch.setattr(writing, '_temp_root', lambda: root)
+    monkeypatch.setattr(writing, 'AutoModel', lambda **kw: None)
+    monkeypatch.setattr(writing, 'WriterPlanningTools', lambda **kw: SimpleNamespace(
+        generate_section_instructions=plan))
+    monkeypatch.setattr(writing, '_primary_data', lambda x: x)
+    task = json.dumps({'constraints': {'visual_policy': {'allow_visuals': False}}})
+    def run():
+        return writing.WriterWritingCapabilities().generate_section_instructions(task, '# Title', '{}')
+    if fail:
+        with pytest.raises(ValueError, match='planning failed'):
+            run()
+        assert root.exists()
+    else:
+        assert json.loads(run())['section_instructions'] == {'instructions': []}
+        assert not root.exists()
+    assert snapshot.exists()
+
+
+@pytest.mark.parametrize('policy', [
+    {'allow_visuals': True},
+    {'allow_visuals': False, 'require_input_image_reuse': True},
+])
+def test_ir_visual_planning_retains_requested_images(monkeypatch, tmp_path, policy):
+    from lazyllm.tools.writer.data_models import WriterBlock, WriterDocument
+    from lazyllm.tools.writer.data_models.multimodal import VisualPlan
+    from lazyllm.tools.writer.tools.planning_tools import WriterPlanningTools
+
+    calls = []
+    monkeypatch.setattr(writing, '_temp_root', lambda: tmp_path / 'planning')
+    monkeypatch.setattr(writing, 'AutoModel', lambda **kw: None)
+
+    def model(self, prompt, schema, **kwargs):
+        calls.append(schema)
+        return VisualPlan()
+
+    monkeypatch.setattr(WriterPlanningTools, '_call_llm_structured', model)
+    outline = WriterDocument(document_id='outline', stage='outline', title='Report', blocks=[
+        WriterBlock(node_id='section', type='heading', content='Overview', level=1),
+    ])
+
+    def run():
+        return writing.WriterWritingCapabilities().generate_section_instructions(
+            json.dumps({'query': 'Write a report', 'task_type': 'write', 'constraints': {'visual_policy': policy},
+                        'output': {'representation': 'ir'}}),
+            outline.model_dump_json(), json.dumps({'context_id': 'context'}),
+        )
+
+    if policy.get('require_input_image_reuse'):
+        with pytest.raises(ValueError, match='Required input image reuse'):
+            run()
+    else:
+        assert json.loads(run())['visual_plan'].get('instructions', []) == []
+    assert calls == [VisualPlan]
+
+
+@pytest.mark.parametrize('policy,query', [
+    ({'allow_visuals': False}, 'Write a report'),
+    ({}, '写一篇纯文字报告，不要图片'),
+])
+def test_ir_no_image_plan_resolves_and_generates_editable_draft(monkeypatch, tmp_path, policy, query):
+    import tempfile
+    from pathlib import Path
+
+    from lazyllm.tools.writer.data_models import WriterBlock, WriterDocument
+    from lazyllm.tools.writer.tools.base import WriterToolBase
+    from lazyllm.tools.writer.utils import save_artifact_json
+    from lazymind import model_config
+
+    monkeypatch.setattr(writing, 'AutoModel', lambda **kw: None)
+    monkeypatch.setattr(writing, '_temp_root', lambda: Path(tempfile.mkdtemp(dir=tmp_path)))
+    monkeypatch.setattr(execution, '_workspace_root', lambda: tmp_path / 'artifacts')
+    monkeypatch.setattr(execution, '_run_root', lambda name: tmp_path / name)
+    monkeypatch.setattr(execution, 'require_context', lambda: SimpleNamespace(emit=lambda _: None))
+    monkeypatch.setattr(model_config, 'is_model_role_available', lambda _: False)
+    calls = []
+
+    def unexpected_model(*args, **kwargs):
+        pytest.fail('No-image planning and media resolution must not call a model')
+
+    def draft_model(self, prompt, **kwargs):
+        calls.append(prompt)
+        body = '# Report\n\n## Overview\n\nA complete report body.\n'
+        kwargs['stream_output']['_stream_sink']({'tag': 'text', 'delta': body})
+        return body
+
+    monkeypatch.setattr(WriterToolBase, '_call_llm_structured', unexpected_model)
+    monkeypatch.setattr(WriterToolBase, '_call_llm_text', draft_model)
+    outline = WriterDocument(document_id='outline', stage='outline', title='Report', blocks=[
+        WriterBlock(node_id='section', type='heading', content='Overview', level=1,
+                    outline_description='Explain the findings'),
+    ])
+    inputs = {
+        'task': {'task_id': 'task', 'task_type': 'write', 'query': query,
+                 'constraints': {'target_chars': 1000, 'visual_policy': policy},
+                 'output': {'representation': 'ir'}},
+        'outline': outline.model_dump(),
+        'context': {'context_id': 'context'},
+        'media': {'library_id': 'media', 'assets': {}},
+    }
+    paths = {}
+    schemas = {'task': 'task.WritingTask', 'outline': 'writer_ir.WriterDocument',
+               'context': 'context.WritingContext', 'media': 'multimodal.MediaAssetLibrary'}
+    for name, value in inputs.items():
+        path = tmp_path / f'{name}.json'
+        save_artifact_json(value, str(path), schema_name=execution.writer_schema(schemas[name]))
+        paths[name] = str(path)
+
+    planned = execution.invoke({}, '_writer_generate_section_instructions', {
+        'writing_task_path': paths['task'], 'outline_path': paths['outline'],
+        'writing_context_path': paths['context'],
+    })
+    assert planned['section_count'] == 1
+    assert planned['visual_need_count'] == 0
+    assert execution._read_json_file(planned['visual_plan'])['instructions'] == []
+    media = execution._writer_resolve_visual_media(planned['visual_plan'], paths['media'])
+    assert execution._read_json_file(media['resolved_media_assets'])['assets'] == {}
+    assert not media['warnings']
+    assert calls == []
+
+    result = execution.invoke({}, '_writer_generate_draft_document', {
+        'writing_task_path': paths['task'], 'section_instructions_path': planned['section_instructions'],
+        'writing_context_path': paths['context'], 'outline_path': paths['outline'],
+        'visual_plan_path': planned['visual_plan'], 'resolved_media_assets_path': media['resolved_media_assets'],
+    })
+    document = WriterDocument.model_validate(execution._read_json_file(result['draft_document']))
+    assert document.stage == 'draft' and document.ui_editable
+    assert any('A complete report body.' in block.content for block in document.iter_blocks())
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('operation', [
+    'validate_patch_set', 'locate_revision_target', 'generate_modify_plan',
+    'generate_patch_set', 'generate_string_replace_set', 'apply_patch', 'apply_string_replace',
+])
+@pytest.mark.parametrize('fail_handoff', [False, True])
+def test_revision_cleanup_after_result_extraction(monkeypatch, tmp_path, operation, fail_handoff):
+    from lazymind.document_tools import revision
+    from lazyllm.tools.writer.tools.base import WriterToolBase
+
+    root = tmp_path / 'call'
+    root.mkdir()
+    source = tmp_path / 'source.md'
+    media = tmp_path / 'reference.png'
+    media.write_bytes(b'preserved media')
+    markdown = f'# Old title\n\nKeep evidence.\n\n![Reference]({media})\n'
+    source.write_text(markdown)
+    checkpoint = tmp_path / 'checkpoint.json'
+    checkpoint.write_text(json.dumps({'source_document': str(source)}))
+    monkeypatch.setattr(revision, '_temp_root', lambda: root)
+    monkeypatch.setattr(revision, 'AutoModel', lambda **kwargs: None)
+
+    def model(self, prompt, schema, **kwargs):
+        values = {
+            'AuditResult': {'is_passed': True, 'score': 100, 'summary': 'Valid revision'},
+            'LocateResult': {'target_title': True},
+            'GeneratedRevision': {'new_title': 'New title'},
+            'StringReplaceSet': {'replacements': [{'old_string': '# Old title', 'new_string': '# New title'}]},
+        }
+        return schema.model_validate(values[schema.__name__])
+
+    monkeypatch.setattr(WriterToolBase, '_call_llm_structured', model)
+    if fail_handoff:
+        def unreadable_result(result):
+            raise OSError('result extraction failed')
+        monkeypatch.setattr(revision, '_primary_data', unreadable_result)
+
+    document = {'document_id': 'doc', 'title': 'Old title', 'stage': 'draft',
+                'blocks': [{'node_id': 'p1', 'type': 'paragraph', 'content': 'Keep evidence.'}]}
+    task = json.dumps({'task_id': 'task', 'query': 'Rename the title', 'task_type': 'revise'})
+    context = json.dumps({'context_id': 'ctx'})
+    plan = json.dumps({'scope': 'document', 'title_instruction': 'Rename the title'})
+    patch = json.dumps({'target_doc_id': 'doc', 'new_title': 'New title', 'hunks': []})
+    replacements = json.dumps({'replacements': [{'old_string': '# Old title', 'new_string': '# New title'}]})
+    args = {
+        'validate_patch_set': {'patch_set_json': patch, 'writing_task_json': task},
+        'locate_revision_target': {'writing_task_json': task, 'writer_document_json': json.dumps(document)},
+        'generate_modify_plan': {'writing_task_json': task, 'writer_document_json': json.dumps(document),
+                                 'locate_result_json': json.dumps({
+                                     'task_id': 'task', 'doc_id': 'doc', 'target_title': True})},
+        'generate_patch_set': {'writer_document_json': json.dumps(document), 'modify_plan_json': plan},
+        'generate_string_replace_set': {'markdown_document': markdown, 'modify_plan_json': plan},
+        'apply_patch': {'writer_document_json': json.dumps(document), 'patch_set_json': patch},
+        'apply_string_replace': {'markdown_document': markdown, 'string_replace_set_json': replacements},
+    }
+
+    def run():
+        return getattr(revision.WriterRevisionCapabilities(), operation)(
+            writing_context_json=context, **args[operation])
+
+    if fail_handoff:
+        with pytest.raises(OSError, match='result extraction failed'):
+            run()
+        assert root.exists() and list(root.iterdir())
+    else:
+        result = json.loads(run())
+        assert not root.exists()
+        if operation == 'apply_patch':
+            assert result['patch_result']['success']
+            assert result['revised_document']['title'] == 'New title'
+            assert result['revised_document']['blocks'][0]['content'] == 'Keep evidence.'
+        elif operation == 'apply_string_replace':
+            assert result['string_replace_result']['success']
+            assert result['revised_document'] == markdown.replace('# Old title', '# New title')
+        elif operation == 'validate_patch_set':
+            assert result['patch_set_review']['is_passed']
+        elif operation == 'locate_revision_target':
+            assert result['target_title'] and result['doc_id'] == 'doc'
+        elif operation == 'generate_modify_plan':
+            assert result['title_instruction'] == 'Rename the title'
+        elif operation == 'generate_patch_set':
+            assert result['new_title'] == 'New title' and result['target_doc_id'] == 'doc'
+        else:
+            assert result['replacements'][0]['new_string'] == '# New title'
+    assert source.read_text() == markdown
+    assert media.read_bytes() == b'preserved media'
+    assert json.loads(checkpoint.read_text()) == {'source_document': str(source)}

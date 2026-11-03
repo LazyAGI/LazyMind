@@ -4,13 +4,13 @@ import { ConfigProvider } from 'antd';
 import i18n from '@/i18n';
 import type { DocumentPublicationGroupState } from '@/api/generated/core-client';
 import { DocumentPublicationDialog } from './DocumentPublicationDialog';
-import type { useWriterProviderAvailability } from './useWriterProviderAvailability';
+import type { ProviderAvailability, useWriterProviderAvailability } from './useWriterProviderAvailability';
 
-const availability = vi.hoisted(() => ({ states: { github: 'ready', notion: 'ready' } as Record<string,string>, accounts: {
+const availability = vi.hoisted(() => ({ states: { github: 'ready', notion: 'ready' } as Record<string,ProviderAvailability>, accounts: {
   github: [{ connection_id: 'github-account', display_name: 'GitHub fixture' }],
   notion: [{ connection_id: 'notion-account', display_name: 'Notion fixture' }],
-}, refresh: vi.fn() }));
-const api = vi.hoisted(() => ({ getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn(), recoverPublication: vi.fn(), retryPublicationLocal: vi.fn(), cancelPublication: vi.fn() }));
+}, obsidian: { provider: 'obsidian', state: 'ready', vaults: [{ id: 'vault-fixture', name: 'Fixture', writable: true }] }, refresh: vi.fn<ReturnType<typeof useWriterProviderAvailability>['refresh']>() }));
+const api = vi.hoisted(() => ({ getPublicationTargets: vi.fn(), preflightPublication: vi.fn(), createPublicationGroup: vi.fn(), recoverPublication: vi.fn(), retryPublicationLocal: vi.fn(), cancelPublication: vi.fn() }));
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => api }));
 const providers = [{ id: 'github', capabilities: ['create','replace'] }, { id: 'notion', capabilities: ['create','replace'] }];
 let state: DocumentPublicationGroupState;
@@ -24,6 +24,8 @@ beforeEach(async () => {
     { provider: 'github', connection_id: 'github-account', bound: true, target_url: 'https://github.com/fixture/repo/pull/7' },
     { provider: 'notion', connection_id: 'notion-account', bound: true, target_url: 'https://www.notion.so/fixture' },
   ] };
+  availability.obsidian = { provider: 'obsidian', state: 'ready', vaults: [{ id: 'vault-fixture', name: 'Fixture', writable: true }] };
+  api.preflightPublication.mockResolvedValue({ data: { data: { targets: [] } } });
   beforePublish = vi.fn(async () => ({ id: 'latest-draft', revision: 4, draft: 8 }));
   api.getPublicationTargets.mockImplementation(async () => ({ data: { data: structuredClone(state) } }));
   api.createPublicationGroup.mockImplementation(async () => ({ data: { data: structuredClone(state) } }));
@@ -33,7 +35,14 @@ beforeEach(async () => {
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); });
 function view(extra = {}) {
-  return <ConfigProvider theme={{ token: { motion: false } }}><DocumentPublicationDialog artifactId='draft' sourceSignature='draft:4:1' providers={providers} availability={availability as ReturnType<typeof useWriterProviderAvailability>} open dirty={false} onClose={close} beforePublish={beforePublish} {...extra} /></ConfigProvider>;
+  const providerAvailability: ReturnType<typeof useWriterProviderAvailability> = {
+    ...availability,
+    accounts: Object.fromEntries(Object.entries(availability.accounts).map(([provider, items]) => [provider, items.map(item => ({
+      tenant_id: 'fixture-tenant', provider, auth_mode: 'oauth', status: 'ACTIVE',
+      created_at: '2026-10-21T00:00:00Z', can_use_chat: true, ...item,
+    }))])),
+  };
+  return <ConfigProvider theme={{ token: { motion: false } }}><DocumentPublicationDialog artifactId='draft' sourceSignature='draft:4:1' providers={providers} availability={providerAvailability} open dirty={false} onClose={close} beforePublish={beforePublish} {...extra} /></ConfigProvider>;
 }
 async function pickBoth() {
   fireEvent.click(await screen.findByRole('checkbox', { name: 'GitHub' }));
@@ -221,7 +230,7 @@ it('provides authorization beside a disabled platform and enables selection afte
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });
 
-it.each(['authorize', 'chat-disabled', 'checking', 'failed'])('does not select an unavailable platform from a menu or remembered choice (%s)', async status => {
+it.each(['authorize', 'chat-disabled', 'checking', 'failed'] as const)('does not select an unavailable platform from a menu or remembered choice (%s)', async status => {
   availability.states.notion = status;
   state.preferred_providers = ['notion'];
   render(view({ initialProvider: 'notion' }));
@@ -234,42 +243,61 @@ it.each(['authorize', 'chat-disabled', 'checking', 'failed'])('does not select a
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });
 
-it.each(['menu', 'preference'])('blocks unbound Obsidian even when selected by %s', async source => {
+it.each(['menu', 'preference'])('allows first Obsidian publication from %s without a preexisting link', async source => {
   availability.states.obsidian = 'ready';
   state.targets.push({ provider: 'obsidian', bound: false });
   state.preferred_providers = source === 'preference' ? ['obsidian'] : [];
   render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: source === 'menu' ? 'obsidian' : undefined }));
   const obsidian = await screen.findByRole('checkbox', { name: 'Obsidian' });
+  expect(obsidian).toBeEnabled();
+  expect(obsidian).toBeChecked();
+  expect(screen.getByRole('link', { name: 'View Obsidian setup guide' })).toHaveAttribute('href', '/cloud-documents/docs/obsidian-setup');
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to Obsidian' }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  expect(api.preflightPublication).toHaveBeenCalledOnce();
+  expect(api.createPublicationGroup.mock.calls[0][1].targets).toEqual([
+    expect.objectContaining({ provider: 'obsidian', parent_uri: 'obsidian://vault-fixture/' }),
+  ]);
+});
+
+it('clears Obsidian selection when its configured vault becomes unavailable', async () => {
+  availability.states.obsidian = 'ready';
+  state.targets.push({ provider: 'obsidian', bound: true });
+  const { rerender } = render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' }));
+  const obsidian = await screen.findByRole('checkbox', { name: 'Obsidian' });
+  expect(obsidian).toBeChecked();
+  availability.states.obsidian = 'configure';
+  rerender(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' }));
+  await waitFor(() => expect(obsidian).not.toBeChecked());
   expect(obsidian).toBeDisabled();
-  expect(obsidian).not.toBeChecked();
-  const guide = screen.getByRole('link', { name: 'View Obsidian setup guide' });
-  expect(guide).toHaveAttribute('href', '/cloud-documents/docs/obsidian-setup');
-  expect(guide).toHaveAttribute('target', '_blank');
-  expect(guide).toHaveAttribute('rel', 'noopener noreferrer');
-  expect(screen.getByText('Desktop / self-hosted')).toBeInTheDocument();
-  fireEvent.click(guide);
-  fireEvent.click(obsidian);
-  expect(obsidian).not.toBeChecked();
-  expect(screen.getByRole('button', { name: 'Select platforms' })).toBeDisabled();
-  expect(beforePublish).not.toHaveBeenCalled();
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });
 
-it('allows a bound Obsidian note and clears its selection if refresh removes the binding', async () => {
+it('does not choose the first vault when several are configured', async () => {
   availability.states.obsidian = 'ready';
-  state.targets.push({ provider: 'obsidian', bound: true });
+  availability.obsidian.vaults.push({ id: 'second-vault', name: 'Second', writable: true });
   render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' }));
-  const obsidian = await screen.findByRole('checkbox', { name: 'Obsidian' });
-  expect(obsidian).toBeEnabled();
-  expect(obsidian).toBeChecked();
-  expect(screen.getByText('Note linked')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'View Obsidian setup guide' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Publish to Obsidian' })).toBeEnabled();
-  state.targets[2].bound = false;
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-  await waitFor(() => expect(obsidian).not.toBeChecked());
-  expect(obsidian).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Select platforms' })).toBeDisabled();
+  await screen.findByRole('checkbox', { name: 'Obsidian' });
+  expect(screen.getByRole('combobox')).toHaveValue('');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to Obsidian' }));
+  await waitFor(() => expect(api.createPublicationGroup).not.toHaveBeenCalled());
+  expect(api.preflightPublication).not.toHaveBeenCalled();
+});
+
+it('keeps choices and shows a correction field when preflight detects an existing note', async () => {
+  availability.states.obsidian = 'ready';
+  api.preflightPublication.mockResolvedValue({ data: { data: { targets: [{ provider: 'obsidian', state: 'blocked', code: 'OBSIDIAN_TARGET_EXISTS' }] } } });
+  render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' }));
+  await screen.findByRole('checkbox', { name: 'Obsidian' });
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to Obsidian' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('already exists');
+  expect(screen.getByRole('checkbox', { name: 'Obsidian' })).toBeChecked();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '../outside.md' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to Obsidian' }));
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/inside the authorized vault/i));
+  expect(api.preflightPublication).toHaveBeenCalledOnce();
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });
 
@@ -474,4 +502,62 @@ it('reuses an existing create destination but takes the title from the latest co
   expect(api.createPublicationGroup.mock.calls[0][1].targets).toEqual([
     { provider: 'github', connection_id: 'github-account', parent_uri: 'https://github.com/fixture/repo/tree/main/docs' },
   ]);
+});
+
+it('requires a new choice when the explicitly selected vault disappears on refresh', async () => {
+  availability.states.obsidian = 'ready';
+  availability.obsidian.vaults.push({ id: 'second-vault', name: 'Second', writable: true });
+  const props = { providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' };
+  const { rerender } = render(view(props));
+  fireEvent.mouseDown(await screen.findByRole('combobox'));
+  fireEvent.click(await screen.findByText('Fixture · ixture', { selector: '.ant-select-item-option-content' }));
+  expect(screen.getByRole('button', { name: 'Publish to Obsidian' })).toBeEnabled();
+  availability.obsidian.vaults = [availability.obsidian.vaults[1]];
+  rerender(view(props));
+  const confirm = screen.getByRole('button', { name: 'Publish to Obsidian' });
+  expect(confirm).toBeDisabled();
+  expect(screen.getByRole('combobox')).toHaveValue('');
+  fireEvent.click(confirm);
+  expect(api.preflightPublication).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('combobox'));
+  fireEvent.click(await screen.findByText('Second · -vault', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  expect(api.createPublicationGroup.mock.calls[0][1].targets[0].parent_uri).toBe('obsidian://second-vault/');
+});
+
+it.each([false, true])('restores a failed first publication destination after remount (multiple vaults: %s)', async multiple => {
+  availability.states.obsidian = 'ready';
+  if (multiple) availability.obsidian.vaults.push({ id: 'second-vault', name: 'Second', writable: true });
+  const parent = 'obsidian://vault-fixture/Articles/Chosen%20note.md';
+  state.targets.push({ provider: 'obsidian', bound: false, parent_uri: parent, operation_hash: state.current_hash,
+    operation: { operation_id: 'failed-obsidian', provider: 'obsidian', status: 'failed_no_write', actions: ['retry'],
+      provider_synced: false, source_slot_id: 'draft', item_index: -1, updated_at: '2026-10-21T00:00:00Z' } });
+  render(view({ providers: [...providers, { id: 'obsidian' }] }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Select only failed platforms to retry' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to Obsidian' }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  expect(api.createPublicationGroup.mock.calls[0][1].targets).toEqual([
+    expect.objectContaining({ provider: 'obsidian', parent_uri: parent, retry_operation_id: 'failed-obsidian' }),
+  ]);
+});
+
+it('does not replace a saved unavailable vault with the only remaining vault', async () => {
+  availability.states.obsidian = 'ready';
+  state.targets.push({ provider: 'obsidian', bound: false, parent_uri: 'obsidian://missing-vault/Articles/Chosen.md' });
+  render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' }));
+  expect(await screen.findByRole('button', { name: 'Publish to Obsidian' })).toBeDisabled();
+  expect(screen.getByRole('combobox')).toHaveValue('');
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});
+
+it.each(['', '   '])('does not restore a GitHub destination explicitly cleared to %j', async value => {
+  state.targets[0] = { provider: 'github', bound: false, parent_uri: 'https://github.com/fixture/old-repo/tree/main/docs' };
+  render(view({ initialProvider: 'github' }));
+  fireEvent.change(await screen.findByRole('textbox'), { target: { value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to GitHub' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('GitHub destination');
+  expect(api.preflightPublication).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });

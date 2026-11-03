@@ -77,7 +77,7 @@ describe('notification API contracts', () => {
     http.request.mockResolvedValue({ data: { data: prefs } });
     const patch = { revision: 7, enabled: false, confirm_running_task_ids: ['run-a'] };
     expect(await patchPreferences(patch)).toEqual(prefs);
-    expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'PATCH', url: '/api/core/user/notification-preferences', data: JSON.stringify(patch) }));
+    expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'PATCH', url: '/api/core/user/notification-preferences', data: JSON.stringify(patch), silentError: true }));
   });
   it('preserves unconfigured legacy schedules and URL-encodes opaque IDs', async () => {
     const value = { configured: false, config: null, revision: 0, availability: {} };

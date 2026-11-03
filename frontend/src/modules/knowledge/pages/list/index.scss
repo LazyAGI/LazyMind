@@ -716,6 +716,37 @@
   }
 }
 
+.knowledge-library-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .knowledge-library-action-button.ant-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 6px;
+    color: #667085;
+    font-size: 18px;
+
+    &:hover, &[aria-expanded="true"] { color: #175cd3; background: #eef4ff; }
+    &:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+  }
+}
+
+.knowledge-library-actions-menu .ant-dropdown-menu {
+  min-width: 156px;
+  padding: 5px;
+  border-radius: 8px;
+
+  .ant-dropdown-menu-item, .ant-dropdown-menu-submenu-title { min-height: 34px; padding: 7px 10px; border-radius: 5px; }
+  .ant-dropdown-menu-item-icon { font-size: 14px; }
+}
+
 .knowledge-list-name-cell {
   min-width: 0;
   display: flex;

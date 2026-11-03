@@ -21,8 +21,10 @@ import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 
 import {
+  CHANNEL_ACCOUNTS_CHANGED_EVENT,
   channelAccountLabel,
   isChannelAccountAvailable,
+  isChannelAccountAuthorizationRequired,
   isChannelAccountPendingActivation,
   listChannelAccounts,
   type ChannelAccount,
@@ -272,7 +274,7 @@ export default function TerminalConnectionQuickPanel({
       if (accountRequestRef.current === requestId) {
         setAccounts(
           results.flatMap((result) => result.items)
-            .filter((account) => account.status === 'connected')
+            .filter((account) => isChannelAccountAvailable(account) || isChannelAccountPendingActivation(account) || isChannelAccountAuthorizationRequired(account))
             .sort((left, right) => (
               dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
             )),
@@ -291,7 +293,10 @@ export default function TerminalConnectionQuickPanel({
 
   useEffect(() => {
     void loadAccounts();
+    const update = () => { void loadAccounts(); };
+    window.addEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
     return () => {
+      window.removeEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
       accountRequestRef.current += 1;
     };
   }, [loadAccounts]);
@@ -306,13 +311,14 @@ export default function TerminalConnectionQuickPanel({
     const nextOpen = !accountsOpen;
     setAccountsOpen(nextOpen);
     if (!nextOpen) return;
-    if (accountsError) void loadAccounts();
+    void loadAccounts();
   };
 
   const connectedCount = accountsLoading && accounts.length === 0
     ? null
     : accounts.filter(isChannelAccountAvailable).length;
   const pendingActivationCount = accounts.filter(isChannelAccountPendingActivation).length;
+  const pendingAuthorizationCount = accounts.filter(isChannelAccountAuthorizationRequired).length;
   const providerAccounts = accounts.filter(
     (account) => accountProvider(account) === provider,
   );
@@ -345,6 +351,7 @@ export default function TerminalConnectionQuickPanel({
             : pendingActivationCount > 0
               ? t('channelGateway.terminal.connectedAndPendingCount', { connected: connectedCount, pending: pendingActivationCount })
               : t('channelGateway.terminal.connectedCount', { count: connectedCount })}
+          {pendingAuthorizationCount > 0 && <> · {t('notifications.pendingAuthorizationCount', { count: pendingAuthorizationCount })}</>}
           {connectedCount != null ? <DownOutlined aria-hidden="true" /> : null}
         </button>
       </header>
@@ -408,15 +415,16 @@ export default function TerminalConnectionQuickPanel({
                 {providerAccounts.map((account) => {
                   const itemProvider = accountProvider(account);
                   const pendingActivation = isChannelAccountPendingActivation(account);
+                  const authorizationRequired = isChannelAccountAuthorizationRequired(account);
                   return (
                     <li key={account.id}>
                       <button
                         type="button"
-                        aria-label={t('channelGateway.terminal.showAccountQr', {
+                        aria-label={authorizationRequired ? t('notifications.wecomRepairAuthorization') : t('channelGateway.terminal.showAccountQr', {
                           account: channelAccountLabel(account, accounts),
                           provider: t(`channelGateway.terminal.${itemProvider}Title`),
                         })}
-                        onClick={() => showAccountQr(account)}
+                        onClick={() => authorizationRequired ? onManage() : showAccountQr(account)}
                       >
                         <span className={`terminal-quick-account-icon is-${itemProvider}`} aria-hidden="true">
                           <ProviderIcon provider={itemProvider} />
@@ -424,20 +432,19 @@ export default function TerminalConnectionQuickPanel({
                         <span className="terminal-quick-account-copy">
                           <strong>{channelAccountLabel(account, accounts) || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
                           <small>
-                            {t(`channelGateway.${itemProvider}.accountStatusMap.${pendingActivation ? 'pendingActivation' : account.status}`, {
+                            {authorizationRequired ? t('notifications.wecomAuthorizationExpired') : t(`channelGateway.${itemProvider}.accountStatusMap.${pendingActivation ? 'pendingActivation' : account.status}`, {
                               defaultValue: pendingActivation ? t('notifications.pendingActivation') : account.status,
                             })}
-                            {' · '}
-                            {t(`channelGateway.${itemProvider}.runtimeStatusMap.${account.runtime_status}`, {
+                            {!authorizationRequired && <> · {t(`channelGateway.${itemProvider}.runtimeStatusMap.${account.runtime_status}`, {
                               defaultValue: account.runtime_status,
-                            })}
+                            })}</>}
                             {' · '}
                             {t('channelGateway.terminal.connectedAt')}: {formatAccountTime(account.connected_at)}
                           </small>
                         </span>
                         <span className="terminal-quick-account-action">
-                          <QrcodeOutlined aria-hidden="true" />
-                          {t('channelGateway.terminal.showQr')}
+                          {authorizationRequired ? <SettingOutlined aria-hidden="true" /> : <QrcodeOutlined aria-hidden="true" />}
+                          {t(authorizationRequired ? 'notifications.wecomRepairAuthorization' : 'channelGateway.terminal.showQr')}
                         </span>
                       </button>
                     </li>

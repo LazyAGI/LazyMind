@@ -283,9 +283,10 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
 
 
 @pytest.mark.parametrize('next_step', ['collect_materials', 'optimize_prompt'])
+@pytest.mark.parametrize('large', [False, True])
 @pytest.mark.asyncio
 async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
-    monkeypatch, tmp_path, next_step,
+    monkeypatch, tmp_path, next_step, large,
 ):
     worker = RemoteWorkflowExecutor()
     marker = (
@@ -302,6 +303,7 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 
         async def context(self, *_):
             return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {},
+                    'declared_output_types': {'workflow_routing': 'text'},
                     'workflow_revision': 'revision-1',
                     'post_step_checkpoint': self.checkpoint}
 
@@ -324,14 +326,6 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
                     }},
                     'workflow_runtime': {'post_step_checks': [{
                         'step_id': 'analyze_subject',
-                    'user_id': 'user-1',
-                    'parent_agentic_config': {'_core_workspace_context': {
-                        'workspace_id': 'workspace-1', 'root': str(tmp_path),
-                        'workspace_version': 1,
-                        'permission_mode': 'always_ask',
-                        'permission_version': 2 if configured else 1,
-                        'opaque_tool_grants': ['shell'] if configured else [],
-                    }},
                         'tool': 'check_image_workflow_capabilities',
                         'arguments': {'workflow_routing': 'workflow_routing'},
                     }]},
@@ -346,6 +340,9 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 
         async def artifact(self, _client, _attempt, _lease, artifact):
             self.artifacts.append(artifact)
+
+        async def upload_artifact_file(self, *_):
+            return '/core-host/uploads/workflow-artifacts/route.txt'
 
         async def progress(self, *_):
             return None
@@ -362,9 +359,17 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     async def stream(**_kwargs):
         nonlocal subagent_runs
         subagent_runs += 1
+        route = 'WORKFLOW: CREATE_ANIMATED_MEME\nREQUIRES: video_generator'
+        if large:
+            route += '\n' + 'Detailed requirements. ' * 3000
+            path = Path(_kwargs['task_spec']['workspace_path']) / 'route.txt'
+            path.write_text(route)
+            content_type, value = 'file', {'type': 'text', 'path': str(path)}
+        else:
+            content_type, value = 'text', {'text': route}
         yield 'data: ' + json.dumps({
-            'type': 'artifact', 'slot': 'workflow_routing', 'content_type': 'text',
-            'seq': 1, 'value': {'text': 'WORKFLOW: CREATE_ANIMATED_MEME\nREQUIRES: video_generator'},
+            'type': 'artifact', 'slot': 'workflow_routing', 'content_type': content_type,
+            'seq': 1, 'value': value,
         }) + '\n\n'
         yield 'data: ' + json.dumps({
             'type': 'done', 'status': 'succeeded', 'summary': 'analyzed',
@@ -436,6 +441,10 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     assert checkpoint['control'] == {'next_step': next_step}
     assert checkpoint['summary'] == 'analyzed'
     assert checkpoint['workflow_revision'] == 'revision-1'
+    if large:
+        assert checks[0]['workflow_routing'].startswith('WORKFLOW: CREATE_ANIMATED_MEME\n')
+        assert len(checks[0]['workflow_routing']) > 32768
+        (tmp_path / 'task-analysis' / 'route.txt').unlink()
 
     # A second blocked attempt must preserve the same checkpoint. The third
     # attempt succeeds with the exact saved route and zero new model work.
@@ -514,6 +523,126 @@ async def test_remote_executor_persists_artifact_before_task_center_event(monkey
     assert task_value == '/var/lib/lazymind/uploads/workflow-artifacts/session-1/attempt-1/result.png'
     assert task_value == workflow_value
     assert runtime.uploaded == ('attempt-1', 'lease-1', 'result.png', b'png')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('declared_type,large', [
+    ('json', False), ('json', True), ('text', False), ('text', True), ('file', True),
+])
+async def test_post_step_checks_receive_scalar_content_and_keep_file_references(
+    monkeypatch, tmp_path, declared_type, large,
+):
+    import importlib.util
+    from lazymind.chat.engine.subagent import context, runner, tools
+
+    source = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
+    spec = importlib.util.spec_from_file_location('paper_result_check', source)
+    package = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(package)
+    description = 'Full-text analysis. ' * (4000 if large else 1)
+    body = {
+        'user_instruction': 'Research requirements', 'candidate_directions': ['agents'],
+        'selected_directions': ['agents'],
+        'papers': [{'paper': {'paper_id': 'paper-1'}, 'is_seed': True,
+                    'is_important': False, 'key_contribution': description}],
+    }
+    checked = []
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime(StopReceiptRuntime):
+        completed = None
+        failure = None
+        published = None
+
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'scalar-task'}, 'inputs': {},
+                    'declared_output_types': {'result': declared_type}}
+
+        async def execution_spec(self, *_):
+            return {
+                'task': {'input_slots': [], 'output_slots': ['result']},
+                'workspace_path': str(tmp_path / 'scalar-task'), 'steps': [], 'llm_config': {},
+                'params': {'step_id': 'compose', 'workflow_runtime': {'post_step_checks': [{
+                    'step_id': 'compose', 'tool': 'validate_result', 'arguments': {'result': 'result'},
+                }]}},
+            }
+
+        async def task_event(self, *_):
+            return None
+
+        async def artifact(self, _client, _attempt, _lease, artifact):
+            self.published = artifact
+
+        async def upload_artifact_file(self, _client, _attempt, _lease, _name, content):
+            assert content
+            # Core can run on a different host; its durable path is not readable here.
+            return '/core-host/uploads/workflow-artifacts/session/attempt/result.txt'
+
+        async def complete(self, _client, _attempt, _lease, result):
+            self.completed = result
+
+        async def fail(self, _client, _attempt, _lease, message):
+            self.failure = message
+
+    def validate_result(result):
+        checked.append(result)
+        if declared_type == 'json':
+            return package.academic_validate_result(result)
+        if declared_type == 'text':
+            assert result == description
+        else:
+            assert result['path'] == '/core-host/uploads/workflow-artifacts/session/attempt/result.txt'
+        return {'status': 'valid'}
+
+    async def stream(**kwargs):
+        events = []
+        ctx = context.SubAgentContext(
+            'scalar-task', 'chat', 'workflow_step', 'compose', kwargs['task_spec']['params'],
+            kwargs['task_spec']['workspace_path'], [], ['result'], None, events.append,
+        )
+        monkeypatch.setattr(tools, 'require_context', lambda: ctx)
+        if declared_type == 'file':
+            path = Path(ctx.workspace_path) / 'data.json'
+            path.write_text(json.dumps(body))
+            # A file slot remains a reference even when it contains JSON.
+            events.append({'type': 'artifact', 'slot': 'result', 'content_type': 'file',
+                           'seq': 1, 'value': {'type': 'json', 'path': str(path)}})
+        else:
+            tools._save_artifact('result', body if declared_type == 'json' else description,
+                                 content_type=declared_type)
+        for event in events:
+            yield 'data: ' + json.dumps(event) + '\n\n'
+        yield 'data: {"type":"done","status":"succeeded","summary":"saved"}\n\n'
+
+    runtime = Runtime()
+    worker.runtime = runtime
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda *_: {'validate_result': validate_result})
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+
+    assert runtime.failure is None
+    assert runtime.completed is not None
+    assert len(checked) == 1
+    if declared_type == 'json':
+        assert checked[0] == body
+    if large:
+        assert runtime.published['content_type'] == 'file'
+        assert runtime.completed['artifacts'][0]['value']['path'].startswith('/core-host/')
+
+
+def test_post_step_scalar_check_rejects_files_outside_its_task_workspace(tmp_path):
+    workspace = tmp_path / 'task'
+    workspace.mkdir()
+    outside = tmp_path / 'other-task.json'
+    outside.write_text('{"private": true}')
+    artifact = {'slot': 'result', 'content_type': 'file',
+                'value': {'type': 'json', 'path': str(outside)}}
+    params = {'step_id': 'compose', 'output_slot_types': {'result': 'json'},
+              'workflow_runtime': {'post_step_checks': [{
+                  'step_id': 'compose', 'arguments': {'result': 'result'},
+              }]}}
+    with pytest.raises(ValueError, match='outside its task workspace'):
+        RemoteWorkflowExecutor._inline_post_step_artifact(artifact, params, str(workspace))
 
 
 @pytest.mark.asyncio
@@ -1087,3 +1216,41 @@ async def test_worker_claim_loop_runs_up_to_configured_concurrency(monkeypatch):
     loop.cancel()
     with pytest.raises(asyncio.CancelledError):
         await loop
+
+
+@pytest.mark.asyncio
+async def test_argument_failure_code_reaches_the_existing_attempt_terminal_protocol(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+    from lazymind.chat.workflow.client import RemoteExecutorClient
+
+    request_bodies = []
+
+    async def transport(request):
+        request_bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={'ok': True, 'data': {}}, request=request)
+
+    client_transport = RemoteExecutorClient('http://core.test', 'executor', 'local')
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+    }
+    runtime.fail.side_effect = client_transport.fail
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = runtime
+
+    async def stream(**_kwargs):
+        yield 'data: ' + json.dumps({
+            'type': 'error', 'status': 'failed', 'message': '参数修复次数已耗尽',
+            'error_code': 'TOOL_ARGUMENT_RETRY_EXHAUSTED',
+        }) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        await worker._run_claim(client, {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    assert len(request_bodies) == 1
+    assert request_bodies[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
+    assert request_bodies[0]['result'] == {'error': '参数修复次数已耗尽'}
+    runtime.complete.assert_not_awaited()

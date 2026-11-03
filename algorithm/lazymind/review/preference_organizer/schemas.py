@@ -21,6 +21,7 @@ class PreferenceStateData(BaseModel):
     projected_chars: int
     projection_truncated: bool
     etag: str
+    max_chars: int = Field(gt=0)
 
 
 class PreferenceOrganizerPassResult(BaseModel):
@@ -46,6 +47,8 @@ class PreferenceOrganizerResultData(BaseModel):
     reason: str = ''
     target_reached: bool = False
     stop_reason: str = ''
+    initial_state: Optional[PreferenceStateData] = None
+    final_state: Optional[PreferenceStateData] = None
 
 
 class PreferenceOrganizerResult(BaseModel):

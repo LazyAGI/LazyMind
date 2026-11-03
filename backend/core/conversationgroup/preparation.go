@@ -226,6 +226,13 @@ func prepareOrganizer(ctx context.Context, db *gorm.DB, run *orm.ConversationOrg
 		p.Items = append(p.Items, preparationItem{Conversation: snapshotConversation{ID: row.ConversationID, Title: row.Title, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision}, Reason: row.PreparationReason})
 	}
 	p.seal(&snapshot)
+	if len(snapshot.Conversations) == 0 {
+		for _, item := range p.Items {
+			if item.Reason == "summary_failed" {
+				return errSummaryPreparationFailed
+			}
+		}
+	}
 	raw, _ := json.Marshal(p)
 	snapRaw, _ := json.Marshal(snapshot)
 	if err := ownedRunUpdate(ctx, db, run.ID, job, "running", map[string]any{"preparation_json": raw, "snapshot_json": snapRaw, "snapshot_hash": snapshotDigest(snapRaw), "progress_total": len(snapshot.Conversations), "stage": "organizing"}); err != nil {

@@ -2020,6 +2020,7 @@ func newResourceUpdateTestDB(t *testing.T) *gorm.DB {
 		&orm.ChatHistory{},
 		&orm.WorkflowSession{},
 		&orm.ResourceUpdateTask{},
+		&orm.MemoryCurrentEntry{},
 		&orm.SkillReviewSchedulerState{},
 		&orm.SkillV2Skill{},
 		&orm.SkillV2Blob{},

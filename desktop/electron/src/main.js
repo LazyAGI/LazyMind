@@ -57,6 +57,8 @@ const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require(
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
 const { createNotificationSession } = require("./notification-session.js");
+const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
+const { registerNotificationSettingsIPC } = require("./notification-settings.js");
 const {
   desktopNotificationAPIOrigin,
   desktopNotificationInstanceID,
@@ -178,6 +180,7 @@ const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
+const agentConnectorCodexInstallTimeoutMs = 90 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -709,7 +712,7 @@ function runSidecar(command, extra = [], options = {}) {
   });
 }
 
-function runAgentConnector(agent, action) {
+function runAgentConnector(agent, action, refreshInstallations = false) {
   const allowedActions = {
     all: new Set(["status"]),
     codex: new Set(["connect", "status", "disconnect", "login"]),
@@ -725,15 +728,22 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  const installWorkflow = ["deepseek-harness", "workbuddy"].includes(agent) && action === "connect";
+  const installWorkflow = ["deepseek-harness", "workbuddy", "codex"].includes(agent) && action === "connect";
   const run = () => runConnectorJSON(
-    ["internal", "agent", agent, action],
-    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs : agentConnectorInstallTimeoutMs)
+    ["internal", "agent", agent, action, ...(action === "status" && refreshInstallations === true ? ["--refresh-installations"] : [])],
+    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs
+      : agent === "codex" ? agentConnectorCodexInstallTimeoutMs : agentConnectorInstallTimeoutMs)
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
   if (installWorkflow) {
-    return runConnectorJSON(["assistant", "start"], agentConnectorActionTimeoutMs).then(run);
+    return runConnectorJSON(["assistant", "start"], agentConnectorActionTimeoutMs).then(run).then(result => {
+      if (agent === "codex") agentRecovery.start();
+      return result;
+    });
+  }
+  if (agent === "codex" && action === "disconnect") {
+    return agentRecovery.stop().then(run).then(result => withAgentLoginStatus(agent, result));
   }
   return run().then((result) => withAgentLoginStatus(agent, result));
 }
@@ -886,12 +896,13 @@ function restartAgentHost() {
   }
 }
 
-function runConnectorJSON(args, timeout, input) {
+function runConnectorJSON(args, timeout, input, options = {}) {
   return new Promise((resolve, reject) => {
     const child = execFile(agentConnectorPath, args, {
       env: sidecarEnv(),
       timeout,
       windowsHide: isWindows,
+      signal: options.signal,
     }, (error, stdout, stderr) => {
       if (error) {
         error.message = String(stderr || stdout || error.message).trim();
@@ -909,6 +920,20 @@ function runConnectorJSON(args, timeout, input) {
     }
   });
 }
+
+const agentRecovery = createAgentRecovery({
+  BrowserWindow, ipcMain, screen,
+  locale: () => app.getLocale(),
+  wait: signal => runConnectorJSON(["internal", "codex-recovery", "wait"], 30000, undefined, { signal }),
+  dismiss: id => runConnectorJSON(["internal", "codex-recovery", "dismiss", id], 5000),
+  check: (id, signal) => runConnectorJSON(["internal", "codex-recovery", "status", id], 10000, undefined, {signal}),
+  finishView: id => runConnectorJSON(["internal", "codex-recovery", "view-complete", id], 5000),
+  reconnect: (id, onStage, signal) => runRecoveryCommand({
+    spawn, executable: agentConnectorPath, env: sidecarEnv(), id, onStage, signal,
+  }),
+  log: message => appendStartupLog("agent-recovery", message),
+});
+let recoverySessionIdentity;
 
 function scheduleAgentHostRestart() {
   if (runtimeStopping || isQuitting || isInstallerWarmup || agentHostRestartTimer) {
@@ -929,6 +954,7 @@ function startAgentHost() {
     return;
   }
   clearTimeout(agentHostRestartTimer);
+  agentRecovery.start();
   agentHostRestartTimer = undefined;
   const child = spawn(agentConnectorPath, [
     "agent", "host", "run", "--provider", "all", "--owner-pid", String(process.pid),
@@ -1456,6 +1482,7 @@ function beginFastQuit(reason = "quit") {
     return;
   }
   isQuitting = true;
+  agentRecovery.stop();
   notificationSessionRevision += 1;
   desktopNotifications.stop();
   allowWindowClose = true;
@@ -2435,7 +2462,7 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
-ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all", "status"));
+ipcMain.handle("lazymind:agentIntegrationStatuses", (_event, refreshInstallations) => runAgentConnector("all", "status", refreshInstallations === true));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
@@ -2585,11 +2612,19 @@ ipcMain.handle("lazymind:browserOpen", async (event, url) => {
 });
 app.on("will-quit", () => { void managedBrowser.clear(); });
 
+registerNotificationSettingsIPC({
+  ipcMain,
+  shell,
+  isTrustedSender: (event) => !isQuitting && isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin()),
+});
 ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   if (isQuitting || !isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");
   }
   value = notificationSession.restore(value) || value;
+  const recoveryIdentity = JSON.stringify([value?.server_url, value?.username, value?.tenant_id]);
+  if (recoverySessionIdentity !== undefined && recoveryIdentity !== recoverySessionIdentity) await agentRecovery.stop();
+  recoverySessionIdentity = recoveryIdentity;
   notificationRenewalCandidate = undefined;
   notificationSession.remember(value);
   const revision = ++notificationSessionRevision;
@@ -2608,6 +2643,7 @@ ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   if (revision === notificationSessionRevision && !isQuitting
     && isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     void desktopNotifications.setSession(value);
+    agentRecovery.start();
   }
   return result;
 });
@@ -2616,6 +2652,8 @@ ipcMain.handle("lazymind:assistantSessionClear", async (event) => {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");
   }
   notificationSessionRevision += 1;
+  await agentRecovery.stop();
+  recoverySessionIdentity = undefined;
   notificationRenewalCandidate = undefined;
   notificationSession.clear();
   desktopNotifications.clearSession();

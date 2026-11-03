@@ -150,11 +150,12 @@ def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
-    stop_condition = make_cancel_stop_condition()
+    stop_condition = MagicMock(return_value=False)
 
     AgentExecutor().create_agent('llm', _plan(extra_stop_condition=stop_condition))
 
-    assert constructor.call_args.kwargs['extra_stop_condition'] is stop_condition
+    assert constructor.call_args.kwargs['extra_stop_condition'](None) is False
+    stop_condition.assert_called_once_with(None)
 
 
 def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:

@@ -13,6 +13,9 @@ import (
 
 func TestScannerLeavesBuiltinDistributionForExplicitUpgrade(t *testing.T) {
 	db := testutil.NewTestDB(t)
+	if err := db.AutoMigrate(&orm.MemoryCurrentEntry{}); err != nil {
+		t.Fatal(err)
+	}
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
 		"auto_evo": true, "origin_builtin_skill_uid": "bsk_demo",

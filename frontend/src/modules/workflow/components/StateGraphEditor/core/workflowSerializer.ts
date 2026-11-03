@@ -25,12 +25,18 @@ export function serializeWorkflowModel(model: WorkflowModel, graphModel?: GraphM
     }));
   }
 
-  // state.yml / GraphModel is authoritative for the step list. This keeps
-  // workflow.yaml declarations correct for canvas renames and direct state.yml
-  // edits, even if WorkflowModel was initialized from an incomplete draft.
-  const stepsSource = graphModel
-    ? graphModel.nodes.map((node) => ({ id: node.id, label: node.label }))
-    : model.steps;
+  // GraphModel owns membership and labels, not declaration order. A state.yml
+  // dictionary's iteration order must not replace the user's workflow declaration.
+  // Keep surviving declarations in place, then append new/renamed nodes.
+  const nodesById = new Map(graphModel?.nodes.map((node) => [node.id, node]));
+  const declaredIds = new Set(model.steps.map((step) => step.id));
+  const stepsSource = graphModel ? [
+    ...model.steps.flatMap((step) => {
+      const node = nodesById.get(step.id);
+      return node ? [{ id: node.id, label: node.label }] : [];
+    }),
+    ...graphModel.nodes.filter((node) => !declaredIds.has(node.id)).map((node) => ({ id: node.id, label: node.label })),
+  ] : model.steps;
   if (stepsSource.length > 0) {
     doc.steps = stepsSource.map((s) => ({ id: s.id, label: s.label }));
   }

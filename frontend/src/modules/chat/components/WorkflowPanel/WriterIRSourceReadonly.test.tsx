@@ -12,7 +12,7 @@ const original: WriterDocument = {
 type Save = NonNullable<WriterIRControlProps['onSave']>;
 function toggleSource() {
   const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
-  menu.open = true;
+  act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
   fireEvent.click(screen.getByRole('button', { name: /^(源码|返回正文)$/ }));
   expect(menu.open).toBe(false);
 }

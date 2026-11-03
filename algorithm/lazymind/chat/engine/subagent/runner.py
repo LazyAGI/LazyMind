@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from dataclasses import replace
 import copy
 import json
 import os
@@ -28,6 +29,7 @@ from lazyllm.tools.agent.base import (
 )
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
+from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolArgumentRetryExhausted
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -104,6 +106,7 @@ WORKFLOW_TOOL_FAILURE_LIMITS = {
     'validate_proposal_from_inputs': 1,
 }
 WORKFLOW_TOOL_CALL_LIMITS = {
+    'ppt_generate_background_images': 1,
     'get_artifact': 6,
     'save_artifacts': 8,
     'validate_and_allocate_outline': 1,
@@ -144,10 +147,11 @@ _COMPLETION_CONCERN = re.compile(
     r'无法|不能|失败|未完成|未能|缺少|尚未|没有(?:完成|生成|交付)',
     re.IGNORECASE,
 )
-# Remove only explicit zero failure counters before checking for unresolved work.
+# Remove explicit zero/negated failure statements, not other unresolved work.
 _ZERO_FAILURE_COUNT = re.compile(
     r'(?<![\w])(?:failed|failures?)\s*[:：=]\s*0(?![\d.])(?:\s+(?:pages?|files?|items?))?'
-    r'|失败\s*[:：=]?\s*0(?![\d.])(?:\s*[页个项次])?', re.IGNORECASE,
+    r'|失败\s*[:：=]?\s*0(?![\d.])(?:\s*[页个项次])?'
+    r'|(?:无|没有)(?:任何)?失败(?:项|记录)?(?=[，。；！!?！？\s]|$)', re.IGNORECASE,
 )
 
 
@@ -556,10 +560,26 @@ def _build_partial_sort_order_hints(
 
 def _build_intent_context_section(params: Dict[str, Any]) -> List[str]:
     """Render immutable instructions already present in public Attempt Context."""
+    request = str(params.get('launch_user_input') or params.get('user_input') or '').strip()
     instruction = str(params.get('runtime_instruction') or '').strip()
-    if not instruction:
+    if not request and not instruction:
         return []
-    return ['', '## Effective Execution Intent', instruction]
+    lines = [
+        '', '## Effective Execution Intent',
+        'Apply the user\'s explicit runtime content requirements (including length, language, '
+        'audience and style) instead of conflicting defaults or examples in the step prompt. '
+        'Later explicit runtime amendments supersede the original request only where they change it. '
+        'A continuation or approval does not reset these requirements. '
+        'These refinements do not change the assigned step, declared output keys/types, '
+        'tool permissions, workflow transitions or approval gates. '
+        'If a requirement cannot be satisfied within those boundaries, report the conflict '
+        'as a task failure rather than silently reverting to the default.',
+    ]
+    if request:
+        lines += ['', 'Original run request:', request]
+    if instruction:
+        lines += ['', 'Runtime amendments for this attempt:', instruction]
+    return lines
 
 
 _STRUCTURED_PARAM_KEYS = {
@@ -581,6 +601,7 @@ _STRUCTURED_PARAM_KEYS = {
     # re-run the parent Workflow instead of completing its one assigned step.
     'workflow_id', 'workflow_ref', 'revision_id', 'revision_no', 'tree_hash',
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
+    'launch_user_input', 'current_user_input', 'runtime_instruction',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters', '_enable_tool_retrieval',
     '_workspace_execution', '_core_workspace_context', '_core_local_runtime', 'workspace_context',
@@ -817,17 +838,16 @@ def _build_subagent_plan(
             'subagent_workflow_materials', 'Workflow Material Bindings', workflow_materials,
             'workflow.inputs', priority=25, authoritative=True, content_kind='instruction',
         )
-    # Inject intent/constraints from the workflow session so SubAgent respects user preferences.
-    if db:
-        intent_lines = _build_intent_context_section(ctx.params)
-        if intent_lines:
-            builder.runtime(
-                'subagent_intent', 'Effective Execution Intent',
-                '\n'.join(intent_lines).strip(), 'database.intent',
-                priority=30,
-                authoritative=True,
-                content_kind='instruction',
-            )
+    # Attempt Context already freezes intent; rendering it must not require a DB.
+    intent_lines = _build_intent_context_section(ctx.params)
+    if intent_lines:
+        builder.runtime(
+            'subagent_intent', 'Effective Execution Intent',
+            '\n'.join(intent_lines).strip(), 'task.intent',
+            priority=30,
+            authoritative=True,
+            content_kind='instruction',
+        )
     # Inject user attachment context so the SubAgent knows which files were uploaded.
     history_files_per_turn = _history_files_per_turn(ctx.params)
     attachment_section = render_attachment_content(
@@ -894,6 +914,14 @@ def _build_subagent_plan(
             + '. Save every required key before finishing. When there are multiple outputs, '
             'use one save_artifacts call containing every output entry.'
         )
+    elif ctx.agent_type == 'workflow_step':
+        output_lines.append(
+            'This Workflow step has no required output artifacts. Only keys in its '
+            'declared output slots may be saved; an empty declared list forbids artifact writes. '
+            'Do not invent output keys to fulfill a prompt requesting filesystem or memory updates. '
+            'Perform required side effects only with available, declared tools. If such a tool '
+            'is missing, report the missing capability as a task failure; do not claim success.'
+        )
     else:
         output_lines.append(
             'No output slots are required by the task metadata. The objective or step prompt '
@@ -905,7 +933,7 @@ def _build_subagent_plan(
         output_lines.append(
             'Optional output artifact keys: ' + ', '.join(optional_keys)
         )
-    if not publisher_owned_outputs:
+    if not publisher_owned_outputs and (ctx.agent_type != 'workflow_step' or ctx.output_slots):
         output_lines.append(
             '## Exact save_artifacts call shape\n'
             'Use this exact JSON structure:\n'
@@ -1537,6 +1565,14 @@ async def run_subagent_stream(
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0
         resume_history = _rebuild_history_from_steps(db, task_id) if resume else None
         if resume:
+            # Use durable results, including malformed calls excluded from model
+            # history. Restarting a worker must not reset its input-repair budget.
+            argument_results = [
+                result for step in db.load_steps(task_id) if step.get('role') == 'tool'
+                for result in (step.get('content') or {}).get('tool_results', [])
+                if isinstance(result, dict)
+            ]
+            plan.execution_options = replace(plan.execution_options, argument_result_history=argument_results)
             objective_message = (
                 PromptBuilder.for_role(AgentRole.SUBAGENT)
                 .input(content=ctx.objective, source='task.objective')
@@ -1798,15 +1834,13 @@ async def run_subagent_stream(
             return
 
         summary = _result_summary(final_result, required_output_keys)
-        # Workflow completion follows declared outputs, package post-step checks
-        # and configured human review. Narrative wording must not introduce an
-        # additional model verdict. Ordinary SubAgents retain completion review.
-        if effective_agent_type != 'workflow_step' and (
-            not required_output_keys or _has_completion_concern(final_result)
-        ):
+        # An empty output contract does not prove that a side effect completed.
+        # Review uncertain outcomes for Workflow steps too, before Core can turn
+        # success into a human-approval checkpoint or release downstream steps.
+        if not required_output_keys or _has_completion_concern(final_result):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=(agent._model_fallback_state.raw_llm if agent is not None else llm),
-                objective=ctx.objective,
+                objective=ctx.objective + '\n'.join(_build_intent_context_section(ctx.params)),
                 steps=db.load_steps(task_id),
                 artifacts=deliverable_artifacts,
                 force_result=final_result,
@@ -1864,6 +1898,7 @@ async def run_subagent_stream(
         failure_phase = translator.run.fallback_code if translator is not None else ''
         yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
                     'summary': exc_summary, 'message': exc_summary,
+                    **({'error_code': exc.code} if isinstance(exc, ToolArgumentRetryExhausted) else {}),
                     **({'current_phase': failure_phase} if failure_phase in {
                         'model_fallback_exhausted', 'model_context_not_fit',
                     } else {})})
@@ -2004,7 +2039,7 @@ def _evaluate_completion(
     force_text = str(force_result or '').strip()
     evidence = [
         {'key': artifact.get('slot'), 'content_type': artifact.get('content_type'),
-         'value': str(artifact.get('value') or {})[:2000]}
+         'value': json.dumps(artifact.get('value') or {}, ensure_ascii=False, default=str)[:2000]}
         for artifact in artifacts
     ]
 
@@ -2024,10 +2059,19 @@ def _evaluate_completion(
     prompt_lines += [
         '',
         'Evaluation rules:',
+        '- Saved artifact values use storage envelopes: JSON content is under data, '
+        'text content is under text, and large content uses a type/path reference. '
+        'These envelopes are not business output fields. Evidence previews may be truncated; '
+        'do not reject valid delivery merely for its storage envelope or preview truncation.',
         '- Decide from the objective whether delivery requires saved artifacts. PDF, image, '
         'document, or data-file generation requires the requested deliverable, not a textual '
         'claim, plan, placeholder, unrelated artifact, or description of a file.',
         '- Pure text analysis or summaries can complete without a saved artifact.',
+        '- Apply explicit runtime content requirements over conflicting step defaults, '
+        'without changing the assigned step or its output/tool/approval boundaries.',
+        '- Producing a requested audit or review with negative findings (for example '
+        'passed=false) is completed review work, not an execution failure. Distinguish '
+        'the review verdict from failure to perform the review itself.',
         '- A report that required work could not be completed means completed=false, even '
         'if it includes useful partial results. Consider the final outcome: a recovered '
         'tool failure must not by itself cause failure.',

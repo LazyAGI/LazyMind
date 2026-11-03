@@ -3,6 +3,7 @@ import type { ChangeEvent, ReactNode, RefObject } from "react";
 import { Alert, Empty, Input, Pagination, Skeleton, Switch, message } from "antd";
 import { ApartmentOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import {
   listSkillAssetsPage,
   patchSkillAsset,
@@ -280,6 +281,12 @@ export default function UserSkillWorkflowSettings({
           <p>{t("settingsPage.skills.description")}</p>
         </div>
         <div className="settings-skill-group-controls">
+          <Link className="settings-capability-management-link" to={activeTab === "skills"
+            ? "/memory-management/skills"
+            : "/memory-management/skills?skillView=workflows"}
+          >
+            {t("settingsPage.skills.openCapabilityManagement")}
+          </Link>
           <div className="settings-skill-master">
             <div>
               <strong>{activeGroupLabel}</strong>

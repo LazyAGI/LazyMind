@@ -1,6 +1,6 @@
 # Test-only dependencies for tests/algorithm. This file is intentionally not
 # referenced by algorithm runtime images or `make up`.
-pytest
+pytest==9.1.1
 pytest-asyncio
 httpx<0.28
 pypdf

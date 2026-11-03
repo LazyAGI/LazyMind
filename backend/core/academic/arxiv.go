@@ -2,44 +2,14 @@ package academic
 
 import (
 	"context"
-	"encoding/xml"
-	"net/http"
-	"net/url"
+	"lazymind/core/academic/arxivsource"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 var citationYearTitlePattern = regexp.MustCompile(`(?i)(?:\(|\b)(?:19|20)\d{2}[a-z]?(?:\)|\.)?\s*[.,:]?\s*(.+)$`)
 var brokenWordPattern = regexp.MustCompile(`([\p{L}\p{N}])-\s*\p{M}*\s+([\p{L}\p{N}])`)
-
-var arxivRequestGate struct {
-	sync.Mutex
-	next time.Time
-}
-
-func waitForArxiv(ctx context.Context) bool {
-	arxivRequestGate.Lock()
-	wait := time.Until(arxivRequestGate.next)
-	if wait < 0 {
-		wait = 0
-	}
-	arxivRequestGate.next = time.Now().Add(wait + 3*time.Second)
-	arxivRequestGate.Unlock()
-	if wait == 0 {
-		return true
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
 
 func citationTitle(citation string) string {
 	compact := strings.Join(strings.Fields(citation), " ")
@@ -77,17 +47,6 @@ func citationTitle(citation string) string {
 	return strings.Trim(strings.TrimSpace(title), ` .,:;"'`)
 }
 
-type arxivFeed struct {
-	Entries []struct {
-		ID        string `xml:"id"`
-		Title     string `xml:"title"`
-		Published string `xml:"published"`
-		Authors   []struct {
-			Name string `xml:"name"`
-		} `xml:"author"`
-	} `xml:"entry"`
-}
-
 func tokenCoverage(reference, title string) float64 {
 	referenceTokens := map[string]bool{}
 	for _, token := range strings.Fields(NormalizeTitle(reference)) {
@@ -107,69 +66,35 @@ func tokenCoverage(reference, title string) float64 {
 }
 
 // resolveWithArxiv provides the deterministic domain adapter used by imports.
-// Failure is intentionally soft because arXiv is a fallback, not a dependency.
-func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool) {
+// Provider failures are returned separately from a successful search with no match.
+func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool, error) {
 	query := citationTitle(citation)
-	searchField := "ti:"
+	field := "ti:"
 	if query == "" {
-		query = strings.TrimSpace(citation)
-		searchField = "all:"
+		query, field = strings.TrimSpace(citation), "all:"
 	}
 	if len(query) > 300 {
 		query = query[:300]
 	}
-	if strings.TrimSpace(query) == "" {
-		return WorkInput{}, false
-	}
-	u := "https://export.arxiv.org/api/query?search_query=" + searchField + url.QueryEscape(`"`+query+`"`) + "&start=0&max_results=3&sortBy=relevance"
-	var feed arxivFeed
-	client := &http.Client{Timeout: 10 * time.Second}
-	resolved := false
-	for attempt := 0; attempt < 2; attempt++ {
-		if !waitForArxiv(ctx) {
-			return WorkInput{}, false
-		}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		req.Header.Set("User-Agent", "LazyMind academic resolver/1.0 (opensource@lazyagi.org)")
-		resp, err := client.Do(req)
-		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			decodeErr := xml.NewDecoder(resp.Body).Decode(&feed)
-			_ = resp.Body.Close()
-			if decodeErr == nil {
-				resolved = true
-				break
-			}
-		} else if resp != nil {
-			_ = resp.Body.Close()
-		}
-	}
-	if !resolved {
-		return WorkInput{}, false
+	papers, err := arxivsource.NewClient().Search(ctx, field+strconv.Quote(query), 5)
+	if err != nil {
+		return WorkInput{}, false, err
 	}
 	bestScore := 0.0
 	var best WorkInput
-	for _, entry := range feed.Entries {
-		title := strings.Join(strings.Fields(entry.Title), " ")
-		score := tokenCoverage(citation, title)
+	for _, paper := range papers {
+		score := tokenCoverage(citation, paper.Title)
 		if score < 0.65 || score <= bestScore {
 			continue
 		}
-		base, _ := NormalizeArxivID(entry.ID)
-		if base == "" {
-			continue
-		}
-		authors := make([]string, 0, len(entry.Authors))
-		for _, author := range entry.Authors {
-			if strings.TrimSpace(author.Name) != "" {
-				authors = append(authors, strings.TrimSpace(author.Name))
-			}
-		}
-		year := 0
-		if len(entry.Published) >= 4 {
-			year, _ = strconv.Atoi(entry.Published[:4])
-		}
-		bestScore = score
-		best = WorkInput{Title: title, Authors: authors, Year: year, ArxivID: base, Provider: "arxiv", ProviderWorkID: base, Provenance: map[string]any{"match": "citation_search", "score": score}}
+		bestScore, best = score, arxivWorkInput(paper)
 	}
-	return best, bestScore > 0
+	return best, bestScore > 0, nil
+}
+
+func arxivWorkInput(paper arxivsource.Metadata) WorkInput {
+	return WorkInput{Title: paper.Title, Authors: paper.Authors, Abstract: paper.Abstract,
+		Year: paper.Year, Venue: paper.Venue, DOI: paper.DOI, ArxivID: paper.BaseID,
+		Provider: "arxiv", ProviderWorkID: paper.BaseID,
+		Provenance: map[string]any{"pdf_url": paper.PDFURL, "pdf_version": paper.Version, "source": "arxiv"}}
 }

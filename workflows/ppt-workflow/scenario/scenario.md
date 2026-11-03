@@ -20,7 +20,11 @@ Uploaded PPTX templates are read inside `analyze_requirements`, before material
 collection. This step reads every original page and additionally saves
 `template_content_brief` (sections, slots, evidence requirements and gaps).
 Collection and outline planning follow those sections. Template sample text is
-not user evidence. Template paths skip `choose_style` and both background stages;
+not user evidence. Outline style preparation is preserved without a separate
+A/B/C style-preview step.
+Material collection and academic analysis share a conditional Materials tab;
+effective executed steps remain visible even when a skip marker exists.
+Template paths skip both background stages;
 final generation revalidates and fills the original PPTX, not HTML.
 
 1. `analyze_requirements` — goal, audience, length, visual style, constraints,

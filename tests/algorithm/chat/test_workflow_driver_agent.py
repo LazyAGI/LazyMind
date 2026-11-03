@@ -1,6 +1,5 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from lazymind.chat.engine.agent_runtime import AgentExecutor
 from lazymind.chat.workflow.driver_agent import _clean_message, evaluate_step
 
 
@@ -14,14 +13,16 @@ def test_driver_message_has_hard_length_cap():
 
 
 def test_driver_evaluates_pinned_policy_acceptance_and_artifacts():
-    with patch.object(AgentExecutor, 'run', return_value='Retry draft because report is missing.') as run:
+    model = MagicMock()
+    model.share.return_value.return_value = 'Retry draft because report is missing.'
+    with patch('lazymind.chat.workflow.driver_agent.AutoModel', return_value=model):
         result = evaluate_step(
             'artifact-pipeline', 'draft', 'Terminal status: failed',
             acceptance='Must save report', driver_prompt='Inspect every required output.',
             workflow_artifacts_summary='metadata exists; report missing', llm_config={},
         )
     assert result['message'].startswith('Retry draft')
-    plan = run.call_args.args[1]
-    prompt_text = plan.prompt.system_prompt + plan.prompt.current_input
+    model.share.assert_called_once_with(stream=False)
+    prompt_text = model.share.return_value.call_args.args[0]
     assert 'Must save report' in prompt_text
     assert 'report missing' in prompt_text

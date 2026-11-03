@@ -99,6 +99,7 @@ export interface DesktopAgentAction {
 }
 
 export interface DesktopAgentConnectionStatus {
+  runtime_state?: "waiting" | "connection_required" | "connected" | "unavailable";
   mcp_trusted?: boolean;
   mcp_enabled?: boolean;
   mcp_configured: boolean;
@@ -108,8 +109,9 @@ export interface DesktopAgentConnectionStatus {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  enabled?: boolean;
   login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };
-  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable"; path?: string };
+  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable" | "startup_unavailable" | "installation_unavailable" | "cdp_unavailable"; path?: string };
 	can_connect?: boolean;
 	can_disconnect?: boolean;
 	retry_action?: "connect" | "disconnect";
@@ -198,6 +200,7 @@ export type DesktopAgentExecutableBindingResult =
 
 type DesktopBridgeCommand =
   | "openLogsDir"
+  | "openNotificationSettings"
   | "openDataDir"
   | "openBrowserExtensionDir"
   | "restartRuntime"
@@ -207,9 +210,10 @@ interface LazyMindDesktopBridge {
   platform?: string;
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
+  openNotificationSettings?: () => Promise<void> | void;
   openBrowserExtensionDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
-  agentIntegrationStatuses?: () => Promise<unknown> | unknown;
+  agentIntegrationStatuses?: (refreshInstallations?: boolean) => Promise<unknown> | unknown;
   agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
   executorIntegrationPolicies?: () => Promise<unknown> | unknown;
   executorIntegrationAction?: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<unknown> | unknown;
@@ -298,6 +302,10 @@ export function openLogsDir(): Promise<DesktopBridgeResult> {
 
 export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
+}
+
+export function openNotificationSettings(): Promise<DesktopBridgeResult> {
+  return callDesktopBridge("openNotificationSettings");
 }
 
 export async function openCloudRegister(url?: string): Promise<DesktopBridgeResult> {
@@ -452,19 +460,19 @@ async function syncCurrentLocalAssistantSession() {
   );
 }
 
-export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegrationStatusesResult> {
+export async function agentIntegrationStatuses(refreshInstallations = false): Promise<DesktopAgentIntegrationStatusesResult> {
   const bridge = getDesktopBridge();
   try {
     await syncCurrentLocalAssistantSession();
     if (bridge?.agentIntegrationStatuses) {
-      const payload = await bridge.agentIntegrationStatuses() as {
+      const payload = await bridge.agentIntegrationStatuses(refreshInstallations) as {
         agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
       };
       return { ok: true, data: payload?.agents || {} };
     }
     const payload = await assistantBridgeJSON<{
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
-    }>("/agents", undefined, AGENT_STATUS_TIMEOUT_MS);
+    }>(refreshInstallations ? "/agents?refresh_installations=true" : "/agents", undefined, AGENT_STATUS_TIMEOUT_MS);
     return { ok: true, data: payload.agents || {} };
   } catch (error) {
     return localBridgeFailure(error);

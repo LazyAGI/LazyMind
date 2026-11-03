@@ -63,6 +63,8 @@ const (
 )
 
 type ChatChunkResponse struct {
+	SteeringReplay           []steeringReplayItem         `json:"steering_replay,omitempty"`
+	SteeringApplied          []steeringApplied            `json:"steering_applied,omitempty"`
 	KnowledgeOperationResult map[string]any               `json:"knowledge_operation_result,omitempty"`
 	ModelOutput              *ChatModelOutput             `json:"model_output,omitempty"`
 	ModelSwitches            []ModelSwitchRecord          `json:"model_switches,omitempty"`
@@ -77,7 +79,7 @@ type ChatChunkResponse struct {
 	PromptQuestions          []string                     `json:"prompt_questions,omitempty"`
 	ReasoningContent         string                       `json:"reasoning_content,omitempty"`
 	ThinkingDurationS        int64                        `json:"thinking_duration_s,omitempty"`
-	ToolCallTurns            int                          `json:"tool_call_turns,omitempty"`
+	ToolCallTurns            *int                         `json:"tool_call_turns,omitempty"`
 	ExternalEventSequence    int64                        `json:"external_event_sequence,omitempty"`
 	Execution                *externalExecutionProjection `json:"execution,omitempty"`
 	ModelRoute               *chatModelRoute              `json:"model_route,omitempty"`

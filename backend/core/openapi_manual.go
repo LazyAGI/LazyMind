@@ -4,6 +4,12 @@ import "lazymind/core/chat"
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range academicWorkflowSchemas() {
+		schemas[name] = schema
+	}
+	for path, operation := range academicWorkflowPaths() {
+		paths[path] = operation
+	}
 	for name, schema := range documentDirectorySchemas() {
 		schemas[name] = schema
 	}
@@ -256,6 +262,9 @@ func manualSchemas() map[string]any {
 			prop("reason", strSchema()),
 			prop("target_reached", boolSchema()),
 			prop("stop_reason", strSchema()),
+			prop("initial_state", refSchema("PreferenceOrganizerState")),
+			prop("final_state", refSchema("PreferenceOrganizerState")),
+			prop("observed_state", refSchema("PreferenceOrganizerState")),
 		),
 		"PreferenceOrganizerState": objReq(
 			[]string{"stored_items", "full_projection_chars", "projected_items", "projected_chars", "projection_truncated", "etag"},
@@ -265,6 +274,8 @@ func manualSchemas() map[string]any {
 			prop("projected_chars", intSchema()),
 			prop("projection_truncated", boolSchema()),
 			prop("etag", strSchema()),
+			prop("max_chars", intSchema()),
+			prop("updated_at", dateTimeSchema()),
 		),
 		"PreferenceOrganizerPass": objReq(
 			[]string{"pass_number", "plan_hash", "before", "receipts", "changes", "operation_count", "outcome"},
@@ -282,6 +293,9 @@ func manualSchemas() map[string]any {
 			prop("task_id", strSchema()),
 			prop("status", enumStringSchema("pending", "running", "done", "failed", "skipped")),
 			prop("waiting_reason", enumStringSchema("memory_review", "resources")),
+			prop("current_state", refSchema("PreferenceOrganizerState")),
+			prop("result_validity", enumStringSchema("current", "stale", "unknown")),
+			prop("invalidation_reason", enumStringSchema("state_unavailable", "missing_snapshot", "preference_changed", "budget_changed")),
 			prop("result", refSchema("PreferenceOrganizerResult")),
 			prop("error_code", strSchema()),
 			prop("error_message", strSchema()),
@@ -348,6 +362,8 @@ func manualSchemas() map[string]any {
 			prop("state", strSchema()),
 			prop("is_empty", boolSchema()),
 			prop("document_count", int64Schema()),
+			prop("paper_count", int64Schema()),
+			prop("pdf_attachment_count", int64Schema()),
 			prop("document_size", int64Schema()),
 			prop("segment_count", int64Schema()),
 			prop("token_count", int64Schema()),
@@ -515,7 +531,7 @@ func manualSchemas() map[string]any {
 			prop("upload_file_id", strSchema()),
 			prop("content_hash", strSchema()),
 		),
-		"CreateTaskRequest": objReq([]string{"items"}, prop("parent", strSchema()), prop("items", array(refSchema("CreateTaskItem")))),
+		"CreateTaskRequest": objReq([]string{"items"}, prop("paper_import", objReq([]string{"idempotency_key", "library_paper_id", "title"}, prop("idempotency_key", strSchema()), prop("library_paper_id", strSchema()), prop("title", strSchema()), prop("paper", obj()))), prop("parent", strSchema()), prop("items", array(refSchema("CreateTaskItem")))),
 		"TaskResponse": obj(
 			prop("name", strSchema()),
 			prop("task_id", strSchema()),
@@ -540,7 +556,7 @@ func manualSchemas() map[string]any {
 			prop("convert_status", strSchema()),
 			prop("convert_error", strSchema()),
 		),
-		"CreateTasksResponse":      obj(prop("tasks", array(refSchema("TaskResponse")))),
+		"CreateTasksResponse":      obj(prop("tasks", array(refSchema("TaskResponse"))), prop("paper_import_batch_id", strSchema())),
 		"StartTaskRequest":         objReq([]string{"task_ids"}, prop("task_ids", array(strSchema())), prop("start_mode", strSchema())),
 		"StartTaskResult":          obj(prop("task_id", strSchema()), prop("document_id", strSchema()), prop("display_name", strSchema()), prop("status", strSchema()), prop("submit_status", strSchema()), prop("message", strSchema())),
 		"StartTasksResponse":       obj(prop("tasks", array(refSchema("StartTaskResult"))), prop("requested_count", intSchema()), prop("started_count", intSchema()), prop("failed_count", intSchema())),
@@ -689,6 +705,51 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusRequest":  objReq([]string{"status"}, prop("status", intSchema())),
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
+		"ConversationFollowUp": objReq(
+			[]string{"id", "conversation_id", "content", "text", "mode", "status", "sort_order", "revision", "created_at", "updated_at"},
+			prop("id", strSchema()), prop("conversation_id", strSchema()), prop("content", obj()), prop("text", strSchema()),
+			prop("mode", enumStringSchema("queued", "steer")),
+			prop("status", enumStringSchema("pending", "steering", "accepted", "failed", "dispatching")),
+			prop("sort_order", int64Schema()), prop("revision", int64Schema()),
+			prop("target_run_id", strSchema()), prop("target_history_id", strSchema()), prop("steer_id", strSchema()),
+			prop("error_code", strSchema()), prop("error_message", strSchema()), prop("accepted_at", dateTimeSchema()),
+			prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
+		),
+		"ConversationFollowUpCreateRequest": objReq(
+			[]string{"text", "content", "idempotency_key"},
+			prop("text", strSchema()), prop("content", obj()), prop("idempotency_key", strSchema()),
+		),
+		"ConversationFollowUpUpdateRequest": objReq(
+			[]string{"text", "content"}, prop("text", strSchema()), prop("content", obj()),
+		),
+		"ConversationFollowUpReorderRequest": objReq(
+			[]string{"ordered_ids"}, prop("ordered_ids", array(strSchema())),
+		),
+		"ConversationFollowUpSteerRequest": obj(prop("expected_run_id", strSchema())),
+		"ConversationFollowUpCompleteRequest": objReq(
+			[]string{"success"}, prop("success", boolSchema()), prop("requeue", boolSchema()), prop("error_code", strSchema()), prop("error_message", strSchema()),
+		),
+		"ConversationFollowUpResponse": objReq(
+			[]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("ConversationFollowUp")),
+		),
+		"ConversationFollowUpClaimData": obj(prop("item", nullableSchema(refSchema("ConversationFollowUp")))),
+		"ConversationFollowUpClaimResponse": objReq(
+			[]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("ConversationFollowUpClaimData")),
+		),
+		"ConversationFollowUpListData": objReq(
+			[]string{"items", "active_run_id", "supports_steering"},
+			prop("items", array(refSchema("ConversationFollowUp"))), prop("active_run_id", strSchema()), prop("supports_steering", boolSchema()),
+		),
+		"ConversationFollowUpListResponse": objReq(
+			[]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("ConversationFollowUpListData")),
+		),
+		"ConversationFollowUpSteerData": objReq(
+			[]string{"item", "delivery_mode"}, prop("item", refSchema("ConversationFollowUp")),
+			prop("delivery_mode", enumStringSchema("queued", "steer")), prop("reason", strSchema()),
+		),
+		"ConversationFollowUpSteerResponse": objReq(
+			[]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("ConversationFollowUpSteerData")),
+		),
 		"ConversationRunningStatusItem": objReq([]string{"conversation_id", "status"},
 			prop("conversation_id", strSchema()), prop("status", enumStringSchema("running", "idle", "unknown")),
 			prop("terminal_status", enumStringSchema("completed", "failed", "canceled")),
@@ -1013,6 +1074,19 @@ func manualPaths() map[string]any {
 		"/conversations:stopChatGeneration":                  map[string]any{"post": op("Stop conversation generation", nil, jsonBody(refSchema("ConversationStopRequest"), true), response(200, "Stopped successfully", refSchema("EmptyObject")))},
 		"/conversations/{conversation_id}:toolLimitDecision": map[string]any{"post": op("Choose whether to continue after the tool-round limit", nil, nil, response(200, "Decision forwarded", refSchema("EmptyObject")))},
 		"/conversations/{conversation_id}:status":            map[string]any{"get": op("Get conversation status", nil, nil, response(200, "Conversation status", refSchema("ConversationChatStatusResponse")))},
+		"/conversations/{conversation_id}/follow-ups": map[string]any{
+			"get":  op("List queued and steering messages", nil, nil, response(200, "Follow-up queue", refSchema("ConversationFollowUpListResponse"))),
+			"post": op("Queue a message while a task is running", nil, jsonBody(refSchema("ConversationFollowUpCreateRequest"), true), response(200, "Queued message", refSchema("ConversationFollowUpResponse"))),
+		},
+		"/conversations/{conversation_id}/follow-ups/{follow_up_id}": map[string]any{
+			"patch":  op("Edit a pending queued message", nil, jsonBody(refSchema("ConversationFollowUpUpdateRequest"), true), response(200, "Updated message", refSchema("ConversationFollowUpResponse"))),
+			"delete": op("Delete a pending queued message", nil, nil, response(200, "Deleted message", refSchema("CoreEmptyResponse"))),
+		},
+		"/conversations/{conversation_id}/follow-ups:reorder":                 map[string]any{"post": op("Reorder all pending queued messages", nil, jsonBody(refSchema("ConversationFollowUpReorderRequest"), true), response(200, "Updated order", refSchema("CoreEmptyResponse")))},
+		"/conversations/{conversation_id}/follow-ups:claim-next":              map[string]any{"post": op("Atomically claim the next queued message", nil, nil, response(200, "Claimed message", refSchema("ConversationFollowUpClaimResponse")))},
+		"/conversations/{conversation_id}/follow-ups/{follow_up_id}:steer":    map[string]any{"post": op("Submit pending input as guidance for the active run", nil, jsonBody(refSchema("ConversationFollowUpSteerRequest"), false), response(200, "Steering delivery result", refSchema("ConversationFollowUpSteerResponse")))},
+		"/conversations/{conversation_id}/follow-ups/{follow_up_id}:complete": map[string]any{"post": op("Complete an ordinary queued-message dispatch", nil, jsonBody(refSchema("ConversationFollowUpCompleteRequest"), true), response(200, "Dispatch recorded", refSchema("CoreEmptyResponse")))},
+		"/conversations/{conversation_id}/follow-ups/{follow_up_id}:retry":    map[string]any{"post": op("Retry a failed queued or steering message", nil, nil, response(200, "Retry pending", refSchema("ConversationFollowUpResponse")))},
 		"/conversations/{name}": map[string]any{
 			"get":    op("Get conversation", nil, nil, response(200, "Conversationtext", refSchema("ConversationDetailItem"))),
 			"delete": op("Delete conversation", nil, nil, response(200, "Deleted successfully", refSchema("EmptyObject"))),

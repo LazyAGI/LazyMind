@@ -138,6 +138,7 @@ export interface ProviderConnectionGroup {
   source: string;
   baseUrl: string;
   apiKeyConfigured: boolean;
+  credentialUnavailable?: boolean;
   verified: boolean;
   models: ProviderModel[];
   modelCount?: number;
@@ -194,6 +195,7 @@ function createConnectionGroup(
     source: provider.source,
     baseUrl: overrides.baseUrl || provider.baseUrl,
     apiKeyConfigured: overrides.apiKeyConfigured ?? false,
+    credentialUnavailable: overrides.credentialUnavailable ?? false,
     verified: overrides.verified ?? false,
     models: overrides.models || provider.models.map((model) => ({ ...model })),
     modelCount: overrides.modelCount ?? overrides.models?.length ?? provider.models.length,
@@ -353,6 +355,7 @@ interface ApiGroup {
   name: string;
   base_url?: string;
   has_api_key?: boolean;
+  credential_status?: string;
   model_count?: number;
   is_verified?: boolean;
   user_model_provider_id: string;
@@ -448,8 +451,11 @@ function mapApiGroup(
     apiKeyConfigured: isApiGroup
       ? Boolean((group as ApiGroup).has_api_key)
       : (group as ProviderConnectionGroup).apiKeyConfigured,
+    credentialUnavailable: isApiGroup
+      ? (group as ApiGroup).credential_status === "unavailable"
+      : (group as ProviderConnectionGroup).credentialUnavailable,
     verified: isApiGroup
-      ? Boolean((group as ApiGroup).is_verified)
+      ? (group as ApiGroup).credential_status !== "unavailable" && Boolean((group as ApiGroup).is_verified)
       : (group as ProviderConnectionGroup).verified,
     models: sortCustomModelsFirst(models.map((model) => ({
       id: model.id,
@@ -521,7 +527,7 @@ export default function ModelProviderPage({
   const [modelsError, setModelsError] = useState<Record<string, string>>({});
   const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
-  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string; remoteModels?: RemoteGroupModel[] } | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string; remoteModels?: RemoteGroupModel[]; discoveryError?: string } | null>(null);
   const keyDiscoveryRequests = useRef(new Set<string>());
   const [discoveringGroupIds, setDiscoveringGroupIds] = useState<Record<string, boolean>>({});
   const [contextWindowMode, setContextWindowMode] = useState<"auto" | "manual">(
@@ -1085,7 +1091,7 @@ export default function ModelProviderPage({
       if (isVerified) {
         setVerificationEvent(current => ({ providerId, account: verificationAccount, sequence: (current?.sequence || 0) + 1 }));
         await loadModelProviders();
-        if (isCurrent()) message.success(t("modelProvider.message.groupVerified"));
+        if (isCurrent()) message.success(t(checkResult?.reason === "credentials_recognized" ? "modelProvider.workspace.arkCredentialsRecognized" : "modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
         return true;
       }
@@ -1386,8 +1392,7 @@ export default function ModelProviderPage({
       }
     } catch (error) {
       if (isCurrent()) {
-        if (discovered) openCatalog();
-        message.error(getProviderConnectionFailureMessage(error, t));
+        setCatalogTarget({ providerId: provider.id, groupId, remoteModels: discovered, discoveryError: getProviderConnectionFailureMessage(error, t) });
       }
     } finally {
       if (added) void onConfigurationChanged?.();
@@ -1549,7 +1554,6 @@ export default function ModelProviderPage({
     groupId: string,
     model: ProviderModel,
     notify = true,
-    confirmIndexedDowngrade = false,
   ) => {
     const operationKey = `${providerId}:${groupId}:${model.id}`;
     const existing = modelDeleteRequests.current.get(operationKey);
@@ -1562,9 +1566,7 @@ export default function ModelProviderPage({
             groupId,
             modelId: model.id,
           },
-          model.capability === "EMBEDDING" && confirmIndexedDowngrade
-            ? { params: { confirm_indexed_downgrade: true } }
-            : undefined,
+          { silentError: true } as never,
         );
         const key = `${providerId}:${groupId}`;
         groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
@@ -1596,19 +1598,13 @@ export default function ModelProviderPage({
       } catch (error) {
         const response = (error as { response?: { status?: number; data?: { detail?: unknown; message?: unknown } } })?.response;
         const detail = String(response?.data?.detail || response?.data?.message || "");
-        const needsEmbeddingConfirmation = model.capability === "EMBEDDING" &&
-          response?.status === 409 && detail.includes("requires confirmation to downgrade");
-        if (needsEmbeddingConfirmation) {
-          Modal.confirm({
-            centered: true,
-            title: t("modelProvider.confirmDeleteModel", { name: model.name }),
-            content: t("modelProvider.confirmDeleteEmbeddingDesc"),
-            okText: t("common.delete"),
-            cancelText: t("common.cancel"),
-            okButtonProps: { danger: true },
-            onOk: () => deleteCustomModel(providerId, groupId, model, notify, true),
-          });
+        const embeddingBlocked = response?.status === 409 &&
+          (detail.includes("requires confirmation to downgrade") || detail.includes("embedding model is in use"));
+        if (embeddingBlocked) {
+          if (notify) message.warning({ key: "embedding-in-use", content: t("modelProvider.embeddingInUse") });
+          else throw new Error(t("modelProvider.embeddingInUse"));
         } else if (notify) message.error(getLocalizedErrorMessage(error));
+
         return false;
       } finally {
         modelDeleteRequests.current.delete(operationKey);
@@ -1701,6 +1697,7 @@ export default function ModelProviderPage({
         groupId={catalogGroup.id}
         models={catalogGroup.models}
         initialRemoteModels={catalogTarget?.remoteModels}
+        initialDiscoveryError={catalogTarget?.discoveryError}
         modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`] || discoveringGroupIds[`${catalogProvider.id}:${catalogGroup.id}`]}
         requiresVerification={!catalogGroup.verified && !canDiscoverWithoutApiKey(catalogProvider, catalogGroup)}
         onCheckConnection={() => {

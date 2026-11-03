@@ -12,7 +12,8 @@ def apply_host_extensions(contribution, context, config, providers=None):
         return contribution
     if providers is None:
         from .product_project import contribute
-        providers = {'product-project-v1': contribute}
+        from .academic_paper_chat import contribute as academic_paper_chat
+        providers = {'product-project-v1': contribute, 'academic-paper-chat-v1': academic_paper_chat}
     for name in dict.fromkeys(names):
         provider = providers.get(name)
         if provider is None:

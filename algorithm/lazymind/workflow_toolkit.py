@@ -121,7 +121,9 @@ def load_workflow_package_tools(
             str(package_root / path) if package_root is not None
             else f'{workflow_id}@{revision_id}/{path}'
         )
-        exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
+        # A package chooses its own annotation semantics. Inheriting this loader's
+        # future annotations breaks typed tool schemas defined inside the package.
+        exec(compile(source.decode('utf-8'), module.__file__, 'exec', dont_inherit=True), module.__dict__)
         for name in tuple(remaining):
             if allowed is not None and name not in allowed[path]:
                 continue
