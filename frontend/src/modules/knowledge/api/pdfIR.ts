@@ -36,6 +36,12 @@ export function usePdfIR(target?: PdfIRTarget) {
   const key = dataset && document ? `${dataset}/${document}` : '';
   const [result, setResult] = useState<{key: string; state: PdfIRState}>({key:'',state:initial});
   const [revision, setRevision] = useState(0);
+  const currentKey = useRef(key);
+  currentKey.current = key;
+  // External preparation may create artifacts after terminal observation stopped.
+  const refresh = useCallback(() => {
+    if (key && currentKey.current === key) setRevision(value => value + 1);
+  }, [key]);
   const [starting, setStarting] = useState(false);
   const pollRequest = useRef<AbortController>();
   const pollTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -78,5 +84,5 @@ export function usePdfIR(target?: PdfIRTarget) {
       if (startRequest.current === controller) startRequest.current = undefined;
     }
   }, [key,url]);
-  return {state: result.key === key ? result.state : initial, starting, start};
+  return {state: result.key === key ? result.state : initial, starting, start, refresh};
 }

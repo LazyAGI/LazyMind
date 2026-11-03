@@ -60,3 +60,20 @@ describe('standalone PDF IR',()=>{
  });
 
 });
+
+it('ignores an external refresh callback captured for a previous document', async () => {
+ mocks.get.mockReset().mockResolvedValue({data:{data:{status:'not_requested'}}});
+ mocks.post.mockReset();
+ const view=renderHook(({document})=>usePdfIR({dataset:'d',document}),{initialProps:{document:'old'}});
+ await act(async()=>{});
+ const refreshOld=view.result.current.refresh;
+ view.rerender({document:'new'});
+ await act(async()=>{});
+ const count=mocks.get.mock.calls.length;
+ await act(async()=>refreshOld());
+ expect(mocks.get).toHaveBeenCalledTimes(count);
+ await act(async()=>view.result.current.refresh());
+ expect(mocks.get).toHaveBeenCalledTimes(count+1);
+ expect(mocks.post).not.toHaveBeenCalled();
+ view.unmount();
+});

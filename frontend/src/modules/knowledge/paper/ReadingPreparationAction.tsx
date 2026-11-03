@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Checkbox, Modal, Progress, Space, Typography } from 'antd';
 import { getLocalizedErrorMessage } from '@/components/request';
 import type { PdfIRTarget } from '../api/pdfIR';
 import { getReadingPreparation, prepareReading, type ReadingPreparation, type ReadingScope } from '../api/readingPreparation';
 const labels = { not_requested: '尚未准备', pending: '等待准备', running: '正在准备', succeeded: '准备完成', failed: '准备失败', canceled: '已取消' };
-export default function ReadingPreparationAction({ target }: { target: PdfIRTarget }) {
+export default function ReadingPreparationAction({ target, onPrepared }: { target: PdfIRTarget; onPrepared?: () => void }) {
+  const targetKey = `${target.dataset}/${target.document}`;
+  const currentTarget = useRef(targetKey);
+  currentTarget.current = targetKey;
+  const preparedCallback = useRef(onPrepared);
+  preparedCallback.current = onPrepared;
+  const activeJob = useRef<string>();
+  const notifiedJobs = useRef(new Set<string>());
   const [open, setOpen] = useState(false);
   const [scopes, setScopes] = useState<ReadingScope[]>(['pdf_parse']);
   const [state, setState] = useState<ReadingPreparation>();
@@ -16,7 +23,13 @@ export default function ReadingPreparationAction({ target }: { target: PdfIRTarg
     let stale = false; let timer: ReturnType<typeof setTimeout>;
     setState(undefined); setError('');
     const poll = async () => {
-      try { const result = await getReadingPreparation(target.dataset, target.document); if (stale) return; setState(result);
+      try { const result = await getReadingPreparation(target.dataset, target.document); if (stale || currentTarget.current !== targetKey) return; setState(result);
+        const jobKey = result.job_id ? `${targetKey}/${result.job_id}` : undefined;
+        if (jobKey && (result.status === 'pending' || result.status === 'running')) activeJob.current = jobKey;
+        if (jobKey && result.status === 'succeeded' && activeJob.current === jobKey && !notifiedJobs.current.has(jobKey)) {
+          notifiedJobs.current.add(jobKey);
+          preparedCallback.current?.();
+        }
         if (result.status === 'pending' || result.status === 'running') timer = setTimeout(poll, 1500);
       } catch (err) { if (!stale) setError(getLocalizedErrorMessage(err)); }
     };
@@ -26,7 +39,12 @@ export default function ReadingPreparationAction({ target }: { target: PdfIRTarg
   return <><button type="button" onClick={() => setOpen(true)}>准备当前论文</button>
     <Modal title="准备当前论文" open={open} onCancel={() => { if (!submitting) setOpen(false); }} closable={!submitting} maskClosable={!submitting} keyboard={!submitting} cancelButtonProps={{ disabled: submitting }} okText="开始准备" cancelText="关闭" confirmLoading={submitting} okButtonProps={{ disabled: !state || !scopes.length || running || target.canWrite === false }} onOk={async () => {
       setSubmitting(true); setError('');
-      try { setState(await prepareReading(target.dataset, target.document, scopes)); setRevision(v => v + 1); }
+      try {
+        const result = await prepareReading(target.dataset, target.document, scopes);
+        if (currentTarget.current !== targetKey) return;
+        if (result.job_id) activeJob.current = `${targetKey}/${result.job_id}`;
+        setState(result); setRevision(v => v + 1);
+      }
       catch (err) { setError(getLocalizedErrorMessage(err)); } finally { setSubmitting(false); }
     }}>
       <Typography.Paragraph>仅准备当前论文，已有结果会复用。解析和研读可能产生费用，禁用的能力无法生成；每篇研读总数沿用个人预设限额。</Typography.Paragraph>
