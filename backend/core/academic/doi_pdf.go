@@ -39,12 +39,23 @@ func newPaperPDFClient() *http.Client {
 // All sources share one wall-clock deadline. The caller retains metadata
 // when optional PDF lookup fails; manual links never count as PDF candidates.
 func lookupDOIPDF(ctx context.Context, doi string) paperPDFLookup {
-	client, _ := ctx.Value(paperPDFClientKey{}).(*http.Client)
-	if client == nil {
-		client = newPaperPDFClient()
-		defer client.CloseIdleConnections()
-	}
+	client, release := paperPDFClient(ctx)
+	defer release()
 	return lookupDOIPDFSources(ctx, doi, sciHubSources(), client)
+}
+
+func paperPDFClient(ctx context.Context) (*http.Client, func()) {
+	if client, _ := ctx.Value(paperPDFClientKey{}).(*http.Client); client != nil {
+		return client, func() {}
+	}
+	client := newPaperPDFClient()
+	return client, client.CloseIdleConnections
+}
+
+func lookupOpenDOIPDF(ctx context.Context, doi string) paperPDFLookup {
+	client, release := paperPDFClient(ctx)
+	defer release()
+	return lookupDOIPDFSources(ctx, doi, nil, client)
 }
 
 // Keep a small configurable shortlist. A reachable paper page is not

@@ -614,6 +614,32 @@ func resolveImportCandidate(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	if candidate.URL != "" {
 		return nil
 	}
+	if b.EntryType == "conversation_sources" {
+		var work orm.AcademicWork
+		if err := store.DB().WithContext(ctx).Where("id=?", item.AcademicWorkID).Take(&work).Error; err != nil {
+			return err
+		}
+		if work.DOINormalized == "" {
+			return errors.New("DOI metadata is missing")
+		}
+		if err := sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"stage": "resolve"}); err != nil {
+			return err
+		}
+		found := lookupOpenDOIPDF(ctx, work.DOINormalized)
+		if found.Candidate == nil {
+			if found.Err != nil {
+				return found.Err
+			}
+			if len(found.Warnings) > 0 {
+				return fmt.Errorf("开放全文探测失败: %s", strings.Join(found.Warnings, "; "))
+			}
+			return errFulltextUnavailable
+		}
+		ref := paperRef(work)
+		ref.SourceProvider, ref.SourceVersion, ref.PDFURL = found.Candidate.SourceProvider, found.Candidate.Version, found.Candidate.URL
+		item.SelectedCandidateJSON = marshal(savedImportCandidate{FulltextCandidate: *found.Candidate, VerifiedPaper: &ref})
+		return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"selected_candidate_json": item.SelectedCandidateJSON, "stage": "acquire"})
+	}
 	var ids []string
 	if json.Unmarshal(item.ReferenceIDsJSON, &ids) != nil || len(ids) == 0 {
 		return errors.New("reference metadata is missing")

@@ -300,7 +300,7 @@ func searchExternalPage(ctx context.Context, source string, request paperSearchR
 			id := officialArxivID(item.URL)
 			doi := NormalizeDOI(item.URL)
 			if id != "" || doiPattern.MatchString(doi) {
-				work, e := lookupPaperLink(ctx, firstNonEmpty(id, doi))
+				work, e := lookupPaperLinkMetadata(ctx, firstNonEmpty(id, doi))
 				if e == nil {
 					papers = append(papers, discoveredPaper{Work: work, PaperURL: item.URL})
 					continue

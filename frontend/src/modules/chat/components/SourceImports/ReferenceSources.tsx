@@ -18,7 +18,10 @@ function groupPaperSources(sources: ChatSource[], inspections: InspectedSource[]
     // source intact so citation IDs, versions and evidence remain available.
     const key = paper?.eligible && paper.paper_key ? `paper:${paper.paper_key}` : `source:${index}`;
     const group = groups.get(key);
-    if (group) group.sources.push(source);
+    if (group) {
+      group.sources.push(source);
+      if (group.paper?.needs_pdf_lookup && !paper?.needs_pdf_lookup) group.paper = paper;
+    }
     else groups.set(key, { key, sources: [source], paper });
   });
   return [...groups.values()];
@@ -82,9 +85,11 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const groups = groupPaperSources(sources, imports?.inspections);
+  const priority = (paper?: InspectedSource) => paper?.eligible && paper.paper_key ? (paper.needs_pdf_lookup ? 1 : 2) : 0;
+  const orderedGroups = [...groups].sort((a, b) => priority(b.paper) - priority(a.paper));
   const currentPage = Math.min(page, Math.max(1, Math.ceil(groups.length / 20)));
   useEffect(() => { setPage(currentPage); }, [currentPage]);
-  const rows = groups.slice((currentPage - 1) * 20, currentPage * 20);
+  const rows = orderedGroups.slice((currentPage - 1) * 20, currentPage * 20);
   const available = uniquePapers(groups.flatMap(group => group.paper || []));
   const selectable = Boolean(imports && available.length);
   const chosen = uniquePapers(groups.flatMap(group => group.paper && keys.has(group.paper.paper_key || "") ? [group.paper] : []));
@@ -131,6 +136,7 @@ export function ChatSourcePanel({ sources, onClose, embedded = false }: { source
                 <span className="chat-source-item-copy">
                   <span className="chat-source-item-heading">{getSourceSubtitle(source) || t("chat.references")}</span>
                   <strong className="chat-source-item-title">{getSourceLabel(source)}</strong>
+                  {paper?.needs_pdf_lookup && <span className="source-group-toggle">{tr("lookupOnImport")}</span>}
                   {getSourceEvidenceText(source) && <span className="chat-source-item-content">{getSourceEvidenceText(source)}</span>}
                   {multiple && <span className="source-group-toggle">{isExpanded ? tr("collapse") : tr("expand")} {group.sources.length}{tr("sourcesSuffix")}</span>}
                 </span>

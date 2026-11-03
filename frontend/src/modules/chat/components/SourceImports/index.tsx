@@ -1,7 +1,7 @@
 import { tr } from "./translations";
 import { knowledgeCreationDefaults, knowledgeCreationMetadata } from "@/modules/knowledge/utils/creation";
 import { sourceContextKey, useSourceImportState } from "./state";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Alert, Button, Form, Input, Modal, Popover, Radio, Select, Space, message, theme } from "antd";
 import { CloseOutlined, DatabaseOutlined, PlusOutlined } from "@ant-design/icons";
 import axios from "axios";
@@ -140,8 +140,9 @@ export function SourceImportActions({ source }: { source: ChatSource }) {
   const matching = ctx?.items.filter(item => item.paper_key === inspected?.paper_key) || [];
   const latest = matching[matching.length - 1];
   return <>
-    {latest && <small className="source-import-current-state">{latest.target_name} · {importStatusLabel(latest)}{latest.state_unavailable && tr("unavailableSuffix")}<Button type="link" size="small" onMouseDown={event => event.preventDefault()} onClick={() => ctx?.setOpened(true)}>{tr("history")}</Button></small>}
-    <div className="source-import-actions"><Button onMouseDown={event => event.preventDefault()} onClick={() => openSource(source)}>{tr("openOriginal")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={event => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
+    {latest && <small className="source-import-current-state">{latest.target_name} · {importStatusLabel(latest)}{latest.state_unavailable && tr("unavailableSuffix")}<Button type="link" size="small" onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.setOpened(true)}>{tr("history")}</Button></small>}
+    {inspected?.needs_pdf_lookup && <small className="source-import-current-state">{tr("lookupOnImport")}</small>}
+    <div className="source-import-actions"><Button onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => openSource(source)}>{tr("openOriginal")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
   </>;
 }
 

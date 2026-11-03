@@ -318,3 +318,57 @@ func TestDOIPreviewDistinguishesFulltextFailureFromAbsence(t *testing.T) {
 		})
 	}
 }
+
+func TestConversationDOIImportUsesOpenPDFLookup(t *testing.T) {
+	db, batch, item, _ := importPipelineFixture(t)
+	prepareReferenceLibrary(t, db, batch.TargetDatasetID)
+	batch.EntryType = "conversation_sources"
+	if err := db.Save(&batch).Error; err != nil {
+		t.Fatal(err)
+	}
+	source, err := inspectRecord(t.Context(), db, sourceRecord{URL: "https://doi.org/10.1234/cited", Title: "Cited paper"})
+	if err != nil || !source.Eligible || !source.NeedsPDFLookup {
+		t.Fatalf("inspect: %+v %v", source, err)
+	}
+	work, err := sourceWork(t.Context(), db, source)
+	if err != nil || work.DOINormalized != "10.1234/cited" {
+		t.Fatalf("work: %+v %v", work, err)
+	}
+	item.AcademicWorkID, item.SelectedCandidateJSON = work.ID, marshal(savedImportCandidate{})
+	if err = db.Save(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	const pdfURL = "https://publisher.example/cited.pdf"
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		switch r.URL.Host {
+		case "api.openalex.org":
+			return 200, `{"results":[]}`
+		case "api.unpaywall.org":
+			return 200, `{"best_oa_location":{"url_for_pdf":"https://publisher.example/cited.pdf","version":"publishedVersion"}}`
+		case "publisher.example":
+			return 206, "%PDF-1.7 verified"
+		default:
+			t.Errorf("unexpected lookup host: %s", r.URL.Host)
+			return 404, ""
+		}
+	})
+	svc, err := doc.NewOriginalService(doc.OriginalServiceDeps{DB: db, HTTPTransport: sourceTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != pdfURL {
+			return nil, fmt.Errorf("unexpected download: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, ContentLength: -1, Header: http.Header{"Content-Type": {"application/pdf"}}, Body: io.NopCloser(strings.NewReader("%PDF-1.7\nPDF fixture\n%%EOF")), Request: r}, nil
+	}), SubmitProcessing: func(context.Context, doc.DatasetCatalogCaller, string, string) (doc.StartTaskResult, error) {
+		return doc.StartTaskResult{Status: "STARTED", SubmitStatus: "ACCEPTED"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), paperPDFClientKey{}, client)
+	if err = processImportItem(ctx, asyncjob.Job{ID: batch.AsyncJobID, AttemptCount: 1}, batch, item, sourceImportCaller(batch), svc); err != nil {
+		t.Fatal(err)
+	}
+	var saved orm.PaperImportItem
+	if err = db.Where("id=?", item.ID).Take(&saved).Error; err != nil || saved.Status != "succeeded" || saved.DocumentID == "" {
+		t.Fatalf("import receipt: %+v %v", saved, err)
+	}
+}

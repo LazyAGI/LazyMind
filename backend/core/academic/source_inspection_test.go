@@ -62,7 +62,7 @@ func TestInspectionIsAuthorizedReadOnlyAndOffline(t *testing.T) {
 	if e := db.Create(&conv).Error; e != nil {
 		t.Fatal(e)
 	}
-	h := orm.ChatHistory{ID: "answer", ConversationID: "chat", RetrievalResult: json.RawMessage(`{"sources":{"1":{"url":"https://arxiv.org/abs/2210.03629","title":"ReAct"},"2":{"url":"https://arxiv.org/pdf/2210.03629v2.pdf"},"3":{"url":"https://example.com/paper.pdf","title":"ReAct"},"4":{"url":"https://doi.org/10.1234/example"}}}`)}
+	h := orm.ChatHistory{ID: "answer", ConversationID: "chat", RetrievalResult: json.RawMessage(`{"sources":{"1":{"url":"https://arxiv.org/abs/2210.03629","title":"ReAct"},"2":{"url":"https://arxiv.org/pdf/2210.03629v2.pdf"},"3":{"url":"https://example.com/paper.pdf","title":"ReAct"},"4":{"url":"https://doi.org/10.1234/example"},"5":{"url":"https://doi.org/10.48550/arXiv.2210.03629v3"}}}`)}
 	if e := db.Create(&h).Error; e != nil {
 		t.Fatal(e)
 	}
@@ -71,8 +71,11 @@ func TestInspectionIsAuthorizedReadOnlyAndOffline(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(rows) != 4 || !rows[0].Eligible || rows[0].PaperKey != rows[1].PaperKey || rows[2].Eligible || rows[3].Eligible {
+	if len(rows) != 5 || !rows[0].Eligible || rows[0].PaperKey != rows[1].PaperKey || rows[2].Eligible || !rows[3].Eligible || !rows[3].NeedsPDFLookup || rows[3].PaperKey != "doi:10.1234/example" || rows[3].Candidate.URL != "" {
 		t.Fatalf("%+v", rows)
+	}
+	if doi := rows[4]; !doi.Eligible || doi.PaperKey != rows[0].PaperKey || doi.Candidate.URL != "https://arxiv.org/pdf/2210.03629v3" {
+		t.Fatalf("arXiv DOI should match the direct arXiv link and preserve its revision: %+v", doi)
 	}
 	if _, e = inspectSources(ctx, db, "mallory", c, nil); e == nil {
 		t.Fatal("cross-user inspection allowed")
@@ -99,7 +102,7 @@ func TestUntrustedFulltextCannotQualify(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if row.Eligible {
+	if !row.NeedsPDFLookup || row.Candidate.URL != "" {
 		t.Fatal("client supplied trust marker accepted")
 	}
 	input.TrustedFulltext = true

@@ -1,6 +1,7 @@
 package academic
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -141,12 +142,7 @@ func TestFulltextFallsBackToDOIAndReusesDownloadedOriginal(t *testing.T) {
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", parser.URL)
 	previous := http.DefaultTransport
 	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host == "api.openalex.org" {
-			body := marshal(scholarlyWork{ID: "https://openalex.org/W123", DOI: "https://doi.org/10.1234/tools", Title: title,
-				Best:      &scholarlyLocation{PDFURL: "https://primary.example/paper.pdf", Version: "publishedVersion"},
-				Locations: []scholarlyLocation{{PDFURL: "https://backup.example/paper.pdf", Version: "publishedVersion"}}})
-			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
-		}
+
 		if r.URL.Host == strings.TrimPrefix(parser.URL, "http://") {
 			return previous.RoundTrip(r)
 		}
@@ -173,8 +169,15 @@ func TestFulltextFallsBackToDOIAndReusesDownloadedOriginal(t *testing.T) {
 	if err = db.Create(&content).Error; err != nil {
 		t.Fatal(err)
 	}
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[{"doi":"https://doi.org/10.1234/tools","best_oa_location":{"is_oa":true,"pdf_url":"https://primary.example/paper.pdf","version":"publishedVersion"},"locations":[{"is_oa":true,"pdf_url":"https://backup.example/paper.pdf","version":"publishedVersion"}]}]}`
+		}
+		return 404, ""
+	})
+	ctx := context.WithValue(t.Context(), paperPDFClientKey{}, client)
 	source := paperSource{Paper: paper, DatasetID: "papers"}
-	if _, _, _, _, err = readExternalCopies(t.Context(), "u", source, content, originals); err == nil || errors.Is(err, errFulltextUnavailable) {
+	if _, _, _, _, err = readExternalCopies(ctx, "u", source, content, originals); err == nil || errors.Is(err, errFulltextUnavailable) {
 		t.Fatal("parser failure was hidden as missing PDF", err)
 	}
 	if err = db.Where("id=?", content.ID).Take(&content).Error; err != nil {
@@ -190,7 +193,7 @@ func TestFulltextFallsBackToDOIAndReusesDownloadedOriginal(t *testing.T) {
 	}
 	db.Where("id=?", content.ID).Take(&content)
 	parsed = true
-	pages, _, hash, version, err := readExternalCopies(t.Context(), "u", source, content, originals)
+	pages, _, hash, version, err := readExternalCopies(ctx, "u", source, content, originals)
 	if err != nil || len(pages) != 1 || hash == "" || version != "publishedVersion" || downloads != 1 {
 		t.Fatalf("retry did not reuse the downloaded PDF: pages=%d version=%s downloads=%d error=%v", len(pages), version, downloads, err)
 	}

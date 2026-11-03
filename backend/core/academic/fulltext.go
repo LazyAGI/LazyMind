@@ -56,15 +56,17 @@ func doiFulltextCandidates(ctx context.Context, user, doi string) ([]FulltextCan
 	if err != nil {
 		return nil, err
 	}
-	var work scholarlyWork
-	err = openAlexGet(ctx, "works/"+url.PathEscape("https://doi.org/"+NormalizeDOI(doi)), url.Values{}, key, &work)
-	if errors.Is(err, errOpenAlexNotFound) {
-		return nil, nil
+	ctx, cancel := context.WithTimeout(ctx, paperPDFProviderTimeout)
+	defer cancel()
+	client, release := paperPDFClient(ctx)
+	defer release()
+	candidates, result := discoverDOIPDFs(ctx, client, doi, key)
+	for i := range candidates {
+		if candidates[i].SourceType == "open_access_landing" {
+			candidates[i].SourceType = "reference_page"
+		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	return scholarlyPaper(work).Candidates, nil
+	return candidates, result.Err
 }
 
 // Page acquisition uses OriginalService's DNS, IP, redirect and byte validation.

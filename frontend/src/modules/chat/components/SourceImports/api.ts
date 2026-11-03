@@ -1,7 +1,7 @@
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 export interface SourceContext { conversation_id?: string; history_id?: string; task_id?: string; workflow_session_id?: string; work_display_key?: string }
-export interface InspectedSource { source_id: string; url: string; title: string; eligible: boolean; paper_key?: string; reason?: string }
+export interface InspectedSource { source_id: string; url: string; title: string; eligible: boolean; needs_pdf_lookup?: boolean; paper_key?: string; reason?: string }
 export interface ImportItem {
   item_id: string; batch_id: string; title: string; paper_key: string;
   target_dataset_id: string; target_name: string; created_library: boolean;

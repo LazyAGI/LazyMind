@@ -32,6 +32,8 @@ func importFailure(err error, stage string, saved bool) importFailureDetails {
 		status = fmt.Sprint(lookup.StatusCode)
 	}
 	switch {
+	case errors.Is(err, errFulltextUnavailable):
+		d.Code, d.Message, d.Recovery = "open_fulltext_not_found", "未找到可下载的开放全文", "可核对原文来源后重试。"
 	case status == "429":
 		d.Code, d.Message, d.Recovery = "provider_rate_limited", "论文来源请求受限", "请稍后重试。"
 	case status == "401" || status == "403" || strings.Contains(text, "api key"):

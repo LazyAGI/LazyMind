@@ -92,7 +92,9 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 			replyError(w, 422, "SOURCE_NOT_IMPORTABLE", s.Reason)
 			return
 		}
-		unique[s.PaperKey] = s
+		if previous, exists := unique[s.PaperKey]; !exists || previous.NeedsPDFLookup || !s.NeedsPDFLookup {
+			unique[s.PaperKey] = s
+		}
 	}
 	c := sourceCaller(r)
 	target := req.TargetDatasetID
@@ -163,12 +165,15 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 			if e != nil {
 				return e
 			}
-			ref := paperRef(work)
-			ref.SourceProvider, ref.SourceVersion, ref.PDFURL = s.Candidate.SourceProvider, s.Candidate.Version, s.Candidate.URL
-			candidate, _ := json.Marshal(savedImportCandidate{FulltextCandidate: s.Candidate, VerifiedPaper: &ref})
+			var candidate savedImportCandidate
+			if s.Candidate.URL != "" {
+				ref := paperRef(work)
+				ref.SourceProvider, ref.SourceVersion, ref.PDFURL = s.Candidate.SourceProvider, s.Candidate.Version, s.Candidate.URL
+				candidate = savedImportCandidate{FulltextCandidate: s.Candidate, VerifiedPaper: &ref}
+			}
 			refs, _ := json.Marshal([]string{s.SourceID})
 			presence, _ := json.Marshal(map[string]string{"paper_key": key})
-			item := orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: work.ID, ReferenceIDsJSON: refs, PresenceSnapshotJSON: presence, SelectedCandidateJSON: candidate, Status: "pending", Stage: "acquire", ErrorDetailsJSON: json.RawMessage("{}"), CreatedAt: now, UpdatedAt: now}
+			item := orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: work.ID, ReferenceIDsJSON: refs, PresenceSnapshotJSON: presence, SelectedCandidateJSON: marshal(candidate), Status: "pending", Stage: "acquire", ErrorDetailsJSON: json.RawMessage("{}"), CreatedAt: now, UpdatedAt: now}
 			// An alias follows the original durable item, including its processing state.
 			var active orm.PaperImportItem
 			q := tx.Table("paper_import_items pi").Select("pi.*").Joins("JOIN paper_import_batches pb ON pb.id = pi.batch_id").Where("pb.target_dataset_id = ? AND pi.academic_work_id = ? AND pi.status IN ?", target, work.ID, []string{"pending", "running"}).Order("pi.created_at ASC").Take(&active)
@@ -208,19 +213,30 @@ func sourceWork(ctx context.Context, tx *gorm.DB, s SourceInspection) (orm.Acade
 		e := tx.Where("id = ?", s.Work.WorkID).Take(&w).Error
 		return w, e
 	}
+	identity := tx.Where("arxiv_id_base = ?", s.Work.ArxivID)
+	identifier := s.Work.ArxivID
+	externalIDs := map[string]string{"arxiv": identifier}
+	if s.Work.DOI != "" {
+		identity = tx.Where("doi_normalized = ?", s.Work.DOI)
+		identifier = s.Work.DOI
+		externalIDs = map[string]string{"doi": identifier}
+	}
 	var existing orm.AcademicWork
-	if e := tx.Where("arxiv_id_base = ?", s.Work.ArxivID).Take(&existing).Error; e == nil {
+	if e := identity.Take(&existing).Error; e == nil {
 		return existing, nil
 	} else if !errors.Is(e, gorm.ErrRecordNotFound) {
 		return existing, e
 	}
 	// Deterministic primary key closes the cross-dataset creation race as well.
 	now := time.Now().UTC()
-	work := orm.AcademicWork{ID: uuid.NewSHA1(uuid.NameSpaceOID, []byte(s.PaperKey)).String(), CanonicalTitle: firstNonEmpty(s.Title, s.Work.ArxivID), NormalizedTitle: NormalizeTitle(s.Title), AuthorsJSON: json.RawMessage("[]"), ArxivIDBase: s.Work.ArxivID, ExternalIDsJSON: mustSourceJSON(map[string]string{"arxiv": s.Work.ArxivID}), ProvenanceJSON: json.RawMessage("{}"), ResolutionConfidence: 1, CreatedAt: now, UpdatedAt: now}
-	if e := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&work).Error; e != nil {
-		return work, e
+	title := firstNonEmpty(s.Title, identifier)
+	work := orm.AcademicWork{ID: uuid.NewSHA1(uuid.NameSpaceOID, []byte(s.PaperKey)).String(), CanonicalTitle: title, NormalizedTitle: NormalizeTitle(title), AuthorsJSON: json.RawMessage("[]"), ArxivIDBase: s.Work.ArxivID, DOINormalized: s.Work.DOI, ExternalIDsJSON: mustSourceJSON(externalIDs), ProvenanceJSON: json.RawMessage("{}"), ResolutionConfidence: 1, CreatedAt: now, UpdatedAt: now}
+	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&work)
+	if result.Error != nil || result.RowsAffected > 0 {
+		return work, result.Error
 	}
-	return work, tx.Where("id = ?", work.ID).Take(&work).Error
+	err := identity.Take(&existing).Error
+	return existing, err
 }
 
 type SourceImportView struct {
