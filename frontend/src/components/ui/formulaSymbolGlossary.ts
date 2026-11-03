@@ -1,0 +1,111 @@
+/** General notation only: paper-specific definitions always take precedence. */
+type Entry = readonly [aliases: string, en: string, zh: string];
+const entries: Entry[] = [
+ [String.raw`\in ∈`, 'Is an element of the set on the right.', '属于：左侧对象是右侧集合的元素。'],
+ [String.raw`\notin ∉`, 'Is not an element of the set on the right.', '不属于：左侧对象不是右侧集合的元素。'],
+ [String.raw`\ni \owns ∋`, 'Contains the element on the right.', '包含该元素：右侧对象是左侧集合的元素。'],
+ [String.raw`\subset ⊂`, 'Subset relation; whether equality is allowed depends on the notation convention.', '子集关系；是否允许两集合相等取决于文中的记号约定。'],
+ [String.raw`\subseteq ⊆`, 'Is a subset of, allowing equality.', '是右侧集合的子集，允许相等。'],
+ [String.raw`\subsetneq ⊊`, 'Is a proper subset: contained in, but not equal to, the other set.', '真子集：包含于另一个集合且不相等。'],
+ [String.raw`\supset ⊃`, 'Superset relation; whether equality is allowed depends on the notation convention.', '超集关系；是否允许相等取决于文中的记号约定。'],
+ [String.raw`\supseteq ⊇`, 'Is a superset of, allowing equality.', '是右侧集合的超集，允许相等。'],
+ [String.raw`\cup ∪`, 'Union: elements belonging to at least one of the sets.', '并集：至少属于其中一个集合的元素。'],
+ [String.raw`\cap ∩`, 'Intersection: elements belonging to both sets.', '交集：同时属于两个集合的元素。'],
+ [String.raw`\setminus ∖`, 'Set difference: elements in the left set but not the right set.', '差集：属于左侧集合但不属于右侧集合的元素。'],
+ [String.raw`\emptyset \varnothing ∅`, 'The empty set, containing no elements.', '空集：不包含任何元素的集合。'],
+ [String.raw`\forall ∀`, 'For every value in the specified domain.', '全称量词：对指定范围内的所有对象都成立。'],
+ [String.raw`\exists ∃`, 'There exists at least one value satisfying the statement.', '存在量词：至少有一个对象使命题成立。'],
+ [String.raw`\nexists ∄`, 'There is no value satisfying the statement.', '不存在使该命题成立的对象。'],
+ [String.raw`\land \wedge ∧`, 'Logical AND: both statements hold; may denote a meet in an ordered structure.', '逻辑与：两个命题同时成立；在序结构中也可表示交运算。'],
+ [String.raw`\lor \vee ∨`, 'Logical OR: at least one statement holds; may denote a join in an ordered structure.', '逻辑或：至少一个命题成立；在序结构中也可表示并运算。'],
+ [String.raw`\neg \lnot ¬`, 'Logical NOT: reverses the truth value of a statement.', '逻辑非：对命题取否定。'],
+ [String.raw`\Rightarrow \implies ⇒`, 'Implication: the statement on the left implies the one on the right.', '逻辑蕴含：左侧命题成立时，右侧命题成立。'],
+ [String.raw`\Leftarrow ⇐`, 'Reverse implication: the right statement implies the left.', '反向蕴含：右侧命题成立时，左侧命题成立。'],
+ [String.raw`\Leftrightarrow \iff ⇔`, 'If and only if: each statement implies the other.', '当且仅当：两侧互为充分必要条件。'],
+ [String.raw`\top ⊤`, 'Truth in logic; may denote the greatest element of an ordered structure.', '逻辑中表示真，也可表示序结构中的最大元素。'],
+ [String.raw`\bot ⊥`, 'Falsehood in logic; also used for a least element or orthogonality, depending on context.', '逻辑中表示假，也可表示最小元素或正交关系，需结合上下文。'],
+ [String.raw`\vdash ⊢`, 'Syntactic derivability: the conclusion can be proved from the premises.', '可推导：结论可由给定前提和推理规则证明。'],
+ [String.raw`\models ⊨`, 'Semantic entailment: every model of the premises satisfies the conclusion.', '语义蕴含：满足前提的每个模型都满足结论。'],
+ [String.raw`\therefore ∴`, 'Therefore: introduces a conclusion.', '所以：引出推理结论。'],
+ [String.raw`\because ∵`, 'Because: introduces a reason or premise.', '因为：引出原因或前提。'],
+ ['=', 'Equality: both sides have the same value.', '等于：两侧的值相同。'],
+ [String.raw`\ne \neq ≠`, 'Not equal.', '不等于。'],
+ ['<', 'Less than.', '小于。'], ['>', 'Greater than.', '大于。'],
+ [String.raw`\le \leq ≤`, 'Less than or equal to.', '小于或等于。'],
+ [String.raw`\ge \geq ≥`, 'Greater than or equal to.', '大于或等于。'],
+ [String.raw`\ll ≪`, 'Much less than; the intended scale depends on context.', '远小于；具体量级需结合上下文。'],
+ [String.raw`\gg ≫`, 'Much greater than; the intended scale depends on context.', '远大于；具体量级需结合上下文。'],
+ [String.raw`\approx ≈`, 'Approximately equal.', '近似相等。'],
+ [String.raw`\equiv ≡`, 'Identity, equivalence or congruence, depending on context.', '恒等、等价或同余，具体含义取决于上下文。'],
+ [String.raw`\sim ∼`, 'May mean distributed as, similar to, or asymptotically equivalent; context determines which.', '可表示服从某分布、相似或渐近等价，具体含义取决于上下文。'],
+ [String.raw`\simeq ≃`, 'Approximate equality or equivalence, depending on context.', '近似相等或等价，具体含义取决于上下文。'],
+ [String.raw`\propto ∝`, 'Proportional to: differs by a multiplicative factor independent of the varying quantity.', '正比于：相差一个与所讨论变量无关的乘法因子。'],
+ [String.raw`\coloneqq \coloneq := ≔`, 'Defined to be equal to the expression on the right.', '定义为右侧表达式。'],
+ ['+', 'Addition; may also denote a unary positive sign.', '加法，也可表示正号。'],
+ ['-', 'Subtraction or unary negation.', '减法或取相反数。'],
+ [String.raw`\pm ±`, 'Plus or minus: represents the positive and negative alternatives.', '正负号：同时表示加与减两种情况。'],
+ [String.raw`\mp ∓`, 'Minus or plus, paired with the opposite choice of a plus-or-minus sign.', '负正号：与正负号按相反符号配对。'],
+ [String.raw`\times ×`, 'Multiplication; may also denote a Cartesian or vector cross product.', '乘法，也可表示笛卡尔积或向量叉积。'],
+ [String.raw`\cdot ·`, 'Multiplication or an inner product, depending on the operands.', '乘法或内积，具体取决于参与运算的对象。'],
+ [String.raw`\div ÷ /`, 'Division: the left quantity is divided by the right quantity.', '除法：左侧量除以右侧量。'],
+ [String.raw`\circ ∘`, 'Usually function composition; may denote another operation defined in the text.', '通常表示函数复合，也可表示文中另行定义的运算。'],
+ [String.raw`\odot ⊙`, 'Often an element-wise product; check the definition for these operands.', '常表示逐元素乘积，具体以文中对运算对象的定义为准。'],
+ [String.raw`\otimes ⊗`, 'Usually a tensor or Kronecker product.', '通常表示张量积或 Kronecker 积。'],
+ [String.raw`\oplus ⊕`, 'May denote a direct sum, exclusive OR, or another explicitly defined operation.', '可表示直和、异或或文中另行定义的运算。'],
+ [String.raw`\sum ∑`, 'Summation over the indicated index and range.', '求和：按指定下标及范围将各项相加。'],
+ [String.raw`\sqrt`, 'A root of the radicand; without an explicit index it is the principal square root.', '根式：计算被开方数的根；未标注根指数时表示主平方根。'],
+ [String.raw`\frac \dfrac \tfrac`, 'A fraction: the numerator divided by the denominator.', '分式：分子除以分母，分母不能为零。'],
+ [String.raw`\prod ∏`, 'Product over the indicated index and range.', '连乘：按指定下标及范围将各项相乘。'],
+ [String.raw`\int ∫`, 'Integral: accumulates a quantity over the indicated domain.', '积分：在指定区域内累积被积量。'],
+ [String.raw`\iint ∬`, 'A double integral, usually over a two-dimensional region.', '二重积分，通常在二维区域上进行积分。'],
+ [String.raw`\iiint ∭`, 'A triple integral, usually over a three-dimensional region.', '三重积分，通常在三维区域上进行积分。'],
+ [String.raw`\oint ∮`, 'An integral over a closed path.', '沿闭合路径的积分。'],
+ [String.raw`\partial ∂`, 'Partial differentiation: differentiate with respect to one variable while holding the others fixed.', '偏微分：对一个变量求导，同时保持其他变量不变。'],
+ [String.raw`\nabla ∇`, 'The differential operator used for gradients, divergence and curl.', '微分算子，用于表示梯度、散度和旋度等运算。'],
+ [String.raw`\infty ∞`, 'Infinity: unbounded growth or an infinite extent, not an ordinary real number.', '无穷：表示无限增长或无限范围，不是普通实数。'],
+ [String.raw`\lim`, 'The limiting value as the indicated variable approaches its target.', '极限：变量趋近指定目标时表达式所趋近的值。'],
+ [String.raw`\to \rightarrow →`, 'Maps to or approaches; the interpretation depends on the surrounding expression.', '可表示映射到或趋近，具体取决于周围表达式。'],
+ [String.raw`\leftarrow ←`, 'A left-directed mapping, implication notation or assignment, depending on context.', '向左的映射、推导或赋值记号，具体取决于上下文。'],
+ [String.raw`\mapsto ↦`, 'Maps an input to the displayed output.', '将输入映射为右侧给出的输出。'],
+ [String.raw`\leftrightarrow ↔`, 'A two-way relation or logical equivalence, depending on context.', '双向关系或逻辑等价，具体取决于上下文。'],
+ [String.raw`\perp`, 'Perpendicular or orthogonal.', '垂直或正交。'],
+ [String.raw`\parallel ∥`, 'Parallel to.', '平行于。'],
+ [String.raw`\sin sin`, 'The sine trigonometric function.', '正弦函数。'],
+ [String.raw`\cos cos`, 'The cosine trigonometric function.', '余弦函数。'],
+ [String.raw`\tan tan`, 'The tangent trigonometric function.', '正切函数。'],
+ [String.raw`\log log`, 'Logarithm; the base follows the convention in the text.', '对数函数，底数以文中约定为准。'],
+ [String.raw`\ln ln`, 'Natural logarithm, with base e.', '自然对数，以 e 为底。'],
+ [String.raw`\exp exp`, 'Exponential function with base e.', '指数函数，以 e 为底。'],
+ [String.raw`\min min`, 'The smallest value in the specified set or domain.', '指定集合或范围中的最小值。'],
+ [String.raw`\max max`, 'The largest value in the specified set or domain.', '指定集合或范围中的最大值。'],
+ [String.raw`\argmin argmin`, 'The argument or arguments that minimize the objective.', '使目标函数取得最小值的自变量或自变量集合。'],
+ [String.raw`\argmax argmax`, 'The argument or arguments that maximize the objective.', '使目标函数取得最大值的自变量或自变量集合。'],
+ [String.raw`\sup sup`, 'Supremum: the least upper bound.', '上确界：最小的上界。'],
+ [String.raw`\inf inf`, 'Infimum: the greatest lower bound.', '下确界：最大的下界。'],
+ [String.raw`\det det`, 'The determinant of a square matrix.', '方阵的行列式。'],
+ [String.raw`\mathbb{R} ℝ`, 'The set of real numbers.', '实数集合。'],
+ [String.raw`\mathbb{N} ℕ`, 'The natural numbers; inclusion of zero follows the convention in the text.', '自然数集合；是否包含 0 以文中约定为准。'],
+ [String.raw`\mathbb{Z} ℤ`, 'The set of integers.', '整数集合。'],
+ [String.raw`\mathbb{Q} ℚ`, 'The set of rational numbers.', '有理数集合。'],
+ [String.raw`\mathbb{C} ℂ`, 'The set of complex numbers.', '复数集合。'],
+ ['Attention', 'Attention aggregates values using weights derived from queries and keys; the exact variant is defined by the formula.', '注意力运算根据查询与键的关系，对值加权汇聚；具体变体以本文公式为准。'],
+ ['softmax', 'Converts scores into nonnegative weights that sum to one.', '把一组分数变为总和为 1 的非负权重。'],
+ ['ReLU', 'Keeps positive inputs and maps negative inputs to zero.', '保留正值，把负值置为 0。'],
+];
+
+const glossary = new Map(entries.flatMap(([aliases, en, zh]) => aliases.split(' ').map(alias => [alias, {en, zh}] as const)));
+export function formulaBuiltinMeaning(latex: string, language: 'en' | 'zh'): string | undefined {
+ const compact = latex.trim().replace(/\s+/g, '');
+ const name = compact.replace(/^\\(?:operatorname|mathrm|mathsf|text)\{([A-Za-z]+)\}$/, '$1');
+ const direct = glossary.get(name);
+ if (direct) return direct[language];
+ const structural = name.match(/^(\\(?:sqrt|[dt]?frac))(?:\{|\[)/)?.[1];
+ if (structural) return glossary.get(structural)?.[language];
+ // Limits belong to the operator visually, but do not change its general role.
+ const operator = name.match(/^(\\(?:sum|prod|int|iint|iiint|oint|lim|min|max|sup|inf))(?:[_^].*)$/)?.[1];
+ return operator ? glossary.get(operator)?.[language] : undefined;
+}
+
+export function isBuiltinFormulaSymbol(latex: string): boolean {
+ return formulaBuiltinMeaning(latex, 'en') !== undefined;
+}

@@ -1,3 +1,4 @@
+import {isBuiltinFormulaSymbol} from './formulaSymbolGlossary';
 export interface FormulaSymbolOccurrence {start:number;end:number;latex:string;definitionIndices:number[];children?:FormulaSymbolOccurrence[]}
 const wrappers=new Set(['mathcal','mathbb','mathbf','mathsf','mathrm','mathit','mathfrak','boldsymbol','operatorname','text','hat','widehat','bar','overline','vec','tilde','widetilde','dot','ddot','breve','check','acute','grave','underline']);
 const structural=new Set(['frac','dfrac','tfrac','sqrt','sum','prod','int','iint','lim','left','right','big','Big','bigg','Bigg','bigl','bigr','Bigl','Bigr','limits','nolimits','displaystyle','textstyle','scriptstyle','scriptscriptstyle','quad','qquad','hspace','vspace']);
@@ -21,6 +22,8 @@ function stripDelimiters(value:string){return value.replace(/^\s*(?:\$\$?|\\\()/
 export function normalizeFormulaSymbol(value:string){
  if(!withinSymbolBudget(value))return "";
  const input=stripDelimiters(value)
+  .replace(/'+/g, primes=>'^{'+String.raw`\prime`.repeat(primes.length)+'}')
+  .replace(/\\[,!;: ]|\\(?:quad|qquad|enspace|thinspace|medspace|thickspace)\b/g,'')
   .replace(/\\(?:left|right|big[lrm]?|Big[lrm]?|bigg[lrm]?|Bigg[lrm]?)\b/g,'')
   .replace(/\\(?:lVert|rVert|Vert)(?![A-Za-z])|\\\|/g,'‖')
   .replace(/\\(?:lvert|rvert|vert)(?![A-Za-z])/g,'|');let cursor=0;
@@ -57,7 +60,7 @@ export function normalizeFormulaSymbol(value:string){
  return sequence();
 }
 
-export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
+export function interactiveFormulaSymbols(latex:string,definitions:string[],includeBuiltins=false) {
  const empty={safe:false,occurrences:[] as FormulaSymbolOccurrence[],unmatchedDefinitions:definitions.map((_,i)=>i)};
  if(unsafe.test(latex) || !withinSymbolBudget(latex))return empty;
  const skip=(offset:number)=>{while(/\s/.test(latex[offset] || '') && offset<latex.length)offset++;return offset;};
@@ -117,13 +120,13 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
     if(name==='begin' && env==='array'){const format=skip(i);i=groupEnd(format)||i;}
     continue;
    }
-   if(structural.has(name) || /^(?:lVert|rVert|Vert|lvert|rvert|vert)$/.test(name) || !/^[a-zA-Z]+$/.test(name)){i+=command[0].length;continue;}
-  }else if(!/[a-zA-Z0-9\u0370-\u03ff]/.test(latex[i])){i++;continue;}
+   if((structural.has(name)&&!(includeBuiltins&&isBuiltinFormulaSymbol(command[0])&&!['sqrt','frac','dfrac','tfrac'].includes(name))) || /^(?:lVert|rVert|Vert|lvert|rvert|vert)$/.test(name) || !/^[a-zA-Z]+$/.test(name)){i+=command[0].length;continue;}
+  }else if(!/[a-zA-Z0-9\u0370-\u03ff]/.test(latex[i])&&!(includeBuiltins&&isBuiltinFormulaSymbol(latex[i]))){i++;continue;}
   const end=atomEnd(i);
   if(occurrences.length>=512)return empty;
   occurrences.push({start:i,end,latex:latex.slice(i,end),definitionIndices:[]});i=end;
  }
- if(!definitions.length)return {safe:true,occurrences,unmatchedDefinitions:[]};
+ if(!definitions.length&&!includeBuiltins)return {safe:true,occurrences,unmatchedDefinitions:[]};
  // Build candidate source ranges BEFORE resolving explanations. Structural
  // commands retain all arguments; child sequences retain their own ranges.
  // This replaces symbol-specific call/norm/string-concatenation repair passes.
@@ -196,7 +199,14 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
  const byKey=new Map<string,number[]>();
  normalized.forEach((value,index)=>{if(value)byKey.set(value,[...(byKey.get(value)||[]),index]);});
  const matchedRanges:FormulaSymbolOccurrence[]=[];
+ const builtinRanges:FormulaSymbolOccurrence[]=[];
  for(const atom of occurrences){const indices=byKey.get(normalizeFormulaSymbol(atom.latex));if(indices)matchedRanges.push({...atom,definitionIndices:indices});}
+ // Structural operators require their complete arguments inside the clickable
+ // range: wrapping a bare \\sqrt or \\frac would change/break TeX parsing.
+ if(includeBuiltins)for(const nodes of sequences)for(const node of nodes){
+  const source=latex.slice(node.start,node.end);
+  if(/^\\(?:sqrt|[dt]?frac)\b/.test(source)&&isBuiltinFormulaSymbol(source))builtinRanges.push({start:node.start,end:node.end,latex:source,definitionIndices:[]});
+ }
  // Complete balanced sibling ranges cover calls, products and delimiters as
  // well as single structural nodes. Never cross arguments or equation rows.
  const balanced=(value:string)=>{
@@ -231,6 +241,9 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
  }
  // Prefer complete explained expressions. Their explained descendants remain
  // available in the definition card, never as competing nested DOM buttons.
+ // Generic fraction/root help must not displace a model-explained numerator,
+ // denominator or complete term. It fills only otherwise unexplained ranges.
+ matchedRanges.push(...builtinRanges.filter(item=>!matchedRanges.some(explained=>explained.start<item.end&&explained.end>item.start)));
  const unique=new Map<string,FormulaSymbolOccurrence>();
  for(const item of matchedRanges)unique.set(`${item.start}:${item.end}`,item);
  const ordered=[...unique.values()].sort((a,b)=>(b.end-b.start)-(a.end-a.start)||a.start-b.start);
@@ -239,6 +252,9 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
   if(selected.some(parent=>parent.start<item.end&&parent.end>item.start))continue;
   item.children=ordered.filter(child=>child!==item&&child.start>=item.start&&child.end<=item.end)
    .sort((a,b)=>a.start-b.start||b.end-a.end);
+  if(includeBuiltins)for(const atom of occurrences){
+   if(atom.start>=item.start&&atom.end<=item.end&&(atom.start!==item.start||atom.end!==item.end)&&isBuiltinFormulaSymbol(atom.latex)&&!item.children.some(child=>child.start===atom.start&&child.end===atom.end))item.children.push(atom);
+  }
   selected.push(item);
  }
  occurrences=occurrences.filter(atom=>!selected.some(item=>item.start<atom.end&&item.end>atom.start));

@@ -6,6 +6,39 @@ import {InteractiveFormula} from './InteractiveFormula';
 beforeAll(async()=>{await i18n.changeLanguage('en-US');});
 const definitions=[{symbol:String.raw`\hat{\mathbf{x}}_i`,meaning:'Feature vector',evidence_ids:['e'],inferred:true}];
 const evidence=[{id:'e',text:'Exact source definition.',page:2,bbox:[0,0,1,.1] as [number,number,number,number]}];
+it.each([String.raw`x \in A`, 'x ∈ A'])('explains set membership locally before a model response: %s', latex=>{
+ render(<InteractiveFormula latex={latex} sourceKey="builtin" definitions={[]} evidence={[]} onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:latex.includes('∈')?'Symbol: ∈':String.raw`Symbol: \in`}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('element of');
+});
+it('prefers a paper definition over a built-in meaning',()=>{
+ render(<InteractiveFormula latex={String.raw`A \times B`} sourceKey="specific" definitions={[{symbol:String.raw`\times`,meaning:'Cartesian product in this paper',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:String.raw`Symbol: \times`}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Cartesian product in this paper');
+});
+it('binds a repaired prime expression to the same existing definition',()=>{
+ render(<InteractiveFormula latex={String.raw`L(w')`} originalLatex={String.raw`L(w^{\prime})`} sourceKey="repair" definitions={[{symbol:String.raw`L(w^{\prime})`,meaning:'Loss after the update',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:"Symbol: L(w')"}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Loss after the update');
+});
+it.each([
+ [String.raw`\forall x`,String.raw`\forall`,'For every'],
+ [String.raw`A \subseteq B`,String.raw`\subseteq`,'subset'],
+ [String.raw`p \land q`,String.raw`\land`,'Logical AND'],
+ [String.raw`\sum_{i=1}^n x_i`,String.raw`\sum_{i=1}^n`,'Summation'],
+ [String.raw`\int_0^1 x`,String.raw`\int_0^1`,'Integral'],
+ [String.raw`x \leq y`,String.raw`\leq`,'Less than'],
+ [String.raw`x \in \mathbb{R}`,String.raw`\mathbb{R}`,'real numbers'],
+ [String.raw`\sqrt{x+y}`,String.raw`\sqrt{x+y}`,'square root'],
+ [String.raw`\frac{x}{y}`,String.raw`\frac{x}{y}`,'numerator'],
+])('provides general notation without a generated explanation: %s',(latex,symbol,meaning)=>{
+ const view=render(<InteractiveFormula latex={latex} sourceKey="notation" definitions={[]} evidence={[]} onNavigate={vi.fn()}/>);
+ expect(view.container.querySelector('.pdf-interactive-equation .katex')).toBeInTheDocument();
+ const expected=document.createElement('div');expected.innerHTML=katex.renderToString(latex,{displayMode:true});
+ expect(view.container.querySelector('.katex-html')?.textContent).toBe(expected.querySelector('.katex-html')?.textContent);
+ fireEvent.click(screen.getByRole('button',{name:`Symbol: ${symbol}`}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent(meaning);
+});
 describe('symbols inside complete formulas',()=>{
  it('preserves malformed extracted LaTeX without crashing the reader',()=>{
  const latex='x\\';
@@ -18,16 +51,16 @@ describe('symbols inside complete formulas',()=>{
  const navigate=vi.fn();
  const view=render(<InteractiveFormula latex={String.raw`\hat {\mathbf {x}} _ {i} + y = 1`} sourceKey="source" definitions={definitions} evidence={evidence} onNavigate={navigate}/>);
  const symbols=screen.getAllByRole('button',{name:/Symbol:/});
- expect(symbols).toHaveLength(3);
+ expect(symbols).toHaveLength(5);
  expect(view.container.querySelector('.pdf-interactive-equation')?.textContent).toContain('+');
  fireEvent.click(symbols[0]);
  expect(screen.getByText('Feature vector')).toBeInTheDocument();
  expect(screen.getByText('Exact source definition.')).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'Source · p. 3'}));
  expect(navigate).toHaveBeenCalledWith(evidence[0]);
- fireEvent.keyDown(symbols[1],{key:'Enter'});
+ fireEvent.keyDown(screen.getByRole('button',{name:'Symbol: y'}),{key:'Enter'});
  expect(screen.getByText('No explanation is available for this term. Regenerate to try again.')).toBeInTheDocument();
- expect(symbols[1]).toHaveAttribute('aria-pressed','true');
+ expect(screen.getByRole('button',{name:'Symbol: y'})).toHaveAttribute('aria-pressed','true');
  view.rerender(<InteractiveFormula latex="z=2" sourceKey="other" definitions={definitions} evidence={evidence} onNavigate={navigate}/>);
  expect(screen.queryByText('Feature vector')).toBeNull();
  expect(screen.queryByRole('region',{name:'Selected symbol'})).toBeNull();

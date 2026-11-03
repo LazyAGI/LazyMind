@@ -38,7 +38,7 @@ describe('formula study panel',()=>{
   render(<PdfStudyDialog onClose={vi.fn()}><PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="hash" blocks={[block]} selected={{...block,latex:'x+y'}} autoExplain compact onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/></PdfStudyDialog>);
   expect(await screen.findByText('Summary')).toBeInTheDocument();
   const symbols=screen.getAllByRole('button',{name:/Symbol:/});
-  expect(symbols).toHaveLength(2);
+  expect(symbols).toHaveLength(3);
   fireEvent.click(symbols[0]);
   expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Input');
   expect(screen.getByText(/Symbols & meanings/).closest('details')).not.toHaveAttribute('open');

@@ -4,6 +4,7 @@ import katex from 'katex';
 import type {FormulaEvidence,FormulaExplanation} from '@/modules/knowledge/api/formulaExplanation';
 import {FormulaMathText} from './FormulaMathText';
 import {interactiveFormulaSymbols} from './interactiveFormulaSymbols';
+import {formulaBuiltinMeaning} from './formulaSymbolGlossary';
 interface Props {latex:string;originalLatex?:string;sourceKey:string;definitions:FormulaExplanation['symbols'];evidence:FormulaEvidence[];compactEvidence?:boolean;onNavigate:(evidence:FormulaEvidence)=>void}
 export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,evidence,compactEvidence=false,onNavigate}:Props){
  const {t,i18n}=useTranslation();
@@ -15,7 +16,7 @@ export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,ev
  const key=`${sourceKey}:${latex}:${JSON.stringify(definitions)}`;
  const [selection,setSelection]=useState<{key:string;index:number;child?:number}>();
  const [copyStatus,setCopyStatus]=useState('');
- const model=useMemo(()=>interactiveFormulaSymbols(latex,definitions.map(definition=>definition.symbol)),[latex,definitions]);
+ const model=useMemo(()=>interactiveFormulaSymbols(latex,definitions.map(definition=>definition.symbol),true),[latex,definitions]);
  const rendered=useMemo(()=>{
   const classes=new Set(model.occurrences.map((_,index)=>`pdfsym-${id}-${index}`));
   let annotated=latex;
@@ -34,13 +35,7 @@ export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,ev
  const relevant=exact.length?exact:candidates;
  const meanings=Array.from(new Set(relevant.map(item=>item.meaning.trim()).filter(Boolean)));
  const definition=relevant.length?{...relevant[0],meaning:meanings.join('；'),evidence_ids:Array.from(new Set(relevant.flatMap(item=>item.evidence_ids)))}:undefined;
- const operatorName=occurrence?.latex.match(/^\\(?:operatorname|mathrm|mathsf|text)\s*\{\s*([A-Za-z][A-Za-z0-9]+)\s*\}$/)?.[1] || occurrence?.latex;
- const generalMeanings:Record<string,[string,string]>={
-  Attention:['A standard attention operation weights values using the relationship between queries and keys; check this paper for its exact variant.','通用注意力运算根据查询与键的关系对值加权汇聚；具体变体以本文公式为准。'],
-  softmax:['Converts scores into nonnegative weights that sum to one.','把一组分数变为总和为 1 的非负权重。'],
-  ReLU:['Keeps positive inputs and maps negative inputs to zero.','保留正值，把负值置为 0。'],
- };
- const generalMeaning=occurrence?.definitionIndices.length===0&&operatorName ? generalMeanings[operatorName]?.[zh?1:0] : undefined;
+ const generalMeaning=occurrence ? formulaBuiltinMeaning(occurrence.latex,zh?'zh':'en') : undefined;
  const citations=definition?Array.from(new Set(definition.evidence_ids)).map(value=>evidence.find(item=>item.id===value)).filter((item):item is FormulaEvidence=>!!item):[];
  useEffect(()=>{
   const container=root.current;if(!container)return;

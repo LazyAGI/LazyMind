@@ -152,6 +152,13 @@ it('preserves structural scope when normalizing expressions',()=>{
  expect(normalizeFormulaSymbol(String.raw`\frac{ab}{c}`)).not.toBe(normalizeFormulaSymbol(String.raw`\frac{a}{bc}`));
  expect(normalizeFormulaSymbol(String.raw`\sqrt[3]{x}`)).not.toBe(normalizeFormulaSymbol(String.raw`\sqrt{x}`));
 });
+it('matches repaired prime and spacing notation without changing the source range',()=>{
+ const latex=String.raw`L(w') + \sqrt{d_k}\,Q`;
+ const result=interactiveFormulaSymbols(latex,[String.raw`L(w^{\prime})`,String.raw`\sqrt{d_k} Q`]);
+ expect(result.unmatchedDefinitions).toEqual([]);
+ expect(result.occurrences.map(item=>item.latex)).toEqual(["L(w')",String.raw`\sqrt{d_k}\,Q`]);
+ expect(normalizeFormulaSymbol("w'")).not.toBe(normalizeFormulaSymbol('w'));
+});
 it('retains inner definitions without splitting the complete explained root',()=>{
  const result=interactiveFormulaSymbols(String.raw`\sqrt{d_k}+d_k`,[String.raw`\sqrt{d_k}`,'d_k']);
  expect(result.occurrences.map(o=>o.latex)).toEqual([String.raw`\sqrt{d_k}`,'d_k']);
