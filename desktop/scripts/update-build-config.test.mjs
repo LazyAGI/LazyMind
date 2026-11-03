@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { prepareUpdateBuildConfig } from "./prepare-update-build-config.mjs";
+import { prepareUpdateBuildConfig, readUpdateBuildConfig } from "./prepare-update-build-config.mjs";
 
 function options() {
   const key = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64");
@@ -25,6 +25,17 @@ test("public update config is bound to the actual package version and target", (
   assert.deepEqual(result.publicKeys, input.configuration.publicKeys);
   for (const mismatch of [{ version: "2.0.0" }, { platform: "windows" }, { arch: "amd64" }]) {
     assert.throws(() => prepareUpdateBuildConfig({ ...input, configuration: { ...input.configuration, ...mismatch } }), /mismatch/);
+  }
+});
+
+test("update sources are supplied by the build and never replaced with a personal source", () => {
+  for (const origin of ["https://mirror.example.invalid", "https://updates.example.invalid"]) {
+    const input = options();
+    input.configuration.policyURL = `${origin}/channel/stable.json`;
+    input.configuration.allowedOrigins = [origin];
+    const result = JSON.parse(Buffer.from(prepareUpdateBuildConfig(input), "base64").toString("utf8"));
+    assert.equal(result.policyURL, input.configuration.policyURL);
+    assert.deepEqual(result.allowedOrigins, [origin]);
   }
 });
 
@@ -60,5 +71,25 @@ test("the build CLI emits only the public configuration consumed by both platfor
     assert.ok(source.includes("prepare-update-build-config.mjs"), `${file} must prepare fixed build config`);
     assert.ok(source.includes("main.embeddedConfig="), `${file} must embed the validated configuration`);
     assert.match(source, /cmd[\\/]update-helper/);
+  }
+});
+
+ test("build JSON and file inputs are exclusive and produce the same public configuration", t => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "lm-public-input-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const config = options().configuration;
+  const file = path.join(dir, "public.json"); writeFileSync(file, JSON.stringify(config));
+  assert.deepEqual(readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: JSON.stringify(config) }), config);
+  assert.deepEqual(readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG: file }), config);
+  assert.equal(readUpdateBuildConfig({}), undefined);
+  assert.throws(() => readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG: file, LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: "{}" }), /only one/);
+  assert.throws(() => readUpdateBuildConfig({ LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: "not-json" }), /Unable/);
+});
+
+test("omitted release identity is bound to platform, architecture and package version", () => {
+  const input = options(); delete input.configuration.releaseId;
+  for (const version of ["1.2.3", "1.2.4+build.1"]) {
+    const config = JSON.parse(Buffer.from(prepareUpdateBuildConfig({ ...input, packageVersion: version }), "base64").toString());
+    assert.equal(config.releaseId, `darwin-arm64-${version.replace(/\+/g, "_")}`);
   }
 });

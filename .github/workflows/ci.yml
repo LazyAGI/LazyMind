@@ -338,6 +338,11 @@ jobs:
           else
             node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js
           fi
+      - name: Test desktop update publisher offline
+        run: |
+          python -m unittest discover -s desktop/scripts -p test_publish_desktop_update.py
+          python -m unittest discover -s desktop/scripts -p test_update_publication_transport.py
+
 
   test-auth-service:
     needs: [lint, doc_check]

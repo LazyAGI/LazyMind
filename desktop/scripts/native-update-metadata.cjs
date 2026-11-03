@@ -27,8 +27,8 @@ async function writeNativeUpdateMetadata(context, options = {}) {
   const resources = platform === "darwin" ? path.join(context.appOutDir, `${product}.app`, "Contents", "Resources")
     : path.join(context.appOutDir, "resources");
   const destination = path.join(resources, "app-update.yml");
-  const configuration = Object.hasOwn(options, "configuration") ? options.configuration
-    : process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG ? JSON.parse(fs.readFileSync(process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG, "utf8")) : undefined;
+  const { readUpdateBuildConfig } = await import("./prepare-update-build-config.mjs");
+  const configuration = Object.hasOwn(options, "configuration") ? options.configuration : readUpdateBuildConfig();
   const signingMode = options.signingMode ?? (platform === "darwin" ? process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc"
     : process.env.WIN_CSC_LINK || process.env.CSC_LINK ? "authenticode" : "none");
   const metadata = await nativeUpdateMetadata({ configuration, packageVersion: context.packager.appInfo.version,

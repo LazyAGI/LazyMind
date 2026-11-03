@@ -598,7 +598,8 @@ test("macOS CI requires credentials only for official LazyAGI releases", () => {
     source,
     /CSC_LINK: \$\{\{ steps\.release\.outputs\.official_release == 'true' && secrets\.MAC_CSC_LINK \|\| '' \}\}/,
   );
-  assert.match(source, /OFFICIAL_REPOSITORY: \$\{\{ github\.repository == 'LazyAGI\/LazyMind' \}\}/);
+  assert.match(source, /SIGNING_MODE: \$\{\{ inputs\.signing_mode/);
+  assert.doesNotMatch(source, /OFFICIAL_REPOSITORY/);
   assert.match(source, /official_release=true/);
   assert.match(source, /Non-official build: using ad-hoc signing and skipping notarization/);
   assert.match(source, /name: Submit app ZIP for notarization\s*\n\s*if: steps\.release\.outputs\.official_release == 'true'/);

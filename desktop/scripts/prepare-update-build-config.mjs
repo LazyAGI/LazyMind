@@ -7,6 +7,15 @@ import { isDeepStrictEqual } from "node:util";
 
 const fields = new Set(["trustDomain", "audience", "channel", "mode", "releaseId", "version", "platform", "arch", "signingIdentity", "updaterProtocol", "policyURL", "allowedOrigins", "publicKeys"]);
 
+export function readUpdateBuildConfig(environment = process.env) {
+  const filename = environment.LAZYMIND_DESKTOP_UPDATE_CONFIG;
+  const json = environment.LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON;
+  if (filename && json) throw new Error("Specify only one public update configuration input");
+  try {
+    return filename ? JSON.parse(fs.readFileSync(filename, "utf8")) : json ? JSON.parse(json) : undefined;
+  } catch { throw new Error("Unable to read public update configuration"); }
+}
+
 export function prepareUpdateBuildConfig({ configuration, packageVersion, platform, arch, signingMode }) {
   if (configuration === undefined) return "";
   if (!configuration || Array.isArray(configuration) || typeof configuration !== "object") throw new Error("Invalid public update configuration");
@@ -30,7 +39,7 @@ export function prepareUpdateBuildConfig({ configuration, packageVersion, platfo
   }
   // The compiled helper's config command performs the authoritative full
   // validation before the build proceeds to packaging or signing.
-  return Buffer.from(JSON.stringify({ ...configuration, version: packageVersion, platform, arch })).toString("base64");
+  return Buffer.from(JSON.stringify({ ...configuration, releaseId: configuration.releaseId ?? `${platform}-${arch}-${packageVersion.replace(/\+/g, "_")}`, version: packageVersion, platform, arch })).toString("base64");
 }
 
 export function verifyStagedUpdateConfig(encoded, staged) {
@@ -48,7 +57,7 @@ function main(args) {
   let configuration, packageJson;
   try {
     packageJson = JSON.parse(fs.readFileSync(options["--package"], "utf8"));
-    if (process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG) configuration = JSON.parse(fs.readFileSync(process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG, "utf8"));
+    configuration = readUpdateBuildConfig();
   } catch { throw new Error("Unable to read package or public update configuration"); }
   const encoded = prepareUpdateBuildConfig({ configuration, packageVersion: packageJson.version,
     platform: options["--platform"], arch: options["--arch"], signingMode: options["--signing-mode"] });
