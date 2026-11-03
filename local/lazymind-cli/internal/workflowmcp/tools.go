@@ -153,7 +153,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.state", Title: "Read LazyMind Workflow state",
-		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for one step in control.automatic_retry_steps when present, otherwise a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. A failed run may still have automatic retry budget; follow control admission. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review. With continuation=failed, automatic recovery is unavailable; yield for user recovery.", Annotations: readOnly},
+		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for one step in control.automatic_retry_steps when present, otherwise a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. A failed run may still have automatic retry budget; follow control admission. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review. With continuation=stopped and an explicit user request to continue, call workflow.session.resume. For requested changes use a projection.rewindable target with workflow.step.begin. With continuation=failed, automatic recovery is unavailable; an explicitly requested retry may use a projection.retryable target with retry_origin=user. Otherwise yield.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
 			value, err := client.State(ctx, input.SessionID)
 			return nil, value, err
@@ -171,13 +171,13 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.resume", Title: "Resume a stopped LazyMind Workflow session",
-		Description: "Resume a stopped legacy Workflow session so its interrupted step can be begun again under Runtime rules. Controlled workflows require the user to select Resume in the authenticated workflow page; this tool cannot bypass that decision. Safe to retry with the same command_id.", Annotations: write},
+		Description: "Resume a stopped Workflow using the same control rules as the Workflow panel. Human review remains required when pending. A returned execution_id is already scheduled: use workflow.step.claim to inspect or claim it, never begin a duplicate. Otherwise read workflow.state for the next action. Safe to retry with the same command_id.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionLifecycleInput) (*mcp.CallToolResult, SessionLifecycleResult, error) {
 			value, err := client.ResumeSession(ctx, input.SessionID, input.CommandID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Start one ready step, including auto steps, and return its contract and execution_handle. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
+		Description: "Advance one Runtime-returned ready, retryable or rewindable step using the same rules as the internal controller, and return its contract and execution_handle. Set retry_origin=user only for recovery explicitly requested by the user. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Begin(ctx, input)
 			return nil, value, err

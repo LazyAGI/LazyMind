@@ -27,6 +27,7 @@ type WorkflowControlCommand struct {
 	PreferenceScope string `json:"preference_scope,omitempty"`
 	Objective       string `json:"objective,omitempty"`
 	Instruction     string `json:"runtime_instruction,omitempty"`
+	RetryOrigin     string `json:"retry_origin,omitempty"`
 }
 
 type WorkflowControlReceipt struct {
@@ -39,8 +40,9 @@ type WorkflowControlReceipt struct {
 }
 
 type WorkflowControlResult struct {
-	Receipt WorkflowControlReceipt `json:"receipt"`
-	Control *controlstore.Snapshot `json:"control"`
+	SessionStatus string                 `json:"-"`
+	Receipt       WorkflowControlReceipt `json:"receipt"`
+	Control       *controlstore.Snapshot `json:"control"`
 }
 
 type WorkflowControlService struct{ DB *gorm.DB }
@@ -56,6 +58,20 @@ func controlOwner(session orm.WorkflowSession, owner string) error {
 }
 
 func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID string, command WorkflowControlCommand) (WorkflowControlResult, error) {
+	return s.execute(ctx, owner, sessionID, command, true)
+}
+
+// ExecuteLifecycle adapts the legacy stop/resume contract, whose command has no
+// state version. It uses the same transaction and effects as panel controls.
+func (s WorkflowControlService) ExecuteLifecycle(ctx context.Context, owner, sessionID, commandID string, stopped bool) (WorkflowControlResult, error) {
+	kind := "resume"
+	if stopped {
+		kind = "stop"
+	}
+	return s.execute(ctx, owner, sessionID, WorkflowControlCommand{CommandID: commandID, Kind: kind}, false)
+}
+
+func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID string, command WorkflowControlCommand, versioned bool) (WorkflowControlResult, error) {
 	var result WorkflowControlResult
 	if command.CommandID == "" || len(command.CommandID) > 255 {
 		return result, controlstore.Reject("INVALID_COMMAND", "command_id is required and must be at most 255 characters")
@@ -77,6 +93,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			if err := json.Unmarshal(saved.ResponseJSON, &result.Receipt); err != nil {
 				return err
 			}
+			result.SessionStatus = session.Status
 			result.Control, err = controlstore.Read(tx, *session)
 			return err
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -86,7 +103,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 		if session.Dismissed {
 			return controlstore.Reject("SESSION_STOPPED", "workflow has been dismissed")
 		}
-		if command.Kind != "stop" && command.Kind != "confirm" && command.Kind != "confirm_and_continue" && session.StateVersion != command.StateVersion {
+		if versioned && command.Kind != "stop" && command.Kind != "confirm" && command.Kind != "confirm_and_continue" && session.StateVersion != command.StateVersion {
 			return controlstore.Reject("STATE_VERSION_CONFLICT", "refresh the workflow before applying this operation")
 		}
 		switch command.Kind {
@@ -94,7 +111,11 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			if command.StepID == "" {
 				return controlstore.Reject("INVALID_COMMAND", "step_id is required")
 			}
-			transition := transitionCommandRequest{CommandID: command.CommandID, Operation: "advance", RetryOrigin: "automatic",
+			retryOrigin := "automatic"
+			if command.RetryOrigin == "user" {
+				retryOrigin = "user"
+			}
+			transition := transitionCommandRequest{CommandID: command.CommandID, Operation: "advance", RetryOrigin: retryOrigin,
 				TargetStepID: command.StepID, ExpectedStateVersion: session.StateVersion, HandOff: true,
 				Objective: command.Objective, RuntimeInstruction: command.Instruction}
 			response, updated, tasks, err := applyWorkflowTransition(ctx, tx, session.ID, transition)
@@ -196,7 +217,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			// Invalidate exactly the checkpoints replaced by the recovery transition.
 			transition := transitionCommandRequest{CommandID: command.CommandID, Operation: command.Kind,
 				RetryOrigin: "user", TargetStepID: command.StepID, ExpectedStateVersion: session.StateVersion,
-				HandOff: true, controlAuthorized: true}
+				HandOff: true}
 			response, updated, tasks, err := applyWorkflowTransition(ctx, tx, session.ID, transition)
 			if err != nil {
 				return err
@@ -257,6 +278,7 @@ func (s WorkflowControlService) Execute(ctx context.Context, owner, sessionID st
 			ContractVersion: controlpolicy.Protocol, RequestHash: digest, HTTPStatus: 200, ResponseJSON: receipt, CreatedAt: time.Now().UTC()}).Error; err != nil {
 			return err
 		}
+		result.SessionStatus = session.Status
 		result.Control, err = controlstore.Read(tx, *session)
 		return err
 	})
@@ -324,7 +346,7 @@ func resumeWorkflowExecution(ctx context.Context, tx *gorm.DB, session *orm.Work
 	}
 	response, updated, tasks, err := applyWorkflowTransition(ctx, tx, session.ID, transitionCommandRequest{
 		CommandID: commandID, Operation: operation, RetryOrigin: "user", TargetStepID: target,
-		ExpectedStateVersion: session.StateVersion, HandOff: true, controlAuthorized: true,
+		ExpectedStateVersion: session.StateVersion, HandOff: true,
 	})
 	if err != nil {
 		return err
@@ -458,11 +480,8 @@ func IsWorkflowUserControlRequest(r *http.Request) bool {
 }
 
 func (h WorkflowControlHandler) Command(w http.ResponseWriter, r *http.Request) {
-	// MCP invocations may execute steps; they never impersonate an interactive decision.
-	if !IsWorkflowUserControlRequest(r) {
-		writeWorkflowControlError(w, controlstore.Reject("PERMISSION_DENIED", "use the authenticated workflow page for user control actions"))
-		return
-	}
+	// SessionAccess and the service authenticate ownership and conversation scope.
+	// Transport (browser or MCP) does not change controller permissions.
 	h.decodeCommand(w, r, "")
 }
 
@@ -494,7 +513,7 @@ func (h WorkflowControlHandler) Begin(w http.ResponseWriter, r *http.Request) {
 	h.decodeCommand(w, r, "begin")
 }
 
-// StopExecution only removes execution authority. Resuming remains an interactive action.
+// StopExecution adapts the execution stop endpoint to the shared control service.
 func (h WorkflowControlHandler) StopExecution(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		CommandID string `json:"command_id"`

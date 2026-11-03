@@ -134,11 +134,15 @@ type SessionLifecycleResult struct {
 	Status       string `json:"status"`
 	StateVersion int64  `json:"state_version"`
 	CommandID    string `json:"command_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	ActionID     string `json:"action_id,omitempty"`
+	ResumeReason string `json:"resume_reason,omitempty"`
 }
 
 type BeginInput struct {
+	RetryOrigin        string `json:"retry_origin,omitempty" jsonschema:"automatic by default; user only for recovery explicitly requested by the user"`
 	SessionID          string `json:"session_id" jsonschema:"required,Workflow session returned by workflow.start"`
-	StepID             string `json:"step_id" jsonschema:"required,One currently ready or retryable step"`
+	StepID             string `json:"step_id" jsonschema:"required,One Runtime-returned ready, retryable or rewindable step"`
 	CommandID          string `json:"command_id,omitempty" jsonschema:"Stable retry key; generated when omitted"`
 	Objective          string `json:"objective,omitempty" jsonschema:"Optional runtime refinement which cannot replace the Workflow prompt"`
 	RuntimeInstruction string `json:"runtime_instruction,omitempty" jsonschema:"Optional retry or execution note"`
@@ -320,10 +324,14 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
 		steps, _ := json.Marshal(retries)
 		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
+	} else if continuation == "stopped" {
+		state.AgentInstruction = "The Workflow is stopped. If the user explicitly asks to continue, call workflow.session.resume on this run. Inspect or claim any returned execution_id with workflow.step.claim instead of beginning a duplicate; otherwise read workflow.state again. Without a new user request, END this turn."
+	} else if continuation == "completed" || continuation == "failed" {
+		state.AgentInstruction = "END this turn unless the user explicitly requested recovery. For a requested change, use an exact projection.rewindable target with workflow.step.begin; for a requested retry, use an exact projection.retryable target and retry_origin=user. Core applies the same rules as the internal controller. Do not create a replacement Workflow."
 	} else {
 		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
 			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "stopped" || continuation == "completed" || continuation == "binding_required" || continuation == "failed" {
+		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "binding_required" {
 			state.AgentInstruction = "END this turn. Do not continue Workflow execution or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
 		}
 	}
@@ -556,7 +564,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 		}
 		if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.SessionID)+"/executions:begin", map[string]any{
 			"command_id": input.CommandID, "step_id": input.StepID, "expected_state_version": state.StateVersion,
-			"objective": input.Objective, "runtime_instruction": input.RuntimeInstruction,
+			"objective": input.Objective, "runtime_instruction": input.RuntimeInstruction, "retry_origin": input.RetryOrigin,
 		}, &grant); err != nil {
 			return BeginResult{}, err
 		}
@@ -565,7 +573,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	command := map[string]any{
 		"contract_version": contractVersion, "command_id": input.CommandID,
 		"tool": "advance_step_and_hand_off", "session_id": input.SessionID,
-		"expected_state_version": state.StateVersion, "retry_origin": "automatic",
+		"expected_state_version": state.StateVersion, "retry_origin": input.RetryOrigin,
 		"steps": []map[string]any{{"step_id": input.StepID, "objective": input.Objective, "runtime_instruction": input.RuntimeInstruction}},
 	}
 	var advanced struct {
