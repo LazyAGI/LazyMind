@@ -3,6 +3,7 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/readingpolicy"
@@ -41,7 +42,7 @@ func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
 		db.Model(&orm.Document{}).Where("id=?", id).Update("ext", mustJSON(documentExt{StoredPath: source, OriginalFilename: id + ".pdf"}))
 	}
 	for i := 0; i < 2; i++ {
-		if err := enrollReadingPreparation(ctx, db.DB); err != nil {
+		if err := enrollReadingPreparation(ctx, db.DB, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,7 +60,7 @@ func TestAutomaticReadingEnrollmentFutureOnlyDurableAndBounded(t *testing.T) {
 	}
 	// Terminal failures consume their reservation and never silently reenroll.
 	db.Model(&orm.AsyncJob{}).Where("job_type=?", ReadingPreparationJob).Update("status", "failed")
-	if err := enrollReadingPreparation(ctx, db.DB); err != nil {
+	if err := enrollReadingPreparation(ctx, db.DB, nil); err != nil {
 		t.Fatal(err)
 	}
 	var count int64
@@ -220,5 +221,54 @@ func TestReadingModelRequestCounterPersistsFailureWithoutDeletingOutputs(t *test
 	data, err := os.ReadFile(old)
 	if err != nil || string(data) != "existing result" {
 		t.Fatal("existing output deleted")
+	}
+}
+
+func TestAutomaticEnrollmentSkipsHistoryAndAdvancesPastUnavailableBatch(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+		t.Fatal(err)
+	}
+	seedDocumentListDataset(t, db, "ds", "owner")
+	db.Model(&orm.Dataset{}).Where("id=?", "ds").Update("scene", "academic_papers")
+	policy := readingpolicy.Defaults()
+	policy.Preset = "advance"
+	policy, err := readingpolicy.Save(t.Context(), db.DB, "owner", policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := policy.AutomaticEligibleAfter.Add(time.Hour + time.Second)
+	// Unavailable sources must not block a later valid source on every pass.
+	for i := 0; i < readingEnrollmentBatch; i++ {
+		seedDocumentListDoc(t, db, "ds", fmt.Sprintf("bad-%03d", i), "missing.pdf", epoch, "owner", nil)
+	}
+	seedDocumentListDoc(t, db, "ds", "valid", "valid.pdf", epoch.Add(time.Second), "owner", nil)
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	if err := os.WriteFile(source, []byte("%PDF-original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&orm.Document{}).Where("id=?", "valid").Update("ext", mustJSON(documentExt{StoredPath: source}))
+	// Previously failed enrollment is excluded even when it is from another day.
+	seedDocumentListDoc(t, db, "ds", "history", "history.pdf", epoch.Add(-time.Millisecond), "owner", nil)
+	if err := db.Create(&orm.AsyncJob{ID: "failed-history", JobType: ReadingPreparationJob, ResourceType: "reading_automatic", CreateUserID: "owner", Status: "failed", CreatedAt: time.Now().Add(-48 * time.Hour), PayloadJSON: mustJSON(readingPreparationPayload{DatasetID: "ds", DocumentID: "history"})}).Error; err != nil {
+		t.Fatal(err)
+	}
+	cursors := make(map[string]readingEnrollmentCursor)
+	for pass := 0; pass < 2; pass++ {
+		if err := enrollReadingPreparation(t.Context(), db.DB, cursors); err != nil {
+			t.Fatal(err)
+		}
+		var count int64
+		db.Model(&orm.AsyncJob{}).Where("job_type=?", ReadingPreparationJob).Count(&count)
+		if want := int64(pass + 1); count != want {
+			t.Fatalf("pass %d jobs=%d want=%d", pass, count, want)
+		}
+	}
+	var job orm.AsyncJob
+	db.Where("id<>?", "failed-history").Take(&job)
+	var payload readingPreparationPayload
+	json.Unmarshal(job.PayloadJSON, &payload)
+	if payload.DocumentID != "valid" {
+		t.Fatalf("wrong candidate: %+v", payload)
 	}
 }

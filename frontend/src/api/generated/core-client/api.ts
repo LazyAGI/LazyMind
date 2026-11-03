@@ -22601,51 +22601,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
-         * @summary Translate an authoritative original PDF paragraph
-         * @param {string} block
-         * @param {string} dataset
-         * @param {string} document
-         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost: async (block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'block' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost', 'block', block)
-            // verify required parameter 'dataset' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost', 'dataset', dataset)
-            // verify required parameter 'document' is not null or undefined
-            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost', 'document', document)
-            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation`
-                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
-                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
-                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(pDFPaperReadingRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
          * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
          * @param {string} block Formula block id from the current PDF IR
@@ -34669,22 +34624,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
-         * @summary Translate an authoritative original PDF paragraph
-         * @param {string} block
-         * @param {string} dataset
-         * @param {string} document
-         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFBlockTranslationEnvelope>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(block, dataset, document, pDFPaperReadingRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
          * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
          * @param {string} block Formula block id from the current PDF IR
@@ -39915,16 +39854,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
-         * @summary Translate an authoritative original PDF paragraph
-         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFBlockTranslationEnvelope> {
-            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
          * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
          * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
@@ -43624,19 +43553,6 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlo
 }
 
 /**
- * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest {
-    readonly block: string
-
-    readonly dataset: string
-
-    readonly document: string
-
-    readonly pDFPaperReadingRequest?: PDFPaperReadingRequest
-}
-
-/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest {
@@ -46644,17 +46560,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
-     * @summary Translate an authoritative original PDF paragraph
-     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

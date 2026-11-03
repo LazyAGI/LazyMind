@@ -349,7 +349,6 @@ def rewrite_content(
     task_type: RewriteTaskType,
     content: Any,
     user_instruct: Any,
-    *, single_attempt: bool = False,
 ) -> str:
     if not isinstance(content, str):
         raise BadRequestError("'content' is required and must be a string.")
@@ -359,7 +358,7 @@ def rewrite_content(
         raise BadRequestError("'user_instruct' must be a non-empty string.")
 
     error: Optional[str] = None
-    attempts = 1 if single_attempt else _MAX_REWRITE_ATTEMPTS
+    attempts = _MAX_REWRITE_ATTEMPTS
     for attempt in range(attempts):
         prompt = _PROMPT_BUILDERS[task_type](
             content=content,
@@ -368,7 +367,7 @@ def rewrite_content(
         )
         started = time.monotonic()
         try:
-            raw = AutoModel(model='llm')(prompt, **({'max_retries': 1} if single_attempt else {}))
+            raw = AutoModel(model='llm')(prompt)
         finally:
             # No source text, prompts or model credentials in timing diagnostics.
             LOG.info(f'structured_generation task={task_type} attempt={attempt + 1} '

@@ -26,9 +26,8 @@ import (
 )
 
 type formulaExplanationHandler struct {
-	loadCacheIdentity func(context.Context, string) (string, error)
-	loadModel         func(context.Context, string) (map[string]any, string, string, error)
-	generate          func(context.Context, string, string, map[string]any) (string, error)
+	loadModel func(context.Context, string) (map[string]any, string, string, error)
+	generate  func(context.Context, string, string, map[string]any) (string, error)
 }
 
 var formulaExplanationFlights = formulaExplanationFlightGroup{active: make(map[string]*formulaExplanationFlight)}
@@ -113,16 +112,6 @@ func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]a
 	return candidate.LLMConfig, pdfir.Digest(string(identity)), selected.ModelName, nil
 }
 
-// Cache migration needs only selection metadata. It must not prepare credentials,
-// resolve a cloud runtime session, or construct a runnable model configuration.
-func loadFormulaCacheIdentity(ctx context.Context, user string) (string, error) {
-	selected, err := loadReadingStudyModel(ctx, user)
-	if err != nil || selected == nil {
-		return "", errors.New("所选研读模型不可用，请在 AI 阅读准备中重新选择")
-	}
-	identity, _ := json.Marshal([]any{modelconfig.ChatCandidateID(selected.Source, selected.ID), selected.CredentialRevision, selected.ModelName, selected.BaseURL, selected.ModelSettings})
-	return pdfir.Digest(string(identity)), nil
-}
 func formulaExplanationError(w http.ResponseWriter, status int, message string) {
 	kind := "Internal server error"
 	switch status {
@@ -219,45 +208,27 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	}
 	cacheDir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "formula-explanations", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	cachePath := filepath.Join(cacheDir, key+".json")
-	cachePaths := []string{cachePath}
 	readCache := func() (formulaExplanation, bool) {
-		for _, candidatePath := range cachePaths {
-			if f, openErr := os.Open(candidatePath); openErr == nil {
-				b, readErr := io.ReadAll(io.LimitReader(f, formulaExplanationMaxBytes+1))
-				f.Close()
-				if readErr == nil {
-					if cached, parseErr := validateCachedFormulaExplanation(string(b), evidence); parseErr == nil && bindFormulaExplanationFocus(&cached, request.FocusSymbol) {
-						// Preserve the model that actually generated this saved explanation.
-						cached.Warnings = formulaExplanationWarnings(request.Language)
-						if candidatePath != cachePath {
-							_ = saveFormulaExplanation(cacheDir, cachePath, cached)
-						}
-						return cached, true
-					}
-				}
-			}
+		f, err := os.Open(cachePath)
+		if err != nil {
+			return formulaExplanation{}, false
 		}
-		return formulaExplanation{}, false
+		defer f.Close()
+		raw, err := io.ReadAll(io.LimitReader(f, formulaExplanationMaxBytes+1))
+		if err != nil {
+			return formulaExplanation{}, false
+		}
+		cached, err := validateCachedFormulaExplanation(string(raw), evidence)
+		if err != nil || !bindFormulaExplanationFocus(&cached, request.FocusSymbol) {
+			return formulaExplanation{}, false
+		}
+		// Preserve the model that actually generated this saved explanation.
+		cached.Warnings = formulaExplanationWarnings(request.Language)
+		return cached, true
 	}
 	if !request.Force {
 		if cached, ok := readCache(); ok {
 			return cached, "hit", nil
-		}
-	}
-	legacyCachePath := func(modelID string) string {
-		legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
-		if request.FocusSymbol != nil {
-			focused, _ := json.Marshal([]string{legacyKey, *request.FocusSymbol})
-			legacyKey = pdfir.Digest(string(focused))
-		}
-		return filepath.Join(cacheDir, legacyKey+".json")
-	}
-	if !request.Force && h.loadCacheIdentity != nil {
-		if identity, err := h.loadCacheIdentity(ctx, store.UserID(r)); err == nil {
-			cachePaths = append(cachePaths, legacyCachePath(identity))
-			if cached, ok := readCache(); ok {
-				return cached, "hit", nil
-			}
 		}
 	}
 	if err := readingpolicy.Check(ctx, store.DB(), store.UserID(r), readingpolicy.Formula); err != nil {
@@ -266,12 +237,6 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	config, modelID, modelName, err := h.loadModel(ctx, store.UserID(r))
 	if err != nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{422, "所选研读模型不可用，请在 AI 阅读准备中重新选择或配置。"}
-	}
-	cachePaths = append(cachePaths, legacyCachePath(modelID))
-	if !request.Force {
-		if cached, ok := readCache(); ok {
-			return cached, "hit", nil
-		}
 	}
 	flightKey := cachePath
 	if request.Force {

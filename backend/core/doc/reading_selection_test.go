@@ -77,10 +77,6 @@ func TestReadingStudyOverrideSharedByManualAndAutomaticExecution(t *testing.T) {
 	if err != nil || autoName != name || autoIdentity != identity {
 		t.Fatalf("automatic selection differs: %s %v", autoName, err)
 	}
-	cacheID, err := loadFormulaCacheIdentity(t.Context(), "owner")
-	if err != nil || cacheID != identity {
-		t.Fatal("cache metadata ignored override")
-	}
 	db.Delete(&orm.UserModelProviderGroupModel{}, "id=?", "b")
 	if _, _, _, err := loadFormulaExplanationModel(t.Context(), "owner"); err == nil {
 		t.Fatal("deleted override fell back to global")

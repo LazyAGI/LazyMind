@@ -25128,69 +25128,7 @@ paths:
                                 $ref: '#/components/schemas/ErrorResponse'
                     description: Model request failed or response invalid
             summary: Explain a figure or table using extracted text and cells
-    /api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation:
-        post:
-            description: 'Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.'
-            parameters:
-                - in: path
-                  name: block
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: dataset
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: document
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/PDFPaperReadingRequest'
-                required: false
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PDFBlockTranslationEnvelope'
-                    description: Source-grounded reading result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Invalid request
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Missing or forbidden document/block
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: PDF structure missing or source changed
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model unavailable or source block too large
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Model request failed or response invalid
-            summary: Translate an authoritative original PDF paragraph
+
     /api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation:
         post:
             description: Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.

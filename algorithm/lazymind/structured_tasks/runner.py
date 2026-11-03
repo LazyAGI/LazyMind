@@ -1,5 +1,6 @@
 """One model call per invocation; no JSON repair, regeneration or business binding."""
 import json
+import re
 import time
 
 import lazyllm
@@ -80,7 +81,9 @@ def run_registered_task(request, task_id, *, call_model, configure_model, call_e
         try:
             if not isinstance(raw, str) or len(raw.encode('utf-8')) > spec.max_output_bytes:
                 raise ValueError('output size or type')
-            raw = raw.strip()
+            # LazyLLM may prefix the answer with reasoning_content. Strip only
+            # complete reasoning blocks; keep strict JSON/schema validation.
+            raw = re.sub(r'\A\s*(?:<think>.*?</think>\s*)+', '', raw, flags=re.S).strip()
             if raw.startswith('```json\n') and raw.endswith('```'):
                 raw = raw[8:-3].strip()
             elif raw.startswith('```\n') and raw.endswith('```'):

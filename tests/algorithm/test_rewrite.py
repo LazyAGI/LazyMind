@@ -364,22 +364,3 @@ def test_rewrite_route_rejects_removed_and_unknown_task_types(unsupported_task_t
     )
 
     assert response.status_code == 422
-
-
-def test_learning_route_forwards_single_attempt(monkeypatch):
-    rewrite_routes = _load_rewrite_routes_module()
-    app = FastAPI()
-    app.include_router(rewrite_routes.router)
-    captured = {}
-
-    def generate(**kwargs):
-        captured.update(kwargs)
-        return '{"summary":"purpose","symbols":[]}'
-
-    monkeypatch.setattr(rewrite_routes, 'rewrite_content', generate)
-    response = TestClient(app).post('/api/chat/rewrite', json={
-        'task_type': 'learning', 'content': 'formula', 'user_instruct': 'Return JSON',
-        'llm_config': {}, 'single_attempt': True,
-    })
-    assert response.status_code == 200
-    assert captured['single_attempt'] is True

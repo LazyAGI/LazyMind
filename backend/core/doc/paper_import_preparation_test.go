@@ -3,7 +3,9 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
+	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/readingpolicy"
@@ -72,7 +74,7 @@ func TestPaperImportUsesOnlyBoundedReadingPreparation(t *testing.T) {
 					if jobs != 0 {
 						t.Fatal("legacy import bypassed bounded queue")
 					}
-					if err := enrollReadingPreparation(context.Background(), db.DB); err != nil {
+					if err := enrollReadingPreparation(context.Background(), db.DB, nil); err != nil {
 						t.Fatal(err)
 					}
 					db.Model(&orm.AsyncJob{}).Count(&jobs)
@@ -203,6 +205,78 @@ func TestPaperExplicitReparseRetainedFilePreservesRequestedLevel(t *testing.T) {
 			}
 			if payload.Level != level || payload.Automatic {
 				t.Fatalf("explicit reparse became a legacy import job: %+v", payload)
+			}
+		})
+	}
+}
+
+func TestQueuedPaperPreparationRevalidatesReadPermissionAndClearsFailure(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		t.Run(fmt.Sprint("revoked=", revoked), func(t *testing.T) {
+			installOriginalSourceTransport(t)
+			t.Setenv("LAZYMIND_RAG_ENABLED", "true")
+			db, ds, document, task := seedPaperImportPreparation(t, "academic_papers", ProcessingLevelParsed, "demand")
+			if err := db.AutoMigrate(&orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
+				t.Fatal(err)
+			}
+			acl.InitStore(db)
+			if _, err := SubmitOriginalTask(t.Context(), DatasetCatalogCaller{UserID: "owner"}, ds.ID, task.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.ACLModel{ResourceType: acl.ResourceTypeDB, ResourceID: ds.ID, GranteeType: acl.GranteeUser, TargetID: "reader", Permission: acl.PermissionDatasetRead}).Error; err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("POST", "/ensure-parsed", nil)
+			r.Header.Set("X-User-Id", "reader")
+			result, err := mustDocumentService(t, db).EnsureDocumentParsed(r, EnsureDocumentParsedRequest{UserID: "reader", DatasetID: ds.ID, DocumentID: document.ID, Caller: DatasetCatalogCaller{UserID: "reader"}})
+			if err != nil || result.Status != "parsing" {
+				t.Fatalf("reader enqueue: %+v %v", result, err)
+			}
+			var job orm.AsyncJob
+			if err := db.Where("job_type=?", paperProcessingJob).Take(&job).Error; err != nil {
+				t.Fatal(err)
+			}
+			// Copies reference the same source document but do not own its parse latch.
+			if err := db.Create(&orm.Task{ID: "newer-copy", DatasetID: ds.ID, DocID: document.ID, TaskType: string(TaskTypeCopy), BaseModel: orm.BaseModel{CreatedAt: time.Now().Add(time.Minute)}}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if revoked {
+				db.Where("target_id=?", "reader").Delete(&orm.ACLModel{})
+			}
+			previous := http.DefaultTransport
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path == "/api/authservice/user/reader/identity/internal" {
+					return testJSONResponse(200, `{"sub":"reader","tenant_id":"default","role":"user"}`), nil
+				}
+				return previous.RoundTrip(req)
+			})
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "test-token")
+			t.Setenv("LAZYMIND_AUTH_SERVICE_URL", "http://auth.test")
+			// Bounded AI preparation still requires write, unlike document chat parsing.
+			if _, err := preparationRequest(t.Context(), "reader", readingPreparationPayload{DatasetID: ds.ID}); err == nil {
+				t.Fatal("read-only user gained AI preparation write permission")
+			}
+			// Stop at the controlled parser dependency boundary, without external calls.
+			t.Setenv("LAZYMIND_RAG_ENABLED", "false")
+			_, err = runPaperProcessing(t.Context(), asyncjob.Job{ID: job.ID, CreateUserID: job.CreateUserID, PayloadJSON: job.PayloadJSON}, nil)
+			if err == nil {
+				t.Fatal("expected execution boundary failure")
+			}
+			if revoked && !strings.Contains(err.Error(), "权限") {
+				t.Fatalf("revoked read reached parser: %v", err)
+			}
+			if !revoked && !strings.Contains(err.Error(), "知识库组件") {
+				t.Fatalf("read-only collaborator blocked before parser: %v", err)
+			}
+			var saved orm.Task
+			db.Where("id=?", result.TaskID).Take(&saved)
+			var ext taskExt
+			json.Unmarshal(saved.Ext, &ext)
+			var state orm.DocumentProcessingState
+			db.Where("dataset_id=? AND document_id=?", ds.ID, document.ID).Take(&state)
+			if ext.TaskState != string(TaskStateFailed) || state.ParseStatus != "failed" {
+				t.Fatalf("failure left parsing latch: task=%s state=%s", ext.TaskState, state.ParseStatus)
 			}
 		})
 	}

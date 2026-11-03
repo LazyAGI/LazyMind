@@ -1,7 +1,6 @@
 package algo
 
 type RewriteRequest struct {
-	SingleAttempt   bool                    `json:"single_attempt,omitempty"`
 	TaskType        string                  `json:"task_type"`
 	Content         string                  `json:"content"`
 	UserInstruct    string                  `json:"user_instruct"`
@@ -29,8 +28,7 @@ type PolishGenerateRequest struct {
 }
 
 type LearningGenerateRequest struct {
-	SingleAttempt bool
-	Content       string
-	UserInstruct  string
-	LLMConfig     map[string]any
+	Content      string
+	UserInstruct string
+	LLMConfig    map[string]any
 }

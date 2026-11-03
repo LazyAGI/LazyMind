@@ -311,3 +311,29 @@ def test_registered_task_does_not_require_provider_json_mode(monkeypatch):
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
     result = llm_task.run_llm_task(request())
     assert result.status == 'succeeded'
+
+
+@pytest.mark.parametrize('task', ['formula', 'visual'])
+@pytest.mark.parametrize('fenced', [False, True])
+def test_reasoning_output_is_cleaned_before_strict_validation(monkeypatch, task, fenced):
+    payload = {'summary': 'Result', 'symbols': []} if task == 'formula' else {'summary': 'Result', 'observations': []}
+    body = json.dumps(payload)
+    if fenced:
+        body = '```json\n' + body + '\n```'
+    raw = '<think>private reasoning {not JSON}\nwith multiple lines</think>\n' + body
+    calls = []
+
+    def model(*args, **kwargs):
+        calls.append(1)
+        return raw
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kw: model)
+    req = request() if task == 'formula' else request(
+        task_type='paper.visual.explain', options={'task_version': 'paper-reading-v2-grounded-findings'},
+        input={'data': {'language': 'zh', 'target_block': {'id': 'i', 'type': 'image', 'page': 1},
+                        'source_blocks': []}})
+    result = llm_task.run_llm_task(req)
+    assert result.status == 'succeeded'
+    assert result.output == payload
+    assert len(calls) == result.usage['model_calls'] == 1
+    assert 'private reasoning' not in result.model_dump_json()

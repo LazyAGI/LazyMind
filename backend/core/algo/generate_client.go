@@ -30,7 +30,6 @@ func GeneratePolish(ctx context.Context, req PolishGenerateRequest) (string, err
 // from GenerateSkill because the latter enforces SKILL.md output semantics.
 func GenerateLearning(ctx context.Context, req LearningGenerateRequest) (string, error) {
 	payload := rewritePayload("learning", req.Content, req.UserInstruct, req.LLMConfig)
-	payload.SingleAttempt = req.SingleAttempt
 	return generate(ctx, payload)
 }
 

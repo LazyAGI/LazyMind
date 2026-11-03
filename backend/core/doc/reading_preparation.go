@@ -66,18 +66,17 @@ func GetReadingPreparation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 409)
 		return
 	}
-	var jobs []orm.AsyncJob
-	err = store.DB().WithContext(r.Context()).Where("job_type=? AND create_user_id=?", ReadingPreparationJob, store.UserID(r)).Order("created_at DESC").Find(&jobs).Error
-	if err != nil {
-		common.ReplyErr(w, "读取准备状态失败", 500)
+	var job orm.AsyncJob
+	err = store.DB().WithContext(r.Context()).Where("job_type=? AND create_user_id=?", ReadingPreparationJob, store.UserID(r)).
+		Where("payload_json ->> 'dataset_id' = ? AND payload_json ->> 'document_id' = ? AND payload_json ->> 'source_sha256' = ?", row.DatasetID, row.ID, hash).
+		Order("created_at DESC, id DESC").Take(&job).Error
+	if err == nil {
+		common.ReplyOK(w, preparationStatus(job))
 		return
 	}
-	for _, j := range jobs {
-		var p readingPreparationPayload
-		if json.Unmarshal(j.PayloadJSON, &p) == nil && p.DatasetID == row.DatasetID && p.DocumentID == row.ID && p.SourceSHA256 == hash {
-			common.ReplyOK(w, preparationStatus(j))
-			return
-		}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "读取准备状态失败", 500)
+		return
 	}
 	common.ReplyOK(w, readingPreparationStatus{Status: "not_requested"})
 }
@@ -148,7 +147,20 @@ func enqueueReadingPreparation(ctx context.Context, db *gorm.DB, row orm.Documen
 
 // Enrollment is durable and bounded. Only documents newer than the saved policy
 // epoch are considered. Existing job rows (including failures) never reenroll.
-func enrollReadingPreparation(ctx context.Context, db *gorm.DB) error {
+const readingEnrollmentBatch = 100
+
+type readingEnrollmentCursor struct {
+	Epoch     time.Time
+	CreatedAt time.Time
+	ID        string
+}
+
+// The scheduler owns these cursors. Restarting only rechecks unqueued candidates;
+// durable job exclusion prevents duplicate generation, regardless of job status.
+func enrollReadingPreparation(ctx context.Context, db *gorm.DB, cursors map[string]readingEnrollmentCursor) error {
+	if cursors == nil {
+		cursors = make(map[string]readingEnrollmentCursor)
+	}
 	var policies []orm.UserReadingPolicy
 	if err := db.WithContext(ctx).Find(&policies).Error; err != nil {
 		return err
@@ -176,25 +188,30 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB) error {
 			if remaining <= 0 {
 				return nil
 			}
+			cursor := cursors[stored.UserID]
+			if !cursor.Epoch.Equal(*p.AutomaticEligibleAfter) {
+				cursor = readingEnrollmentCursor{Epoch: *p.AutomaticEligibleAfter}
+			}
+			// Filter completed enrollment in SQL, not once per historical document.
+			enrolled := tx.Model(&orm.AsyncJob{}).Select("1").Where("job_type=? AND resource_type=? AND create_user_id=?", ReadingPreparationJob, "reading_automatic", stored.UserID).
+				Where("payload_json ->> 'dataset_id' = documents.dataset_id AND payload_json ->> 'document_id' = documents.id")
+			query := tx.Table("documents").Select("documents.*").Joins("JOIN datasets ON datasets.id=documents.dataset_id").
+				Where("datasets.scene=? AND datasets.deleted_at IS NULL AND documents.deleted_at IS NULL AND documents.create_user_id=? AND documents.created_at>?", "academic_papers", stored.UserID, *p.AutomaticEligibleAfter).
+				Where("(LOWER(documents.document_type) = 'pdf' OR LOWER(documents.display_name) LIKE '%.pdf')").Where("NOT EXISTS (?)", enrolled)
+			if cursor.ID != "" {
+				query = query.Where("(documents.created_at > ? OR (documents.created_at = ? AND documents.id > ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+			}
 			var rows []orm.Document
-			if err := tx.Table("documents").Select("documents.*").Joins("JOIN datasets ON datasets.id=documents.dataset_id").Where("datasets.scene=? AND datasets.deleted_at IS NULL AND documents.deleted_at IS NULL AND documents.create_user_id=? AND documents.created_at>?", "academic_papers", stored.UserID, *p.AutomaticEligibleAfter).Order("documents.created_at ASC").Find(&rows).Error; err != nil {
+			if err := query.Order("documents.created_at ASC, documents.id ASC").Limit(readingEnrollmentBatch).Find(&rows).Error; err != nil {
 				return err
 			}
+			processed := 0
 			for _, row := range rows {
 				if remaining <= 0 {
 					break
 				}
-				if !strings.EqualFold(row.DocumentType, "PDF") && !strings.HasSuffix(strings.ToLower(row.DisplayName), ".pdf") {
-					continue
-				}
-				key := pdfir.Digest("automatic:" + stored.UserID + ":" + pdfIRResource(row.DatasetID, row.ID))
-				var count int64
-				if err := tx.Model(&orm.AsyncJob{}).Where("job_type=? AND idempotency_key=?", ReadingPreparationJob, key).Count(&count).Error; err != nil {
-					return err
-				}
-				if count > 0 {
-					continue
-				}
+				cursor.CreatedAt, cursor.ID = row.CreatedAt, row.ID
+				processed++
 				scopes := []string{}
 				for _, k := range readingpolicy.Keys {
 					if p.Modes[k] == readingpolicy.Automatic {
@@ -212,6 +229,12 @@ func enrollReadingPreparation(ctx context.Context, db *gorm.DB) error {
 				}
 				remaining--
 			}
+			// Wrap only at exhaustion. Bad files cannot starve the next batch;
+			// wrapping gives a repaired/unavailable file another chance later.
+			if processed == len(rows) && len(rows) < readingEnrollmentBatch {
+				cursor.CreatedAt, cursor.ID = time.Time{}, ""
+			}
+			cursors[stored.UserID] = cursor
 			return nil
 		})
 		if err != nil {
@@ -226,8 +249,9 @@ func StartReadingPreparation(ctx context.Context, db *gorm.DB) <-chan struct{} {
 		defer close(done)
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
+		cursors := make(map[string]readingEnrollmentCursor)
 		for {
-			if err := enrollReadingPreparation(ctx, db); err != nil && ctx.Err() == nil {
+			if err := enrollReadingPreparation(ctx, db, cursors); err != nil && ctx.Err() == nil {
 				log.Printf("reading preparation enrollment failed: %v", err)
 			}
 			select {
@@ -240,6 +264,10 @@ func StartReadingPreparation(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	return done
 }
 func preparationRequest(ctx context.Context, user string, p readingPreparationPayload) (*http.Request, error) {
+	return preparationRequestWithPermission(ctx, user, p, acl.PermissionDatasetWrite)
+}
+
+func preparationRequestWithPermission(ctx context.Context, user string, p readingPreparationPayload, permission string) (*http.Request, error) {
 	identity, err := common.GetCurrentIdentity(ctx, user)
 	if err != nil {
 		return nil, errors.New("阅读准备账户不可用")
@@ -249,7 +277,7 @@ func preparationRequest(ctx context.Context, user string, p readingPreparationPa
 	r.Header.Set("X-Tenant-ID", identity.TenantID)
 	r.Header.Set("X-User-Role", identity.Role)
 	r = mux.SetURLVars(r, map[string]string{"dataset": p.DatasetID, "document": p.DocumentID})
-	if _, _, ok := requireDatasetPermission(r, p.DatasetID, acl.PermissionDatasetWrite); !ok {
+	if _, _, ok := requireDatasetPermission(r, p.DatasetID, permission); !ok {
 		return nil, errors.New("阅读准备权限已撤销")
 	}
 	return r, nil
@@ -447,7 +475,7 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 	return result, nil
 }
 func defaultFormulaHandler() formulaExplanationHandler {
-	return formulaExplanationHandler{loadCacheIdentity: loadFormulaCacheIdentity, loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
+	return formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 		if err := recordReadingModelCall(ctx); err != nil {
 			return "", err
 		}
@@ -455,7 +483,7 @@ func defaultFormulaHandler() formulaExplanationHandler {
 	}}
 }
 func defaultVisualHandler() paperReadingHandler {
-	return paperReadingHandler{kind: "visual", model: formulaExplanationHandler{loadCacheIdentity: loadFormulaCacheIdentity, loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
+	return paperReadingHandler{model: formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 		if err := recordReadingModelCall(ctx); err != nil {
 			return "", err
 		}
