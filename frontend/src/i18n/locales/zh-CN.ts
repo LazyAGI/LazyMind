@@ -10485,7 +10485,7 @@ const zhCN = {
       incomplete: '研究部分完成',
       budget_exhausted: '本轮研究额度已用尽，部分问题尚未完成调查。',
       technical_failure: '部分证据核验失败，研究尚未全部完成。',
-      material_limited: '部分必要材料暂不可用，研究尚未全部完成。',
+      material_limited: '已有材料尚不足以覆盖全部研究问题，未覆盖部分已在报告中说明。',
     },
     "paperListReady": "论文清单已就绪。",
     "prepareMissingContents": "获取未就绪全文（{{count}}）",

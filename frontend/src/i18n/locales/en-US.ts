@@ -10742,7 +10742,7 @@ const enUS = {
       incomplete: 'Research partially complete',
       budget_exhausted: 'The research budget was exhausted. Some questions remain unresolved.',
       technical_failure: 'Some evidence checks failed. The research is not yet complete.',
-      material_limited: 'Some required materials are unavailable. The research is not yet complete.',
+      material_limited: 'The available evidence does not cover every research question. Uncovered areas are disclosed in the report.',
     },
     "paperListReady": "Your paper list is ready.",
     "prepareMissingContents": "Fetch unavailable full text ({{count}})",

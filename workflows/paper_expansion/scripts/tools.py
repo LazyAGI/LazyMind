@@ -153,7 +153,6 @@ class Investigation(TypedDict):
     status: Literal['resolved', 'excluded', 'blocked', 'open']
     conclusion: str
     paper_ids: list[str]
-    queries: list[str]
     query_ids: NotRequired[Annotated[list[str], Field(description=(
         'Full source_queries[].id strings copied verbatim from academic_expansion_context; no shortened IDs.'))]]
     relation_ids: NotRequired[list[str]]
@@ -501,7 +500,8 @@ def _publish_research_report(relation):
               'selection': relation.get('selection', {'before_count': len(result['papers']), 'changes': []}),
               'claims': relation.get('claims', []), 'reading': relation.get('reading', {}),
               'source_versions': relation['source_versions'],
-              'investigation': relation['investigation'], 'coverage_gaps': relation.get('coverage_gaps', []),
+              'investigation': relation['investigation'], 'limitations': relation.get('limitations', []),
+              'coverage_gaps': relation.get('coverage_gaps', []),
               'research_complete': relation.get('research_complete', False),
               'completion': copy.deepcopy(relation['completion']),
               'preparation_metrics': context['record'].get('preparation', {}).get('metrics', {}),
@@ -618,21 +618,17 @@ def _lineage_input(analyses, selection_reasons=None):
             _invalid('analysis fields must be plain strings')
         supplied[row['paper_id']] = row
     frozen = base.get('list_mode') == 'deep'
-    if frozen and (supplied.keys() != before.keys() or selection_reasons):
-        _invalid('analyze exactly the frozen candidate paper IDs; do not submit additions or removals')
+    if frozen and (not supplied.keys() <= before.keys() or selection_reasons):
+        _invalid('use frozen candidate paper IDs for key analyses; do not submit additions or removals')
     base['papers'] = [{'paper': {'paper_id': identity}, 'is_seed': False, 'is_important': False,
-                       **{field: supplied[identity][field]
-                          for field in _ANALYSIS_FIELDS if field in supplied[identity]}}
+                       **{field: supplied.get(identity, {})[field]
+                          for field in _ANALYSIS_FIELDS if field in supplied.get(identity, {})}}
                       for identity in (before if frozen else supplied)]
     result, contents = _canonical_input(base)
     # The screen is provisional; all extra identities must already be registered.
     seeds = {row['paper']['paper_id'] for row in _analysis_candidates()['papers'] if row['is_seed']}
-    if not seeds.issubset(supplied):
+    if not frozen and not seeds.issubset(supplied):
         _invalid('analyses must retain all user seeds')
-    statuses = {row['paper_id']: row['status'] for row in contents}
-    for identity, row in supplied.items():
-        if statuses.get(identity) == 'ready' and not any(row.get(field, '').strip() for field in _ANALYSIS_FIELDS):
-            _invalid('available paper ' + identity + ' requires an analysis description')
     if frozen:
         return result, contents, supplied, {'before_count': len(before), 'changes': []}
     after = {row['paper']['paper_id']: row for row in result['papers']}
@@ -718,7 +714,6 @@ def _validate_investigation(investigation, result, preparation, query_receipts):
     prepared = {(clue['source_paper_id'], clue['name']): clue
                 for clue in preparation.get('named_clues', [])}
     errors = []
-    recorded_queries = {row['query'] for row in query_receipts.values()}
     seen = set()
     for item_index, item in enumerate(investigation):
         if (not isinstance(item, dict) or item.get('kind') not in {'predecessor', 'successor', 'peer'}
@@ -728,7 +723,7 @@ def _validate_investigation(investigation, result, preparation, query_receipts):
                            for key in ('question_id', 'question', 'conclusion'))
                 or item['question_id'] in seen):
             _invalid('investigation needs unique questions, confirmed directions, kind, status and conclusions')
-        for key in ('paper_ids', 'queries', 'unresolved_clues', 'gaps'):
+        for key in ('paper_ids', 'unresolved_clues', 'gaps'):
             if not isinstance(item.get(key), list) or any(not isinstance(value, str) for value in item[key]):
                 _invalid('investigation.' + key + ' must be a string array')
         if not set(item['paper_ids']).issubset(allowed):
@@ -737,9 +732,6 @@ def _validate_investigation(investigation, result, preparation, query_receipts):
         if unknown_queries:
             errors.append(f'investigation[{item_index}].query_ids: {unknown_queries!r} are not actual task query '
                           'receipt IDs; copy full source_queries[].id strings without abbreviation')
-        if any(query not in recorded_queries for query in item['queries']):
-            errors.append(f'investigation[{item_index}].queries must use actual recorded queries; '
-                          'use query_ids for citation queries')
         resolutions = item.get('clue_resolutions', [])
         if not isinstance(resolutions, list):
             _invalid('investigation.clue_resolutions must be an array')
@@ -780,32 +772,60 @@ def _validate_investigation(investigation, result, preparation, query_receipts):
     return prepared, errors
 
 
-def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[PaperRelation],
-                              investigation: list[Investigation], claims: list[ClaimEvidence] | None = None,
+def academic_submit_relations(analyses: list[PaperAnalysis] | None = None,
+                              relations: list[PaperRelation] | None = None,
+                              claims: list[ClaimEvidence] | None = None,
+                              limitations: list[str] | None = None,
+                              investigation: list[Investigation] | None = None,
                               selection_reasons: list[SelectionReason] | None = None,
                               research_structure: ResearchStructure | None = None):
-    """Submit research analysis and write its report; this is the terminal tool.
+    """Publish an evidence-backed relationship graph and research report; this is the terminal tool.
 
-    Cite real positions already read in this expansion for claims and relations. Describe source statements
-    and research inferences explicitly in the analysis text and retain their conditions. There is no separate
-    semantic verification step. Deep expansion uses the frozen paper IDs and directions; omit
-    research_structure and selection_reasons. Other paths supply both. Never drop papers for missing full text.
-    Unfinished investigations must describe actual material limitations or exhausted research resources.
-    The expansion is supplied by the Workflow binding; do not pass expansion_id.
-    For each clue_resolution, resolved requires a full paper_id in the final set; all other statuses omit it.
-    A source paper's own mechanism resolves to source_paper_id, supported by its key_contribution claim.
+    Submit only key findings and supported relationships, not three fields per paper or a fixed investigation
+    matrix. Deep expansion retains the entire frozen list automatically, including papers without analysis.
+    Cite real read positions for each scientific finding; never guess blocks or infer facts from titles.
+    Normal comparison conditions belong in limitations or relation.conditions, not investigation.gaps.
+    Optional investigation records outstanding work; missing evidence stays explicit in a partial report,
+    without requiring exhaustive searches before delivery. Query text and source versions come from the server.
+    All academic tools use the Workflow binding; do not pass expansion_id.
+
+    Submissions are drafted within this execution before business checks. After a rejection, resend only
+    changed arrays/objects; omitted arguments reuse the draft, [] clears an array. Each supplied array replaces
+    that whole array. All retained data is checked again before publication. No-argument retry reuses the draft.
+    Schema-rejected calls cannot be drafted. Other executions never reuse this draft.
 
     Args:
-        analyses: Paper IDs and analysis text only. Do not put claims or evidence inside these objects.
-        claims: Top-level evidence array alongside analyses. Each entry identifies paper_id, field and
-            that paper's read positions. Use evidence for cross-paper sources with separate paper IDs and positions.
-        investigation: Research questions and named-clue dispositions. Copy complete source_queries[].id strings
-            from task context into query_ids; never abbreviate IDs.
+        analyses: Key analysis texts only, with full paper_id. No claims inside these objects. For frozen deep
+            expansion, omit papers with no key finding; they remain in the list. Other paths supply the final set.
+        claims: Evidence for key analysis fields only; omit claims that duplicate a relation's statement.
+            Use cross-paper evidence with separate source paper IDs and their own actual read positions.
+        relations: Only supported relationships with explicit conditions; no edge for missing evidence.
+        limitations: Normal limits of comparison and applicability, such as differing experimental baselines.
+        investigation: Optional unresolved questions or actual material gaps, not a mandatory matrix.
+            clue_resolutions belongs inside an investigation entry, never at the top level. Copy full query_ids;
+            do not supply query text. Omit this argument if no additional investigation record is needed.
     """
     from lazymind.chat.engine.subagent.context import require_context
     ctx = require_context()
     if ctx.params.get('step_id') != 'analyze_relations':
         _invalid('research submission is only available in analyze_relations')
+    # Reuse the framework's execution-local draft storage, without publishing a Workflow artifact.
+    draft_key = 'academic_submission_' + ctx.task_id
+    with _PUBLISH_LOCK:
+        saved = ctx.read_draft(draft_key)
+        draft = json.loads(saved[0]) if saved else {}
+        updates = {'analyses': analyses, 'relations': relations, 'claims': claims, 'limitations': limitations,
+                   'investigation': investigation, 'selection_reasons': selection_reasons,
+                   'research_structure': research_structure}
+        draft.update({key: value for key, value in updates.items() if value is not None})
+        ctx.write_draft(draft_key, 'json', json.dumps(draft, ensure_ascii=False), pending_commit=False)
+    return _submit_research_draft(copy.deepcopy(draft))
+
+
+def _submit_research_draft(draft):
+    analyses, claims, relations = (draft.get(key, []) for key in ('analyses', 'claims', 'relations'))
+    investigation, limitations = (draft.get(key, []) for key in ('investigation', 'limitations'))
+    selection_reasons, research_structure = (draft.get(key) for key in ('selection_reasons', 'research_structure'))
     context = _read_expansion_context(_expansion_id())
     result, contents, supplied, selection = _lineage_input(analyses, selection_reasons)
     candidate = _analysis_candidates()
@@ -827,12 +847,14 @@ def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[Pap
         ]
     _validate_structure(research_structure, result)
     query_receipts = {row['id']: row for row in context.get('source_queries', [])}
-    prepared_clues, errors = _validate_investigation(investigation, result, preparation, query_receipts)
-    allowed = set(supplied)
+    _, errors = _validate_investigation(investigation, result, preparation, query_receipts)
+    if any(not value.strip() for value in limitations):
+        errors.append('limitations must describe concrete comparison or applicability limits')
+    allowed = {row['paper']['paper_id'] for row in result['papers']}
     checks, seen = [], set()
     for claim in claims or []:
         identity, field = claim.get('paper_id'), claim.get('field')
-        if identity not in allowed or field not in _ANALYSIS_FIELDS or (identity, field) in seen:
+        if identity not in supplied or field not in _ANALYSIS_FIELDS or (identity, field) in seen:
             _invalid('claims must name one existing analysis field once')
         if not supplied[identity].get(field, '').strip():
             _invalid('claim must cite nonempty published analysis text')
@@ -899,12 +921,17 @@ def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[Pap
                                   'put other papers\' evidence under their own paper_id')
             ref.update(content_hash=version['content_hash'], source_version=version['source_version'])
     if errors:
-        _invalid('Correct all submission fields before resubmitting:\n' + '\n'.join(errors))
+        _invalid('Draft saved. Resubmit only changed arrays/objects; omitted fields are retained. '
+                 'Correct all submission fields:\n' + '\n'.join(errors))
     bound_query_ids = {key for item in investigation for key in item.get('query_ids', [])}
     bound_query_ids.update(key for item in investigation for row in item.get('clue_resolutions', [])
                            for key in row['query_ids'])
+    for item in investigation:
+        item['queries'] = list(dict.fromkeys(query_receipts[key]['query'] for key in item.get('query_ids', [])
+                                             if query_receipts[key]['mode'] == 'keyword'))
     payload = {'input': result, 'selection': selection, 'claims': claims or [], 'relations': relations,
-               'research_structure': research_structure, 'investigation': investigation, 'source_versions': versions,
+               'research_structure': research_structure, 'investigation': investigation, 'limitations': limitations,
+               'source_versions': versions,
                'source_queries': [query_receipts[key] for key in sorted(bound_query_ids)]}
     field_claims = [row for row in checks if row['field'] != 'relation']
     # Preserve authored findings; citation validation does not assign scientific verdicts.
@@ -914,84 +941,30 @@ def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[Pap
                 'reading': reading, 'metrics': _model_metrics()}
     if candidate.get('list_mode') == 'deep':
         analysis.update(list_mode='deep', recommendations=candidate['recommendations'])
-    seed_ids = {row['paper']['paper_id'] for row in result['papers'] if row['is_seed']}
-    coverage = {(item['direction'], item['kind']) for item in investigation}
-    missing = [{'direction': direction, 'kind': kind, 'reason': '尚未记录该方向的这类调查'}
-               for direction in result['selected_directions'] for kind in ('predecessor', 'successor', 'peer')
-               if (direction, kind) not in coverage]
+    # Completion describes the evidence delivered, not whether every possible follow-up was exhausted.
+    # Ordinary limitations do not become tasks. Actual unresolved work remains visible in a partial report.
+    missing = []
     for item in investigation:
-        if item['status'] not in {'resolved', 'excluded'}:
-            reasons = [*item['unresolved_clues'], *item['gaps']]
-            if reasons:
+        reasons = [*item['unresolved_clues'], *item['gaps']]
+        for clue in item.get('clue_resolutions', []):
+            if clue['status'] in {'open', 'blocked'}:
                 missing.append({'direction': item['direction'], 'kind': item['kind'],
-                                'question_id': item['question_id'], 'reason': '；'.join(dict.fromkeys(reasons))})
-            continue
-        linked = [row for row in relations if row['id'] in item.get('relation_ids', [])]
-        actual_queries = [query_receipts[key] for key in item.get('query_ids', [])]
-        if item['kind'] == 'successor':
-            # Topic-only research follows the papers recorded for this investigation, not user seeds.
-            subjects = seed_ids or set(item['paper_ids'])
-            cited = [row for row in actual_queries if row['mode'] == 'citations' and row['paper_id'] in subjects]
-
-            def successful(row):
-                return any(source['status'] in {'ok', 'empty'} for source in row.get('sources', []))
-            precision = [row for row in actual_queries if row['mode'] == 'keyword' and successful(row)]
-            adequate = bool(cited and precision and (any(successful(row) for row in cited)
-                            or len({row['query'] for row in precision}) >= 2))
-        elif item['kind'] == 'predecessor':
-            adequate = any(row['relation_type'] in {'method_modification', 'design_inspiration',
-                           'component_use', 'background_citation'} for row in linked)
-        else:
-            adequate = any(row['relation_type'] in {'experimental_comparison', 'mechanism_comparison'}
-                           for row in linked)
-        adequate = adequate and not item['gaps'] and not item['unresolved_clues']
-        if not adequate:
-            reason = '；'.join([*item['unresolved_clues'], *item['gaps']]) or (
-                '后续调查尚缺研究对象的被引尝试及成功精确补查' if item['kind'] == 'successor'
-                else '尚缺说明该调查结论的关系与引用')
+                                'question_id': item['question_id'], 'clue_name': clue['name'],
+                                'reason': clue['reason']})
+        if reasons:
             missing.append({'direction': item['direction'], 'kind': item['kind'],
-                            'question_id': item['question_id'], 'reason': reason})
-    questions = {row['id']: row for row in preparation.get('research_questions', [])}
-    for key, clue in prepared_clues.items():
-        dispositions = [(item, row) for item in investigation for row in item.get('clue_resolutions', [])
-                        if (row['source_paper_id'], row['name']) == key]
-        if not dispositions:
-            question = questions[clue['question_ids'][0]]
-            missing.append({'direction': question['direction'], 'kind': question['category'],
-                            'question_id': question['id'], 'clue_name': clue['name'],
-                            'reason': '原文命名线索尚未记录解析、排除或具体获取障碍'})
-        for item, disposition in dispositions:
-            reason = disposition['reason'] if disposition['status'] in {'open', 'blocked'} else ''
-            if disposition['status'] == 'resolved':
-                endpoints = {clue['source_paper_id'], disposition['paper_id']}
-                own_contribution = clue['source_paper_id'] == disposition['paper_id'] and any(
-                    row['paper_id'] == disposition['paper_id'] and row['field'] == 'key_contribution'
-                    for row in field_claims)
-                described_role = any(edge['id'] in item.get('relation_ids', [])
-                                     and endpoints <= {edge['source_paper_id'], edge['target_paper_id']}
-                                     for edge in relations)
-                if not (own_contribution or described_role):
-                    reason = '线索已登记论文身份，但尚未说明其与原文的具体角色与引用依据'
-            if reason:
-                missing.append({'direction': item['direction'], 'kind': item['kind'],
-                                'question_id': item['question_id'], 'clue_name': clue['name'], 'reason': reason})
-    missing = list({json.dumps(gap, sort_keys=True, ensure_ascii=False): gap for gap in missing}.values())
+                            'question_id': item['question_id'], 'reason': '；'.join(dict.fromkeys(reasons))})
+    cited = {ref['paper_id'] for row in checks for ref in row['evidence']}
+    direction_papers = {row['id']: set() for row in research_structure['directions']}
+    for node in research_structure['nodes']:
+        direction_papers[node['direction_id']].add(node['paper_id'])
+    for direction in research_structure['directions']:
+        if not cited.intersection(direction_papers[direction['id']]):
+            missing.append({'direction': direction['name'], 'reason': '当前方向尚缺可引用的比较或研究结论'})
     analysis['research_complete'] = not missing
     analysis['coverage_gaps'] = missing
-    if not missing:
-        completion = {'status': 'complete', 'reason': 'scope_covered'}
-    elif (all(ctx.tool_call_budget.get(name, {}).get('remaining') == 0
-              for name in ('academic_read_paper', 'academic_search_papers'))
-          or (getattr(ctx, 'execution_deadline', None) is not None
-              and ctx.execution_deadline - time.monotonic() <= 180)):
-        completion = {'status': 'incomplete', 'reason': 'budget_exhausted'}
-    elif (any(row['status'] in {'failed', 'unavailable'} for row in contents)
-          or any(item['status'] == 'blocked' for item in investigation)
-          or any(row['status'] == 'blocked' for item in investigation for row in item.get('clue_resolutions', []))):
-        completion = {'status': 'incomplete', 'reason': 'material_limited'}
-    else:
-        _invalid('research still has actionable gaps; supplement the research before submitting: '
-                 + json.dumps(missing, ensure_ascii=False))
+    completion = ({'status': 'incomplete', 'reason': 'material_limited'} if missing
+                  else {'status': 'complete', 'reason': 'scope_covered'})
     analysis['completion'] = completion
     analysis['submission_hash'] = _submission_hash(payload)
     analysis['analysis_version'] = _submission_hash(analysis)
@@ -1043,8 +1016,9 @@ def _research_report_input(relation):
                          'directions': [direction] if direction else [],
                          'citations': [references[ref['paper_id']] for ref in claim['evidence']]})
     for edge in relation['relations']:
-        directions = list(dict.fromkeys(item['direction'] for item in relation['investigation']
-                                        if edge['id'] in item.get('relation_ids', [])))
+        directions = list(dict.fromkeys(direction_names[membership[identity]]
+                                        for identity in (edge['source_paper_id'], edge['target_paper_id'])
+                                        if identity in membership))
         findings.append({'statement': edge['statement'], 'conditions': edge['conditions'],
                          'relationship': edge['relation_type'], 'directions': directions,
                          'citations': [references[ref['paper_id']] for ref in edge['evidence']]})
@@ -1053,7 +1027,8 @@ def _research_report_input(relation):
             'directions': [{'name': row['name'], 'question': row['question']}
                            for row in relation['research_structure']['directions']],
             'completion': relation['completion'], 'findings': findings,
-            'limitations': relation['coverage_gaps'],
+            'limitations': [*relation['coverage_gaps'],
+                            *({'reason': value} for value in relation.get('limitations', []))],
             'paper_analyses': [{field: row.get(field, '') for field in _ANALYSIS_FIELDS}
                                for row in papers],
             'papers': [{'reference': index, **{key: row['paper'][key]

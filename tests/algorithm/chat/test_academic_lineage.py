@@ -85,7 +85,7 @@ def lineage(tmp_path, monkeypatch, request):
                                               'branch_question': 'sharing scope?', 'reason': 'Investigate scope'}]},
             'investigation': [{'question_id': kind, 'kind': kind, 'direction': 'method', 'question': kind + '?',
                                'status': 'resolved', 'conclusion': 'Search documented', 'paper_ids': ['a', 'b', 'c'],
-                               'queries': ['precise title'], 'query_ids': ['exact', 'forward'],
+                               'query_ids': ['exact', 'forward'],
                                'relation_ids': ['b-c'], 'unresolved_clues': [], 'gaps': []}
                               for kind in ['predecessor', 'successor', 'peer']]}
     args['relations'].append({**copy.deepcopy(args['relations'][0]), 'id': 'a-b',
@@ -128,6 +128,54 @@ def test_deep_report_uses_frozen_candidates(lineage, monkeypatch):
     assert report['recommendations'] == recommendations
     assert [row['paper']['paper_id'] for row in report['input']['papers']] == list('abc')
     assert len(report['research_structure']['nodes']) == 2
+
+
+def test_sparse_findings_keep_full_list_and_normal_limits_do_not_block_report(lineage):
+    module, ctx, events, _, args = lineage
+    candidate = ctx.params['remote_inputs']['candidate_set']
+    candidate.update(list_mode='deep', directions=[{'name': 'method', 'question': 'Which mechanism?'}],
+                     recommendations=[{'paper_id': pid, 'direction': 'method', 'reason': 'Relevant'} for pid in 'bc'])
+    module.academic_submit_relations(
+        analyses=[args['analyses'][1]], claims=[args['claims'][1]], relations=[],
+        limitations=['不同实验基线不能直接排序，也不能外推到未测试的上下文长度。'])
+    report = _artifact(events, 'expansion_report')
+    assert [row['paper']['paper_id'] for row in report['input']['papers']] == list('abc')
+    assert len(report['claims']) == 1 and report['relations'] == []
+    assert report['completion']['status'] == 'complete'
+    assert report['coverage_gaps'] == [] and report['investigation'] == []
+    assert ctx.report_requests[0].input.data['limitations'] == [{'reason': report['limitations'][0]}]
+    assert len(ctx.report_requests[0].input.data['findings']) == 1
+
+
+def test_submission_correction_reuses_execution_draft_and_rechecks_sources(lineage):
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
+    module, ctx, events, versions, args = lineage
+    ensure_lazyllm_tool_docs([module.academic_submit_relations])
+    tool = ToolManager([module.academic_submit_relations]).all_tools[0]
+    args['claims'][0]['positions'] = [9]
+    with pytest.raises(ToolExecutionError, match='Draft saved'):
+        module.academic_submit_relations(**tool._validate_input(args))
+    assert not ctx.report_requests and not ctx.list_pending_drafts()
+    assert not any(event.get('slot') for event in events)
+    args['claims'][0]['positions'] = [0]
+    original = module._read_expansion_context('exp')
+    original['record']['reading']['b']['content_hash'] = 'old-version'
+    module._read_expansion_context = lambda _: original
+    with pytest.raises(ToolExecutionError, match='source version changed'):
+        module.academic_submit_relations(**tool._validate_input({'claims': args['claims']}))
+    original['record']['reading']['b']['content_hash'] = versions['b']['content_hash']
+    module.academic_submit_relations(**tool._validate_input({}))
+    report = _artifact(events, 'expansion_report')
+    assert report['input']['papers'][0]['key_contribution'] == args['analyses'][0]['key_contribution']
+    assert len(report['claims']) == 3 and len(report['relations']) == 2
+    assert _artifact(events)['investigation'][0]['queries'] == ['precise title']
+    assert len(ctx.report_requests) == 1
+    ctx.task_id = 'another-execution'
+    with pytest.raises(ToolExecutionError):
+        module.academic_submit_relations()
+    assert len(ctx.report_requests) == 1
 
 
 def test_named_clue_submission_reports_all_errors_then_publishes_source_mechanism(lineage, monkeypatch):
@@ -276,15 +324,15 @@ def test_incomplete_report_preserves_actual_material_gap(lineage):
     assert ctx.report_requests[0].input.data['limitations'] == report['coverage_gaps']
 
 
-def test_actionable_gaps_require_research_until_budget_is_exhausted(lineage):
+def test_unresolved_work_is_disclosed_without_exhausting_research_budget(lineage):
     module, ctx, events, _, args = lineage
-    args['investigation'][0].update(status='open', gaps=['尚需阅读原文方法章节'])
-    with pytest.raises(ToolExecutionError, match='actionable gaps'):
-        module.academic_submit_relations(**args)
-    assert not ctx.report_requests
-    ctx.tool_call_budget = {name: {'remaining': 0} for name in ('academic_read_paper', 'academic_search_papers')}
+    args['investigation'][0].update(status='open', gaps=['尚未读取原文方法章节，相关机制不作结论'])
     module.academic_submit_relations(**args)
-    assert _artifact(events)['completion'] == {'status': 'incomplete', 'reason': 'budget_exhausted'}
+    report = _artifact(events, 'expansion_report')
+    assert report['completion'] == {'status': 'incomplete', 'reason': 'material_limited'}
+    assert report['coverage_gaps'][0]['reason'] == '尚未读取原文方法章节，相关机制不作结论'
+    assert ctx.execution_deadline > time.monotonic() + 180
+    assert len(ctx.report_requests) == 1
 
 
 def test_topic_only_successor_search_uses_investigation_papers(lineage):

@@ -112,7 +112,7 @@ it('keeps candidate lists compact while allowing every saved paper to be opened'
 it.each([
   ['complete', 'scope_covered', '研究完成', undefined],
   ['incomplete', 'budget_exhausted', '研究部分完成', '本轮研究额度已用尽，部分问题尚未完成调查。'],
-  ['incomplete', 'material_limited', '研究部分完成', '部分必要材料暂不可用，研究尚未全部完成。'],
+  ['incomplete', 'material_limited', '研究部分完成', '已有材料尚不足以覆盖全部研究问题，未覆盖部分已在报告中说明。'],
 ])('shows saved research completion: %s / %s', async (status, reason, label, explanation) => {
   show(slot('expansion_report', { analysis_version: 'checked', input, narrative: '研究正文', relations: [], completion: { status, reason } }));
   expect(await screen.findByText(label)).toBeVisible();
