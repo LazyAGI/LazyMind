@@ -328,9 +328,9 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             # Keep PowerShell lifecycle deadlines independent of concurrent
             # filesystem scans and archive extraction on the shared runner.
-            node --test --test-concurrency=1 desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js
+            node --test --test-concurrency=1 desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           else
-            node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js
+            node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           fi
 
   test-auth-service:
