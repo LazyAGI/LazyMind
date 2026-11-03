@@ -1039,7 +1039,7 @@ export default function RenderPdf({
 
   if (error && errorSource.current === fileData) {
     return (
-      <div ref={readerFrame} className="pdf-reader-workspace" style={{height:style?.height || "100%",width:"100%"}}>
+      <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "100%",width:"100%"}}>
         {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
         {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
@@ -1063,7 +1063,7 @@ export default function RenderPdf({
     writePdfNoteHighlights(noteHighlightKey,next);
   };
   return (
-    <div ref={readerFrame} className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div className="pdf-reader-stage">

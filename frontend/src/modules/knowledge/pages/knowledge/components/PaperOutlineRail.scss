@@ -96,3 +96,8 @@
 @media (prefers-reduced-motion:reduce) {
  .paper-outline-rail__popover {transition:none;transform:none;}
 }
+
+// The rail belongs to the original PDF, not the overview article.
+.paper-reader-pane:has(.pdf-reader-workspace[data-reader-mode="overview"]) > .paper-outline-rail {
+ display:none;
+}
