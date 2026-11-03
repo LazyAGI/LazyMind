@@ -1,6 +1,6 @@
 export type PaperGraphData = {
   nodes: { id: string; label: string; tone: string }[];
-  edges: { id: string; source: string; target: string; label: string; description?: string; relationType?: string; directed: boolean; dashed: boolean; status?: string }[];
+  edges: { id: string; source: string; target: string; label: string; description?: string; relationType?: string; directed: boolean; dashed: boolean }[];
 };
 
 export const paperRelationColors: Record<string, string> = {

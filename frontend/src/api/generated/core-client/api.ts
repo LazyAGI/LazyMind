@@ -432,7 +432,7 @@ export type AcademicExpansionReadingValueReadLevelEnum = typeof AcademicExpansio
 
 export interface AcademicExpansionReport {
     'analysis_version'?: string;
-    'claims'?: Array<AcademicVerifiedClaim>;
+    'claims'?: Array<AcademicResearchClaim>;
     'completion'?: AcademicResearchCompletion;
     'coverage_gaps'?: Array<AcademicCoverageGap>;
     'currency_cost'?: number | null;
@@ -478,7 +478,6 @@ export interface AcademicExpansionReportRelationsInner {
     'source_paper_id': string;
     'statement': string;
     'target_paper_id': string;
-    'verification': AcademicExpansionReportRelationsInnerVerification;
 }
 
 export const AcademicExpansionReportRelationsInnerRelationTypeEnum = {
@@ -491,45 +490,6 @@ export const AcademicExpansionReportRelationsInnerRelationTypeEnum = {
 } as const;
 
 export type AcademicExpansionReportRelationsInnerRelationTypeEnum = typeof AcademicExpansionReportRelationsInnerRelationTypeEnum[keyof typeof AcademicExpansionReportRelationsInnerRelationTypeEnum];
-
-export interface AcademicExpansionReportRelationsInnerVerification {
-    'parts'?: Array<AcademicExpansionReportRelationsInnerVerificationPartsInner>;
-    'reason'?: string;
-    'scope_reason'?: string;
-    'scope_status'?: AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum;
-    'status'?: AcademicExpansionReportRelationsInnerVerificationStatusEnum;
-    'verification_error'?: string;
-}
-
-export const AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum = {
-    Supported: 'supported',
-    Uncertain: 'uncertain'
-} as const;
-
-export type AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum];
-export const AcademicExpansionReportRelationsInnerVerificationStatusEnum = {
-    Supported: 'supported',
-    Uncertain: 'uncertain',
-    Unsupported: 'unsupported'
-} as const;
-
-export type AcademicExpansionReportRelationsInnerVerificationStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationStatusEnum];
-
-export interface AcademicExpansionReportRelationsInnerVerificationPartsInner {
-    'part_index'?: number;
-    'reason'?: string;
-    'sources'?: Array<string>;
-    'status'?: AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum;
-    'text'?: string;
-}
-
-export const AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum = {
-    Supported: 'supported',
-    Uncertain: 'uncertain',
-    Unsupported: 'unsupported'
-} as const;
-
-export type AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum];
 
 export interface AcademicExpansionReportResearchStructure {
     'directions': Array<AcademicExpansionReportResearchStructureDirectionsInner>;
@@ -550,17 +510,6 @@ export interface AcademicExpansionReportStageMetricsValue {
     'currency_cost'?: number | null;
     'model'?: string;
     'provider_usage_records'?: Array<object>;
-    'verification'?: AcademicExpansionReportStageMetricsValueVerification;
-}
-export interface AcademicExpansionReportStageMetricsValueVerification {
-    'batches'?: Array<object>;
-    'completed_fields'?: number;
-    'elapsed_seconds'?: number;
-    'failed_fields'?: number;
-    'model_calls'?: number;
-    'reused_fields'?: number;
-    'semantic_rounds'?: number;
-    'submitted_fields'?: number;
 }
 export interface AcademicExpansionReportStageTimingInner {
     'attempt'?: number;
@@ -760,7 +709,6 @@ export interface AcademicModelMetrics {
     'currency_cost'?: number | null;
     'model'?: string;
     'provider_usage_records'?: Array<object>;
-    'verification'?: AcademicExpansionReportStageMetricsValueVerification;
 }
 export interface AcademicPaperRef {
     'abstract': string | null;
@@ -781,7 +729,7 @@ export interface AcademicPaperRef {
     'year'?: number;
 }
 /**
- * Frozen changes against the candidate_set bound to the checked analysis, including the original paper metadata and a reason for every addition or removal.
+ * Frozen changes against the candidate_set bound to the research analysis, including the original paper metadata and a reason for every addition or removal.
  */
 export interface AcademicPaperSelection {
     'before_count': number;
@@ -830,11 +778,11 @@ export interface AcademicPresenceDocument {
     'source_version'?: string;
 }
 /**
- * Checked relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
+ * Research relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
  */
 export interface AcademicRelationAnalysis {
     'analysis_version': string;
-    'claims': Array<AcademicVerifiedClaim>;
+    'claims': Array<AcademicResearchClaim>;
     'completion': AcademicResearchCompletion;
     'coverage_gaps': Array<AcademicCoverageGap>;
     'input': AcademicReviewInput;
@@ -849,8 +797,27 @@ export interface AcademicRelationAnalysis {
     'source_versions': Array<AcademicSourceVersion>;
     'submission_hash': string;
 }
+export interface AcademicResearchClaim {
+    'available_sources'?: Array<string>;
+    'content_hash'?: string;
+    'evidence'?: Array<AcademicSourceEvidence>;
+    'field'?: AcademicResearchClaimFieldEnum;
+    'paper_id'?: string;
+    'positions'?: Array<number>;
+    'source_version'?: string;
+    'statement'?: string;
+}
+
+export const AcademicResearchClaimFieldEnum = {
+    SeedRelation: 'seed_relation',
+    DirectionRelation: 'direction_relation',
+    KeyContribution: 'key_contribution'
+} as const;
+
+export type AcademicResearchClaimFieldEnum = typeof AcademicResearchClaimFieldEnum[keyof typeof AcademicResearchClaimFieldEnum];
+
 /**
- * Research outcome for the checked analysis, independent of the Workflow execution status. A complete outcome is verified; an incomplete outcome preserves its actual stopping reason.
+ * Research outcome for the analysis, independent of the Workflow execution status. A complete outcome covers the research scope; an incomplete outcome preserves its actual stopping reason.
  */
 export interface AcademicResearchCompletion {
     'reason': AcademicResearchCompletionReasonEnum;
@@ -858,10 +825,9 @@ export interface AcademicResearchCompletion {
 }
 
 export const AcademicResearchCompletionReasonEnum = {
-    Verified: 'verified',
+    ScopeCovered: 'scope_covered',
     BudgetExhausted: 'budget_exhausted',
-    MaterialLimited: 'material_limited',
-    TechnicalFailure: 'technical_failure'
+    MaterialLimited: 'material_limited'
 } as const;
 
 export type AcademicResearchCompletionReasonEnum = typeof AcademicResearchCompletionReasonEnum[keyof typeof AcademicResearchCompletionReasonEnum];
@@ -1027,44 +993,6 @@ export const AcademicTaskLaunchReviewScopeEnum = {
 } as const;
 
 export type AcademicTaskLaunchReviewScopeEnum = typeof AcademicTaskLaunchReviewScopeEnum[keyof typeof AcademicTaskLaunchReviewScopeEnum];
-
-export interface AcademicVerifiedClaim {
-    'available_sources'?: Array<string>;
-    'content_hash'?: string;
-    'evidence'?: Array<AcademicSourceEvidence>;
-    'field'?: AcademicVerifiedClaimFieldEnum;
-    'paper_id'?: string;
-    'parts'?: Array<AcademicExpansionReportRelationsInnerVerificationPartsInner>;
-    'positions'?: Array<number>;
-    'reason'?: string;
-    'scope_reason'?: string;
-    'scope_status'?: AcademicVerifiedClaimScopeStatusEnum;
-    'source_version'?: string;
-    'statement'?: string;
-    'status'?: AcademicVerifiedClaimStatusEnum;
-    'verification_error'?: string;
-}
-
-export const AcademicVerifiedClaimFieldEnum = {
-    SeedRelation: 'seed_relation',
-    DirectionRelation: 'direction_relation',
-    KeyContribution: 'key_contribution'
-} as const;
-
-export type AcademicVerifiedClaimFieldEnum = typeof AcademicVerifiedClaimFieldEnum[keyof typeof AcademicVerifiedClaimFieldEnum];
-export const AcademicVerifiedClaimScopeStatusEnum = {
-    Supported: 'supported',
-    Uncertain: 'uncertain'
-} as const;
-
-export type AcademicVerifiedClaimScopeStatusEnum = typeof AcademicVerifiedClaimScopeStatusEnum[keyof typeof AcademicVerifiedClaimScopeStatusEnum];
-export const AcademicVerifiedClaimStatusEnum = {
-    Supported: 'supported',
-    Uncertain: 'uncertain',
-    Unsupported: 'unsupported'
-} as const;
-
-export type AcademicVerifiedClaimStatusEnum = typeof AcademicVerifiedClaimStatusEnum[keyof typeof AcademicVerifiedClaimStatusEnum];
 
 export interface AcademicWorkflowPaper {
     'direction_relation'?: string;

@@ -12,7 +12,7 @@ import (
 	workflowstore "lazymind/core/workflow/store"
 )
 
-func checkedResearchOutcome(version string, complete bool, reason string, gaps []any) map[string]any {
+func researchOutcome(version string, complete bool, reason string, gaps []any) map[string]any {
 	status := "incomplete"
 	if complete {
 		status = "complete"
@@ -24,13 +24,13 @@ func TestReportRequiresItsEffectiveAnalysisVersion(t *testing.T) {
 	db := paperFixture(t)
 	record := orm.AcademicExpansion{UserID: "u", PreparationJSON: marshal(expansionPreparation{}), DiscoveryJSON: marshal([]paperDiscovery{})}
 	artifacts := []workflowstore.Artifact{
-		{Slot: "relation_analysis", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": checkedResearchOutcome("current", true, "verified", []any{})})},
-		{Slot: "expansion_report", ProducerAttemptID: "compose", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": checkedResearchOutcome("previous", true, "verified", []any{})})},
+		{Slot: "relation_analysis", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": researchOutcome("current", true, "scope_covered", []any{})})},
+		{Slot: "expansion_report", ProducerAttemptID: "compose", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": researchOutcome("previous", true, "scope_covered", []any{})})},
 	}
 	if _, err := expansionReportSnapshot(db.DB, record, "session", "compose", artifacts); err == nil {
 		t.Fatal("report from an earlier analysis was accepted")
 	}
-	artifacts[1].Value = marshal(map[string]any{"data": checkedResearchOutcome("current", true, "verified", []any{})})
+	artifacts[1].Value = marshal(map[string]any{"data": researchOutcome("current", true, "scope_covered", []any{})})
 	raw, err := expansionReportSnapshot(db.DB, record, "session", "compose", artifacts)
 	if err != nil {
 		t.Fatal(err)
@@ -66,10 +66,10 @@ func TestReportFreezesOnlyTheCheckedContentVersion(t *testing.T) {
 		}
 	}
 	checkedVersion := map[string]any{"paper_id": paper.PaperID, "status": "ready", "content_hash": content.ContentHash, "source_version": content.SourceVersion}
-	report := checkedResearchOutcome("same-analysis", true, "verified", []any{})
+	report := researchOutcome("same-analysis", true, "scope_covered", []any{})
 	report["source_versions"] = []any{checkedVersion}
 	artifacts := []workflowstore.Artifact{
-		{Slot: "relation_analysis", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": checkedResearchOutcome("same-analysis", true, "verified", []any{})})},
+		{Slot: "relation_analysis", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": report})},
 		{Slot: "expansion_result", ProducerAttemptID: "compose", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": input})},
 		{Slot: "expansion_report", ProducerAttemptID: "compose", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": report})},
 	}
@@ -81,6 +81,7 @@ func TestReportFreezesOnlyTheCheckedContentVersion(t *testing.T) {
 		t.Fatal("unchanged analysis_version allowed a report checked against the previous body")
 	}
 	checkedVersion["content_hash"] = "replacement-body"
+	artifacts[0].Value = marshal(map[string]any{"data": report})
 	artifacts[2].Value = marshal(map[string]any{"data": report})
 	raw, err := expansionReportSnapshot(db.DB, record, "session", "compose", artifacts)
 	if err != nil {
@@ -107,16 +108,16 @@ func TestReportPreservesItsAuthoritativeResearchOutcome(t *testing.T) {
 	db := paperFixture(t)
 	record := orm.AcademicExpansion{UserID: "u", PreparationJSON: marshal(expansionPreparation{}), DiscoveryJSON: marshal([]paperDiscovery{})}
 	gaps := []any{map[string]any{"direction": "method", "kind": "predecessor", "question_id": "origin", "reason": "The original source is not publicly available."}}
-	analysis := checkedResearchOutcome("checked-partial", false, "material_limited", gaps)
+	analysis := researchOutcome("checked-partial", false, "material_limited", gaps)
 	selection := map[string]any{"before_count": 2, "changes": []any{map[string]any{"action": "removed", "paper": map[string]any{"paper": map[string]any{"paper_id": "duplicate"}}, "reason": "Duplicate version of the seed paper."}}}
 	analysis["selection"] = selection
 	artifacts := []workflowstore.Artifact{
 		{Slot: "relation_analysis", Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": analysis})},
 		{Slot: "expansion_report", ProducerAttemptID: "compose", Validity: "effective", Selected: true},
 	}
-	for _, field := range []string{"completion", "research_complete", "coverage_gaps", "selection"} {
+	for _, field := range []string{"completion", "research_complete", "coverage_gaps", "selection", "input", "relations", "claims", "research_structure", "source_versions"} {
 		t.Run(field, func(t *testing.T) {
-			report := checkedResearchOutcome("checked-partial", false, "material_limited", gaps)
+			report := researchOutcome("checked-partial", false, "material_limited", gaps)
 			report["selection"] = selection
 			switch field {
 			case "completion":
@@ -127,6 +128,8 @@ func TestReportPreservesItsAuthoritativeResearchOutcome(t *testing.T) {
 				report[field] = map[string]any{"before_count": 1, "changes": []any{}}
 			case "coverage_gaps":
 				report[field] = []any{}
+			default:
+				report[field] = map[string]any{"different": true}
 			}
 			artifacts[1].Value = marshal(map[string]any{"data": report})
 			if _, err := expansionReportSnapshot(db.DB, record, "session", "compose", artifacts); err == nil {
@@ -186,7 +189,7 @@ func TestIncompleteExpansionKeepsCompletedVersionWithoutAutomaticReview(t *testi
 				}
 			}
 			gaps := []any{map[string]any{"direction": "method", "kind": "predecessor", "reason": "Verification stopped at the shared deadline."}}
-			outcome := checkedResearchOutcome("partial-version", false, "budget_exhausted", gaps)
+			outcome := researchOutcome("partial-version", false, "budget_exhausted", gaps)
 			outcome["source_versions"] = versions
 			artifacts := []workflowstore.Artifact{}
 			for slot, value := range map[string]any{"relation_analysis": outcome, "expansion_result": input, "expansion_report": outcome} {

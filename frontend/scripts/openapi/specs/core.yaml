@@ -670,7 +670,7 @@ components:
                     type: string
                 claims:
                     items:
-                        $ref: '#/components/schemas/AcademicVerifiedClaim'
+                        $ref: '#/components/schemas/AcademicResearchClaim'
                     type: array
                 completion:
                     $ref: '#/components/schemas/AcademicResearchCompletion'
@@ -774,47 +774,6 @@ components:
                                 type: string
                             target_paper_id:
                                 type: string
-                            verification:
-                                properties:
-                                    parts:
-                                        items:
-                                            properties:
-                                                part_index:
-                                                    type: integer
-                                                reason:
-                                                    type: string
-                                                sources:
-                                                    items:
-                                                        type: string
-                                                    type: array
-                                                status:
-                                                    enum:
-                                                        - supported
-                                                        - uncertain
-                                                        - unsupported
-                                                    type: string
-                                                text:
-                                                    type: string
-                                            type: object
-                                        type: array
-                                    reason:
-                                        type: string
-                                    scope_reason:
-                                        type: string
-                                    scope_status:
-                                        enum:
-                                            - supported
-                                            - uncertain
-                                        type: string
-                                    status:
-                                        enum:
-                                            - supported
-                                            - uncertain
-                                            - unsupported
-                                        type: string
-                                    verification_error:
-                                        type: string
-                                type: object
                         required:
                             - id
                             - source_paper_id
@@ -823,7 +782,6 @@ components:
                             - statement
                             - conditions
                             - evidence
-                            - verification
                         type: object
                     type: array
                 research_complete:
@@ -888,28 +846,6 @@ components:
                                     properties: {}
                                     type: object
                                 type: array
-                            verification:
-                                properties:
-                                    batches:
-                                        items:
-                                            properties: {}
-                                            type: object
-                                        type: array
-                                    completed_fields:
-                                        type: integer
-                                    elapsed_seconds:
-                                        type: number
-                                    failed_fields:
-                                        type: integer
-                                    model_calls:
-                                        type: integer
-                                    reused_fields:
-                                        type: integer
-                                    semantic_rounds:
-                                        type: integer
-                                    submitted_fields:
-                                        type: integer
-                                type: object
                         type: object
                     type: object
                 stage_timing:
@@ -1302,28 +1238,6 @@ components:
                         properties: {}
                         type: object
                     type: array
-                verification:
-                    properties:
-                        batches:
-                            items:
-                                properties: {}
-                                type: object
-                            type: array
-                        completed_fields:
-                            type: integer
-                        elapsed_seconds:
-                            type: number
-                        failed_fields:
-                            type: integer
-                        model_calls:
-                            type: integer
-                        reused_fields:
-                            type: integer
-                        semantic_rounds:
-                            type: integer
-                        submitted_fields:
-                            type: integer
-                    type: object
             type: object
         AcademicPaperRef:
             properties:
@@ -1368,7 +1282,7 @@ components:
                 - abstract
             type: object
         AcademicPaperSelection:
-            description: Frozen changes against the candidate_set bound to the checked analysis, including the original paper metadata and a reason for every addition or removal.
+            description: Frozen changes against the candidate_set bound to the research analysis, including the original paper metadata and a reason for every addition or removal.
             properties:
                 before_count:
                     type: integer
@@ -1467,13 +1381,13 @@ components:
                     type: string
             type: object
         AcademicRelationAnalysis:
-            description: Checked relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
+            description: Research relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
             properties:
                 analysis_version:
                     type: string
                 claims:
                     items:
-                        $ref: '#/components/schemas/AcademicVerifiedClaim'
+                        $ref: '#/components/schemas/AcademicResearchClaim'
                     type: array
                 completion:
                     $ref: '#/components/schemas/AcademicResearchCompletion'
@@ -1499,28 +1413,6 @@ components:
                                 properties: {}
                                 type: object
                             type: array
-                        verification:
-                            properties:
-                                batches:
-                                    items:
-                                        properties: {}
-                                        type: object
-                                    type: array
-                                completed_fields:
-                                    type: integer
-                                elapsed_seconds:
-                                    type: number
-                                failed_fields:
-                                    type: integer
-                                model_calls:
-                                    type: integer
-                                reused_fields:
-                                    type: integer
-                                semantic_rounds:
-                                    type: integer
-                                submitted_fields:
-                                    type: integer
-                            type: object
                     type: object
                 reading:
                     additionalProperties:
@@ -1572,47 +1464,6 @@ components:
                                 type: string
                             target_paper_id:
                                 type: string
-                            verification:
-                                properties:
-                                    parts:
-                                        items:
-                                            properties:
-                                                part_index:
-                                                    type: integer
-                                                reason:
-                                                    type: string
-                                                sources:
-                                                    items:
-                                                        type: string
-                                                    type: array
-                                                status:
-                                                    enum:
-                                                        - supported
-                                                        - uncertain
-                                                        - unsupported
-                                                    type: string
-                                                text:
-                                                    type: string
-                                            type: object
-                                        type: array
-                                    reason:
-                                        type: string
-                                    scope_reason:
-                                        type: string
-                                    scope_status:
-                                        enum:
-                                            - supported
-                                            - uncertain
-                                        type: string
-                                    status:
-                                        enum:
-                                            - supported
-                                            - uncertain
-                                            - unsupported
-                                        type: string
-                                    verification_error:
-                                        type: string
-                                type: object
                         required:
                             - id
                             - source_paper_id
@@ -1621,7 +1472,6 @@ components:
                             - statement
                             - conditions
                             - evidence
-                            - verification
                         type: object
                     type: array
                 research_complete:
@@ -1685,15 +1535,43 @@ components:
                 - coverage_gaps
                 - analysis_version
             type: object
+        AcademicResearchClaim:
+            properties:
+                available_sources:
+                    items:
+                        type: string
+                    type: array
+                content_hash:
+                    type: string
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceEvidence'
+                    type: array
+                field:
+                    enum:
+                        - seed_relation
+                        - direction_relation
+                        - key_contribution
+                    type: string
+                paper_id:
+                    type: string
+                positions:
+                    items:
+                        type: integer
+                    type: array
+                source_version:
+                    type: string
+                statement:
+                    type: string
+            type: object
         AcademicResearchCompletion:
-            description: Research outcome for the checked analysis, independent of the Workflow execution status. A complete outcome is verified; an incomplete outcome preserves its actual stopping reason.
+            description: Research outcome for the analysis, independent of the Workflow execution status. A complete outcome covers the research scope; an incomplete outcome preserves its actual stopping reason.
             properties:
                 reason:
                     enum:
-                        - verified
+                        - scope_covered
                         - budget_exhausted
                         - material_limited
-                        - technical_failure
                     type: string
                 status:
                     enum:
@@ -2014,73 +1892,6 @@ components:
             required:
                 - kind
                 - request_key
-            type: object
-        AcademicVerifiedClaim:
-            properties:
-                available_sources:
-                    items:
-                        type: string
-                    type: array
-                content_hash:
-                    type: string
-                evidence:
-                    items:
-                        $ref: '#/components/schemas/AcademicSourceEvidence'
-                    type: array
-                field:
-                    enum:
-                        - seed_relation
-                        - direction_relation
-                        - key_contribution
-                    type: string
-                paper_id:
-                    type: string
-                parts:
-                    items:
-                        properties:
-                            part_index:
-                                type: integer
-                            reason:
-                                type: string
-                            sources:
-                                items:
-                                    type: string
-                                type: array
-                            status:
-                                enum:
-                                    - supported
-                                    - uncertain
-                                    - unsupported
-                                type: string
-                            text:
-                                type: string
-                        type: object
-                    type: array
-                positions:
-                    items:
-                        type: integer
-                    type: array
-                reason:
-                    type: string
-                scope_reason:
-                    type: string
-                scope_status:
-                    enum:
-                        - supported
-                        - uncertain
-                    type: string
-                source_version:
-                    type: string
-                statement:
-                    type: string
-                status:
-                    enum:
-                        - supported
-                        - uncertain
-                        - unsupported
-                    type: string
-                verification_error:
-                    type: string
             type: object
         AcademicWorkflowPaper:
             properties:

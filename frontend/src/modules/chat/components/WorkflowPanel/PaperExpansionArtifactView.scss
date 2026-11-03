@@ -113,7 +113,7 @@
   > button { flex: none; white-space: nowrap; align-self: flex-start; }
 }
 .paper-lineage-table { min-width: 640px;
-  th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { min-width: 72px; white-space: nowrap; }
+  th:nth-child(2), td:nth-child(2) { min-width: 72px; white-space: nowrap; }
 }
 .paper-workflow-dates { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 12px; font-size: 12px; color: var(--color-text-secondary);
   > div { display: flex; gap: 8px; }
@@ -122,15 +122,19 @@
 .paper-workflow-direction h4 { margin: 10px 0 4px; font-size: 14px; font-weight: 500; }
 .paper-workflow-change { padding: 12px 0; }
 .paper-workflow-change > p { color: var(--color-text-secondary); font-size: 12px; }
-.paper-lineage-pending { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-text-secondary); }
 
 .paper-workflow-direction-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--color-text-secondary);
   > span:last-child { color: var(--color-primary); font-size: 11px; }
 }
 .paper-workflow-more { margin-top: 14px; }
-.paper-workflow-report-direction { border-bottom: 1px solid var(--color-border-secondary);
-  > summary { display: flex; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; padding: 16px 0; font-weight: 500; }
-  > summary .anticon { font-size: 10px; color: var(--color-text-secondary); }
-  &[open] > summary .anticon { transform: rotate(90deg); }
-  > .markdown-body { padding-bottom: 16px; }
+.paper-workflow-report {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 8px 0 24px;
+  line-height: 1.8;
+
+  .markdown-body > :first-child { margin-top: 0; }
+  .markdown-body h2 { margin-top: 28px; }
+  .markdown-body p { margin: 12px 0; }
 }

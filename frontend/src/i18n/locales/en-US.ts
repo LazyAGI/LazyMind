@@ -10833,11 +10833,11 @@ const enUS = {
       "yourChoice": "Choose manually",
       "preparingAll": "You can leave this page. Research will continue with all directions; you will be notified if more information is needed.",
       "preparingManual": "You can leave this page. You will be notified to choose directions and confirm after initial research.",
-      "steps": {"research": "Preliminary research", "chooseDirection": "Confirm research directions", "search": "Search and expansion", "screen": "Screening and follow-up", "analyze": "Relationship analysis and evidence verification"},
-      "outputs": {"fast": "Output: paper list", "balanced": "Output: paper list", "deep": "Outputs: paper list, relationship graph and research report"},
+      "steps": {"research": "Preliminary research", "chooseDirection": "Confirm research directions", "search": "Search and expansion", "screen": "Screening and follow-up", "analyze": "Research analysis and report"},
+      "outputs": {"fast": "Output: paper list", "balanced": "Output: paper list", "deep": "Outputs: paper list, research report and paper relationship graph"},
       "fast": {"label": "Quick expansion", "summary": "Focus on the most relevant papers"},
       "balanced": {"label": "Standard expansion", "summary": "Screen and follow up by direction"},
-      "deep": {"label": "Deep analysis", "summary": "Same search, plus relationship verification"}
+      "deep": {"label": "Deep research", "summary": "Select relevant papers, read key sections, compare methods and write a research report"}
     },
     "reviewFlow": {
       "entry": {"inputs": "Confirm papers and topic", "inputsHint": "Current step", "research": "Initial research", "researchHint": "Explore directions at the selected depth", "directions": "Confirm research directions", "directionsHint": "Choose among multiple directions; a single direction continues automatically", "selectedFulltext": "Check selected full texts", "selectedFulltextHint": "Use only the confirmed papers", "expandedFulltext": "Search and prepare full texts", "expandedFulltextHint": "Expand related papers and prepare usable materials", "handoff": "Hand off review materials", "handoffHint": "Include papers, topic and requirements", "generate": "Read and generate review", "generateHint": "Produce the review text and references"},
@@ -11030,7 +11030,7 @@ const enUS = {
     "recordsExpansionDepth": {
       "fast": "Expansion depth: Fast",
       "balanced": "Expansion depth: Standard",
-      "deep": "Expansion depth: Deep",
+      "deep": "Expansion depth: Deep research",
     },
     "recordsLoadFailed": "Could not load research records. Please retry.",
     "viewReviewRecord": "View review record",
@@ -11188,12 +11188,12 @@ const enUS = {
       "candidate_set": "Search and expansion",
       "screened_candidates": "Screening and follow-up search",
       "relation_analysis": "Screening and additions",
-      "deep_analysis": "Relationship analysis and evidence verification",
+      "deep_analysis": "Research analysis and report",
       "direction_research": "Research directions",
       "seed_set": "Seed papers",
       "expanded_papers": "Expansion and screening",
       "paper_relations": "Research relationships",
-      "expansion_result": "Research report and paper relationships"
+      "expansion_result": "Paper list"
     }
   },
   errors: enUSErrorMessages,

@@ -1,6 +1,6 @@
 id: paper_expansion
 name: 论文自动拓展
-description: 承接已确认的研究范围，检索并交付论文清单，深入调研进一步生成研究报告与论文关系。
+description: 承接已确认的研究范围，检索并交付论文清单，深入研究进一步生成研究报告与论文关系。
 when_to_use: 仅在拓展记录已经确定方向后执行（按启动时所选策略全选方向或等待人工确认）；继续同一范围或调整结果表达沿用原记录。
 runtime:
   transactional_outputs: true
@@ -18,7 +18,7 @@ runtime:
   - expansion_id
   completed_continue_steps:
   - expand_and_screen
-  completed_edit_routing: 同一范围继续查找回到 expand_and_screen；报告由已核验结果直接生成，不支持独立改写保存的报告。正式执行后实质改变主题或方向时新建调研任务；仅初步调研阶段支持在原记录调整范围。
+  completed_edit_routing: 同一范围继续查找回到 expand_and_screen；报告根据有依据的研究发现撰写，不支持独立改写保存的报告。正式执行后实质改变主题或方向时新建调研任务；仅初步调研阶段支持在原记录调整范围。
   execution_limits:
     expand_and_screen:
       rounds: 32
@@ -34,7 +34,6 @@ runtime:
       tool_calls:
         academic_read_paper: 48
         academic_search_papers: 8
-        academic_check_relations: 6
   post_step_checks:
   - step_id: expand_and_screen
     tool: academic_validate_stage
@@ -62,7 +61,6 @@ tool_scripts:
   - academic_submit_relations
   - academic_validate_stage
   - academic_validate_result
-  - academic_check_relations
   - academic_validate_relations
 steps:
 - id: expand_and_screen
@@ -70,7 +68,7 @@ steps:
 - id: screen_and_supplement
   label: 筛选与补充
 - id: analyze_relations
-  label: 关系分析与证据核验
+  label: 研究分析与报告
 slots:
 - id: expansion_id
   label: 任务定位
@@ -91,7 +89,7 @@ slots:
   required: false
   exposed: false
 - id: analysis_not_required
-  label: 跳过关系分析
+  label: 跳过研究分析与报告
   type: json
   cardinality: single
   external: true
@@ -108,7 +106,7 @@ slots:
   cardinality: single
   exposed: false
 - id: relation_analysis
-  label: 关系分析与证据核验
+  label: 研究分析与报告
   type: json
   cardinality: single
   exposed: true
@@ -123,7 +121,7 @@ slots:
   cardinality: single
   exposed: true
 - id: expansion_report
-  label: 研究报告与论文关系
+  label: 研究报告
   type: json
   cardinality: single
   exposed: true
@@ -161,7 +159,7 @@ ui:
   - id: analyze_relations
     step_id: analyze_relations
     hide_when_material: analysis_not_required
-    label: 关系分析与证据核验
+    label: 研究分析与报告
     layout: list
     generation_process: {result_slot: expansion_report, slots: [relation_analysis]}
     slots:

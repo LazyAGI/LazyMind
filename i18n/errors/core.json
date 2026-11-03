@@ -2094,5 +2094,5 @@
   "2005162": {"en-US": "The research preparation operation is invalid for the current state", "zh-CN": "当前调研状态不支持该操作"},
   "2005163": {"en-US": "There are no failed import items to retry", "zh-CN": "没有可重试的失败项"},
   "2005164": {"en-US": "This import is still being processed", "zh-CN": "本次导入正在处理中"},
-  "2005165": {"en-US": "The report must preserve the verified analysis and its actual research outcome", "zh-CN": "报告必须保留已核验分析及真实研究完成情况"}
+  "2005165": {"en-US": "The report must preserve the research analysis and its actual research outcome", "zh-CN": "报告必须保留同一版本的研究分析及真实研究完成情况"}
 }

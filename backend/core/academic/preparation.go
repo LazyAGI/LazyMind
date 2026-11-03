@@ -44,13 +44,13 @@ func depthFor(mode string) (expansionDepth, bool) {
 	var preparation, research, compose, searches, reads int
 	switch mode {
 	case "fast":
-		guidance = "快速调研：聚焦核心问题与代表论文，阅读支撑关键结论的段落，核验主要依据并明确材料边界。"
+		guidance = "快速调研：聚焦核心问题与代表论文，阅读支撑关键结论的段落，分析主要依据并明确材料边界。"
 		preparation, research, compose, searches, reads = 12, 24, 8, 12, 24
 	case "", "balanced":
-		guidance = "标准调研：覆盖主要研究路线，比较代表方法与关键证据，阅读相关正文并核验重要结论及适用条件。"
+		guidance = "标准调研：覆盖主要研究路线，比较代表方法与关键证据，阅读相关正文并说明重要结论及适用条件。"
 		preparation, research, compose, searches, reads = 20, 32, 8, 24, 48
 	case "deep":
-		guidance = "深入调研：在主要路线之外追踪相关工作、前后向引用及不同证据，扩大关键正文阅读，核验分歧、反例和适用边界。"
+		guidance = "深入研究：在主要路线之外追踪相关工作、前后向引用及不同证据，阅读关键正文，比较主要方法、分歧和适用边界，生成带引用的研究报告。"
 		preparation, research, compose, searches, reads = 28, 48, 12, 36, 72
 	default:
 		return expansionDepth{}, false
@@ -60,7 +60,7 @@ func depthFor(mode string) (expansionDepth, bool) {
 		Preparation: graphengine.ExecutionLimit{Rounds: preparation, ToolCalls: map[string]int{"search_papers": preparation * 2 / 3, "read_paper": preparation}},
 		Steps: map[string]graphengine.ExecutionLimit{
 			"expand_and_screen": {Rounds: research, ToolCalls: map[string]int{"academic_search_papers": searches}},
-			"analyze_relations": {Rounds: research, Timeout: 1800, ToolCalls: map[string]int{"academic_read_paper": reads, "academic_search_papers": searches / 3, "academic_check_relations": 6}},
+			"analyze_relations": {Rounds: research, Timeout: 1800, ToolCalls: map[string]int{"academic_read_paper": reads, "academic_search_papers": searches / 3}},
 			"compose_result":    {Rounds: compose},
 		},
 	}, true
@@ -82,6 +82,9 @@ func depthForExpansion(record orm.AcademicExpansion) (expansionDepth, bool) {
 	depth.Steps["expand_and_screen"] = standard.Steps["expand_and_screen"]
 	depth.Steps["screen_and_supplement"] = graphengine.ExecutionLimit{Rounds: 12, ToolCalls: map[string]int{"academic_search_papers": 8, "academic_read_paper": 5}}
 	depth.Guidance = "覆盖已确认方向，逐方向找方法来源、同类方法和后续工作，对覆盖薄弱的方向定点补查。"
+	if record.BudgetMode == "deep" {
+		depth.Guidance += " 深入研究在筛选清单基础上阅读关键内容，比较主要方法并生成研究报告与论文关系图；区分原文陈述与研究推断，保留引用和适用条件。"
+	}
 	return depth, ok
 }
 

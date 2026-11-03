@@ -73,7 +73,7 @@ function GraphCanvas({ graph, nodeLinks, onViewEvidence, fullscreen }: {
       ariaLabel: edge.label,
       markerEnd: edge.directed ? { type: MarkerType.ArrowClosed, width: 16, height: 16, color } : undefined,
       style: { strokeDasharray: edge.dashed ? '5 4' : undefined, strokeWidth: active?.id === edge.id ? 2 : 1.2,
-        stroke: color, opacity: active?.id === edge.id || edge.status === 'verified' ? 1 : 0.58 },
+        stroke: color, opacity: !active || active.id === edge.id ? 1 : 0.58 },
     };
   }), [graph, positions, active?.id]);
   useEffect(() => {
@@ -159,7 +159,6 @@ export default function PaperGraph({ graph, nodeLinks, paperCount, onViewEvidenc
     </div>
     <div className='paper-graph-legend'>
       {[...new Set(graph.edges.map(edge => edge.relationType).filter((type): type is string => Boolean(type)))].map(type => <span key={type}><i style={{ borderColor: paperRelationColors[type] }} />{tr(`relationType_${type}`)}</span>)}
-      <span><i className='is-pending' />{tr('pendingRelationLegend')}</span>
     </div>
 
     <div className='paper-graph-canvas' ref={fullscreen ? undefined : inlineCanvas} style={fullscreen ? undefined : { height: canvasHeight }} aria-label={tr('relationGraph')}>

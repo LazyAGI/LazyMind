@@ -5425,7 +5425,7 @@ function SlotPaperExpansion({ slot, session, slotId, revisionCount, onRefresh, r
       ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} baseline={baseline} />
       : <pre className='workflow-slot__text'>{artifact.source}</pre>}
     <div className='workflow-slot__text-meta'>
-      <ArtifactSourceButton value={artifact.source} />
+      <ArtifactSourceButton value={slotId === 'expansion_report' && typeof data?.narrative === 'string' ? data.narrative : artifact.source} />
       {revisionCount !== undefined && revisionCount > 0 && <SlotVersionPopover
         sessionId={session.session_id} slotId={slotId} listIndex={slot.list_index ?? -1}
         revisionCount={revisionCount} currentRevision={slot.revision} currentVersionNumber={slot.version_number}

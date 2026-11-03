@@ -1,4 +1,4 @@
-import type { AcademicExpansionReportRecommendationsInner, AcademicExpansionReportRelationsInner, AcademicExpansionReportResearchStructure, AcademicPaperSelection, AcademicResearchCompletion } from '@/api/generated/core-client/api';
+import type { AcademicResearchClaim, AcademicExpansionReportRecommendationsInner, AcademicExpansionReportRelationsInner, AcademicExpansionReportResearchStructure, AcademicPaperSelection, AcademicResearchCompletion } from '@/api/generated/core-client/api';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import type { ImportPreviewItem } from './academicReferences';
 const core = `${BASE_URL}/api/core/academic`;
@@ -79,7 +79,7 @@ export interface ExpansionReport extends PaperInvestigation {
  research_structure?: PaperResearchStructure; relations?: PaperRelation[];
  analysis_version?: string;
  narrative?: string;
- claims?: Array<{ paper_id: string; statement: string; status: string; reason: string; content_hash: string; positions: number[] }>;
+ claims?: AcademicResearchClaim[];
  reading?: Record<string, { read_level: string; positions: number[]; pages: number[]; total_blocks: number }>;
  currency_cost?: number | null;
  execution_elapsed_ms?: number;

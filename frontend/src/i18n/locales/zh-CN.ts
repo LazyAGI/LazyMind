@@ -10576,11 +10576,11 @@ const zhCN = {
       "yourChoice": "人工选择",
       "preparingAll": "你可以离开此页面，调研完成后会按全部方向自动继续；需要补充信息时会通知你。",
       "preparingManual": "你可以离开此页面，调研完成后会通知你选择方向并确认继续。",
-      "steps": {"research": "初步调研", "chooseDirection": "确定研究方向", "search": "检索与拓展", "screen": "筛选与补充", "analyze": "关系分析与证据核验"},
-      "outputs": {"fast": "产出：论文清单", "balanced": "产出：论文清单", "deep": "产出：论文清单、关系图与研究报告"},
+      "steps": {"research": "初步调研", "chooseDirection": "确定研究方向", "search": "检索与拓展", "screen": "筛选与补充", "analyze": "研究分析与报告"},
+      "outputs": {"fast": "产出：论文清单", "balanced": "产出：论文清单", "deep": "产出：论文清单、研究报告与论文关系图"},
       "fast": {"label": "快速扩展", "summary": "聚焦最相关的论文"},
       "balanced": {"label": "标准扩展", "summary": "按方向筛选并补查"},
-      "deep": {"label": "深入分析", "summary": "同标准档，再核验关系"}
+      "deep": {"label": "深入研究", "summary": "筛选相关论文，阅读关键内容，比较主要方法并生成研究报告"}
     },
     "reviewFlow": {
       "entry": {"inputs": "确认论文与主题", "inputsHint": "当前步骤", "research": "初步调研", "researchHint": "按所选深度梳理方向", "directions": "确认研究方向", "directionsHint": "多个方向时选择，单一方向自动继续", "selectedFulltext": "检查已选全文", "selectedFulltextHint": "仅使用本次确认的论文", "expandedFulltext": "检索与全文准备", "expandedFulltextHint": "扩展相关论文，准备可用材料", "handoff": "综述材料交接", "handoffHint": "携带论文、主题与补充要求", "generate": "阅读与生成综述", "generateHint": "输出综述正文与引用"},
@@ -10772,7 +10772,7 @@ const zhCN = {
     "recordsExpansionDepth": {
       "fast": "扩展档位：快速",
       "balanced": "扩展档位：标准",
-      "deep": "扩展档位：深入",
+      "deep": "扩展档位：深入研究",
     },
     "recordsLoadFailed": "研究记录加载失败，请重试。",
     "viewReviewRecord": "查看综述记录",
@@ -10929,13 +10929,13 @@ const zhCN = {
     "stage": {
       "candidate_set": "检索与拓展",
       "screened_candidates": "筛选与补充",
-      "relation_analysis": "筛选与补充",
-      "deep_analysis": "关系分析与证据核验",
+      "relation_analysis": "研究分析与报告",
+      "deep_analysis": "研究分析与报告",
       "direction_research": "调研与方向",
       "seed_set": "种子论文",
       "expanded_papers": "扩展与筛选",
       "paper_relations": "研究关系分析",
-      "expansion_result": "研究报告与论文关系"
+      "expansion_result": "论文清单"
     }
   },
   errors: zhCNErrorMessages,

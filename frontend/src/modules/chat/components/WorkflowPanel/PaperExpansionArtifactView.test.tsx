@@ -76,24 +76,21 @@ it('uses saved selection changes rather than the currently selected upstream lis
 });
 
 
-it('shows the frozen relationship network before the report, with pending relationships and evidence access', async () => {
-  const report = slot('expansion_report', { input, narrative: '研究正文', analysis_version: 'v2', reading_order: ['paper-a'],
-    reading_plan: [{ paper_id: 'paper-a', purpose: 'obsolete reading route' }],
-    relations: [{ id: 'pending', source_paper_id: 'paper-a', target_paper_id: 'paper-b', relation_type: 'mechanism_comparison', statement: '待核验的机制对照', evidence: [], verification: { status: 'uncertain' } }] });
-  show(report, [report, slot('relation_analysis', { input, analysis_version: 'v1', relations: [] })]);
-  expect(await screen.findByLabelText('关系图')).toHaveAttribute('data-edges', 'pending');
-  expect(screen.getByText('已核验 0 条 · 待核验 1 条')).toBeVisible();
-  expect(within(screen.getByLabelText('关系图')).getByText('起始论文 · 2023')).toBeVisible();
-  expect(screen.getByRole('button', { name: /查看论文：Toolformer/ })).toHaveAttribute('title', 'Toolformer');
-  expect(screen.getByText('研究正文')).toBeVisible();
-  expect(screen.queryByText('obsolete reading route')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '查看论文：Toolformer' }));
-  expect(within(screen.getByLabelText('论文详情')).getByText('Original abstract')).toBeVisible();
-  fireEvent.click(screen.getByRole('switch'));
-  expect(screen.getByLabelText('关系图')).toHaveAttribute('data-edges', '');
-  fireEvent.click(screen.getByRole('button', { name: '查看关系依据' }));
-  expect(screen.getByRole('table')).toHaveTextContent('待核验的机制对照');
-  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+it('renders a continuous research report and exposes only its prose as source', async () => {
+  const report = slot('expansion_report', { input,
+    narrative: '## 研究概述\n\n工具选择依赖训练信号。[1]\n\n## 方法比较\n\n两种方法的训练数据和选择机制不同。',
+    analysis_version: 'v2', relations: [{ id: 'relation', statement: 'internal relation statement' }],
+    investigation: [{ conclusion: 'internal investigation log' }] });
+  show(report);
+  const article = await screen.findByRole('article');
+  expect(within(article).getByRole('heading', { name: '研究概述' })).toBeVisible();
+  expect(within(article).getByRole('heading', { name: '方法比较' })).toBeVisible();
+  expect(screen.queryByLabelText('关系图')).not.toBeInTheDocument();
+  expect(screen.queryByText('internal relation statement')).not.toBeInTheDocument();
+  expect(screen.queryByText('internal investigation log')).not.toBeInTheDocument();
+  expect(screen.queryByText(/完整论文清单/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText('展示源码'));
+  expect(screen.queryByText(/"analysis_version"/)).not.toBeInTheDocument();
 });
 
 it('preserves unknown payloads on the original renderer', async () => {
@@ -112,36 +109,9 @@ it('keeps candidate lists compact while allowing every saved paper to be opened'
   expect(screen.getByText('Candidate 8')).not.toBeVisible();
 });
 
-it('summarizes actual relationship verification timeouts without exposing investigation gaps', async () => {
-  show(slot('expansion_report', { analysis_version: 'checked', input, narrative: '研究正文', coverage_gaps: [{ reason: '不展示的内部缺口' }], relations: [{
-    id: 'timeout', source_paper_id: 'paper-a', target_paper_id: 'paper-b', relation_type: 'mechanism_comparison', statement: '未完成核验的关系', evidence: [],
-    verification: { status: 'uncertain', verification_error: 'stage_timeout' },
-  }] }));
-  expect(await screen.findByRole('status')).toHaveTextContent('1 条关系核验超时，尚未确认');
-  expect(screen.queryByText('不展示的内部缺口')).not.toBeInTheDocument();
-});
-
-
-it('excludes unsupported relationships from the graph while preserving their evidence and count', async () => {
-  const relation = (id: string, status: string) => ({ id, source_paper_id: 'paper-a', target_paper_id: 'paper-b', relation_type: 'mechanism_comparison', statement: `${id}关系声明`, evidence: [], verification: { status, scope_status: status } });
-  show(slot('expansion_report', { analysis_version: 'checked', input, narrative: '研究正文', relations: [relation('verified', 'supported'), relation('pending', 'uncertain'), relation('unsupported', 'unsupported')] }));
-  expect(await screen.findByLabelText('关系图')).toHaveAttribute('data-edges', 'verified,pending');
-  expect(screen.getByText(/证据不支持.*1/)).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '查看论文：Toolformer' }));
-  expect(within(screen.getByLabelText('论文详情')).getAllByText('候选关系声明，尚未核验。')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('switch', { name: '显示待核验关系' }));
-  expect(screen.getByLabelText('关系图')).toHaveAttribute('data-edges', 'verified');
-  fireEvent.click(screen.getByRole('button', { name: '查看关系依据' }));
-  expect(within(screen.getByRole('table')).getByText('unsupported关系声明')).toBeVisible();
-  expect(within(screen.getByRole('table')).getByText('证据不支持')).toBeVisible();
-  fireEvent.click(screen.getByRole('switch', { name: '显示待核验关系' }));
-  expect(screen.getByLabelText('关系图')).toHaveAttribute('data-edges', 'verified,pending');
-});
-
 it.each([
-  ['complete', 'verified', '研究完成', undefined],
+  ['complete', 'scope_covered', '研究完成', undefined],
   ['incomplete', 'budget_exhausted', '研究部分完成', '本轮研究额度已用尽，部分问题尚未完成调查。'],
-  ['incomplete', 'technical_failure', '研究部分完成', '部分证据核验失败，研究尚未全部完成。'],
   ['incomplete', 'material_limited', '研究部分完成', '部分必要材料暂不可用，研究尚未全部完成。'],
 ])('shows saved research completion: %s / %s', async (status, reason, label, explanation) => {
   show(slot('expansion_report', { analysis_version: 'checked', input, narrative: '研究正文', relations: [], completion: { status, reason } }));
@@ -195,4 +165,19 @@ it('does not compare an old screening result with candidates from a later run', 
   show(screened, [screened, later]);
   expect(await screen.findByText('暂无法获取本步增删明细。')).toBeVisible();
   expect(screen.queryByRole('region', { name: '本步筛选与补充' })).not.toBeInTheDocument();
+});
+
+it('keeps the relationship graph in analysis with paper details and citations, without verification controls', async () => {
+  show(slot('relation_analysis', { input, selection: { before_count: 2, changes: [] }, relations: [{ id: 'methods', source_paper_id: 'paper-a', target_paper_id: 'paper-b',
+    relation_type: 'mechanism_comparison', statement: '两种工具选择机制不同', conditions: '在各自训练设置下',
+    evidence: [{ paper_id: 'paper-a', positions: [0], source_version: 'v1' }] }] }));
+  expect(await screen.findByLabelText('关系图')).toHaveAttribute('data-edges', 'methods');
+  expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '查看论文：Toolformer' }));
+  const detail = screen.getByLabelText('论文详情');
+  expect(within(detail).getByText('Original abstract')).toBeVisible();
+  expect(within(detail).getByText('两种工具选择机制不同')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '查看关系依据' }));
+  expect(screen.getByRole('table')).toHaveTextContent('两种工具选择机制不同');
+  expect(screen.queryByText('显示待核验关系')).not.toBeInTheDocument();
 });

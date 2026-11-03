@@ -2,11 +2,11 @@ import { useMemo, type ReactNode } from 'react';
 import { CheckOutlined, DownOutlined, ReadOutlined, RightOutlined } from '@ant-design/icons';
 import { Tag, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { PaperInvestigation, PaperRecommendation, PaperSelectionChanges, PaperRelation, PaperResearchStructure, WorkflowPaper } from '@/modules/knowledge/api/paperWorkflows';
+import type { PaperInvestigation, PaperRelation, PaperResearchStructure, PaperRecommendation, PaperSelectionChanges, WorkflowPaper } from '@/modules/knowledge/api/paperWorkflows';
 import MarkdownViewer from '../MarkdownViewer';
 import PaperLineageView from './PaperLineageView';
 import PaperResearchCompletion from './PaperResearchCompletion';
-import { paperReportSections, visiblePaperAnalysis } from './paperReport';
+import { visiblePaperAnalysis } from './paperReport';
 import './PaperExpansionArtifactView.scss';
 
 const paperSlots = new Set(['candidate_set', 'screened_candidates', 'relation_analysis', 'expansion_result', 'expansion_report']);
@@ -137,12 +137,8 @@ export function PaperExpansionArtifactView({ slotId, data, baseline }: {
   const papers = useMemo(() => [...new Map((papersIn(input) ?? []).map(item => [item.paper.paper_id, item])).values()], [input]);
   const seeds = papers.filter(item => item.is_seed);
   const candidates = papers.filter(item => !item.is_seed);
-  const structure = data.research_structure as PaperResearchStructure | undefined;
-  const savedRelations = data.relations;
-  const relations = useMemo(() => (Array.isArray(savedRelations) ? savedRelations : []) as PaperRelation[], [savedRelations]);
   const reading = data.reading;
   const narrative = useMemo(() => text(data.narrative), [data.narrative]);
-  const sections = useMemo(() => paperReportSections(narrative), [narrative]);
   const selection = record(data.selection) as unknown as PaperSelectionChanges | null;
   const directions = strings(input?.selected_directions);
   const savedDirections = Array.isArray(data.directions) ? data.directions : record(data.research_structure)?.directions;
@@ -178,13 +174,13 @@ export function PaperExpansionArtifactView({ slotId, data, baseline }: {
   return <div className='paper-workflow-result'><div className='paper-workflow-scroll'>
     {isReport ? <>
       <PaperResearchCompletion completion={data.completion as PaperInvestigation['completion']} />
-      <Section title={tr('relationGraph')}>
-        <PaperLineageView papers={papers} structure={structure} relations={relations}
-          renderDetail={item => <PaperDetail item={item} analysis reading={reading} />} />
-      </Section>
-      <Section title={tr('narrative')}>{sections.length ? sections.map((section, index) => section.title ? <details className='paper-workflow-report-direction' key={section.title} open={index === 0}><summary>{section.title}<RightOutlined aria-hidden /></summary><MarkdownViewer>{section.body}</MarkdownViewer></details> : <MarkdownViewer key='preface'>{section.body}</MarkdownViewer>) : <MarkdownViewer>{narrative}</MarkdownViewer>}</Section>
-      {finalList}
+      <article className='paper-workflow-report' aria-label={tr('narrative')}>
+        <MarkdownViewer>{narrative}</MarkdownViewer>
+      </article>
     </> : isAnalysis ? <>
+      {Array.isArray(data.relations) && <PaperLineageView papers={papers} relations={data.relations as PaperRelation[]}
+        structure={data.research_structure as PaperResearchStructure | undefined}
+        renderDetail={item => <PaperDetail item={item} analysis reading={reading} />} />}
       {data.list_mode !== 'deep' && selection && <SelectionChanges selection={selection} reading={reading} />}
       {finalList}
     </> : listMode === 'fast' || listMode === 'balanced' || listMode === 'deep' ? <>

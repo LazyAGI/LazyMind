@@ -44,15 +44,11 @@ func academicWorkflowSchemas() map[string]any {
 	sourceEvidence := objReq([]string{"paper_id", "positions"}, prop("paper_id", strSchema()), prop("positions", array(intSchema())), prop("content_hash", strSchema()), prop("source_version", strSchema()))
 	sourceVersion := objReq([]string{"paper_id", "status", "content_hash", "source_version"}, prop("paper_id", strSchema()), prop("status", strSchema()), prop("content_hash", strSchema()), prop("source_version", strSchema()))
 	coverageGap := objReq([]string{"direction", "kind"}, prop("direction", strSchema()), prop("kind", enumStringSchema("predecessor", "successor", "peer")), prop("question_id", strSchema()), prop("clue_name", strSchema()), prop("reason", strSchema()))
-	completion := objReq([]string{"status", "reason"}, prop("status", enumStringSchema("complete", "incomplete")), prop("reason", enumStringSchema("verified", "budget_exhausted", "material_limited", "technical_failure")))
-	completion["description"] = "Research outcome for the checked analysis, independent of the Workflow execution status. A complete outcome is verified; an incomplete outcome preserves its actual stopping reason."
-	verification := obj(prop("status", enumStringSchema("supported", "uncertain", "unsupported")), prop("reason", strSchema()), prop("scope_status", enumStringSchema("supported", "uncertain")), prop("scope_reason", strSchema()), prop("verification_error", strSchema()), prop("parts", array(obj(prop("part_index", intSchema()), prop("text", strSchema()), prop("status", enumStringSchema("supported", "uncertain", "unsupported")), prop("reason", strSchema()), prop("sources", array(strSchema()))))))
+	completion := objReq([]string{"status", "reason"}, prop("status", enumStringSchema("complete", "incomplete")), prop("reason", enumStringSchema("scope_covered", "budget_exhausted", "material_limited")))
+	completion["description"] = "Research outcome for the analysis, independent of the Workflow execution status. A complete outcome covers the research scope; an incomplete outcome preserves its actual stopping reason."
 	claim := obj(prop("paper_id", strSchema()), prop("field", enumStringSchema("seed_relation", "direction_relation", "key_contribution")), prop("statement", strSchema()),
 		prop("positions", array(intSchema())), prop("content_hash", strSchema()), prop("source_version", strSchema()), prop("evidence", array(refSchema("AcademicSourceEvidence"))), prop("available_sources", array(strSchema())))
-	for key, value := range verification["properties"].(map[string]any) {
-		claim["properties"].(map[string]any)[key] = value
-	}
-	relations := array(objReq([]string{"id", "source_paper_id", "target_paper_id", "relation_type", "statement", "conditions", "evidence", "verification"}, prop("id", strSchema()), prop("source_paper_id", strSchema()), prop("target_paper_id", strSchema()), prop("relation_type", enumStringSchema("method_modification", "design_inspiration", "component_use", "experimental_comparison", "mechanism_comparison", "background_citation")), prop("statement", strSchema()), prop("conditions", strSchema()), prop("evidence", array(refSchema("AcademicSourceEvidence"))), prop("verification", verification)))
+	relations := array(objReq([]string{"id", "source_paper_id", "target_paper_id", "relation_type", "statement", "conditions", "evidence"}, prop("id", strSchema()), prop("source_paper_id", strSchema()), prop("target_paper_id", strSchema()), prop("relation_type", enumStringSchema("method_modification", "design_inspiration", "component_use", "experimental_comparison", "mechanism_comparison", "background_citation")), prop("statement", strSchema()), prop("conditions", strSchema()), prop("evidence", array(refSchema("AcademicSourceEvidence")))))
 	structure := objReq([]string{"directions", "nodes"}, prop("directions", array(obj(prop("id", strSchema()), prop("name", strSchema()), prop("question", strSchema())))), prop("nodes", array(obj(prop("paper_id", strSchema()), prop("direction_id", strSchema()), prop("branch_question", strSchema()), prop("reason", strSchema())))))
 	clueResolution := objReq([]string{"source_paper_id", "name", "status", "reason", "query_ids"},
 		prop("source_paper_id", strSchema()), prop("name", strSchema()), prop("status", enumStringSchema("resolved", "excluded", "blocked", "open")),
@@ -65,13 +61,12 @@ func academicWorkflowSchemas() map[string]any {
 	)
 	selectionChange := objReq([]string{"action", "paper", "reason"}, prop("action", enumStringSchema("added", "removed")), prop("paper", refSchema("AcademicWorkflowPaper")), prop("reason", strSchema()))
 	selection := objReq([]string{"before_count", "changes"}, prop("before_count", intSchema()), prop("changes", array(refSchema("AcademicPaperSelectionChange"))))
-	selection["description"] = "Frozen changes against the candidate_set bound to the checked analysis, including the original paper metadata and a reason for every addition or removal."
-	metrics["properties"].(map[string]any)["verification"] = obj(prop("elapsed_seconds", map[string]any{"type": "number"}), prop("semantic_rounds", intSchema()), prop("model_calls", intSchema()), prop("batches", array(obj())), prop("submitted_fields", intSchema()), prop("reused_fields", intSchema()), prop("completed_fields", intSchema()), prop("failed_fields", intSchema()))
+	selection["description"] = "Frozen changes against the candidate_set bound to the research analysis, including the original paper metadata and a reason for every addition or removal."
 	relationAnalysis := objReq([]string{"input", "selection", "claims", "relations", "research_structure", "investigation", "source_versions", "source_queries", "reading", "submission_hash", "metrics", "completion", "research_complete", "coverage_gaps", "analysis_version"},
-		prop("input", refSchema("AcademicReviewInput")), prop("selection", refSchema("AcademicPaperSelection")), prop("claims", array(refSchema("AcademicVerifiedClaim"))), prop("relations", relations), prop("research_structure", structure),
+		prop("input", refSchema("AcademicReviewInput")), prop("selection", refSchema("AcademicPaperSelection")), prop("claims", array(refSchema("AcademicResearchClaim"))), prop("relations", relations), prop("research_structure", structure),
 		prop("investigation", array(refSchema("AcademicInvestigation"))), prop("source_versions", array(refSchema("AcademicSourceVersion"))), prop("source_queries", array(refSchema("AcademicSourceQueryReceipt"))),
 		prop("reading", reading), prop("submission_hash", strSchema()), prop("metrics", metrics), prop("completion", refSchema("AcademicResearchCompletion")), prop("research_complete", boolSchema()), prop("coverage_gaps", array(refSchema("AcademicCoverageGap"))), prop("analysis_version", strSchema()))
-	relationAnalysis["description"] = "Checked relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version."
+	relationAnalysis["description"] = "Research relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version."
 	reportProps := report["properties"].(map[string]any)
 	reportProps["list_mode"] = enumStringSchema("fast", "balanced")
 	reportProps["recommendations"] = array(objReq([]string{"paper_id", "reason"}, prop("paper_id", strSchema()), prop("reason", strSchema()), prop("direction", strSchema())))
@@ -80,7 +75,7 @@ func academicWorkflowSchemas() map[string]any {
 	reportProps["analysis_version"] = strSchema()
 	reportProps["research_structure"] = structure
 	reportProps["relations"] = relations
-	reportProps["claims"] = array(refSchema("AcademicVerifiedClaim"))
+	reportProps["claims"] = array(refSchema("AcademicResearchClaim"))
 	reportProps["investigation"] = array(refSchema("AcademicInvestigation"))
 	reportProps["research_complete"] = boolSchema()
 	reportProps["completion"] = refSchema("AcademicResearchCompletion")
@@ -118,7 +113,7 @@ func academicWorkflowSchemas() map[string]any {
 
 		"AcademicSourceOutcome": sourceOutcome, "AcademicSourceQueryReceipt": queryReceipt, "AcademicDiscoveryQuery": discoveryQuery,
 		"AcademicSourceEvidence": sourceEvidence, "AcademicSourceVersion": sourceVersion, "AcademicCoverageGap": coverageGap, "AcademicResearchCompletion": completion,
-		"AcademicVerifiedClaim": claim, "AcademicInvestigation": investigation, "AcademicClueResolution": clueResolution,
+		"AcademicResearchClaim": claim, "AcademicInvestigation": investigation, "AcademicClueResolution": clueResolution,
 		"AcademicPaperSelection": selection, "AcademicPaperSelectionChange": selectionChange,
 		"AcademicRelationAnalysis": relationAnalysis,
 		"AcademicExpansionReport":  report, "AcademicModelMetrics": metrics,

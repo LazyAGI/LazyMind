@@ -147,7 +147,7 @@ export default function PreparationPanel({ detail, onRefresh, onStart }: {
       {compact && confirmedChoices.length > 1 && <Button type="link" size="small" className="paper-preparation-all-directions" aria-expanded={directionsExpanded} onClick={() => setDirectionsExpanded(value => !value)}>{t(directionsExpanded ? 'paperTasks.overview.hideDirections' : 'paperTasks.overview.showDirections', { count: confirmedChoices.length })}</Button>}
     </section>;
   const content = <section className="paper-preparation" aria-label="初步调研与方向确认">
-    {!compact && <div className="paper-preparation-meta"><LockOutlined />{researchDepthLabels[record.budget_mode || 'balanced']}调研</div>}
+    {!compact && <div className="paper-preparation-meta"><LockOutlined />{record.goal === 'expansion' ? t(`paperTasks.expansionDepth.${record.budget_mode || 'balanced'}.label`) : `${researchDepthLabels[record.budget_mode || 'balanced']}调研`}</div>}
     {compact && confirmedDirections}
     {!review && !compact && <Steps className="paper-preparation-steps" size="small" current={preparationPhase}
       items={[{ title: '初步调研' }, { title: preparation.auto_confirmed ? '方向已确定' : '确认方向' }, { title: '正式拓展' }]} />}
@@ -158,7 +158,7 @@ export default function PreparationPanel({ detail, onRefresh, onStart }: {
       <details><summary>查看调研详情</summary><MarkdownViewer>{preparation.summary}</MarkdownViewer></details>
     </section>}
     {compact && preparation.summary && <details className="paper-preparation-background"><summary>{t('paperTasks.overview.showResearch')}</summary>
-      <div className="paper-preparation-meta"><LockOutlined />{researchDepthLabels[record.budget_mode || 'balanced']}调研</div>
+      <div className="paper-preparation-meta"><LockOutlined />{record.goal === 'expansion' ? t(`paperTasks.expansionDepth.${record.budget_mode || 'balanced'}.label`) : `${researchDepthLabels[record.budget_mode || 'balanced']}调研`}</div>
       <MarkdownViewer>{preparation.summary}</MarkdownViewer>
     </details>}
     {preparation.error && <Alert type="error" showIcon message={preparation.error} />}

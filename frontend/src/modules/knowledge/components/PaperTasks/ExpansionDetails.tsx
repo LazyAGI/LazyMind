@@ -26,7 +26,7 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
     const expansionStages = expansionProgressStages(record);
     const stageDone = (index: number) => completed || (index < expansionStages.length - 1 && !!record.progress?.[expansionStages[index]]);
     const currentStage = expansionStages.findIndex((_, index) => !stageDone(index));
-    const stageTitle = (slot: string) => t(`paperTasks.stage.${record.goal === 'expansion' && record.budget_mode === 'deep' && slot === 'relation_analysis' ? 'deep_analysis' : slot}`);
+    const stageTitle = (slot: string) => t(`paperTasks.stage.${slot}`);
     const completedStages = expansionStages.filter((_, index) => stageDone(index)).length;
     return <>
         <section className="paper-expansion-context" aria-label={t('paperTasks.overview.context')}>

@@ -131,7 +131,7 @@ func init() {
 		}},
 		{2005137, 409, "The paper content or cache is unavailable or changed; retry the read", []string{
 			"verified paper source version conflict",
-			"paper content changed after checked analysis; report publication requires renewed verification",
+			"paper content changed after research analysis; report publication requires renewed analysis",
 		}},
 		{2005131, 409, "The import preview expired or changed; refresh and retry", []string{
 			"verified pdf content changed; refresh import preview",
@@ -214,14 +214,14 @@ func init() {
 		{2005164, 409, "This import is still being processed", []string{
 			"本次导入正在处理中",
 		}},
-		{2005165, 409, "The report must preserve the verified analysis and its actual research outcome", []string{
-			"checked analysis requires its research completion outcome",
-			"checked analysis requires research_complete",
-			"checked analysis requires its coverage gaps",
-			"complete research must have a verified outcome without unresolved coverage gaps",
+		{2005165, 409, "The report must preserve the research analysis and its actual research outcome", []string{
+			"research analysis requires its research completion outcome",
+			"research analysis requires research_complete",
+			"research analysis requires its coverage gaps",
+			"complete research must have a scope-covered outcome without unresolved coverage gaps",
 			"incomplete research requires its actual stopping reason",
 			"expansion report does not match the effective relation analysis version",
-			"expansion report must preserve the checked analysis",
+			"expansion report must preserve the research analysis",
 		}},
 		{2000103, 400, "Invalid request", []string{
 			"unsupported_source",

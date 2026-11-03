@@ -67,7 +67,6 @@
 .paper-graph-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 12px; border-bottom: 1px solid var(--color-border-secondary); font-size: 11px; color: var(--color-text-secondary);
   > span { display: inline-flex; align-items: center; gap: 6px; }
   i { width: 18px; border-top: 2px solid; }
-  i.is-pending { border-top-style: dashed; opacity: 0.6; }
 }
 
 .paper-graph-node .paper-graph-node-detail {

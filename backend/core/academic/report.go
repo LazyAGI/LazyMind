@@ -33,21 +33,21 @@ func readExpansionResearchState(raw json.RawMessage) (expansionResearchState, er
 func validateResearchCompletion(value map[string]any) error {
 	completion, ok := value["completion"].(map[string]any)
 	if !ok {
-		return errors.New("checked analysis requires its research completion outcome")
+		return errors.New("research analysis requires its research completion outcome")
 	}
 	complete, ok := value["research_complete"].(bool)
 	if !ok {
-		return errors.New("checked analysis requires research_complete")
+		return errors.New("research analysis requires research_complete")
 	}
 	gaps, ok := value["coverage_gaps"].([]any)
 	if !ok {
-		return errors.New("checked analysis requires its coverage gaps")
+		return errors.New("research analysis requires its coverage gaps")
 	}
 	if complete {
-		if completion["status"] != "complete" || completion["reason"] != "verified" || len(gaps) != 0 {
-			return errors.New("complete research must have a verified outcome without unresolved coverage gaps")
+		if completion["status"] != "complete" || completion["reason"] != "scope_covered" || len(gaps) != 0 {
+			return errors.New("complete research must have a scope-covered outcome without unresolved coverage gaps")
 		}
-	} else if completion["status"] != "incomplete" || (completion["reason"] != "budget_exhausted" && completion["reason"] != "material_limited" && completion["reason"] != "technical_failure") {
+	} else if completion["status"] != "incomplete" || (completion["reason"] != "budget_exhausted" && completion["reason"] != "material_limited") {
 		return errors.New("incomplete research requires its actual stopping reason")
 	}
 	return nil
@@ -98,9 +98,9 @@ func expansionReportSnapshot(db *gorm.DB, record orm.AcademicExpansion, session,
 		if err := validateResearchCompletion(analysis); err != nil {
 			return nil, err
 		}
-		for _, field := range []string{"completion", "research_complete", "coverage_gaps", "selection"} {
+		for _, field := range []string{"completion", "research_complete", "coverage_gaps", "selection", "input", "relations", "claims", "research_structure", "source_versions"} {
 			if !reflect.DeepEqual(report[field], analysis[field]) {
-				return nil, errors.New("expansion report must preserve the checked analysis " + field)
+				return nil, errors.New("expansion report must preserve the research analysis " + field)
 			}
 		}
 	}
@@ -176,26 +176,26 @@ func expansionReportSnapshot(db *gorm.DB, record orm.AcademicExpansion, session,
 	}
 	report["materials"] = materials
 	if value, present := report["source_versions"]; present {
-		var checked []struct {
+		var sources []struct {
 			PaperID       string `json:"paper_id"`
 			Status        string `json:"status"`
 			ContentHash   string `json:"content_hash"`
 			SourceVersion string `json:"source_version"`
 		}
-		if err := json.Unmarshal(marshal(value), &checked); err != nil {
+		if err := json.Unmarshal(marshal(value), &sources); err != nil {
 			return nil, err
 		}
 		byID := map[string]map[string]any{}
 		for _, material := range materials {
 			byID[material["paper_id"].(string)] = material
 		}
-		for _, source := range checked {
+		for _, source := range sources {
 			current, exists := byID[source.PaperID]
 			if !exists && source.Status == "unavailable" {
 				continue
 			}
 			if !exists || current["status"] != source.Status || current["content_hash"] != source.ContentHash || current["source_version"] != source.SourceVersion {
-				return nil, errors.New("paper content changed after checked analysis; report publication requires renewed verification")
+				return nil, errors.New("paper content changed after research analysis; report publication requires renewed analysis")
 			}
 		}
 	}

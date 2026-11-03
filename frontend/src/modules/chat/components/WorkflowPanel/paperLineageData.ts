@@ -2,21 +2,14 @@ import type { PaperRelation, WorkflowPaper } from '@/modules/knowledge/api/paper
 import type { PaperGraphData } from './paperGraphData';
 
 export const paperNodeId = (paperId: string) => `p_${paperId}`;
-export function paperRelationStatus(relation: PaperRelation): 'verified' | 'pending' | 'timeout' | 'error' | 'unsupported' {
-  const verification = relation.verification;
-  if (verification.verification_error) return verification.verification_error === 'stage_timeout' ? 'timeout' : 'error';
-  if (verification.status === 'supported' && verification.scope_status === 'supported') return 'verified';
-  if (verification.status === 'unsupported') return 'unsupported';
-  return 'pending';
-}
-export const verifiedPaperRelations = (relations: PaperRelation[]) => relations.filter(relation => paperRelationStatus(relation) === 'verified');
+export const isDirectedPaperRelation = (type: PaperRelation['relation_type']) =>
+  ['method_modification', 'design_inspiration', 'component_use', 'background_citation'].includes(type);
 export function paperRelationshipGraph(papers: WorkflowPaper[], relations: PaperRelation[]): PaperGraphData {
   const known = new Set(papers.map(item => item.paper.paper_id));
   const edges = relations.filter(item => known.has(item.source_paper_id) && known.has(item.target_paper_id)).map(item => {
-    const status = paperRelationStatus(item);
-    const directed = status === 'verified' && item.relation_type === 'method_modification';
+    const directed = isDirectedPaperRelation(item.relation_type);
     return { id: item.id, source: paperNodeId(item.source_paper_id), target: paperNodeId(item.target_paper_id),
-      label: item.relation_type, relationType: item.relation_type, status, directed, dashed: status !== 'verified' };
+      label: item.relation_type, relationType: item.relation_type, directed, dashed: false };
   });
   const connected = new Set(edges.flatMap(item => [item.source, item.target]));
   return { nodes: papers.map(item => ({ id: paperNodeId(item.paper.paper_id), label: paperGraphTitle(item.paper.title || item.paper.paper_id), tone: item.is_seed ? 'amber' : 'blue' }))

@@ -202,8 +202,8 @@ describe('paper task startup routes', () => {
         mount(['a']);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
-        fireEvent.click(within(screen.getByRole('radiogroup', { name: '深入分析 · 研究方向' })).getByRole('radio', { name: '人工选择' }));
-        expect(screen.getByRole('radio', { name: '深入分析', exact: true })).toBeChecked();
+        fireEvent.click(within(screen.getByRole('radiogroup', { name: '深入研究 · 研究方向' })).getByRole('radio', { name: '人工选择' }));
+        expect(screen.getByRole('radio', { name: '深入研究', exact: true })).toBeChecked();
         await submit();
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep', direction_selection: 'manual' }), false);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
@@ -218,13 +218,13 @@ describe('paper task startup routes', () => {
         expect(within(screen.getByRole('radiogroup', { name: '标准扩展 · 研究方向' })).getByRole('radio', { name: '默认全选' })).toBeChecked();
         for (const [name, steps] of [
             [/^标准扩展/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充']],
-            [/^深入分析/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '关系分析与证据核验']],
+            [/^深入研究/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '研究分析与报告']],
         ] as const) {
             const card = screen.getByRole('radio', { name }).closest('.paper-research-depth-option')!;
             expect(within(card).getAllByRole('listitem')).toHaveLength(steps.length);
             for (const step of steps) expect(within(card).getByText(step, { exact: true })).toBeInTheDocument();
         }
-        for (const tier of [/^标准扩展/, /^深入分析/, /^快速扩展/]) {
+        for (const tier of [/^标准扩展/, /^深入研究/, /^快速扩展/]) {
             fireEvent.click(screen.getByRole('radio', { name: tier }));
             expect(screen.getByRole('button', { name: '开始扩展' })).toBeInTheDocument();
             expect(screen.queryByRole('button', { name: '开始初步调研' })).not.toBeInTheDocument();
@@ -602,8 +602,8 @@ describe('result list actions', () => {
         expect(screen.getByRole('button', { name: '打开拓展会话' })).toBeEnabled();
         fireEvent.click(screen.getByRole('button', { name: '查看过程' }));
         expect(screen.getByText('检索与拓展')).toBeVisible();
-        expect(screen.getByText('筛选与补充')).toBeVisible();
-        expect(screen.getByText('筛选与补充').closest('li')).toHaveAttribute('data-status', ['running', 'active'].includes(status) ? 'running' : 'pending');
+        expect(screen.getByText('研究分析与报告')).toBeVisible();
+        expect(screen.getByText('研究分析与报告').closest('li')).toHaveAttribute('data-status', ['running', 'active'].includes(status) ? 'running' : 'pending');
         expect(screen.queryByText('准备参考论文与检索计划')).not.toBeInTheDocument();
         expect(screen.queryByText('检索工具调用训练信号')).not.toBeInTheDocument();
         expect(previewPaperImport).not.toHaveBeenCalled();

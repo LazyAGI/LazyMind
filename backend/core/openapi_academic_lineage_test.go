@@ -31,7 +31,7 @@ func TestAcademicOpenAPIDistinguishesQueryReceiptsFromFrozenDiscoveries(t *testi
 	}
 }
 
-func TestAcademicOpenAPICheckedAnalysisAndReportPreserveVersionedEvidenceAndSelection(t *testing.T) {
+func TestAcademicOpenAPIResearchAnalysisAndReportPreserveVersionedEvidenceAndSelection(t *testing.T) {
 	schemas := generatedOpenAPISchemas(t)
 	for _, name := range []string{"AcademicRelationAnalysis", "AcademicExpansionReport"} {
 		properties := schemaPropertiesForTest(t, schemas, name)
@@ -44,15 +44,15 @@ func TestAcademicOpenAPICheckedAnalysisAndReportPreserveVersionedEvidenceAndSele
 		if properties["selection"].(map[string]any)["$ref"] != "#/components/schemas/AcademicPaperSelection" {
 			t.Fatalf("%s lost its frozen candidate changes", name)
 		}
-		for field, item := range map[string]string{"source_versions": "AcademicSourceVersion", "coverage_gaps": "AcademicCoverageGap", "investigation": "AcademicInvestigation", "claims": "AcademicVerifiedClaim"} {
+		for field, item := range map[string]string{"source_versions": "AcademicSourceVersion", "coverage_gaps": "AcademicCoverageGap", "investigation": "AcademicInvestigation", "claims": "AcademicResearchClaim"} {
 			if properties[field].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/"+item {
 				t.Fatalf("%s.%s lost its structured contract", name, field)
 			}
 		}
 	}
 	completion := schemaPropertiesForTest(t, schemas, "AcademicResearchCompletion")
-	if !reflect.DeepEqual(completion["status"].(map[string]any)["enum"], []any{"complete", "incomplete"}) || !reflect.DeepEqual(completion["reason"].(map[string]any)["enum"], []any{"verified", "budget_exhausted", "material_limited", "technical_failure"}) {
-		t.Fatal("research completion must distinguish verification from actual stopping reasons")
+	if !reflect.DeepEqual(completion["status"].(map[string]any)["enum"], []any{"complete", "incomplete"}) || !reflect.DeepEqual(completion["reason"].(map[string]any)["enum"], []any{"scope_covered", "budget_exhausted", "material_limited"}) {
+		t.Fatal("research completion must distinguish research coverage from actual stopping reasons")
 	}
 	summary := schemaPropertiesForTest(t, schemas, "AcademicChatSummary")
 	if summary["completion"].(map[string]any)["$ref"] != "#/components/schemas/AcademicResearchCompletion" || summary["research_complete"] == nil || summary["coverage_gaps"] == nil {
@@ -84,7 +84,7 @@ func TestAcademicOpenAPICheckedAnalysisAndReportPreserveVersionedEvidenceAndSele
 	if !reflect.DeepEqual(change["action"].(map[string]any)["enum"], []any{"added", "removed"}) || change["paper"].(map[string]any)["$ref"] != "#/components/schemas/AcademicWorkflowPaper" || change["reason"] == nil {
 		t.Fatal("candidate changes must retain action, paper metadata and reason")
 	}
-	claim := schemaPropertiesForTest(t, schemas, "AcademicVerifiedClaim")
+	claim := schemaPropertiesForTest(t, schemas, "AcademicResearchClaim")
 	if claim["evidence"].(map[string]any)["items"].(map[string]any)["$ref"] != "#/components/schemas/AcademicSourceEvidence" {
 		t.Fatal("claim evidence must expose its own source hash, version and content positions")
 	}

@@ -705,8 +705,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                                 {reading && <Typography.Text type="secondary">已返回 {reading.positions.length} / {reading.total_blocks} 个正文块；页码：{reading.pages.filter(page => page > 0).join('、') || '原文未提供可靠页码'}</Typography.Text>}
                                 {claims.map((claim, index) => <div className="paper-expansion-paper-evidence" key={index}>
                                   <Typography.Paragraph>{claim.statement}</Typography.Paragraph>
-                                  <Typography.Text type="secondary">{claim.reason}</Typography.Text>
-                                  {!!claim.positions.length && <div className="paper-expansion-muted">{t('paperTasks.workflowResult.positions', { positions: claim.positions.map(position => position + 1).join('、') })}</div>}
+                                  {!!claim.positions?.length && <div className="paper-expansion-muted">{t('paperTasks.workflowResult.positions', { positions: claim.positions.map(position => position + 1).join('、') })}</div>}
                                 </div>)}
                               </Space>
                             </details>
