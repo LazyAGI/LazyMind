@@ -105,7 +105,11 @@ def replay(monkeypatch, tmp_path):
 
 
 def payload(prompt):
-    return json.loads(prompt.split('INPUT_JSON:\n', 1)[1])
+    fields = {}
+    for message in prompt['input']:
+        if message['role'] == 'user':
+            fields.update(json.loads(message['content'].split('INPUT_JSON:\n', 1)[1]))
+    return fields
 
 
 def published(replay):
@@ -292,10 +296,10 @@ def test_parallel_figures_keep_full_evidence_private_context_and_order(replay, m
     assert [chart['finding_ids'] for chart in charts] == [['r1'], ['r2']]
     for call in replay.plot.call_args_list:
         sent = payload(call.args[0])
-        assert [row['value'] for row in sent['data']['analysis_results']] == [2., 5.]
-        assert sent['data']['tables']['data']['rows'] == replay.inputs['data']['rows']
-        assert sent['data']['shared_style']['series_order'] == ['baseline', 'candidate']
-        assert sent['data']['shared_style']['terminology']['baseline'] == 'Baseline'
+        assert [row['value'] for row in sent['analysis_results']] == [2., 5.]
+        assert sent['tables']['data']['rows'] == replay.inputs['data']['rows']
+        assert sent['shared_style']['series_order'] == ['baseline', 'candidate']
+        assert sent['shared_style']['terminology']['baseline'] == 'Baseline'
         assert 'HELPER SOURCE' in sent['skill_reference'] and 'def ' in sent['skill_reference']
     assert replay.source.read_bytes() == source_bytes and replay.analysis.call_count == 1
     assert all(item['concurrency'] == 2 and not item.get('fallback') for item in execution['figures'])

@@ -1,6 +1,7 @@
 """Strict paper-v2.1 analysis boundary; no model, filesystem or execution side effects."""
 from __future__ import annotations
 
+from collections import Counter
 import copy
 from datetime import date, datetime
 import hashlib
@@ -287,8 +288,6 @@ class Finding(Object):
             raise ValueError('数值结论缺少 value')
         if self.kind == 'count' and (self.value < 0 or not self.value.is_integer()):
             raise ValueError('计数必须是非负整数')
-        if (self.kind == 'probability') != (self.probability is not None):
-            raise ValueError('probability 与结论类型不一致')
         if self.probability and (not 0 <= self.value <= 1 or self.unit is not None or self.model_id is None):
             raise ValueError('后验概率须为 0..1、无单位且关联模型')
         return self
@@ -364,6 +363,39 @@ def table_map(inputs):
     if 'tables' in data:
         return {entry['id']: entry['table'] for entry in data['tables']}
     return {'data': data}
+
+
+PROMPT_TABLE_BYTES = 48 * 1024
+
+
+def table_profile(table, levels=20, samples=5):
+    """Columns, level counts, ranges and a few rows: enough to plan from, without every row."""
+    rows, profiles = table['rows'], []
+    for index, name in enumerate(table['columns']):
+        values = [row[index] for row in rows if row[index] is not None]
+        counts = Counter(values)
+        item = dict(column=name, missing=len(rows) - len(values), distinct=len(counts))
+        if values and table['column_types'][index] in ('integer', 'number'):
+            item.update(min=min(values), max=max(values))
+        if len(counts) <= levels:
+            item['level_counts'] = [[value, count] for value, count in counts.items()]
+        else:
+            item['examples'] = list(counts)[:samples]
+        profiles.append(item)
+    return dict(columns=table['columns'], column_types=table['column_types'], units=table['units'],
+                row_count=len(rows), rows_omitted=True, column_profiles=profiles, sample_rows=rows[:samples])
+
+
+def prompt_tables(tables):
+    """Prompts carry complete tables within a size budget and profiles beyond it; executed code gets every row."""
+    shown, used = {}, 0
+    for key, table in tables.items():
+        size = len(json.dumps(table, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode())
+        if used + size <= PROMPT_TABLE_BYTES:
+            shown[key], used = table, used + size
+        else:
+            shown[key] = table_profile(table)
+    return shown
 
 
 def refs_exist(refs, tables, field):

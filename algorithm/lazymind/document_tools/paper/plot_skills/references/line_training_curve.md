@@ -1,8 +1,10 @@
-# Measured trajectories over ordered checkpoints
+# Line chart over an ordered x
 
-Use a trajectory to show how an observed response changes with training progress
-or another ordered x variable. Select axes that describe the actual measurements;
-the name of this style does not require training data.
+Use a line chart to show how a measured value changes along an ordered numeric x:
+training steps, data size, time, a parameter sweep or another ordered factor. Each
+point is an observation or a verified per-x summary such as a mean; say which in the
+caption. Select axes that describe the actual measurements; the name of this style
+does not require training data.
 
 ## Required call
 

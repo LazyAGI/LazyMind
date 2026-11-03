@@ -1,14 +1,16 @@
-# Grouped method comparisons
+# Grouped bar chart
 
-Do not automatically overlay individual-run dots on these bars. Keep the verified
-means and intervals; when the distribution itself matters, choose an appropriate
-point-interval or distribution figure instead. A bar caption must not claim that
-individual observations are shown.
+Use grouped bars for the ordinary comparison of values or means across named
+categories and series, for example methods within datasets. This is the standard
+main-result figure when readers compare the measured levels themselves. Draw
+verified intervals as error bars when they exist and define them in the caption.
+Keep experimental settings in separate panels or apply an explicit filter first.
+Each displayed method/category cell must refer to a single observation or a
+verified summary of the intended replicates.
 
-Select this representation when the question is how named methods compare within
-the same categories. Keep experimental settings in separate panels or apply an
-explicit filter first. Each displayed method/category cell must refer to a single
-observation or a verified summary of the intended replicates.
+Bars may also show signed differences around the zero line. Do not overlay
+individual-run dots by default; a bar caption must not claim that individual
+observations are shown.
 
 ## Interface and binding
 
@@ -46,8 +48,7 @@ drop a method to fit the palette, or turn missing cells into zero-height bars.
 
 The application can fit method legends outside the observations after applying
 final font metrics. A category-only display should not repeat its axis labels in a
-legend. Do not overlay another mean symbol. If interval comparison is the main question, `point_interval` can
-communicate those estimates with less ink; choose based on the question rather than dropping uncertainty.
+legend. Do not overlay another mean symbol.
 
 Return the research question as figure metadata. The caption explains panel scope,
 aggregation, units and any absent cells; the drawing does not establish significance.

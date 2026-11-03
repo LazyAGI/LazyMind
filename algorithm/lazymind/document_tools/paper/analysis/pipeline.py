@@ -137,12 +137,11 @@ def run(inputs):
     plan['failed_figures'] = [dict(id=item['id'], title=item['title'], error=item['error']) for item in failed]
     plan['figures'] = [figure for figure in plan['figures'] if figure['id'] not in failed_ids]
     traces = {item['id']: item for item in figure_trace}
-    # Use the actual final figure set, including any disclosed simple fallback.
+    # Keep the planned style; a disclosed simple fallback records the style it actually drew.
     for figure in plan['figures']:
         item = traces[figure['id']]
         if item.get('fallback'):
             figure['fallback'] = item['fallback']
-            figure['style'] = 'point_interval'
         figure['caption'] = item['caption']
     summary, interpretation = model.interpret_results(inputs, copy.deepcopy(analysis), copy.deepcopy(plan))
     for chart in charts:

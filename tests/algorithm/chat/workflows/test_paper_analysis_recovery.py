@@ -6,6 +6,7 @@ import lazyllm
 import pytest
 
 from lazymind.document_tools.paper.analysis import trace
+from lazymind.document_tools.paper.model_context import model_prompt
 from lazymind.document_tools.paper.plotting import model
 from lazymind.document_tools.paper.plotting.code_response import (
     normalize_response, parse_code_response, repair_response,
@@ -92,16 +93,18 @@ def test_native_provider_channels_through_sdk_and_f4(monkeypatch, tmp_path, stre
     monkeypatch.setattr('requests.post', post)
     monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_: client)
     monkeypatch.setenv('LAZYMIND_PAPER_MODEL_STREAM', 'auto' if stream else 'off')
+    prompt = model_prompt('Offline request', facts={}, tables={})
     with dynamic_chat_config(modules=client, source='openai' if stream else 'minimax', model='f4-test',
                              url='http://provider.test/v1/', skip_auth=True), \
             trace.capture(tmp_path, 'native-test', emit=lambda _: None) as recorder:
         with lazyllm.globals.stack_enter(client.identities):
             client._get_supplier()  # Cached before F4 configures the actual caller.
         with trace.stage(stage, attempt=1):
-            assert getattr(model, method)('Offline request') == expected
+            assert getattr(model, method)(prompt) == expected
     step = json.loads((recorder.root / 'public.json').read_text())['process_steps'][0]
     assert step['output']['text'] == body and step['reasoning']['text'] == thinking
     assert len(calls) == 1 and calls[0]['stream'] == stream
+    assert calls[0]['messages'] == prompt['input']
     assert calls[0].get('reasoning_split') is (None if stream else True)
     assert ('response_format' in calls[0]) == (method == 'call_model')
     assert MinimaxChat._convert_msg_format is converter

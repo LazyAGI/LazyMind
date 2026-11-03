@@ -50,12 +50,15 @@ def _stream_parser(parser_type, **settings):
     return parser_type(**settings)
 
 
-def configure(client, policy):
+def configure(client, policy, *, structured=False):
     from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
     from lazyllm.module.llms.onlinemodule.base.onlineChatModuleBase import LazyLLMOnlineChatModuleBase
 
     supported = isinstance(client, (OnlineChatModule, LazyLLMOnlineChatModuleBase))
     if supported:
+        if structured:
+            from lazyllm import ChatPrompter
+            client.prompt(ChatPrompter(enable_system=False))
         # AutoModel creates this client for this request. Dynamic routers pass
         # their constructor timeout to each supplier when it is first created.
         # Passing timeout in forward kwargs would also put it in the API body.
@@ -71,6 +74,8 @@ def configure(client, policy):
                 supplier = client._get_supplier()
         # A cached supplier keeps the formatter and timeout from its creation.
         # Configure the actual F4 caller as well as the outer router.
+        if structured:
+            supplier.prompt(client._prompt)
         supplier.formatter(client._formatter)
         supplier._timeout = client._timeout
         # Only this F4 client uses the preview callback; provider parsing stays intact.

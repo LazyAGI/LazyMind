@@ -1,6 +1,5 @@
 """One independent drawing request per figure, sharing all results, data and style."""
 import copy
-import json
 from concurrent.futures import CancelledError, as_completed
 
 from .model import call_model, call_code_model, PlotModelError
@@ -10,23 +9,26 @@ from .skills import PlotSkills
 from .labels import display_unit
 from .pipeline import draw_one, limits, FigureRenderError
 from ..analysis.results import result_rows
-from ..analysis.schema import table_map
+from ..analysis.schema import prompt_tables, table_map
 from ..analysis.model import facts
+from ..model_context import model_prompt
 from ..analysis import trace as diagnostics
 from ..execution.threads import ThreadPoolExecutor
 
 
 def generate_code(data, statistics, spec, reference, previous, error):
-    prompt = (REPAIR_INSTRUCTION if previous else CODE_INSTRUCTION) + '''Implement def draw(data, statistics, spec): for ONE figure and return a Matplotlib Figure.
+    prompt = '''Implement def draw(data, statistics, spec): for ONE figure and return a Matplotlib Figure.
 Use the plain function declaration without type annotations; no annotation-only imports are needed.
 Import names actually used in executable statements explicitly; an alias binds only that alias.
 Prefer 1 or 2 data panels, with at most 4 in this figure/script. Implement only this figure's planned purpose;
 do not expand the full analysis context into a large dashboard or add unrelated panels and duplicated plotting code.
 Use loops and the supplied helpers for related series. Additional planned figures have their own independent scripts.
 data.analysis_results is the COMPLETE executed result table, with values, meaning, units, intervals, source columns,
-scope, coordinates and comparison direction in each row. data.tables contains COMPLETE original source tables:
-display_unit is an optional formatted unit symbol with the original numeric scale; unit preserves source metadata.
-each has columns, column_types, units and rows (lists of cells). data.facts supplies the research topic and context.
+scope, coordinates and comparison direction in each row. display_unit is an optional formatted unit symbol with the
+original numeric scale; unit preserves source metadata. At execution data.tables contains the COMPLETE original
+source tables, each with columns, column_types, units and rows (lists of cells). This request shows a table marked
+rows_omitted only by row_count, column_profiles and sample_rows; draw still receives all of its rows.
+data.facts supplies the research topic and context.
 spec.purpose/requirements describe this figure; spec.finding_ids identifies its focus. Other results are context.
 These requirements are generated planning hints, not additional observations. Actual result rows are authoritative
 if a hint implies an incorrect value/direction. Derive numeric annotations from runtime values, not literal planning text.
@@ -47,9 +49,7 @@ series_order and series_colors use ORIGINAL coordinate values; terminology maps 
 For each panel derive its actual groups from the selected result rows and chosen coordinate. Filter the global order
 to these observed groups, then append any remaining observed groups. The global order is not a data inventory for
 every panel. Never filter observations by translated labels or key summaries by display labels.
-Keep summaries indexed by actual group keys. For draw_point_intervals, pass those keys as methods and pass
-method_labels=data['shared_style']['terminology'] for display. This optional argument changes labels only.
-Other helpers have their own supplied signatures; do not transfer this keyword to unrelated helpers.
+Keep summaries indexed by actual group keys and pass display names only where a helper signature accepts them.
 Identify every displayed series with a legend or direct label. Build legend handles and labels together from the
 actual plotted artists so a shared legend does not silently omit a series.
 Ticks identify categories, not full condition descriptions. Avoid repeating factor names and shared sample sizes on
@@ -84,13 +84,19 @@ No file/network/process access, installation, save/show calls or extra statistic
 Use only the actual allowed imports below. The three function arguments are dictionaries. No attribute-compatibility readers,
 schema guards or validation frameworks. On repair use the specific error and preserve evidence; a simpler honest layout is allowed.
 '''
-    payload = dict(data=data, statistics=statistics, spec=spec, skill_reference=reference,
-                   execution_rules=dict(allowed_imports=sorted(ALLOWED_IMPORTS), forbidden_names=sorted(FORBIDDEN),
-                                        forbidden_attributes=sorted(FORBIDDEN_ATTRIBUTES)),
-                   previous_code=numbered_source(previous) if previous else '', error=error)
     request = call_model if previous else call_code_model
-    answer = request(prompt + '\nINPUT_JSON:\n' + json.dumps(
-        payload, ensure_ascii=False, allow_nan=False, separators=(',', ':')))
+    rows = [{key: value for key, value in row.items() if key != 'display_unit'} for row in data['analysis_results']]
+    answer = request(model_prompt(
+        prompt, facts=data['facts'], tables=prompt_tables(data['tables']),
+        shared=dict(analysis_results=rows, statistics=statistics, shared_style=data['shared_style'],
+                    execution_rules=dict(allowed_imports=sorted(ALLOWED_IMPORTS), forbidden_names=sorted(FORBIDDEN),
+                                         forbidden_attributes=sorted(FORBIDDEN_ATTRIBUTES)),
+                    skill_reference=reference),
+        task=dict(spec={key: value for key, value in spec.items() if key != 'caption'},
+                  display_units={row['id']: row.get('display_unit') for row in data['analysis_results']},
+                  previous_code=numbered_source(previous) if previous else '', error=error,
+                  caption=spec.get('caption', '')),
+        response_instruction=REPAIR_INSTRUCTION if previous else CODE_INSTRUCTION))
     source = repair_response(answer, previous) if previous else code_response(answer)
     if isinstance(answer.get('caption'), str) and answer['caption'].strip():
         spec['caption'] = answer['caption'].strip()
@@ -138,11 +144,13 @@ def draw(analysis, figures, inputs, shared=None):
         try:
             chart, trace = draw_one(data, statistics, spec, reference, attempts, generate_code)
         except (FigureRenderError, PlotModelError) as exc:
-            from .simple import generate_simple_code
+            from .simple import fallback_style, generate_simple_code
             original_attempts = getattr(exc, 'history', [])
-            fallback = dict(reason=str(exc), original_style=figure['style'], relationship_not_shown=True)
-            spec.update(style='point_interval', base_style=None, fallback=fallback,
-                        style_contract=PlotSkills().style_contract('point_interval'))
+            style = fallback_style(figure['style'])
+            fallback = dict(reason=str(exc), original_style=figure['style'], style=style,
+                            relationship_not_shown=True)
+            spec.update(style=style, base_style=None, fallback=fallback,
+                        style_contract=PlotSkills().style_contract(style))
             spec['caption'] = ('Simple display of the selected executed estimates; the originally planned geometry '
                                'was not completed. Original units and available intervals are retained.')
             try:

@@ -13,10 +13,15 @@ def test_executed_results_produce_one_unchanged_markdown_conclusion():
                     targets=[], methods=['mean'], models=[], limitations=[])
     markdown = '## 综合结论\n\n2026 年样本均值为 0.5；本次模拟不能推断真实任务表现。'
     call = Mock(return_value=markdown)
-    text, record = interpret({}, analysis, dict(figures=[]), call)
+    inputs = dict(data=dict(columns=['score'], column_types=['number'], units=[None], rows=[[0.5]]))
+    text, record = interpret(inputs, analysis, dict(figures=[]), call)
     assert text == render(dict(summary=text)) == markdown
     assert record['format'] == 'markdown'
-    sent = json.loads(call.call_args.args[0].split('INPUT_JSON:\n', 1)[1])
+    sent = {}
+    for message in call.call_args.args[0]['input']:
+        if message['role'] == 'user':
+            sent.update(json.loads(message['content'].split('INPUT_JSON:\n', 1)[1]))
     assert sent['analysis_results'][0]['value'] == 0.5
+    assert sent['tables']['data']['rows'] == [[0.5]]
     assert 'schema' not in sent
     call.assert_called_once()

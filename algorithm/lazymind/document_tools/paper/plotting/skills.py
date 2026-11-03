@@ -10,26 +10,45 @@ from pathlib import Path
 
 from .templates import NATIVE_FUNCTION_GUIDANCE, paper_template
 
+# The figure planner sees only these descriptions, in this order: name the ordinary chart first,
+# then when to use it and what it must not receive.
 STYLES = {
-    'bar_paired_delta': ('bar_paired.py', 'paired baseline/method bars'),
-    'bar_grouped_hatch': ('bar_grouped.py', 'grouped bars with a highlighted method'),
-    'line_confidence_band': ('line_selfdistill.py', 'curves with measured uncertainty'),
-    'line_training_curve': ('line_training.py', 'training steps and measured metrics'),
-    'box_raw_points': ('box_raw_points.py', 'independent-run distribution: boxes and all valid raw points'),
-    'scatter_tradeoff': ('scatter_tradeoff.py', 'paired continuous measurements with stable shapes and colors'),
-    'line_loss_with_inset': ('line_loss_inset.py', 'loss curves and a zoomed panel'),
-    'scatter_tsne_cluster': ('scatter_tsne.py', 'existing embedding coordinates'),
-    'scatter_broken_axis': ('scatter_break.py', 'scatter with an explicitly justified broken axis'),
-    'radar_dual_series': ('radar_comparison.py', 'comparable dimensions with explicit scales'),
-    'heatmap_matrix': ('paper_extended.py', 'quantitative matrix, signed differences, correlations or confusion counts'),
-    'point_interval': ('paper_extended.py', 'verified point estimates and asymmetric interval endpoints'),
-    'histogram_distribution': ('paper_extended.py', 'raw distribution with shared bins and explicit density units'),
-    'ecdf_distribution': ('paper_extended.py', 'exact empirical cumulative distribution, without smoothing'),
-    'bar_stacked': ('paper_extended.py', 'complete additive components and optional within-category proportions'),
-    'classification_roc_pr': ('paper_extended.py', 'binary ROC and PR from paired true labels and prediction scores'),
-    'density_hexbin': ('paper_extended.py', 'count-valued hexagonal bins preserving all paired observations'),
-    'contour_response': ('paper_extended.py', 'response contours on an actual complete ordered two-dimensional grid'),
-    'violin_raw_points': ('paper_extended.py', 'sample density shape, all raw points, median and IQR'),
+    'bar_grouped_hatch': ('bar_grouped.py', 'Grouped bar chart: values or means per category and series '
+                          '(e.g. method x dataset) with CI error bars when available. Standard main-result '
+                          'comparison; hatching only marks a user-designated focal method.'),
+    'line_training_curve': ('line_training.py', 'Line chart: values along any ordered numeric x (epochs, steps, '
+                            'data size, time, parameter sweep), one line per series, without interval bands.'),
+    'line_confidence_band': ('line_selfdistill.py', 'Line chart with CI band: an estimate and its interval at '
+                             'each ordered x value, one line per series.'),
+    'point_interval': ('paper_extended.py', 'Dot-and-whisker (forest) plot: differences, effects, coefficients '
+                       'or many estimates with CIs, especially signed values compared with zero.'),
+    'box_raw_points': ('box_raw_points.py', 'Box plot with all raw points: distribution of per-run or '
+                       'per-subject values by group; needs raw rows.'),
+    'scatter_tradeoff': ('scatter_tradeoff.py', 'Scatter plot: two measured quantities paired by the same runs '
+                         'or groups (e.g. accuracy vs. training time).'),
+    'bar_paired_delta': ('bar_paired.py', 'Two side-by-side bars per category (baseline, method) with the gap '
+                         'annotated; both inputs are nonnegative raw values. Not for precomputed differences.'),
+    'bar_stacked': ('paper_extended.py', 'Stacked bars: complete nonnegative additive components per category, '
+                    'optionally as within-category proportions.'),
+    'heatmap_matrix': ('paper_extended.py', 'Heatmap of a quantitative matrix: values, signed differences, '
+                       'correlations or confusion counts.'),
+    'violin_raw_points': ('paper_extended.py', 'Violin plot with raw points, median and IQR; needs at least '
+                          'five raw values per group.'),
+    'histogram_distribution': ('paper_extended.py', 'Histogram of raw values with shared bins.'),
+    'ecdf_distribution': ('paper_extended.py', 'ECDF: exact cumulative distribution of raw values.'),
+    'line_loss_with_inset': ('line_loss_inset.py', 'Line chart plus a zoomed inset of a narrow window '
+                             '(e.g. late-training loss).'),
+    'scatter_broken_axis': ('scatter_break.py', 'Scatter with a broken x axis, only when observations form '
+                            'two distant clusters that must both be visible.'),
+    'scatter_tsne_cluster': ('scatter_tsne.py', 'Scatter of supplied 2D embedding coordinates; never computed '
+                             'or invented here.'),
+    'density_hexbin': ('paper_extended.py', 'Hexbin density of many paired raw observations, too many for a '
+                       'scatter plot.'),
+    'contour_response': ('paper_extended.py', 'Contour map of a response measured on a complete 2D grid.'),
+    'radar_dual_series': ('radar_comparison.py', 'Radar chart comparing two methods across several comparable '
+                          'dimensions on one scale.'),
+    'classification_roc_pr': ('paper_extended.py', 'ROC and PR curves from per-case true labels and prediction '
+                              'scores.'),
 }
 
 
