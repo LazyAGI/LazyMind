@@ -792,6 +792,22 @@ describe('shared workflow compact layout', () => {
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
   });
 
+  it('shows a successful dynamic yield without failed or approval controls', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
+    fixture.session.projection!.current = [];
+    fixture.session.projection!.ready = ['refine_topic'];
+    fixture.session.projection!.nodes = { write_document: {
+      execution: 'succeeded', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
+    } };
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={vi.fn()} />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.getByText('等待下一步')).toBeInTheDocument();
+    expect(screen.queryByText('执行失败')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  });
+
   it('blocks approval while an ordinary Chat turn is active without treating it as approval', async () => {
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };

@@ -4173,6 +4173,7 @@ const enUS = {
     workflowStatusPaused: "Paused",
     workflowStatusBlocked: "Waiting for inputs",
     workflowStatusWaiting: "Waiting for approval",
+    workflowStatusNextStep: "Waiting for next step",
     workflowStatusFailed: "Failed",
     workflowStatusStopped: "Stopped",
     workflowBtnDisabledHint: "Step is running, please wait…",

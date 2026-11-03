@@ -744,7 +744,7 @@ def _run_paper_step(context, stream=None) -> dict:
     if step == 'literature_review' and 'paper_input' not in bound:
         from .review_materials import current_handoff
         review_context = current_handoff()
-    fixed_review_scope = 'paper_input' in bound or review_context is not None
+    fixed_review_scope = review_context is not None
     if step == 'prepare':
         # Old sessions pin their graph; keep them runnable without exposing this node in new graphs.
         if not bound and '[paper:demo]' not in request and '默认演示材料' not in request:
@@ -826,7 +826,7 @@ def _run_paper_step(context, stream=None) -> dict:
             pool = initialize_pool(bound, request)
         # Saved upstream materials do not include papers uploaded in later turns.
         # An explicit programmatic input still owns its selected paper scope.
-        if step == 'literature_review' and not fixed_review_scope:
+        if step == 'literature_review' and not fixed_review_scope and 'paper_input' not in bound:
             uploaded = _conversation_papers(context.params.get('history_files_per_turn'))
             current = material(pool, 'papers')
             papers = copy.deepcopy(current['content']) if current else []

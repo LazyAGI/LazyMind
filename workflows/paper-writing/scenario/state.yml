@@ -83,7 +83,7 @@ steps:
     label: "文献综述"
     mode: human
     route: choice
-    capabilities: [kb]
+    capabilities: [kb, academic_search]
     tools_only: true
     terminal_tools_only: true
     prompt: |

@@ -148,7 +148,9 @@ HTTP 200 也可能处于 `processing`，应同时检查 `status`。读取正文�
 ## 4. 接正式生成能力时改哪里
 
 - **启动路由**：[workflows.go](../../backend/core/academic/workflows.go) 的 `createPaperHandoff` 将综述交给新 Chat 的 `paper-writing`，心得和 PPT 继续使用各自的 Mock。
-- **综述材料**：`paper-writing` 在 F2 前通过 `review_materials.py` 读取冻结选文和全文，整理为已有 `papers` 业务输入。论文不必入库；选文、题录、关系和正文版本继续保留。普通 F2 只使用知识库、附件与上游材料，不调用外部搜索或 `paper_expansion`。
+- **综述材料**：`paper-writing` 在 F2 前通过 `review_materials.py` 读取冻结选文和全文，整理为已有 `papers` 业务输入。论文不必入库；选文、题录、关系和正文版本继续保留。普通 F2 保留附件与上游材料，按主题通过 Sciverse 和所选知识库扩充、筛选并去重文献；用户指定来源、年份、数量、重点或仅用附件时，按本轮要求选材。冻结选文默认不扩充，明确要求补充文献时才检索；不另外启动 `paper_expansion`。检索或读取部分失败时保留可读材料并展示限制，缺少可用论文时提示补材料，不以模型知识概述冒充文献综述。
+- **综述数量**：默认范围为 12–20 篇，由 `LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT=12` 和 `LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT=20` 配置。按相关性与主题覆盖选择范围内的合适数量，20 是上限，不要求凑满。范围包含已保留的论文，背景材料不占名额。Sciverse 和知识库共享候选检索预算，题录候选允许超取以供去重和相关性筛选；低于下限时最多补检三轮，仍不足时在执行提示和材料记录中披露。用户明确指定数量时优先遵循；用户上传论文超过默认上限时保留，不继续自动扩充；历史检索文献按本轮范围重新筛选。Compose 部署调整这两个参数后重新创建 `chat` 服务。
+- **正文与引用**：综述开头不插入逐篇检索、全文缺失或论文数量提醒。选材及阅读笔记都按内容区分学术论文和背景材料；背景/创新点说明、实验数据和内部测试报告仅作上下文，上传的真实学术论文可正常引用。Runtime 按论文清单生成连续编号的参考文献有序列表，正文使用对应数字引用，材料池保留原始 ID 和背景材料供后续步骤使用。
 - **下游步骤**：参考 [通用交接包](../../workflows/paper_workflow_mock) 和 [心得接续 PPT 包](../../workflows/paper_ppt_with_reflection_mock)，保留输入绑定与上述读取工具，替换 Mock 步骤的生成逻辑。
 - **输出**：正式成果沿用现有 Workflow artifact 发布机制。当前 `academic_handoff_submit()` 只确认冻结输入并发布 `handoff_receipt / ppt_request`，返回 `awaiting_downstream`，不代表正式成果完成。
 - **心得接续 PPT**：读取已保存的 `reflection_markdown` 和原论文清单；当前 Mock 的心得正文也是占位内容，正式接入时需一并替换。

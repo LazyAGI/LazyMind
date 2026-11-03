@@ -980,6 +980,8 @@ def test_business_manuscript_entry_publishes_visible_preparation_then_review(run
 
 def test_config_logical_edges_and_no_real_external_calls():
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
+    # Core uses these capabilities to forward KB and Sciverse credentials to F2.
+    assert {'kb', 'academic_search'} <= set(state['steps']['literature_review']['capabilities'])
     for step in state['steps'].values():
         # The wrapper owns runtime parameters. Do not let a focused UI tab or
         # old launch request redefine a deterministic Mock tool invocation.

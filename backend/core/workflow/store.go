@@ -317,7 +317,7 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 		if err != nil {
 			return err
 		}
-		if view.Status == "paused" || view.Status == "waiting" || session.Status == "pausing" || session.Status == SessionStatusCompleted {
+		if view.Status == "paused" || view.ApprovalStepID != "" || session.Status == "pausing" || session.Status == SessionStatusCompleted {
 			return nil
 		}
 		if session.Status != SessionStatusActive {

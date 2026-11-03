@@ -5,8 +5,9 @@ when_to_use: >
   用户只要求数据分析时，直接选择 data_analysis；F4 工具会从当前会话的 JSON 附件读取完整约定输入，
   不需要模型逐行读取或重写附件内容。已有 paper_input 或材料池绑定时优先沿用绑定。
   Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
-  Literature reviews use supplied papers, selected knowledge bases, or attachments.
-  Without supplied materials, F2 reviews the topic using model knowledge.
+  Literature reviews retain supplied papers and expand references through Sciverse and selected knowledge bases.
+  Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
+  unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
   Start review handoffs at literature_review with the frozen selection.
   Before starting, use the framework ask_user clarification card for the declared execution
   preference unless the user has explicitly answered it for this task. A request to do only

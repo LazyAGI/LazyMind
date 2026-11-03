@@ -659,7 +659,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			if err != nil {
 				return err
 			}
-			if display.Status == "waiting" {
+			if display.ApprovalStepID != "" {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing", false, nil)
 			}
 			if display.Status == "paused" {

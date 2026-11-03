@@ -323,7 +323,8 @@ def validate_output(module, value, inputs=None):
         validate_value(key, value[key])
     if module == 'literature_review':
         for paper in value['papers']:
-            text(paper.get('citation'), 'paper.citation')
+            if paper.get('review_role') != 'background':
+                text(paper.get('citation'), 'paper.citation')
     if module == 'experiment':
         meta = validate_result_meta(value['result_meta'], value['experiment'])
         if meta.data_origin == 'observed' and meta.execution_status != 'succeeded':

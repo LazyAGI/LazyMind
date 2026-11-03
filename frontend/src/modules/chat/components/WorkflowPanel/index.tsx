@@ -1997,7 +1997,7 @@ export function WorkflowPanel({
   // transports the selected action; host delivery is not workflow execution.
   const sessionBusy = displayStatus === 'active' || displayStatus === 'loading';
   const approvalStepId = display?.status === 'waiting' ? display.approval_step_id : undefined;
-  const displayStatusKey = workflowDisplayLabel(display?.status);
+  const displayStatusKey = workflowDisplayLabel(display?.status, display?.reason);
   // A native Chat submission can outlive this panel (it moves to the new reply).
   // Keep controls locked until that turn ends, even before workflow events arrive.
   // Dirty editors do not disable retry — click flushes saves first, then proceeds.

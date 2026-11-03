@@ -112,7 +112,7 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 			if err != nil {
 				return err
 			}
-			if projected.Display.Status == "waiting" {
+			if projected.Display.ApprovalStepID != "" {
 				status = SessionStatusWaiting
 			} else if projected.Projection.Completed {
 				status = SessionStatusCompleted

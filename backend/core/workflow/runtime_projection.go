@@ -300,7 +300,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	if err != nil {
 		return projectionResponse{}, err
 	}
-	if display.Status == "waiting" {
+	if display.ApprovalStepID != "" {
 		projection.Completed = false
 	}
 	return projectionResponse{

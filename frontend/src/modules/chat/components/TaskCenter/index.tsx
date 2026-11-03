@@ -1225,7 +1225,7 @@ const TaskCenter = (props: Props) => {
         hiddenSteps={taskPresentation?.hidden_steps}
         hideGroupedArtifacts={taskPresentation?.hide_final_artifacts}
         groupedStatus={taskPresentation?.grouped && workflowSession
-          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status))
+          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status, workflowSession.projection?.display?.reason))
           : undefined}
         onClose={onClose}
         showHeader={showHeader}

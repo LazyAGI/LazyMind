@@ -1019,6 +1019,8 @@ services:
       LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
       # F4 code runs in sandboxed Python children of Chat; no Docker socket/CLI is needed.
       LAZYMIND_WORKFLOWS_DIR: /app/workflows
+      LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT: ${LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT:-12}
+      LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT: ${LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT:-20}
       LAZYMIND_OUTPUT_EDITABLE_PPT: ${LAZYMIND_OUTPUT_EDITABLE_PPT:-false}
       LAZYMIND_PPT_EXPORT_URL: ${LAZYMIND_PPT_EXPORT_URL:-http://ppt-export:8099}
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]

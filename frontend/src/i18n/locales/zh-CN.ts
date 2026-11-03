@@ -3959,6 +3959,7 @@ const zhCN = {
     workflowStatusPaused: "已暂停",
     workflowStatusBlocked: "等待输入",
     workflowStatusWaiting: "等待审批",
+    workflowStatusNextStep: "等待下一步",
     workflowStatusFailed: "执行失败",
     workflowStatusStopped: "已停止",
     workflowStatusAria: "工作流状态：{{status}}",
