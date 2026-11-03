@@ -38,7 +38,7 @@ func TestAddKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 			newKey:            "key-three",
 			wantStatus:        http.StatusOK,
 			wantKeys:          "key-one\nkey-two\nkey-three",
-			wantUpstreamCalls: 1,
+			wantUpstreamCalls: 0,
 		},
 		{
 			name:              "appends beyond the former whole-group limit",
@@ -46,7 +46,7 @@ func TestAddKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 			newKey:            strings.Repeat("b", 400),
 			wantStatus:        http.StatusOK,
 			wantKeys:          strings.Repeat("a", 400) + "\n" + strings.Repeat("b", 400),
-			wantUpstreamCalls: 1,
+			wantUpstreamCalls: 0,
 		},
 	}
 
@@ -105,7 +105,7 @@ func TestRemoveKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 			storedKeys:   "key-one\nkey-two",
 			removeKey:    "key-one",
 			wantKeys:     "key-two",
-			wantVerified: true,
+			wantVerified: false,
 		},
 		{
 			name:         "clears ciphertext after removing last key",
@@ -191,7 +191,7 @@ func TestGroupKeyMetadataSupportsDeletionWithoutExposingSecrets(t *testing.T) {
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("delete status=%d: %s", recorder.Code, recorder.Body.String())
 			}
-			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-secret-two", true)
+			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-secret-two", false)
 		}
 	}
 }

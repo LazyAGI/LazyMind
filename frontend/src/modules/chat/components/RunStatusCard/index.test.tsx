@@ -13,6 +13,19 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("RunStatusCard", () => {
+  it.each(["model_fallback_exhausted", "model_context_not_fit"])("keeps model selection and settings available for %s", (code) => {
+    const listener = vi.fn();
+    window.addEventListener(CHAT_OPEN_MODEL_SELECTOR_EVENT, listener);
+    render(<RunStatusCard terminal={{ status: "failed", reason: "runtime_failure", code, partial_output: true }}
+      conversationId="fallback-conversation" />);
+    expect(screen.getByRole("alert")).toHaveTextContent(`chat.runStatus.codes.${code}`);
+    expect(screen.getByRole("link", { name: "chat.checkModelSettings" })).toHaveAttribute("href",
+      "/settings?section=models&view=providers&return_to=%2Fagent%2Fchat%2Fhome%2Ffallback-conversation");
+    fireEvent.click(screen.getByRole("button", { name: "chat.changeModel" }));
+    expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({ conversationId: "fallback-conversation" });
+    window.removeEventListener(CHAT_OPEN_MODEL_SELECTOR_EVENT, listener);
+  });
+
   it("renders cancellation as a compact status alert", () => {
     render(<RunStatusCard terminal={{
       status: "cancelled",

@@ -2,12 +2,60 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 )
+
+func TestAlgorithmPreparePythonKeepsExistingVenvAfterInstallFailure(t *testing.T) {
+	installFakeUVOnPath(t)
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{
+		"LAZYLLM_VERSION":            "1.4.0\n",
+		"algorithm/requirements.txt": "requests\n",
+	} {
+		path := filepath.Join(repo, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Algorithm.RAGDisabled = true
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(paths.AlgorithmPython), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.AlgorithmPython, []byte("existing python"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{t: t, handlers: []func(Command) (CommandResult, error){
+		func(Command) (CommandResult, error) { return CommandResult{}, errors.New("installer failed") },
+	}}
+	err = NewAlgorithmServiceManager(runner).preparePython(context.Background(), cfg, paths, false)
+	if err == nil {
+		t.Fatal("expected install failure")
+	}
+	runner.assertCommandCount(1)
+	data, err := os.ReadFile(paths.AlgorithmPython)
+	if err != nil || string(data) != "existing python" {
+		t.Fatalf("existing python changed: %q, %v", data, err)
+	}
+}
 
 func TestLazyLLMVersionUsesRepositoryPin(t *testing.T) {
 	t.Setenv("LAZYMIND_LAZYLLM_VERSION", "")

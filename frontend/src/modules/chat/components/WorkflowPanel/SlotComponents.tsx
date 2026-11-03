@@ -956,6 +956,7 @@ export function SlotVersionPopover({
   onDiscardDraft,
 }: SlotVersionPopoverProps) {
   // effectiveDraftIndex: index used for draftStore operations (localStorage key).
+  const { onBrowse } = useContext(SlotEditingContext);
   const effectiveDraftIndex = draftListIndex ?? listIndex;
   const popoverKey: PopoverKey = `${sessionId}:${slotId}:${listIndex}`;
   const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
@@ -994,6 +995,7 @@ export function SlotVersionPopover({
       setOpen(false);
       return;
     }
+    onBrowse?.();
     // Always load version history; in draft mode also default-select the draft entry.
     setLoading(true);
     setVersionError('');
@@ -1021,7 +1023,7 @@ export function SlotVersionPopover({
     } finally {
       setLoading(false);
     }
-  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue]);
+  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue, onBrowse]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -5147,6 +5149,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
         </div>
         <div className='workflow-slot__file-card-actions'>
           <ArtifactSourceButton value={raw} sourceUrl={textSource ? url : undefined} fileRecord={!textSource} />
+          {/\.pptx$/i.test(name) ? <span role='note'>网页暂不支持打开 PPTX，请下载后使用 PowerPoint 或 WPS 查看。</span> :
           <button
             className='workflow-slot__file-action-btn'
             onClick={handlePreview}
@@ -5155,7 +5158,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
             type='button'
           >
             {tr('chat.slots.preview')}
-          </button>
+          </button>}
           {allowDownload && (
             <a
               href={url}

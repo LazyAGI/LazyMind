@@ -34,7 +34,7 @@ func requireLocalRuntime() error {
 
 func Enabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_VOCABULARY_ENABLED"))) {
-	case "1", "true", "yes", "on":
+	case "", "1", "true", "yes", "on":
 		return true
 	default:
 		return false

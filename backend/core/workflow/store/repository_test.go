@@ -883,7 +883,7 @@ func TestAutomaticAttemptCountExcludesUserAuthorizedCommands(t *testing.T) {
 		{CommandID: "auto-1", SessionID: "s1", TargetStepID: "draft", Operation: "retry", RetryOrigin: "automatic", Status: "accepted", ResponseJSON: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now},
 		{CommandID: "user-1", SessionID: "s1", TargetStepID: "draft", Operation: "retry", RetryOrigin: "user", Status: "accepted", ResponseJSON: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now},
 	}
-	if err := repo.db.AutoMigrate(&orm.WorkflowTransitionCommand{}); err != nil {
+	if err := repo.db.AutoMigrate(&orm.WorkflowTransitionCommand{}, &orm.WorkflowSessionStep{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.db.Create(&rows).Error; err != nil {
@@ -892,5 +892,57 @@ func TestAutomaticAttemptCountExcludesUserAuthorizedCommands(t *testing.T) {
 	got, err := repo.AutomaticAttemptCount(ctx, "s1", "draft")
 	if err != nil || got != 2 {
 		t.Fatalf("automatic retries=%d err=%v, want 2", got, err)
+	}
+}
+
+func TestArgumentFailureBudgetSurvivesRepositoryRecreationAndManualRetry(t *testing.T) {
+	repo := testRepo(t)
+	ctx := context.Background()
+	if err := repo.db.AutoMigrate(&orm.WorkflowSessionStep{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := repo.AutomaticAttemptLimit(ctx, "s", "draft"); err != nil || got != 3 {
+		t.Fatal(got, err)
+	}
+	if err := repo.db.Create(&orm.WorkflowSessionStep{ID: "failed", SessionID: "s", StepID: "draft", Attempt: 1, Status: "failed", TerminalCode: "TOOL_ARGUMENT_RETRY_EXHAUSTED", ResultJSON: `{"error":"TOOL_ARGUMENT_RETRY_EXHAUSTED: save_artifacts: required value"}`}).Error; err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(repo.db)
+	if got, err := restarted.AutomaticAttemptLimit(ctx, "s", "draft"); err != nil || got != 2 {
+		t.Fatal(got, err)
+	}
+	if got, err := restarted.AutomaticAttemptLimit(ctx, "s", "other"); err != nil || got != 3 {
+		t.Fatal(got, err)
+	}
+	// New manual attempts do not remove the historical parameter failure.
+	if err := repo.db.Create(&orm.WorkflowSessionStep{ID: "manual", SessionID: "s", StepID: "draft", Attempt: 2, Status: "succeeded", ResultJSON: `{}`}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := New(repo.db).AutomaticAttemptLimit(ctx, "s", "draft"); err != nil || got != 2 {
+		t.Fatal(got, err)
+	}
+}
+
+func TestAutomaticArgumentBudgetUsesTerminalCodeInsteadOfDisplayText(t *testing.T) {
+	for _, test := range []struct {
+		name, code, result string
+		limit              int
+	}{
+		{"structured", "TOOL_ARGUMENT_RETRY_EXHAUSTED", `{"error":"参数修复次数已耗尽"}`, 2},
+		{"ordinary_failure", "LAZYMIND_EXECUTION_FAILED", `{"error":"network failure","debug":"TOOL_ARGUMENT_RETRY_EXHAUSTED: quoted example"}`, MaxAutomaticWorkflowStepAttempts},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := testRepo(t)
+			if err := repo.db.AutoMigrate(&orm.WorkflowSessionStep{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowSessionStep{ID: "attempt", SessionID: "session", StepID: "draft", Status: "failed", TerminalCode: test.code, ResultJSON: test.result}).Error; err != nil {
+				t.Fatal(err)
+			}
+			limit, err := repo.AutomaticAttemptLimit(context.Background(), "session", "draft")
+			if err != nil || limit != test.limit {
+				t.Fatal(limit, err)
+			}
+		})
 	}
 }

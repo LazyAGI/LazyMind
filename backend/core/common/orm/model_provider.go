@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // RawJSON keeps JSON payloads as json.RawMessage while supporting both the
@@ -58,6 +60,7 @@ func (DefaultModelProvider) TableName() string { return "default_model_providers
 // This is distinct from the runtime_models.yaml role key (e.g. "evo_llm", "embed_main") stored in
 // user_selected_models.model_type (mapped via UserSelectedModel.ModelKey).
 type DefaultModel struct {
+	ModelSettings          string     `gorm:"column:model_settings;type:text;not null;default:'{}'"`
 	ID                     string     `gorm:"column:id;type:varchar(64);primaryKey"`
 	DefaultModelProviderID string     `gorm:"column:default_model_provider_id;type:varchar(64);not null;uniqueIndex:uk_default_models_provider_name,priority:1"`
 	ProviderName           string     `gorm:"column:provider_name;type:varchar(255);not null;default:''"`
@@ -80,8 +83,16 @@ type UserModelProvider struct {
 	ID                     string `gorm:"column:id;type:varchar(64);primaryKey"`
 	DefaultModelProviderID string `gorm:"column:default_model_provider_id;type:varchar(64);not null"`
 	Name                   string `gorm:"column:name;type:varchar(255);not null"`
+	LogoDataURL            string `gorm:"column:logo_data_url;type:text;not null;default:''"`
+	IsCustom               bool   `gorm:"column:is_custom;not null;default:false"`
+	ProtocolName           string `gorm:"column:protocol_name;type:varchar(255);not null;default:''"`
+	RequestConfig          string `gorm:"column:request_config;type:text;not null;default:''"`
 	Description            string `gorm:"column:description;type:text;not null"`
 	BaseURL                string `gorm:"column:base_url;type:varchar(1024);not null;default:''"`
+	ActiveKeyGroupID       string `gorm:"column:active_key_group_id;type:varchar(64);not null;default:''"`
+	ActiveKeyID            string `gorm:"column:active_key_id;type:varchar(64);not null;default:''"`
+	ActiveKeyInitialized   bool   `gorm:"column:active_key_initialized;type:boolean;not null;default:false"`
+	ActiveKeyRevision      int64  `gorm:"column:active_key_revision;type:bigint;not null;default:0"`
 	Category               string `gorm:"column:category;type:varchar(64);not null;default:'model'"`
 	Capabilities           string `gorm:"column:capabilities;type:varchar(512);not null;default:'multi_group,custom_base_url,has_models'"`
 	BaseModel
@@ -120,6 +131,7 @@ func (UserModelProviderGroup) TableName() string { return "user_model_provider_g
 // ModelType stores the lazyllm technical type (e.g. "llm", "embed", "rerank", "vlm", "cross_modal_embed"),
 // matching the type values in model_catalog.yaml and DefaultModel.ModelType.
 type UserModelProviderGroupModel struct {
+	ModelSettings            string  `gorm:"column:model_settings;type:text;not null;default:'{}'"`
 	ID                       string  `gorm:"column:id;type:varchar(64);primaryKey"`
 	UserModelProviderID      string  `gorm:"column:user_model_provider_id;type:varchar(64);not null;index:idx_user_model_provider_group_models_provider"`
 	UserModelProviderGroupID string  `gorm:"column:user_model_provider_group_id;type:varchar(64);not null;uniqueIndex:uk_user_model_provider_group_models_group_name,priority:1"`
@@ -128,10 +140,18 @@ type UserModelProviderGroupModel struct {
 	ModelType                string  `gorm:"column:model_type;type:varchar(64);not null"`
 	Vision                   bool    `gorm:"column:vision;type:boolean;not null;default:false"`
 	MaxInputTokens           *string `gorm:"column:max_input_tokens;type:varchar(16)"`
+	InputTokenLimit          *string `gorm:"column:input_token_limit;type:varchar(16)"`
+	MaxOutputTokens          *string `gorm:"column:max_output_tokens;type:varchar(16)"`
 	FreeAutoSelectPriority   int     `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
 	FreeAutoSelectBaseURLs   string  `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`
 	IsDefault                bool    `gorm:"column:is_default;type:boolean;not null;default:false"`
+	Enabled                  bool    `gorm:"column:enabled;type:boolean;not null;default:true"`
 	BaseModel
+}
+
+func (m *UserModelProviderGroupModel) BeforeCreate(*gorm.DB) error {
+	m.Enabled = true
+	return nil
 }
 
 func (UserModelProviderGroupModel) TableName() string { return "user_model_provider_group_models" }

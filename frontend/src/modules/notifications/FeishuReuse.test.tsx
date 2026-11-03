@@ -78,7 +78,7 @@ it('shows an in-progress Feishu connection instead of offering a conflicting rec
   const disclosure = document.querySelector('details')!;
   disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
   expect(screen.getAllByText('notifications.connecting').length).toBeGreaterThan(0);
-  expect(within(disclosure).getByText('notifications.connectionInProgressHint')).toBeInTheDocument();
+  expect(await within(disclosure).findByText('notifications.connectionInProgressHint')).toBeInTheDocument();
   expect(within(disclosure).queryByRole('button', { name: 'notifications.reconnect' })).not.toBeInTheDocument();
   expect(mocks.resume).not.toHaveBeenCalled();
 

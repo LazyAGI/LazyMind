@@ -69,6 +69,14 @@ func ordinaryTaskOpenAPI() (map[string]any, map[string]any) {
 	process["summary"] = map[string]any{"type": "string", "maxLength": 300}
 	process["revision"] = map[string]any{"type": "integer", "format": "int64", "minimum": 1}
 	process["order"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 1000}
+	process["model_switch"] = refSchema("ChatModelSwitchRecord")
+	taskProperties := builder.components["OrdinaryTaskView"].(map[string]any)["properties"].(map[string]any)
+	taskProperties["model_switch"] = refSchema("ChatModelSwitchRecord")
+	taskProperties["failure_code"] = enumStringSchema("model_fallback_exhausted", "model_context_not_fit")
+	// These shared Go aliases use the existing authoritative Chat schema names.
+	for _, name := range []string{"ModelSwitchIdentity", "ModelSwitchedData", "ModelSwitchRecord"} {
+		delete(builder.components, name)
+	}
 	builder.components["OrdinaryTaskView"].(map[string]any)["properties"].(map[string]any)["plan_steps"] = map[string]any{
 		"type": "array", "minItems": 3, "maxItems": 5,
 		"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
@@ -116,4 +124,27 @@ func ordinaryTaskOpenAPI() (map[string]any, map[string]any) {
 		}}
 	}
 	return builder.components, paths
+}
+
+func subagentModelSchemas() map[string]any {
+	window := func() map[string]any {
+		return map[string]any{"type": "integer", "format": "int64", "minimum": 1, "nullable": true}
+	}
+	schemas := map[string]any{
+		"TaskModelRuntimeEvent": objReq([]string{"schema_version", "event_id", "run_id", "type", "data"},
+			prop("schema_version", map[string]any{"type": "integer", "enum": []int{1}}), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", enumStringSchema("model_switched")), prop("data", refSchema("ChatModelSwitchedData"))),
+		"TaskEvent": objReq([]string{"type"},
+			prop("type", strSchema()), prop("task_id", strSchema()), prop("execution_id", strSchema()), prop("snapshot", boolSchema()), prop("event_id", strSchema()), prop("model_output", refSchema("ChatModelOutput")), prop("runtime_event", refSchema("TaskModelRuntimeEvent")), prop("process_step", refSchema("PublicProcessStep")),
+			prop("steps", array(strSchema())), prop("scope_version", intSchema()), prop("progress", intSchema()), prop("current_phase", strSchema()), prop("estimated_sec", intSchema()), prop("slot", strSchema()), prop("content_type", strSchema()), prop("seq", intSchema()), prop("value", obj()), prop("sources", array(obj())), prop("status", strSchema()), prop("summary", strSchema()), prop("message", strSchema()),
+			prop("tool_calls", array(obj())), prop("tool_results", array(obj())), prop("durable_tool_results", array(obj())), prop("writing_subtasks", array(obj())), prop("text", strSchema()), prop("think", strSchema()), prop("stream_id", strSchema()), prop("chunk_index", int64Schema()), prop("delta", strSchema()), prop("v2_artifact_id", strSchema()), prop("v2_revision_id", strSchema())),
+		"TaskModelCandidate":             objReq([]string{"candidate_id", "source", "model_id", "provider_group_id", "credential_revision", "credential_count", "max_input_tokens", "llm_config"}, prop("candidate_id", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")), prop("model_id", strSchema()), prop("provider_group_id", strSchema()), prop("credential_revision", int64Schema()), prop("credential_count", intSchema()), prop("max_input_tokens", window()), prop("llm_config", obj())),
+		"TaskModelFallbackInitialSwitch": objReq([]string{"from", "reason_code", "from_max_input_tokens"}, prop("from", refSchema("ChatModelSwitchIdentity")), prop("reason_code", enumStringSchema("model_config_unavailable")), prop("from_max_input_tokens", window())),
+		"SubagentRunRequest": objReq([]string{"task_id", "agent_type", "workspace_path", "resume"},
+			prop("task_id", strSchema()), prop("agent_type", strSchema()), prop("workspace_path", strSchema()), prop("resume", boolSchema()), prop("params", obj()), prop("tools", array(strSchema())), prop("llm_config", obj()), prop("tool_config", obj()), prop("user_env_vars", obj()), prop("task_spec", obj()), prop("initial_steps", array(objReq([]string{"seq", "role", "content"}, prop("seq", intSchema()), prop("execution_id", strSchema()), prop("role", strSchema()), prop("content", obj())))), prop("workspace_execution", obj()),
+			prop("model_fallback_current_id", strSchema()), prop("model_fallback_candidates", array(refSchema("TaskModelCandidate"))), prop("model_fallback_initial_switch", refSchema("TaskModelFallbackInitialSwitch"))),
+	}
+	schemas["TaskEvent"].(map[string]any)["description"] = "Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error."
+	schemas["SubagentRunRequest"].(map[string]any)["description"] = "Core-to-Chat private execution input, rebuilt from the database task owner's current authorized models before every ordinary execution. Credentials and candidates never enter task params, public events or durable model_runtime records. InheritedModelOrigin is Core memory only and cannot be supplied by clients."
+	return schemas
+
 }

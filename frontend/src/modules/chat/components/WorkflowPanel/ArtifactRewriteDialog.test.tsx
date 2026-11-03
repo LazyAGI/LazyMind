@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import { createRef, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SlotEditingContext } from './slotEditingContext';
 
 const workflowApi = vi.hoisted(() => ({ patchSlotItem: vi.fn(), previewRewriteSelection: vi.fn(), executeArtifactAction: vi.fn() }));
 
@@ -60,6 +61,22 @@ function renderDialog(requestPreview = vi.fn()) {
 }
 
 describe('ArtifactRewriteDialog', () => {
+  it('enters free browse when an edit dialog opens before any generation or save', () => {
+    const onBrowse = vi.fn();
+    const requestPreview = vi.fn();
+    const props = { sessionId: 'session-1', slotId: 'draft_document', listIndex: 0, baseRevision: 1,
+      selection, onClose: vi.fn(), onApplied: vi.fn(), requestPreview };
+    const content = (open: boolean) => <SlotEditingContext.Provider value={{ onBrowse, setEditing: vi.fn(),
+      registerFlush: () => () => {}, registerFooterAction: () => () => {},
+    }}><ArtifactRewriteDialog {...props} open={open} /></SlotEditingContext.Provider>;
+    const view = render(content(false));
+    expect(onBrowse).not.toHaveBeenCalled();
+    view.rerender(content(true));
+    expect(onBrowse).toHaveBeenCalledOnce();
+    expect(requestPreview).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   beforeEach(() => {
     workflowApi.patchSlotItem.mockReset();
     previewApi.mockReset();

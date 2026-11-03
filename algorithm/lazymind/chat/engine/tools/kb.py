@@ -261,9 +261,6 @@ class KBToolkit:
         'read_document', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
-    __tool_auto_activate__ = [
-        r'知识库|资料库|(?<!\w)knowledge[\s_-]+bases?(?!\w)',
-    ]
 
     def __init__(self, kb_scope: Optional[List[str]] = None):
         self._kb_scope = tuple(_string_list(kb_scope)) if kb_scope is not None else None

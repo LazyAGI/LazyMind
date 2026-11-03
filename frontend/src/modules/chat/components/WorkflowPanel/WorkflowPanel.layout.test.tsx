@@ -5,12 +5,25 @@ import i18n from '@/i18n';
 import type { SlotRevision, WorkflowSession, WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
 import { WorkflowPanel } from './index';
-import { controlActions, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
+import { controlActions, externalPanelAction, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
+import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
+
+// Use the same transport boundary as WorkflowRunPage; the panel never receives
+// capabilities, reviews or delivery state.
+function panelAdapter(control: WorkflowControlView, execute: (intent: WorkflowActionIntent) => Promise<void>) {
+  const session = fixture.session;
+  return { execute: (intent: WorkflowPanelActionIntent) => execute(externalPanelAction(intent, session, control)) };
+}
+
+vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) => <section aria-label={target.filename}>
+  {target.content}<button onClick={close}>关闭预览</button>
+</section> }));
 
 const fixture = vi.hoisted(() => ({
   session: {} as WorkflowSession,
   ui: {} as WorkflowUI,
+  fetchWorkflowUI: vi.fn<(...args: [string, string?]) => Promise<WorkflowUI>>(),
   flush: vi.fn(async () => true),
   refresh: vi.fn(),
   pause: vi.fn(),
@@ -28,13 +41,17 @@ vi.mock('@/modules/chat/store/workflowPanel', async (original) => {
     get sessionByConversation() { return { 'layout-test': fixture.session }; },
     bumpDismissedRefresh: vi.fn(), autoRunningByConversation: {}, setAutoRunning: vi.fn(),
     loadActiveSession: vi.fn(async () => {}),
-    fetchWorkflowUI: () => Promise.resolve(fixture.ui), setFocusedTab: fixture.setFocusedTab,
+    fetchWorkflowUI: fixture.fetchWorkflowUI, setFocusedTab: fixture.setFocusedTab,
     setFocusedSortOrder: vi.fn(),
     get focusedTabByConversation() { return { 'layout-test': fixture.focusedTab }; }, workflowUIByWorkflow: {},
   };
   return { ...actual, useWorkflowStore: Object.assign((selector?: (value: typeof state) => unknown) => selector ? selector(state) : state, { getState: () => state }) };
 });
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ pauseSession: fixture.pause }) }));
+vi.mock('@/modules/user/uiPreferencesApi', () => ({
+  fetchUserUiPreferences: async () => ({ workflow_trust_notice_dismissed: false }),
+  USER_UI_PREFERENCES_CHANGED_EVENT: 'test:preferences-changed',
+}));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
 vi.mock('./actions/WorkflowTabActions', () => ({ WorkflowTabActions: () => null }));
 vi.mock('./ppt/SlideThumb', () => ({ SlideThumb: () => null }));
@@ -66,15 +83,16 @@ vi.mock('./SlotComponents', () => ({
       });
       return () => { unregisterFlush(); unregisterAction(); };
     }, [active, context.registerFlush, context.registerFooterAction, slotId, slot.document, slot.list_index]);
-    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}</article>;
+    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}<button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
   },
 }));
 
 beforeEach(async () => {
   await i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
-  fixture.flush.mockResolvedValue(true);
-  fixture.pause.mockResolvedValue(undefined);
+  fixture.fetchWorkflowUI.mockReset().mockImplementation(async () => fixture.ui);
+  fixture.flush.mockReset().mockResolvedValue(true);
+  fixture.pause.mockReset().mockResolvedValue(undefined);
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
@@ -98,7 +116,162 @@ beforeEach(async () => {
 });
 afterEach(cleanup);
 
+async function waitForCompletedContinueButton() {
+  await screen.findByRole('tab', { name: '成稿', selected: true });
+  return waitFor(() => {
+    const button = screen.getByRole('button', { name: '继续' });
+    expect(button).toBeEnabled();
+    return button;
+  });
+}
+
 describe('shared workflow compact layout', () => {
+  it('replaces the UI for a new pinned version of the same workflow without displaying the old tabs', async () => {
+    fixture.session.pinned_revision_id = 'v1';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(fixture.fetchWorkflowUI).toHaveBeenLastCalledWith('fixture', 'v1');
+    let resolve!: (ui: WorkflowUI) => void;
+    fixture.fetchWorkflowUI.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    fixture.session = { ...fixture.session, pinned_revision_id: 'v2' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.queryByRole('tab', { name: '成稿' })).not.toBeInTheDocument();
+    expect(fixture.fetchWorkflowUI).toHaveBeenLastCalledWith('fixture', 'v2');
+    await act(async () => resolve({ tabs: [
+      { id: 'prepare', label: '新版准备', slots: [] },
+      { id: 'review', label: '新增审核', slots: [] },
+      { id: 'draft', label: '新版结果', slots: [] },
+    ] }));
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['1新版准备', '2新增审核', '3新版结果']);
+  });
+
+  it('ignores a late UI response after switching pinned versions', async () => {
+    let resolveOld!: (ui: WorkflowUI) => void;
+    fixture.fetchWorkflowUI.mockImplementationOnce(() => new Promise(done => { resolveOld = done; }));
+    fixture.session.pinned_revision_id = 'v1';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    fixture.session = { ...fixture.session, session_id: 'new-session', pinned_revision_id: 'v2' };
+    fixture.ui = { tabs: [{ id: 'draft', label: '新版结果', slots: [] }] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '新版结果' });
+    await act(async () => resolveOld({ tabs: [{ id: 'draft', label: '过期结果', slots: [] }] }));
+    expect(screen.queryByRole('tab', { name: '过期结果' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '新版结果' })).toBeVisible();
+  });
+
+  it('does not keep the previous locale visible while loading the same revision in another language', async () => {
+    fixture.session.pinned_revision_id = 'v1';
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    let resolve!: (ui: WorkflowUI) => void;
+    fixture.fetchWorkflowUI.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await act(async () => { await i18n.changeLanguage('en-US'); });
+    expect(screen.queryByRole('tab', { name: '成稿' })).not.toBeInTheDocument();
+    await act(async () => resolve({ tabs: [{ id: 'draft', label: 'Result', slots: [] }] }));
+    expect(screen.getByRole('tab', { name: 'Result' })).toBeVisible();
+  });
+
+  it.each(['native', 'codex'] as const)('opens the actual completed result instead of the last tab on %s', async surface => {
+    fixture.ui.tabs!.reverse();
+    fixture.session.current_step_id = '';
+    fixture.session.steps = fixture.session.steps!.map((step, i) => ({
+      ...step, updated_at: `2026-09-16T00:0${i}:00Z`,
+    }));
+    const props = surface === 'codex' ? { embedded: true, externalPresentation: { activities: {}, compactEmptyStates: false } } : {};
+    const view = render(<WorkflowPanel conversationId='layout-test' {...props} />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.getByRole('tab', { name: '写作准备', selected: false })).toBeVisible();
+    expect(fixture.setFocusedTab).not.toHaveBeenCalled();
+    view.unmount();
+    render(<WorkflowPanel conversationId='layout-test' {...props} />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+  });
+
+  it('preserves a user-selected page when a workflow completes', async () => {
+    fixture.focusedTab = 'prepare';
+    fixture.session.current_step_id = '';
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+  });
+
+  it('keeps automatic grids from reintroducing hidden output when every tab is hidden', async () => {
+    fixture.ui.slotDefinitions = [{ id: 'document', label: '内部数据', type: 'text', user_visible: false }];
+    fixture.ui.tabs = [{ id: 'internal', label: '内部数据', slots: fixture.ui.slotDefinitions }];
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.getByText('示例工作流')).toBeInTheDocument());
+    expect(screen.queryByText('正文 document')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '内部数据' })).not.toBeInTheDocument();
+    act(() => setDeveloperModeActive(true));
+    expect(await screen.findByText('正文 document')).toBeInTheDocument();
+  });
+
+  it('switches declared output visibility with developer mode without changing the workflow session', async () => {
+    fixture.ui.tabs![0].slots = [{ id: 'internal_prompt', label: '生成提示词', type: 'text', user_visible: false }];
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'internal_prompt', slot: 'internal_prompt', step_id: 'prepare' });
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(screen.queryByText('正文 internal_prompt')).not.toBeInTheDocument();
+    act(() => setDeveloperModeActive(true));
+    fireEvent.click(await screen.findByRole('tab', { name: '写作准备' }));
+    expect(screen.getByText('正文 internal_prompt')).toBeInTheDocument();
+    act(() => setDeveloperModeActive(false));
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(fixture.session.slots!.some(slot => slot.slot_id === 'internal_prompt')).toBe(true);
+  });
+
+  it('leaves expanded workflow mode when previewing an ordinary reply in the same conversation', async () => {
+    const controller = { target: null, open: vi.fn(), close: vi.fn(), onVersions: undefined };
+    const view = render(<ArtifactPreviewContext.Provider value={controller}><WorkflowPanel conversationId="layout-test" /></ArtifactPreviewContext.Provider>);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    fireEvent.click(screen.getByRole('button', { name: '展开工作流面板' }));
+    expect(document.querySelector('.workflow-panel--expanded')).not.toBeNull();
+    view.rerender(<ArtifactPreviewContext.Provider value={{ ...controller, target: { key: 'ordinary', filename: 'report.md', content: 'report' } }}>
+      <WorkflowPanel conversationId="layout-test" />
+    </ArtifactPreviewContext.Provider>);
+    await waitFor(() => expect(document.querySelector('.workflow-panel--expanded')).toBeNull());
+    expect(screen.getByText('正文 document')).toBeInTheDocument();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  });
+
+  it('opens an auxiliary output in a shared result tab through status_step_ids', async () => {
+    fixture.ui.tabs![1].status_step_ids = ['write_document', 'write_flat_document'];
+    const controller = { target: { key: 'visual:1', filename: 'visual.json', content: 'visual plan',
+      workflow: { sessionId: 'layout-test', stepId: 'write_flat_document' } }, open: vi.fn(), close: vi.fn(), onVersions: undefined };
+    render(<ArtifactPreviewContext.Provider value={controller}><WorkflowPanel conversationId="layout-test" /></ArtifactPreviewContext.Provider>);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.getByRole('region', { name: 'visual.json' })).toHaveTextContent('visual plan');
+    expect(controller.close).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole('region', { name: 'visual.json' }).parentElement!, { key: 'Escape' });
+    expect(controller.close).toHaveBeenCalledOnce();
+  });
+
+  it('locates a stage output inside its workflow step without unmounting the editor', async () => {
+    function Host() {
+      const controller = useArtifactPreviewController('layout-test');
+      return <ArtifactPreviewContext.Provider value={controller}>
+        <button onClick={() => controller.open({ key: 'plan:2', filename: 'plan.json', content: 'exact plan revision 2',
+          workflow: { sessionId: 'layout-test', stepId: 'prepare' } })}>预览计划</button>
+        <WorkflowPanel conversationId='layout-test' />
+      </ArtifactPreviewContext.Provider>;
+    }
+    render(<Host />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    const editor = screen.getByText('正文 document');
+    fireEvent.click(screen.getByRole('button', { name: '预览计划' }));
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+    expect(screen.getByRole('region', { name: 'plan.json' }).closest('.workflow-panel__body')).not.toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(editor).toBeInTheDocument();
+    expect(editor).not.toBeVisible();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    expect(screen.queryByRole('region', { name: 'plan.json' })).not.toBeInTheDocument();
+    expect(editor).toBeVisible();
+  });
+
   it('keeps a replacement document action when the previous registration cleans up', async () => {
     render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('tab', { name: '成稿', selected: true });
@@ -229,25 +402,45 @@ describe('shared workflow compact layout', () => {
     fixture.session.slots = [];
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown' };
     const view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('tab', { name: '成稿' });
+    await screen.findByRole('tab', { name: '成稿', selected: true });
     const nativeContent = view.container.querySelector('.workflow-panel__body')!.innerHTML;
     view.rerender(<WorkflowPanel conversationId='layout-test' embedded
       externalPresentation={{ activities: {}, compactEmptyStates: false }} />);
     expect(view.container.querySelector('.workflow-panel__body')!.innerHTML).toBe(nativeContent);
-    expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toHaveTextContent('—');
+    expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toBeNull();
     expect(view.container.querySelector('.workflow-panel__slot-collapse')).toBeNull();
   });
 
+  it.each(['list', 'composite'] as const)('hides missing components in %s tabs and reveals arriving output', async layout => {
+    fixture.ui.tabs![1].layout = layout;
+    fixture.session.slots![0].sort_order = 1;
+    fixture.ui.tabs![1].slots.push({ id: 'template_content_brief', label: '模板内容要求', type: 'text' });
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.getByText('正文 document')).toBeVisible();
+    expect(screen.queryByText('模板内容要求')).not.toBeInTheDocument();
+    expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toBeNull();
+    fixture.session = { ...fixture.session, slots: [...fixture.session.slots!, {
+      slot_id: 'template-brief', slot: 'template_content_brief', step_id: 'write_document',
+      selected: true, revision: 1, sort_order: 1, artifact_value: { text: '模板内容' },
+    }] } as WorkflowSession;
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByText('模板内容要求')).toBeVisible();
+    expect(screen.getByText('正文 template_content_brief')).toBeVisible();
+  });
+
   it.each(['active', 'waiting', 'failed', 'completed'] as const)(
-    'shows the full trust notice for %s sessions and after remount', async (status) => {
+    'keeps the full trust notice hidden for %s sessions and after remount', async (status) => {
       fixture.session.status = status;
       fixture.session.steps = [];
       const notice = '此工作流以完全信任模式运行，可在服务进程的系统权限范围内读取、修改文件和执行代码，不受 Workspace 权限限制，无需逐次审批。';
       const view = render(<WorkflowPanel conversationId='layout-test' />);
-      expect(await screen.findByText(notice)).toBeVisible();
+      await screen.findByRole('tab', { name: '成稿' });
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
       view.unmount();
       render(<WorkflowPanel conversationId='layout-test' />);
-      expect(await screen.findByText(notice)).toBeVisible();
+      await screen.findByRole('tab', { name: '成稿' });
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
     },
   );
 
@@ -337,6 +530,9 @@ describe('shared workflow compact layout', () => {
       { id: 'main', label: '主文档', type: 'text', widget: { widgetType: 'writer-document' } },
       { id: 'evidence', label: '证据清单', type: 'text' },
     ];
+    fixture.session.slots = ['main', 'evidence'].map(slot => ({
+      ...fixture.session.slots![0], slot_id: slot, slot, step_id: 'step6',
+    }));
     render(<WorkflowPanel conversationId='layout-test' />);
     const first = await screen.findByRole('tab', { name: '阶段 1' });
     first.focus();
@@ -468,9 +664,9 @@ describe('shared workflow compact layout', () => {
     fixture.ui.tabs![1].completed_continue_step = 'write_document';
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    await screen.findByRole('tab', { name: '成稿' });
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续' })));
-    expect(send).toHaveBeenCalledOnce();
+    const button = await waitForCompletedContinueButton();
+    await act(async () => fireEvent.click(button));
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
     expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     });
@@ -480,8 +676,8 @@ describe('shared workflow compact layout', () => {
     fixture.ui.tabs![1].completed_continue_step = 'write_document';
     const send = vi.fn(async () => false);
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    await screen.findByRole('tab', { name: '成稿' });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    const button = await waitForCompletedContinueButton();
+    fireEvent.click(button);
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByRole('button', { name: '继续' })).toBeEnabled());
     expect(fixture.session.projection!.display!.status).toBe('completed');
@@ -645,8 +841,85 @@ describe('shared workflow compact layout', () => {
 
 
 describe('external workflow surface boundary', () => {
+  it.each(['pending', 'dispatching', 'accepted', 'unknown'])(
+    'does not add a host delivery lock to native approval: %s', async status => {
+      fixture.session.status = 'waiting';
+      fixture.session.projection = {
+        display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' },
+        current: [], ready: ['next'], nodes: {
+          next: { execution: 'none', validity: 'effective', requires_approval: false, reachability: 'reachable', readiness: 'ready', branch: 'active' },
+        },
+      };
+      const review = { id: 'review', step_id: 'write_document', execution_id: 'attempt', status: 'pending' as const, version: 1, manifest_hash: 'hash' };
+      const control: WorkflowControlView = {
+        protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+        continuation: 'awaiting_user', reviews: [review], active_executions: 0, active_execution_ids: [],
+        binding: { bound: true }, admission: { can_begin: true },
+        delivery: { id: 'previous-notification', kind: 'continue', status }, available_actions: [],
+      };
+      const execute = vi.fn(async () => {});
+      const view = render(<WorkflowPanel conversationId='layout-test' />);
+      await screen.findByRole('button', { name: '发布' });
+      const buttons = () => ['工作流会话操作', '工作流审批操作'].flatMap(name => within(screen.getByRole('group', { name })).getAllByRole('button'))
+        .map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled, title: button.title }));
+      const native = buttons();
+      view.rerender(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+      expect(buttons()).toEqual(native);
+      expect(screen.getByRole('button', { name: '继续执行' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: '继续执行' }));
+      await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'confirm_and_continue', stepId: 'write_document', review }));
+    },
+  );
+
+  it.each([false, true])('retries the failed execution while browsing another tab (paused=%s)', async paused => {
+    fixture.session.status = paused ? 'stopped' : 'failed';
+    fixture.session.steps![1].status = 'failed';
+    fixture.session.projection = {
+      display: { status: paused ? 'paused' : 'failed', reason: '', approval_step_id: '' },
+      current: ['write_document'], nodes: {
+        write_document: { execution: 'failed', validity: 'effective', requires_approval: false, reachability: 'reachable', readiness: 'not_applicable', branch: 'active' },
+      },
+    };
+    const control: WorkflowControlView = {
+      protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+      continuation: paused ? 'stopped' : 'failed', reviews: [], active_executions: 0, active_execution_ids: [],
+      binding: { bound: true }, admission: { can_begin: false }, delivery: null, available_actions: paused ? ['resume'] : ['retry'],
+    };
+    const send = vi.fn(async () => {});
+    const execute = vi.fn(async () => {});
+    const view = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('tab', { name: '写作准备' }));
+    const retry = screen.getByRole('button', { name: '重试' });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(send).toHaveBeenCalledWith(i18n.t('chat.workflowRetry'), {
+      session_id: 'layout-test', kind: paused ? 'resume' : 'retry', expected_state_version: 0,
+    }));
+    view.rerender(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+    expect(screen.getByRole('tab', { name: '写作准备' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(paused
+      ? { kind: 'resume' } : { kind: 'retry', stepId: 'write_document' }));
+  });
+
+  it('does not approve a new attempt that appeared while saving external edits', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
+    const execute = vi.fn(async () => {});
+    fixture.flush.mockImplementationOnce(async () => {
+      fixture.session = { ...fixture.session, steps: fixture.session.steps!.map(step => ({ ...step, attempt: step.attempt + 1 })) };
+      return true;
+    });
+    render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={{ execute }} />);
+    await screen.findByRole('button', { name: '发布' });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续执行' })));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each(['automatic-gap', 'delivery-pending', 'review-without-checkpoint', 'interrupted', 'completed-follow-on'] as const)(
-    'keeps native footer controls on the external surface: %s', async scenario => {
+    'mirrors every native footer button: %s', async scenario => {
       const completed = scenario === 'completed-follow-on';
       const interrupted = scenario === 'interrupted';
       fixture.session.status = completed ? 'completed' : 'waiting';
@@ -675,16 +948,59 @@ describe('external workflow surface boundary', () => {
       await screen.findByRole('button', { name: '发布' });
       const footerButtons = () => within(screen.getByRole('group', { name: '工作流会话操作' }))
         .getAllByRole('button').map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled }));
-      // Background-native pause is not an external capability. Other footer
-      // actions remain shared; external stop is tested with its explicit grant.
-      const native = footerButtons().filter(button => button.label !== '停止');
+      const native = footerButtons();
       view.rerender(<WorkflowPanel conversationId='layout-test' embedded
         externalPresentation={{ activities: {}, compactEmptyStates: false }}
-        controlAdapter={{ control, execute: vi.fn(async () => {}) }} />);
-      expect(footerButtons()).toEqual(native);
+        controlAdapter={panelAdapter(control, vi.fn(async () => {}))} />);
+      const external = footerButtons();
+      expect(external).toEqual(native);
+      // A running/preparing projection blocks continuation and approval on both
+      // surfaces, even before an attempt exists or while capabilities refresh.
       expect(screen.queryByRole('group', { name: '工作流审批操作' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '保存并继续' })).not.toBeInTheDocument();
       if (interrupted || completed) expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
+    },
+  );
+
+  it.each(['preparing', 'executing', 'pausing'] as const)(
+    'shares the native running controls during hosted %s, including before dispatch', async reason => {
+      fixture.session.status = reason === 'pausing' ? 'pausing' : 'active';
+      fixture.session.projection = { display: { status: 'running', reason, approval_step_id: '' } };
+      fixture.session.steps = [];
+      let finishStop!: () => void;
+      const execute = vi.fn(() => new Promise<void>(resolve => { finishStop = resolve; }));
+      const control: WorkflowControlView = {
+        protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+        continuation: 'continue', reviews: [], active_executions: reason === 'executing' ? 1 : 0,
+        active_execution_ids: reason === 'executing' ? ['attempt'] : [],
+        binding: { bound: true }, admission: { can_begin: reason === 'preparing' },
+        delivery: reason === 'preparing' ? { id: 'start', kind: 'continue', status: 'pending' } : null,
+        available_actions: ['stop', 'save', 'continue'],
+      };
+      const view = render(<WorkflowPanel conversationId='layout-test' />);
+      await screen.findByText('正文 document');
+      // Footer actions register in an effect after the document appears. Compare
+      // both surfaces only once the native footer has finished registering.
+      await screen.findByRole('button', { name: '发布' });
+      const controls = () => within(screen.getByRole('group', { name: '工作流会话操作' }))
+        .getAllByRole('button').map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled }));
+      const native = controls();
+      view.rerender(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+      expect(controls()).toEqual(native);
+      expect(screen.queryByRole('button', { name: '保存并继续' })).not.toBeInTheDocument();
+      if (reason === 'pausing') {
+        expect(screen.getByRole('button', { name: String(i18n.t('chat.workflowStopping')) })).toBeDisabled();
+        return;
+      }
+      const stop = screen.getByRole('button', { name: '停止' });
+      expect(stop).toBeEnabled();
+      fireEvent.click(stop);
+      await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'stop' }));
+      fireEvent.click(screen.getByRole('button', { name: String(i18n.t('chat.workflowStopping')) }));
+      expect(execute).toHaveBeenCalledOnce();
+      expect(fixture.flush).not.toHaveBeenCalled();
+      expect(fixture.pause).not.toHaveBeenCalled();
+      await act(async () => finishStop());
     },
   );
 
@@ -700,7 +1016,7 @@ describe('external workflow surface boundary', () => {
       available_actions: ['stop'],
     } as WorkflowControlView;
     const execute = vi.fn(async () => {});
-    render(<WorkflowPanel conversationId='layout-test' controlAdapter={{ control, execute }} />);
+    render(<WorkflowPanel conversationId='layout-test' controlAdapter={panelAdapter(control, execute)} />);
     fireEvent.click(await screen.findByRole('button', { name: '停止' }));
     await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'stop' }));
     expect(fixture.flush).not.toHaveBeenCalled();
@@ -724,7 +1040,7 @@ describe('external workflow surface boundary', () => {
       available_actions: ['confirm', 'confirm_and_continue', 'rewind'],
     } as WorkflowControlView;
     const execute = vi.fn(async () => {});
-    render(<WorkflowPanel conversationId='layout-test' controlAdapter={{ control, execute }} />);
+    render(<WorkflowPanel conversationId='layout-test' controlAdapter={panelAdapter(control, execute)} />);
     const approval = await screen.findByRole('group', { name: '工作流审批操作' });
     expect(within(approval).getAllByRole('button').map(button => button.textContent)).toEqual([
       '继续执行', '此步骤不需审批', '以后此工作流无需审批',
@@ -732,7 +1048,7 @@ describe('external workflow surface boundary', () => {
     expect(screen.queryByRole('group', { name: '回退到步骤：' })).not.toBeInTheDocument();
     fireEvent.click(within(approval).getByRole('button', { name: '此步骤不需审批' }));
     await waitFor(() => expect(execute).toHaveBeenCalledWith({
-      kind: 'confirm_and_continue', review, preferenceScope: 'step',
+      kind: 'confirm_and_continue', stepId: 'write_document', review, preferenceScope: 'step',
     }));
   });
 
@@ -745,7 +1061,7 @@ describe('external workflow surface boundary', () => {
       available_actions: ['rewind'],
     } as WorkflowControlView;
     render(<WorkflowPanel conversationId='layout-test' embedded onRefresh={vi.fn(async () => {})}
-      controlAdapter={{ control, execute }} />);
+      controlAdapter={panelAdapter(control, execute)} />);
     await screen.findByRole('button', { name: '发布' });
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(within(shortcuts).getByRole('button', { name: '成稿' })).toBeVisible();
@@ -794,7 +1110,7 @@ describe('external workflow surface boundary', () => {
       available_actions: ['rewind'],
     } as WorkflowControlView;
     render(<WorkflowPanel conversationId='layout-test'
-      controlAdapter={{ control, execute }} />);
+      controlAdapter={panelAdapter(control, execute)} />);
     await screen.findByRole('button', { name: '发布' });
     fireEvent.click(within(screen.getByRole('group', { name: '回退到步骤：' })).getByRole('button', { name: '成稿' }));
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
@@ -840,14 +1156,15 @@ describe('external presentation opt-in', () => {
     await waitFor(() => expect(screen.getByText('步骤执行失败')).toBeVisible());
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     expect(screen.queryByText('步骤执行失败')).not.toBeInTheDocument();
-    expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toHaveTextContent('—');
+    expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toBeNull();
   });
 
   it('auto-expands an empty external slot when content arrives and respects an explicit collapse', async () => {
     fixture.session.slots = [];
+    fixture.ui.tabs![1].composite_behavior = { hide_empty_columns: false };
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown', collapseWhenEmpty: true };
     const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
-    await screen.findByRole('tab', { name: /成稿/ });
+    await screen.findByRole('tab', { name: /成稿/, selected: true });
     const button = () => view.container.querySelector<HTMLButtonElement>('.workflow-panel__slot-collapse')!;
     expect(button()).toHaveAttribute('aria-expanded', 'false');
     fixture.session.slots = [{ slot_id: 'document', slot: 'document', step_id: 'write_document', selected: true, revision: 1, artifact_value: { text: 'arrived' } }] as WorkflowSession['slots'];
@@ -868,7 +1185,7 @@ it('keeps external streaming previews from replacing an editor with pending chan
   fixture.session.status = 'active';
   fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
   const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
-  await screen.findByRole('tab', { name: /成稿/ });
+  await screen.findByRole('tab', { name: /成稿/, selected: true });
   fireEvent.doubleClick(screen.getByText('正文 document'));
   view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {
     task: { artifacts: [{ slot: 'document', content_type: 'text', seq: 2, value: { text: 'provisional' } }] },
@@ -892,7 +1209,7 @@ it('keeps saved output visible after execution fails and retries through externa
   const control: WorkflowControlView = {
     protocol: 'workflow.control.v1', session_id: stored.session_id, state_version: 4,
     continuation: 'awaiting_executor', active_executions: 1, active_execution_ids: ['attempt'],
-    reviews: [], binding: { bound: true, generation: 1 }, delivery: null,
+    reviews: [], binding: { bound: true }, delivery: null,
     admission: { can_begin: false }, available_actions: ['stop'],
   };
   const getControl = vi.fn(async () => ({ data: { data: {
@@ -912,7 +1229,7 @@ it('keeps saved output visible after execution fails and retries through externa
   ] } };
   const panel = () => <WorkflowPanel conversationId='layout-test'
     externalPresentation={{ activities }}
-    controlAdapter={{ control: snapshot.control!, execute: commands.execute }} />;
+    controlAdapter={panelAdapter(snapshot.control!, commands.execute)} />;
   const view = render(panel());
   expect(await screen.findByText('生成中预览')).toBeVisible();
   expect(screen.getByText('正文 document')).toHaveAttribute('data-value', 'unfinished preview');
@@ -946,4 +1263,183 @@ it('keeps saved output visible after execution fails and retries through externa
   expect(fixture.flush.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
   expect(getSession).not.toHaveBeenCalled();
   expect(getProjection).not.toHaveBeenCalled();
+});
+
+describe('workflow follow and session presentation', () => {
+  function enableFollowing() {
+    fixture.ui = { ...fixture.ui, source_type: 'builtin', follow_mode: { default: 'following' } };
+    fixture.session = { ...fixture.session, status: 'active', current_step_id: 'prepare', steps: [], projection: undefined };
+  }
+  const following = () => screen.getByRole('button', { name: '跟随进度' });
+  const browsing = () => screen.getByRole('button', { name: '自由浏览' });
+
+  it('freezes the current tab before any manual tab selection and resumes without execution', async () => {
+    enableFollowing();
+    const send = vi.fn();
+    const view = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('button', { name: '跟随进度' });
+    fireEvent.click(browsing());
+    fixture.session = { ...fixture.session, current_step_id: 'write_document' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
+    expect(screen.getByRole('tab', { name: /成稿.*当前/ })).toBeVisible();
+    fireEvent.click(following());
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(following()).toHaveAttribute('aria-pressed', 'true');
+    expect(send).not.toHaveBeenCalled();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  });
+
+  it('restores free browse and stable tab identity after insertion and remount', async () => {
+    enableFollowing();
+    fixture.ui.tabs!.unshift({ id: 'new', label: '新增步骤', slots: [], hide_when_material: 'skip_new' });
+    fixture.ui.tab_visibility_ready_material = 'plan_ready';
+    let view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '自由浏览' });
+    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fixture.session = { ...fixture.session, slots: [...fixture.session.slots!,
+      { slot: 'plan_ready', slot_id: 'plan_ready', selected: true, revision: 1 } as SlotRevision,
+    ] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('tab', { name: '新增步骤' })).toBeVisible();
+    expect(screen.getByRole('tab', { name: '成稿', selected: true })).toBeVisible();
+    view.unmount();
+    fixture.focusedTab = undefined;
+    view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('enters browse for editing and history and protects edits when resume saving fails', async () => {
+    enableFollowing();
+    fixture.session.current_step_id = 'write_document';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '跟随进度' });
+    fireEvent.click(screen.getByRole('button', { name: '查看历史' }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.doubleClick(screen.getByText('正文 document'));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fixture.session = { ...fixture.session, current_step_id: 'prepare' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    fixture.flush.mockResolvedValue(false);
+    fixture.flush.mockClear();
+    fireEvent.click(following());
+    await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('tab', { name: '成稿', selected: true })).toBeVisible();
+    fixture.flush.mockResolvedValue(true);
+    fireEvent.click(following());
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+  });
+
+  it('ignores a late save after the user browses elsewhere or changes workflow runs', async () => {
+    enableFollowing();
+    fixture.session.current_step_id = 'write_document';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '自由浏览' });
+    fireEvent.click(browsing());
+    let complete!: (saved: boolean) => void;
+    fixture.flush.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    fireEvent.click(following());
+    expect(following()).toBeDisabled();
+    fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
+    await act(async () => complete(true));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
+    expect(following()).toBeEnabled();
+    fireEvent.click(screen.getByRole('tab', { name: /成稿/ }));
+    fixture.flush.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    fireEvent.click(following());
+    fixture.session = { ...fixture.session, session_id: 'next-run', current_step_id: 'prepare' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    fireEvent.click(await screen.findByRole('button', { name: '自由浏览' }));
+    await act(async () => complete(true));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
+    expect(following()).toBeEnabled();
+  });
+
+  it('enters browse for artifact preview, stays free after close and exits preview on explicit follow', async () => {
+    enableFollowing();
+    fixture.session.current_step_id = 'write_document';
+    function Host() {
+      const controller = useArtifactPreviewController('layout-test');
+      return <ArtifactPreviewContext.Provider value={controller}>
+        <button onClick={() => controller.open({ key: 'plan:1', filename: 'plan.json', content: 'plan',
+          workflow: { sessionId: 'layout-test', stepId: 'prepare' } })}>预览计划</button>
+        <WorkflowPanel conversationId='layout-test' />
+      </ArtifactPreviewContext.Provider>;
+    }
+    render(<Host />);
+    await screen.findByRole('button', { name: '自由浏览' });
+    fireEvent.click(screen.getByRole('button', { name: '预览计划' }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '预览计划' }));
+    fireEvent.click(following());
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.queryByRole('region', { name: 'plan.json' })).not.toBeInTheDocument();
+  });
+
+  it('expands any builtin and keeps shrinking only for the same session', async () => {
+    fixture.ui.source_type = 'builtin';
+    fixture.session.status = 'active';
+    let view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '缩小工作流面板' });
+    expect(screen.queryByRole('button', { name: '跟随进度' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '缩小工作流面板' }));
+    fixture.session = { ...fixture.session, status: 'completed' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(document.querySelector('.workflow-panel--expanded')).toBeNull();
+    view.unmount();
+    view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(document.querySelector('.workflow-panel--expanded')).toBeNull();
+    fixture.session = { ...fixture.session, session_id: 'new-run', status: 'active' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '缩小工作流面板' });
+  });
+});
+
+
+it.each([false, true])('preserves mainline no_advance controls without adding continuation (external=%s)', async external => {
+  fixture.session.status = 'waiting';
+  fixture.session.projection = {
+    display: { status: 'failed', reason: 'no_advance', approval_step_id: '' },
+    ready: ['next'], current: [], nodes: {
+      write_document: { execution: 'succeeded', validity: 'effective', requires_approval: false, reachability: 'reachable', readiness: 'not_applicable', branch: 'active' },
+      next: { execution: 'none', validity: 'effective', requires_approval: true, reachability: 'reachable', readiness: 'ready', branch: 'active' },
+    },
+  };
+  const send = vi.fn(async (_message: string) => true);
+  const execute = vi.fn(async () => {});
+  render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} controlAdapter={external ? { execute } : undefined} />);
+  expect(await screen.findByRole('button', { name: '重试' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: '保存并继续' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: '工作流审批操作' })).not.toBeInTheDocument();
+  expect(send).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
+});
+
+it.each(['awaiting_user', 'stopped'] as const)('uses the shared approval step despite host continuation %s', async continuation => {
+  fixture.session.status = 'waiting';
+  fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
+  const review = { id: 'review', step_id: 'write_document', execution_id: 'attempt', status: 'pending' as const, version: 3, manifest_hash: 'manifest' };
+  const execute = vi.fn(async () => {});
+  const control: WorkflowControlView = {
+    protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 8,
+    continuation, reviews: [{ ...review, id: 'other-review', step_id: 'prepare' }, review], active_executions: 0, active_execution_ids: [],
+    binding: { bound: true }, admission: { can_begin: false }, delivery: null, available_actions: ['resume'],
+  };
+  render(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
+  fireEvent.click(await screen.findByRole('button', { name: '继续执行' }));
+  await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+  expect(execute).toHaveBeenCalledWith({ kind: 'confirm_and_continue', stepId: 'write_document', review });
+  expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
 });

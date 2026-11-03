@@ -9,6 +9,7 @@ import {
 import { DocTypeEnum } from "@/api/generated/knowledge-client";
 import type { BatchMoveDocument } from "../KnowledgeTable";
 import { localizeErrorCode } from "@/components/request";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 
 type TreeOption = Omit<DefaultOptionType, "label"> & {
   title: string;
@@ -141,6 +142,7 @@ const BatchMoveModal = ({
       onCancel();
     } catch (error) {
       console.error("Failed to create batch move task:", error);
+      message.error(getImportErrorMessage(error));
     } finally {
       setLoading(false);
     }

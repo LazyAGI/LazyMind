@@ -44,6 +44,7 @@ describe("AddVocabularyModal", () => {
     render(<AddVocabularyModal selection={{text:"stack",context:"Full stack",page:1}} datasetId="dataset-1" documentId="document-1" onClose={vi.fn()} onAdded={vi.fn()}/>);
     expect(await screen.findByText("堆叠")).toBeTruthy();expect(screen.getByText("堆放")).toBeTruthy();expect(screen.queryByText("堆；电池")).toBeNull();
     await waitFor(()=>expect(screen.getByDisplayValue("完整技术栈")).toBeTruthy());expect(screen.queryByRole("button",{name:"翻译原句"})).toBeNull();
+    expect(translateText).toHaveBeenCalledWith("Full stack", "zh", "en");
     const term=screen.getByDisplayValue("stack");fireEvent.change(term,{target:{value:"specification"}});fireEvent.keyDown(term,{key:"Enter",code:"Enter",charCode:13});
     expect(await screen.findByText("当前内容")).toBeTruthy();expect(screen.getByText("新词典内容")).toBeTruthy();
   });

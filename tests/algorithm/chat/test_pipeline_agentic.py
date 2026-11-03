@@ -119,7 +119,10 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
         chat_service.lazyllm.globals._init_sid('sid-1')
         chat_service.lazyllm.globals['dynamic_env_vars'] = {'REMOVED_TOKEN': 'stale-secret'}
         response = await chat_service.handle_chat(ChatRequest(
-            message={'query': 'hello', 'history': []},
+            message={
+                'query': 'Paper context: sex classification task.\n\nUser query:\nhello',
+                'user_query': 'hello', 'history': [],
+            },
             conversation={
                 'session_id': 'sid-1',
                 'conversation_id': 'conversation-1',
@@ -193,6 +196,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     assert '`workspace_path`' in agent_calls[0]['kwargs']['prompt']
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
     query = agent_queries[0]
+    assert 'Paper context: sex classification task.' in query
     assert 'Enabled user-level variables: ["REDFOX_API_KEY"]' in query
     assert 'runtime-only-secret' not in query
     assert 'REMOVED_TOKEN' not in query
@@ -214,7 +218,11 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     assert payloads[-1]['data']['performance_metrics']['schema_version'] == 1
 
 
-def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
+@pytest.mark.parametrize('message', [
+    {'query': '你是傻逼', 'history': []},
+    {'query': '服务端论文上下文', 'user_query': '你是傻逼', 'history': []},
+])
+def test_sensitive_input_is_blocked_before_model_execution(monkeypatch, message):
     model_calls = []
 
     def fail_if_model_is_created(*args, **kwargs):
@@ -223,7 +231,7 @@ def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
 
     monkeypatch.setattr(chat_service, 'AutoModel', fail_if_model_is_created)
     request = ChatRequest(
-        message={'query': '你是傻逼', 'history': []},
+        message=message,
         conversation={'session_id': 'sid-sensitive'},
         runtime={'llm_config': {}},
     )

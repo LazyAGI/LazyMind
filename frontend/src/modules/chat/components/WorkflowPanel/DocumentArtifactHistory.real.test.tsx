@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { MDXEditorMethods, MDXEditorProps } from '@mdxeditor/editor';
 import i18n from '@/i18n';
 import { SlotRenderer } from './SlotComponents';
+import { SlotEditingContext } from './slotEditingContext';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const capture = vi.hoisted(() => ({ change: undefined as MDXEditorProps['onChange'], editor: null as MDXEditorMethods | null }));
@@ -71,7 +72,10 @@ it.each(['markdown', 'ir', 'ir-to-markdown'] as const)('preserves edits and resu
   api.saveDocumentArtifact.mockImplementation(async (_id, body) => ({ data: { ok: true, result: {
     artifact_id: `local-${body.base_revision}`, revision: body.base_revision + 1, draft_version: 1, value: body.value,
   } } }));
-  const view = render(<SlotRenderer slot={slot(3)} sessionId='real-history' slotId='flat_draft_document' revisionCount={3} />);
+  const onBrowse = vi.fn();
+  const view = render(<SlotEditingContext.Provider value={{ onBrowse, setEditing: vi.fn(),
+    registerFlush: () => () => {}, registerFooterAction: () => () => {},
+  }}><SlotRenderer slot={slot(3)} sessionId='real-history' slotId='flat_draft_document' revisionCount={3} /></SlotEditingContext.Provider>);
   await screen.findByRole('button', { name: '版本历史', exact: true });
   const typeTitle = async (text: string, markdown: boolean) => {
     if (markdown) {
@@ -85,6 +89,7 @@ it.each(['markdown', 'ir', 'ir-to-markdown'] as const)('preserves edits and resu
   };
   await typeTitle('Saved before rollback', mode === 'markdown');
   fireEvent.click(screen.getByRole('button', { name: '版本历史', exact: true }));
+  expect(onBrowse).toHaveBeenCalledOnce();
   const dialog = await screen.findByRole('dialog');
   fireEvent.click(within(dialog).getAllByRole('option').at(-1)!);
   fireEvent.click(within(dialog).getByRole('button', { name: /应用.*1/ }));

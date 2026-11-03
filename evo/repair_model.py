@@ -74,6 +74,22 @@ def resolve_evo_model(role: object) -> Mapping[str, Any]:
             missing_fields=missing,
         )
 
+    advanced = config.get('request_advanced')
+    unsupported_advanced = advanced is not None and (
+        not isinstance(advanced, Mapping)
+        or any(key not in {'headers', 'query', 'extra_body'} or value is not None
+               and (not isinstance(value, Mapping) or bool(value)) for key, value in advanced.items())
+    )
+    if unsupported_advanced:
+        # The OpenCode executor does not share LazyLLM's final HTTP boundary.
+        # Reject rather than omit gateway credentials or change request meaning.
+        raise EvoModelConfigError(
+            MODEL_NOT_ALLOWED, 'advanced_request_options_unsupported', provider=source, model=model,
+        )
+    features = config.get('features')
+    if isinstance(features, Mapping) and features.get('tool_calling') is False:
+        raise EvoModelConfigError(MODEL_NOT_ALLOWED, 'tool_calling_required', provider=source, model=model)
+
     raw_descriptor = config.get('opencode')
     descriptor = raw_descriptor if isinstance(raw_descriptor, Mapping) else {}
     required = ('provider', 'provider_model', 'model', 'npm', 'base_url')

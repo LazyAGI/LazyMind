@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { controlActions, deliveryBanner, deliveryPending, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, type WorkflowControlView } from './workflowControl';
+import { controlActions, deliveryBanner, overlayInfoBanner, REVIEW_CHANGED_NOTICE, ReviewRefreshRequired, type WorkflowControlView } from './workflowControl';
 
 const state = (): WorkflowControlView => ({
   protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 3, continuation: 'awaiting_user',
-  admission: { can_begin: false }, active_executions: 0, active_execution_ids: [], binding: { bound: true, generation: 1 },
+  admission: { can_begin: false }, active_executions: 0, active_execution_ids: [], binding: { bound: true },
   reviews: [{ id: 'review-1', execution_id: 'attempt-1', step_id: 'write', status: 'pending', version: 1, manifest_hash: 'hash-1' }],
   delivery: null, available_actions: ['confirm', 'confirm_and_continue', 'stop'],
 });
@@ -43,28 +43,6 @@ describe('typed workflow user commands', () => {
 });
 
 
-it('allows lifecycle resume after cancellation is accepted, without resending accepted continuation', () => {
-  const control = state();
-  control.delivery = { id: 'cancel', kind: 'cancel', status: 'accepted' };
-  expect(deliveryPending(control)).toBe(false);
-  control.delivery.kind = 'continue';
-  expect(deliveryPending(control)).toBe(true);
-  control.delivery.consumed_at = '2026-09-08T00:00:00Z';
-  expect(deliveryPending(control)).toBe(false);
-});
-
-it('keeps panel controls available after a settled execution notification is delivered', () => {
-  const control = state();
-  control.delivery = { id: 'native-result', kind: 'continue', status: 'accepted', execution_id: 'native-1' };
-  control.active_execution_ids = [];
-  expect(deliveryPending(control)).toBe(false);
-  control.active_execution_ids = ['native-1'];
-  expect(deliveryPending(control)).toBe(true);
-  control.delivery.status = 'unknown';
-  control.active_execution_ids = [];
-  expect(deliveryPending(control)).toBe(true);
-});
-
 it('keeps routine host delivery silent while preserving actionable notices', () => {
   const pending = { id: 'act-1', kind: 'continue' as const, status: 'pending' as const };
   for (const status of ['pending', 'dispatching', 'accepted']) {
@@ -81,7 +59,7 @@ it('keeps routine host delivery silent while preserving actionable notices', () 
 
 it('explains Codex cancellation limits without reporting that Workflow stop failed', () => {
   const delivery = { id: 'cancel', kind: 'cancel' as const, status: 'failed' };
-  const binding = { bound: true, generation: 2, provider: 'codex' };
+  const binding = { bound: true, provider: 'codex' };
   expect(overlayInfoBanner('', delivery, binding)).toEqual({ key: 'chat.workflowControlCodexStopped', tone: 'info' });
   expect(deliveryBanner({ ...delivery, kind: 'continue' }, binding)?.tone).toBe('warning');
   expect(deliveryBanner(delivery, { ...binding, provider: 'deepseek-harness' })?.tone).toBe('warning');

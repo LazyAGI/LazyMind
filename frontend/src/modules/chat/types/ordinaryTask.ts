@@ -1,18 +1,9 @@
 import type { KnowledgeOperation } from "../utils/knowledgeOperations";
 import type { MediaCapabilityDependencyDetail } from "../utils/mediaCapabilityDependency";
+import type { OrdinaryTaskView as CoreOrdinaryTaskView, PublicProcessStep as CorePublicProcessStep } from "@/api/generated/core-client";
 
 /** Public execution data. Raw agent reasoning and tool arguments are never part of this contract. */
-export interface PublicProcessStep {
-  step_id: string;
-  revision: number;
-  order: number;
-  title: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "interrupted" | "canceled";
-  summary?: string;
-  started_at: string | null;
-  finished_at: string | null;
-  elapsed_ms: number | null;
-}
+export type PublicProcessStep = CorePublicProcessStep;
 
 export interface PublicSource {
   source_id: string;
@@ -70,6 +61,8 @@ export interface OrdinaryTaskView {
   revision: number;
   process_state: "available" | "not_provided" | "unavailable";
   process_steps: PublicProcessStep[];
+  model_switch?: CoreOrdinaryTaskView["model_switch"];
+  failure_code?: CoreOrdinaryTaskView["failure_code"];
   /** A public task outline; entries have no inferred execution status. */
   plan_steps?: string[];
   /** Overall task progress used to estimate plan position, not individual execution states. */

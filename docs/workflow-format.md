@@ -431,6 +431,15 @@ ui:
 
 旧格式（数组 `[{slot, weight}]` 或 `[[{slot, weight}]]`）在解析时自动迁移为格式 C，无需手动转换。
 
+**跨 composite 页码联动**
+
+同一组逐页素材的 composite tab 可声明相同的 `page_group`（例如
+`page_group: presentation`）。组内共享当前页；拖动页序时，所有已生成的
+`cardinality: list`、`ordered: true` 素材使用一次事务同步排序。空槽跳过，
+页数不一致或版本冲突则拒绝整个排序。不要把不对应页面的素材库放进这一组。
+`sort_order` 是从 1 开始的当前显示位置；`list_index` 是稳定身份，拖动后不能
+用“页码减一”代替它。已有下载文件不会随 UI 排序自动重写，需要重新导出。
+
 **声明式 HTML 页面与导出 action**
 
 通用渲染器不会根据 slot id 或素材内容猜测控件类型。完整 HTML 页面必须声明

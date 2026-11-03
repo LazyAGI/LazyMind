@@ -1,0 +1,11 @@
+.paper-breadcrumb { min-width: 0; color: #627084; font-size: 13px; }
+.paper-breadcrumb ol { display: flex; align-items: center; min-width: 0; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.paper-breadcrumb li { min-width: 0; }
+.paper-breadcrumb li:first-child, .paper-breadcrumb-separator { flex: none; }
+.paper-breadcrumb a { color: #627084; text-decoration: none; }
+.paper-breadcrumb a:hover { color: #2858b8; }
+.paper-breadcrumb a:focus-visible { outline: 2px solid #2858b8; outline-offset: 3px; border-radius: 2px; }
+.paper-breadcrumb .paper-breadcrumb-library { overflow: hidden; }
+.paper-breadcrumb .paper-breadcrumb-library a, .paper-breadcrumb .paper-breadcrumb-library h1 { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: #172033; line-height: 1.5; font-family: inherit; font-size: 16px; font-weight: 600; }
+.paper-breadcrumb-paper { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paper-breadcrumb-separator { color: #a4adba; }

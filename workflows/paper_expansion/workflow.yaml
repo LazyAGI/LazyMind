@@ -1,0 +1,129 @@
+id: paper_expansion
+name: 论文自动拓展
+description: 在独立 Chat 中分五步拓展论文，保存当前用户的成果。候选只通过 arXiv 外部搜索发现，版本由服务端锁定；全文复用限定发起论文集，关系分析依据实际材料。
+when_to_use: 用户从知识库启动论文拓展、先拓展后综述，或继续同一论文拓展 Chat。保留原拓展记录 ID。
+runtime:
+  transactional_outputs: true
+  publisher_owned_slots: [paper_relations, expansion_result]
+  post_step_checks:
+  - step_id: explore_directions
+    tool: academic_validate_stage
+    arguments: {result: direction_research}
+  - step_id: prepare_seed_set
+    tool: academic_validate_stage
+    arguments: {result: seed_set}
+  - step_id: expand_and_screen
+    tool: academic_validate_stage
+    arguments: {result: expanded_papers}
+  - step_id: compose_result
+    tool: academic_validate_result
+    arguments:
+      result: expansion_result
+  host_extensions:
+  - academic-paper-chat-v1
+  completed_edit_step: compose_result
+  completed_edit_routing: 主题变更回到 explore_directions；方向变更回到 prepare_seed_set；继续寻找新增论文回到 expand_and_screen；展示要求回到
+    compose_result。先保存原成果，继续补充同一记录。
+  trigger_inputs:
+  - expansion_id
+tool_scripts:
+- path: scripts/tools.py
+  functions:
+  - academic_expansion_context
+  - academic_search_papers
+  - academic_read_paper
+  - academic_validate_result
+  - academic_validate_stage
+  - academic_submit_relations
+  - academic_publish_expansion_result
+steps:
+- id: explore_directions
+  label: 调研与方向
+- id: prepare_seed_set
+  label: 准备种子论文
+- id: expand_and_screen
+  label: 拓展与筛选
+- id: analyze_relations
+  label: 研究关系分析
+- id: compose_result
+  label: 整理拓展成果
+slots:
+- id: expansion_id
+  label: 任务上下文
+  type: text
+  cardinality: single
+  external: true
+  exposed: false
+- id: direction_research
+  label: 调研与方向
+  type: json
+  cardinality: single
+  exposed: true
+- id: seed_set
+  label: 准备种子论文
+  type: json
+  cardinality: single
+  exposed: true
+- id: expanded_papers
+  label: 拓展与筛选
+  type: json
+  cardinality: single
+  exposed: true
+- id: paper_relations
+  label: 研究关系分析
+  type: json
+  cardinality: single
+  exposed: true
+- id: expansion_result
+  label: 整理拓展成果
+  type: json
+  cardinality: single
+  exposed: true
+ui:
+  slots:
+    direction_research:
+      widgetType: json-block
+      readOnly: true
+    seed_set:
+      widgetType: json-block
+      readOnly: true
+    expanded_papers:
+      widgetType: json-block
+      readOnly: true
+    paper_relations:
+      widgetType: json-block
+      readOnly: true
+    expansion_result:
+      widgetType: json-block
+      readOnly: true
+  tabs:
+  - id: explore_directions
+    step_id: explore_directions
+    label: 调研与方向
+    layout: list
+    slots:
+    - id: direction_research
+  - id: prepare_seed_set
+    step_id: prepare_seed_set
+    label: 准备种子论文
+    layout: list
+    slots:
+    - id: seed_set
+  - id: expand_and_screen
+    step_id: expand_and_screen
+    label: 拓展与筛选
+    layout: list
+    slots:
+    - id: expanded_papers
+  - id: analyze_relations
+    step_id: analyze_relations
+    label: 研究关系分析
+    layout: list
+    slots:
+    - id: paper_relations
+  - id: compose_result
+    step_id: compose_result
+    label: 整理拓展成果
+    layout: list
+    slots:
+    - id: expansion_result

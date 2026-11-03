@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   latestChatInputProps: null as any,
   latestConversationOptions: null as any,
   latestUserEditOptions: null as any,
+  messageList: [] as any[],
   isStreaming: false,
   canStopGeneration: false,
   loading: false,
@@ -150,13 +151,14 @@ vi.mock("./hooks/useChatConversation", () => ({
     isStreaming: mocks.isStreaming,
     canStopGeneration: mocks.canStopGeneration,
     loading: mocks.loading,
-    messageList: [],
-    messageListRef: { current: [] },
+    messageList: mocks.messageList,
+    messageListRef: { current: mocks.messageList },
     openResumeSSE: vi.fn(),
     openSSE: vi.fn(),
     regenerate: mocks.regenerate,
     mediaCapabilityDependency: null,
     mediaCapabilityChecking: false,
+    modelFallbackNotificationHolder: <span data-testid="model-fallback-notifications" />,
     continueAfterMediaCapabilityConfiguration: vi.fn(),
     replaceMessageList: vi.fn(),
     mergeHistoryPage: mocks.mergeHistoryPage,
@@ -241,10 +243,29 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.latestChatInputProps = null;
     mocks.latestConversationOptions = null;
     mocks.latestUserEditOptions = null;
+    mocks.messageList = [];
     mocks.isStreaming = false;
     mocks.canStopGeneration = false;
     mocks.loading = false;
     mocks.runtimeWaiting = false;
+  });
+
+  it('updates skill deposit counts live and excludes archived regeneration attempts', () => {
+    mocks.messageList = [
+      { role: "User", delta: "question" },
+      { role: "Assistant", tool_call_turns: 10, archived_failure: true },
+      { role: "Assistant", delta: "answer" },
+    ];
+    const props = { sessionId: "chat", setIsChatContent: vi.fn(), onOpenSSE: vi.fn(),
+      parseErrorData: vi.fn(), setChatConfigFn: vi.fn() };
+    const { rerender } = render(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 0 });
+    mocks.messageList = [...mocks.messageList.slice(0, -1), { role: "Assistant", tool_call_turns: 8 }];
+    rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 8 });
+    mocks.messageList = [...mocks.messageList.slice(0, -1), { role: "Assistant", tool_call_turns: 0 }];
+    rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 0 });
   });
 
   it('passes workflow hand-off stop availability without pretending Chat is streaming', () => {
@@ -272,6 +293,7 @@ describe("ChatContainerComponent wheel forwarding", () => {
 
   it("disables workspace controls for document previews but enables them for ordinary chats", () => {
     const view = render(<ChatContainerComponent sessionId="pdf-preview" allowLocalWorkspace={false} />);
+    expect(screen.getByTestId("model-fallback-notifications")).toBeInTheDocument();
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(false);
     view.rerender(<ChatContainerComponent sessionId="conversation-1" />);
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(true);

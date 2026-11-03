@@ -8,7 +8,7 @@ import {
   type ChatModelSelectionRequest,
 } from "@/modules/chat/store/modelSelection";
 import ChatInput from ".";
-import { createRef, useState, type ReactNode } from "react";
+import { createRef, Profiler, useState, type ReactNode } from "react";
 import { useChatInputStore, type ChatModeDraft } from "../../store/chatInput";
 import { useChatMessageStore } from "../../store/chatMessage";
 import { useWorkflowStore } from "../../store/workflowPanel";
@@ -258,6 +258,35 @@ describe("ChatInput model switch save lock", () => {
     } finally {
       rects.mockRestore();
       act(() => { useChatInputStore.getState().setModeDraft(); useChatMessageStore.getState().clearPendingMessage(); });
+    }
+  });
+
+  it('captures uploaded files as soon as the attachment is committed', async () => {
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+    const ref = createRef<ChatInputImperativeProps>();
+    const captured: ChatModeDraft[] = [];
+    try {
+      render(<Profiler id="composer" onRender={() => {
+        // A synchronous mode switch can happen after the DOM commits but before
+        // passive effects run, just as the async upload finishes in CI.
+        if (captured.length || !screen.queryByRole('button', { name: 'photo.png' })) return;
+        const detail: { runInBackground: boolean; draft?: ChatModeDraft } = { runInBackground: true };
+        window.dispatchEvent(new CustomEvent('lazymind:chat-capture-mode-draft', { detail }));
+        if (detail.draft) captured.push(detail.draft);
+      }}>
+        <ChatInput ref={ref} value="Summarize" onChange={vi.fn()} isChatContent={false}
+          runInBackground={false} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />
+      </Profiler>);
+      await act(async () => ref.current?.uploadFiles([new File(['test'], 'photo.png', { type: 'image/png' })]));
+      await waitFor(() => expect(captured.length).toBeGreaterThan(0));
+      for (const draft of captured) {
+        expect(draft.files).toEqual([expect.objectContaining({
+          id: 'upload:photo.png', input: { input_type: 'image', uri: '/uploads/photo.png', filename: 'photo.png' },
+        })]);
+      }
+    } finally {
+      rects.mockRestore();
+      act(() => useChatInputStore.getState().setModeDraft());
     }
   });
 
@@ -583,9 +612,9 @@ describe("ChatInput model switch save lock", () => {
     expect(screen.getByTestId("local-workspace-control")).toHaveTextContent("conversation-1");
   });
 
-  it("reports whether the resource picker is open and closes after choosing an action", async () => {
+  it("reports whether the compact resource picker is open, aligns its action icons, and closes after choosing an action", async () => {
     render(<ChatInput value="" onChange={vi.fn()} isChatContent
-      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} showSkillDeposit={false} />);
 
     const trigger = screen.getByRole("button", { name: "chat.addResource" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -593,7 +622,17 @@ describe("ChatInput model switch save lock", () => {
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     const attachment = await screen.findByRole("button", { name: /chat\.addAttachment/ });
-    expect(document.getElementById(trigger.getAttribute("aria-controls")!)).toContainElement(attachment);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    expect(menu).toContainElement(attachment);
+    const actions = within(menu).getAllByRole("button");
+    expect(actions).toHaveLength(4);
+    for (const action of actions) {
+      expect.soft(action.firstElementChild).toHaveClass("chat-add-resource-menu-icon");
+    }
+    const popoverInner = menu.closest<HTMLElement>(".ant-popover-inner")!;
+    expect(popoverInner).not.toBeNull();
+    expect.soft(popoverInner.style.height).toBe("");
+    expect.soft(menu.closest<HTMLElement>(".ant-popover-inner-content")!.style.height).toBe("");
 
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "false");

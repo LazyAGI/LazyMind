@@ -8,6 +8,7 @@ import { DefaultOptionType } from "antd/es/select";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import { TreeNode } from "../KnowledgeTable";
 
 type ITreeData = Omit<DefaultOptionType, "label">;
@@ -160,6 +161,7 @@ function CopyMoveModal(props: CopyMoveModalProps) {
       })
       .catch((error) => {
         console.error(error);
+        message.error(getImportErrorMessage(error));
       });
   }
 

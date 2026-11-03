@@ -24,6 +24,8 @@ import {
 import { downloadStream } from '@/modules/chat/utils/download';
 import FileViewer from '@/modules/knowledge/components/FileViewer';
 import './index.scss';
+import { useArtifactPreview } from '../ArtifactPreview/context';
+import { filePreviewTarget } from '../ArtifactPreview/target';
 
 const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
 
@@ -73,6 +75,7 @@ export default function ArtifactPanel({
     () => files.filter((file) => file.origin === 'published'),
     [files],
   );
+  const preview = useArtifactPreview();
   const [selectedId, setSelectedId] = useState<string>();
   const [view, setView] = useState<'detail' | 'versions'>('detail');
 
@@ -89,6 +92,14 @@ export default function ArtifactPanel({
 
   const selected = files.find((file) => file.id === selectedId);
   const selectFile = (id: string) => {
+    const file = files.find(item => item.id === id);
+    if (preview && file) {
+      const versions = file.origin === 'published' && ['main_chat', 'subagent'].includes(file.sourceType) && (file.artifact.revision_count ?? 0) > 0;
+      preview.open(filePreviewTarget(file), versions ? {
+        onVersions: () => { setSelectedId(id); setView('versions'); },
+      } : undefined);
+      return;
+    }
     setView('detail');
     setSelectedId(id);
   };

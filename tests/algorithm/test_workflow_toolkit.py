@@ -277,3 +277,28 @@ def test_legacy_package_loader_excludes_test_code_without_manifest(path):
     assert load_workflow_package_tools(
         package, ['selected_tool'], 'renamed-workflow', 'revision-1',
     )['selected_tool']() == 'ok'
+
+
+def test_reorder_pages_maps_visual_positions_and_commits_linked_lists_once():
+    client = MagicMock()
+    states = {'briefs': [8, 2, 5], 'slides': [3, 9, 6], 'optional': []}
+    client.get_slot_order.side_effect = lambda session, slot: MagicMock(
+        result={'order_list': states[slot], 'order_version': 4})
+    client.reorder_slot_orders.return_value.result = {'order_version': 5}
+    toolkit = HostWorkflowToolkit(lambda: client)
+    result = toolkit.reorder_artifact_pages('session', ['slides', 'briefs', 'optional'], [3, 2, 1])
+    assert result['reordered_slots'] == ['briefs', 'slides']
+    client.reorder_slot_orders.assert_called_once_with('session', [
+        {'slot_id': 'briefs', 'order': [5, 2, 8], 'version': 4},
+        {'slot_id': 'slides', 'order': [6, 9, 3], 'version': 4},
+    ])
+    client.advance.assert_not_called()
+
+
+@pytest.mark.parametrize('order', [[1, 1], [0, 1], [True], [], [1, 2, 3]])
+def test_reorder_pages_rejects_bad_permutations_or_misaligned_lists(order):
+    client = MagicMock()
+    client.get_slot_order.return_value.result = {'order_list': [8, 2], 'order_version': 4}
+    with pytest.raises(ValueError):
+        HostWorkflowToolkit(lambda: client).reorder_artifact_pages('session', ['slides'], order)
+    client.reorder_slot_orders.assert_not_called()

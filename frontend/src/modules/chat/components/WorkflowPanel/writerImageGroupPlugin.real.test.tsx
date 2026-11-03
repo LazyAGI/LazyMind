@@ -16,6 +16,7 @@ it('saves, reopens and restores image groups through the Markdown editor', async
 
   await waitFor(() => expect(view.getByRole('button', { name: 'Set as sliding gallery' })).toBeInTheDocument());
   expect(view.container.querySelector('.writer-image-group')).toHaveAttribute('data-image-count', '3');
+  expect(view.container.querySelector('.writer-image-group')).toHaveAttribute('data-layout', 'vertical');
   expect(pendingImageGroups(markdown)).toHaveLength(1);
   await act(async () => fireEvent.click(view.getByRole('button', { name: 'Set as sliding gallery' })));
   await waitFor(() => expect(documentImageGroups(saved)[0]?.layout).toBe('sliding'), { timeout: 4000 });
@@ -27,6 +28,7 @@ it('saves, reopens and restores image groups through the Markdown editor', async
   view.unmount();
   const reopened = render(<MarkdownArtifactEditor markdown={saved} sourceRevision={2} onSave={onSave} />);
   await waitFor(() => expect(reopened.container.querySelector('.writer-image-group')).toHaveAttribute('data-layout', 'sliding'));
+  expect(reopened.container.querySelector('.writer-image-group')).toHaveAttribute('data-image-count', '3');
   await act(async () => fireEvent.click(reopened.getByRole('button', { name: 'Restore vertical layout' })));
   await waitFor(() => expect(documentImageGroups(saved)[0].layout).toBe('vertical'), { timeout: 4000 });
   expect(markdownImageCandidates(saved)[0].images).toEqual([0, 1, 2].map(occurrence => ({ source: encoded, occurrence })));

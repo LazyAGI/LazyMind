@@ -980,7 +980,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     if has_explicit_workflow or not provisional.routing_review_required:
         return await _run_chat_with_parse_status(request, task_profile_override=provisional)
 
-    raw_query = str(request.message.query or '')
+    raw_query = str(request.message.user_query or request.message.query or '')
     filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
     skip_sensitive_filter = (
         request.runtime.skip_sensitive_filter
@@ -1073,7 +1073,7 @@ async def _handle_chat_impl(
     from lazymind.chat.workflow.workflow_manager import (
         _build_chat_agent_task_context,
         guard_workflow_agent_stream,
-        resolve_workflow_injection,
+        resolve_workflow_injection_async,
         update_intentwriter,
         workflow_startup_clarification_already_asked,
     )
@@ -1124,7 +1124,9 @@ async def _handle_chat_impl(
     if skip_sensitive_filter:
         sensitive_match = None
     elif sensitive_match_override is _SENSITIVE_MATCH_UNSET:
-        sensitive_match = check_sensitive_content(query)
+        # Core preserves the original user message separately from injected
+        # source material, such as paper abstracts and saved relationship notes.
+        sensitive_match = check_sensitive_content(user_input)
     else:
         sensitive_match = sensitive_match_override
     if sensitive_match is not None:
@@ -1414,7 +1416,7 @@ async def _handle_chat_impl(
         if ref.startswith('builtin:')
     )
 
-    workflow_contribution = resolve_workflow_injection(
+    workflow_contribution = await resolve_workflow_injection_async(
         effective_workflow_context,
         conversation_id=conversation_id,
         # The raw query may contain the internal <mentioned_resources> envelope.
@@ -2225,6 +2227,9 @@ async def _handle_chat_impl(
                 else ','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir]))
             ),
             llm_config=runtime.llm_config or {},
+            current_model_candidate_id=runtime.model_fallback_current_id,
+            model_candidates=tuple(runtime.model_fallback_candidates),
+            initial_model_switch=runtime.model_fallback_initial_switch,
 
             max_retries=max_retries,
             tool_failure_limits={
@@ -2393,13 +2398,18 @@ async def _handle_chat_impl(
                 _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
+        fallback_state = getattr(react_agent, '_model_fallback_state', None)
         terminal_frame = translator.finish_run(
             outcome=outcome,
+            usage=fallback_state.usage_snapshot if fallback_state is not None else None,
             usage_map=lazyllm.globals.get('usage') or {},
-            module_id=getattr(executor.runtime_llm(react_agent), '_module_id', None),
-            llm_config=runtime.llm_config or {},
+            module_id=(None if fallback_state is not None
+                       else getattr(executor.runtime_llm(react_agent), '_module_id', None)),
+            llm_config=(fallback_state.current.llm_config if fallback_state is not None else runtime.llm_config or {}),
             turn_seq=message.current_turn_seq,
-            max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),
+            max_input_tokens=(fallback_state.current.max_input_tokens if fallback_state is not None
+                              else resolve_max_input_tokens(llm_config=runtime.llm_config or {})),
+            prefer_usage_snapshot=fallback_state is not None,
         )
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
         metrics = translator.last_metrics or terminal_frame.get('performance_metrics')

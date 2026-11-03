@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { isVocabularyEnabled } from "./mode";
 
 describe("isVocabularyEnabled", () => {
-  it("is disabled by default", () => {
-    expect(isVocabularyEnabled({})).toBe(false);
+  it("is enabled by default", () => {
+    expect(isVocabularyEnabled({})).toBe(true);
   });
 
   it.each(["1", "true", "TRUE", "yes", "on"])("accepts %s as enabled", (value) => {

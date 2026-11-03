@@ -44,6 +44,7 @@ def load_preference_state(store: MemoryStore | None = None) -> PreferenceStateSn
         projected_chars=projection.projected_chars,
         projection_truncated=projection.projection_truncated,
         etag='sha256:' + hashlib.sha256(content.encode('utf-8')).hexdigest(),
+        max_chars=max_chars,
     )
     return PreferenceStateSnapshot(content=content, items=items, data=data)
 
@@ -58,7 +59,7 @@ def target_reached(state: PreferenceStateData) -> bool:
         not state.projection_truncated
         and projection_target_reached(
             state.full_projection_chars,
-            max_chars=int(_cfg['preference_context_max_chars']),
+            max_chars=state.max_chars,
             target_percent=TARGET_PROMPT_PERCENT,
         )
     )

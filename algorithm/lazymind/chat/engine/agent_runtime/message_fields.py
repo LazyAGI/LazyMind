@@ -38,7 +38,7 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
     if isinstance(content, list):
         blocks = []
         for block in content:
-            if isinstance(block, dict) and block.get('type') == 'image_url':
+            if isinstance(block, dict) and block.get('type') in {'image_url', 'input_image', 'image'}:
                 image_count += 1
             else:
                 blocks.append(block)

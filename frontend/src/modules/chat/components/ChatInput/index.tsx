@@ -22,6 +22,7 @@ import {
   PaperClipOutlined,
   PlusOutlined,
   SettingOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
 import SkillRecordingPanel from "../SkillRecording";
@@ -799,7 +800,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       uri: file.uri, filename: file.name,
     }))], value);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
-    useEffect(() => {
+    // Keep synchronous mode-switch capture aligned with the committed composer.
+    // Async uploads can commit before passive effects update the old listener.
+    useLayoutEffect(() => {
       const transferDraft = (event: Event) => {
         const detail = (event as CustomEvent).detail;
         if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
@@ -1577,12 +1580,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         setAddMenuOpen(open);
                       }}
                       placement="topLeft"
-                      styles={{ body: { height: menuHeight } }}
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div id={addMenuId} className="chat-add-resource-menu">
                           <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
-                            <span aria-hidden="true">◉</span>{t("recording.title")}
+                            <VideoCameraOutlined className="chat-add-resource-menu-icon" />{t("recording.title")}
                           </button>
                             <button
                               type="button"
@@ -1598,35 +1600,24 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                 setAddMenuOpen(false);
                               }}
                             >
-                              <PaperClipOutlined />
+                              <PaperClipOutlined className="chat-add-resource-menu-icon" />
                               {t("chat.addAttachment")}
                             </button>
-                  {showSkillDeposit && isChatContent && (
-                    <Tooltip title={skillDepositTooltip}>
-                      <div
-                        className={`input-bottom-actions-left-item skill-deposit-action${
-                          isSkillDepositDisabled ? " is-disabled" : ""
-                        }`}
-                        aria-disabled={isSkillDepositDisabled}
-                        role="button"
-                        tabIndex={isSkillDepositDisabled ? -1 : 0}
-                        onClick={handleSkillDeposit}
-                        onKeyDown={(event) => {
-                          if (
-                            isSkillDepositDisabled ||
-                            (event.key !== "Enter" && event.key !== " ")
-                          ) {
-                            return;
-                          }
-                          event.preventDefault();
-                          handleSkillDeposit();
-                        }}
-                      >
-                        <BulbOutlined />
-                        {t("chat.skillDeposit")}
-                      </div>
-                    </Tooltip>
-                  )}
+                          {showSkillDeposit && isChatContent && (
+                            <Tooltip title={skillDepositTooltip}>
+                              <span className="chat-add-resource-menu-tooltip-anchor">
+                                <button
+                                  type="button"
+                                  disabled={isSkillDepositDisabled}
+                                  aria-disabled={isSkillDepositDisabled}
+                                  onClick={handleSkillDeposit}
+                                >
+                                  <BulbOutlined className="chat-add-resource-menu-icon" />
+                                  {t("chat.skillDeposit")}
+                                </button>
+                              </span>
+                            </Tooltip>
+                          )}
                           {allowKnowledgeBaseSelection ? (
                             <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
                               <span className="chat-add-resource-menu-tooltip-anchor">
@@ -1642,7 +1633,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                     }, 0);
                                   }}
                                 >
-                                  <BookOutlined />
+                                  <BookOutlined className="chat-add-resource-menu-icon" />
                                   {t("chat.knowledgeBase")}
                                 </button>
                               </span>
@@ -1655,7 +1646,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               promptRef.current?.onOpen();
                             }}
                           >
-                            <CommentOutlined />
+                            <CommentOutlined className="chat-add-resource-menu-icon" />
                             {t("chat.promptTemplate")}
                           </button>
                         </div>

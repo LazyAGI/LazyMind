@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def _load_ppt_tools():
     root = Path(__file__).resolve().parents[4]
@@ -21,6 +23,47 @@ def _write_ready_style(deck):
         'design_style': {'id': 1}, 'color_tone': {'id': 1},
         'primary_color': {'id': 1}, 'palette': {'primary': '#fff'},
     }), encoding='utf-8')
+
+
+def test_restyle_pages_scope_and_persisted_global_instruction(monkeypatch, tmp_path):
+    tools = _load_ppt_tools()
+    monkeypatch.setattr(tools, '_resolve_deck_dir', lambda _: tmp_path)
+    (tmp_path / 'pages').mkdir()
+    for page in (1, 2):
+        (tmp_path / 'pages' / f'page_{page:03d}.html').write_text(f'<html>{page}</html>')
+    _write_ready_style(tmp_path)
+    calls = []
+    monkeypatch.setattr(tools, 'ppt_run_stage', lambda *a, **kw: calls.append(kw) or {'status': 'ok'})
+    result = tools.ppt_restyle_pages(str(tmp_path), '第2页留白少一点，不改文字', pages=[2])
+    assert result['updated_pages'] == [2]
+    assert calls[0]['edit_instruction'] == '第2页留白少一点，不改文字'
+    assert 'visual_revision_instructions' not in json.loads((tmp_path / 'style_spec.json').read_text(encoding='utf-8'))
+    result = tools.ppt_restyle_pages(str(tmp_path), '全部米白和橄榄绿，禁用蓝色')
+    assert result['updated_pages'] == [1, 2]
+    assert '全部米白和橄榄绿，禁用蓝色' in json.loads(
+        (tmp_path / 'style_spec.json').read_text(encoding='utf-8'))['visual_revision_instructions']
+
+
+def test_restyle_reports_partial_failure_without_claiming_global_success(monkeypatch, tmp_path):
+    import pytest
+    tools = _load_ppt_tools()
+    monkeypatch.setattr(tools, '_resolve_deck_dir', lambda _: tmp_path)
+    (tmp_path / 'pages').mkdir()
+    for page in (1, 2, 3):
+        (tmp_path / 'pages' / f'page_{page:03d}.html').write_text(f'<html>{page}</html>')
+    _write_ready_style(tmp_path)
+    calls = []
+
+    def stage(*args, **kwargs):
+        calls.append(kwargs['page'])
+        if kwargs['page'] == 2:
+            raise tools.ToolExecutionError('unchanged HTML')
+        return {'status': 'ok'}
+    monkeypatch.setattr(tools, 'ppt_run_stage', stage)
+    with pytest.raises(tools.ToolExecutionError, match=r'updated_pages=\[1\]'):
+        tools.ppt_restyle_pages(str(tmp_path), '改成绿色')
+    assert calls == [1, 2]
+    assert 'visual_revision_instructions' not in json.loads((tmp_path / 'style_spec.json').read_text(encoding='utf-8'))
 
 
 def test_conversation_root_uses_durable_upload_storage(monkeypatch, tmp_path):
@@ -137,7 +180,8 @@ def test_preview_images_use_small_durable_urls_but_disk_stays_relative(monkeypat
     (deck / 'pages').mkdir()
     image = deck / 'images' / 'big image.png'
     image.write_bytes(b'x' * 2_000_000)
-    original = '<html><style>#bg{background:url("../images/big image.png")}</style><img src="../images/big image.png"></html>'
+    original = ('<html><style>#bg{background:url("../images/big image.png")}</style>'
+                '<img src="../images/big image.png"></html>')
     page = deck / 'pages' / 'page_001.html'
     page.write_text(original, encoding='utf-8')
     preview, count = tools._inline_preview_images(original, deck, page)
@@ -300,7 +344,8 @@ def test_workflow_deck_binding_survives_reworded_retry_and_other_workflows(monke
     assert len(list((tmp_path / 'ppt_decks').iterdir())) == 2
 
 
-def test_auto_background_prompts_publish_and_generate_without_style_model(monkeypatch, tmp_path):
+@pytest.mark.parametrize('explicit_deck', [False, True])
+def test_auto_background_prompts_publish_and_generate_without_style_model(monkeypatch, tmp_path, explicit_deck):
     from PIL import Image
 
     tools = _load_ppt_tools()
@@ -338,7 +383,7 @@ def test_auto_background_prompts_publish_and_generate_without_style_model(monkey
         return {'local_path': str(source)}
 
     monkeypatch.setattr(tools, 'image_generator', generate)
-    result = tools.ppt_generate_background_images(str(deck), prompts_json=prompts)
+    result = tools.ppt_generate_background_images(str(deck) if explicit_deck else None, prompts_json=prompts)
     assert result['count'] == 2
     assert generated_prompts == [item['prompt'] for item in prompts]
     assert not (deck / 'style_spec.json').exists()

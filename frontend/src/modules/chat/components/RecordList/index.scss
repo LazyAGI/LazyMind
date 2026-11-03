@@ -275,7 +275,16 @@
 
       > .list-title { grid-column: 1; grid-row: 1; }
       > .conversation-groups--organizer { grid-column: 2; grid-row: 1; }
-      > .record-toolbar-actions { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+    }
+
+    .record-global-header {
+      flex-shrink: 0;
+      margin-bottom: 4px;
+
+      > .record-group-title {
+        padding: 0;
+        white-space: nowrap;
+      }
     }
 
     .list-title {

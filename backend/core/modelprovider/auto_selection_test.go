@@ -69,6 +69,31 @@ func TestAutoSelectUnconfiguredProviderModelsSkipsExistingAndReportsMissing(t *t
 	}
 }
 
+func TestAutoSelectVisionChatCanFillBothChatAndVisionSlots(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		models []orm.UserModelProviderGroupModel
+		want   []autoSelectedModel
+	}{
+		{name: "one vision chat fills both slots", models: []orm.UserModelProviderGroupModel{{ID: "vision", Name: "vision", ModelType: "llm", Vision: true}}, want: []autoSelectedModel{{ModelKey: "llm", Name: "vision"}, {ModelKey: "vlm", Name: "vision"}}},
+		{name: "text only never fills vision", models: []orm.UserModelProviderGroupModel{{ID: "text", Name: "text", ModelType: "llm"}, {ID: "vision", Name: "vision", ModelType: "llm", Vision: true}}, want: []autoSelectedModel{{ModelKey: "llm", Name: "text"}, {ModelKey: "vlm", Name: "vision"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}).DB
+			result, err := autoSelectUnconfiguredProviderModels(db, "user", "User", "OpenAI", "https://api.openai.com/v1/", tc.models, time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(result.Configured, tc.want) {
+				t.Fatalf("configured=%v, want %v", result.Configured, tc.want)
+			}
+			if !reflect.DeepEqual(result.Missing, []string{"embed_main", "image_generator"}) {
+				t.Fatalf("missing=%v", result.Missing)
+			}
+		})
+	}
+}
+
 func TestAutoSelectUnconfiguredProviderModelsPrefersVerifiedFreeModels(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:auto_select_free_provider_models?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

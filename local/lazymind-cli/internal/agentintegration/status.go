@@ -35,6 +35,7 @@ type LoginStatus struct {
 }
 
 type Status struct {
+	Enabled       *bool             `json:"enabled,omitempty"`
 	Login         *LoginStatus      `json:"login,omitempty"`
 	Connection    *ConnectionStatus `json:"connection,omitempty"`
 	RetryAction   string            `json:"retry_action,omitempty"`
@@ -83,6 +84,7 @@ func Fail(status Status, message string) Status {
 
 // Connection reports runtime health separately from the user's enabled setting.
 type ConnectionStatus struct {
+	RuntimeState       string `json:"runtime_state,omitempty"`
 	MCPTrusted         bool   `json:"mcp_trusted"`
 	MCPEnabled         bool   `json:"mcp_enabled"`
 	MCPConfigured      bool   `json:"mcp_configured"`

@@ -136,6 +136,28 @@ func knowledgeExt(raw json.RawMessage) map[string]any {
 }
 
 func updateKnowledgeConfiguration(ctx context.Context, tx *gorm.DB, user string, ds *orm.Dataset, c ResourceMetadataChanges, updates, before, after map[string]any) error {
+	nextScene := ds.Scene
+	if c.Scene != nil {
+		var err error
+		nextScene, err = resourceScene(*c.Scene)
+		if err != nil {
+			return err
+		}
+		if (ds.Scene == "academic_papers") != (nextScene == "academic_papers") {
+			return resourceErr("CONFLICT", "cannot switch between paper and document knowledge bases")
+		}
+	}
+	level := ds.ProcessingLevel
+	if c.ProcessingLevel != nil {
+		level = *c.ProcessingLevel
+	}
+	// Metadata-only edits must remain possible on imported storage-only libraries
+	// and while parsing is paused. Validate prerequisites when configuration changes.
+	if nextScene != ds.Scene || effectiveProcessingLevel(level) != effectiveProcessingLevel(ds.ProcessingLevel) {
+		if err := validateAcademicScenario(ctx, tx, user, nextScene, level); err != nil {
+			return resourceErr("INVALID_ARGUMENT", err.Error())
+		}
+	}
 	ext := knowledgeExt(ds.Ext)
 	extChanged := false
 	if c.CoverImage != nil {

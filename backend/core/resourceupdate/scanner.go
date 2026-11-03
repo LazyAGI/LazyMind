@@ -17,16 +17,18 @@ import (
 )
 
 type Scanner struct {
-	db       *gorm.DB
-	cfg      Config
-	clock    clockFunc
-	workerID string
+	db                    *gorm.DB
+	cfg                   Config
+	clock                 clockFunc
+	workerID              string
+	preferenceAfterUserID string
 }
 
 type ScannerRunResult struct {
 	SkillResultsExpired    int
 	SkillTasksCreated      int
 	SkillDraftTasksCreated int
+	PreferenceTasksCreated int
 }
 
 type autoApplyTrigger struct {
@@ -61,11 +63,16 @@ func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
 		result.SkillDraftTasksCreated = created
 		return nil
 	})
-	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0) {
+	if err != nil {
+		return result, err
+	}
+	result.PreferenceTasksCreated, err = s.scanPreferenceOrganizers(ctx, now)
+	if err == nil && (result.SkillResultsExpired > 0 || result.SkillTasksCreated > 0 || result.SkillDraftTasksCreated > 0 || result.PreferenceTasksCreated > 0) {
 		resourceUpdateInfo(logEventResultScanDone).
 			Int("skill_results_expired", result.SkillResultsExpired).
 			Int("skill_tasks_created", result.SkillTasksCreated).
 			Int("skill_draft_tasks_created", result.SkillDraftTasksCreated).
+			Int("preference_tasks_created", result.PreferenceTasksCreated).
 			Msg(logEventResultScanDone)
 	}
 	return result, err

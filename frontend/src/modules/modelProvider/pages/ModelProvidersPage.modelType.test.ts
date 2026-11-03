@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code }));
+vi.mock("@/components/request", () => ({
+  localizeErrorCode: (code: string) => code,
+}));
 
 vi.mock("@/runtime/cloud/session", () => ({
   LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed",
   getCloudSession: vi.fn(),
-	isCloudBusinessAvailable: () => false,
+  isCloudBusinessAvailable: () => false,
   beginCloudLogin: vi.fn(),
 }));
 
@@ -35,6 +37,17 @@ import {
 } from "./ModelProvidersPage";
 
 describe("custom model type mapping", () => {
+  it("keeps unclassified models distinct from chat", () => {
+    expect(mapModelTypeToCapability("")).toBe("UNKNOWN");
+    expect(mapModelTypeToCapability("decisions")).toBe("UNKNOWN");
+    expect(mapModelTypeToCapability("llm")).toBe("LLM_CHAT");
+  });
+  it.each(["cross_modal_embed", "embed_image", "multimodal_embedding"])(
+    "preserves the multimodal embedding capability for %s",
+    (type) => {
+      expect(mapModelTypeToCapability(type)).toBe("MULTIMODAL_EMBEDDING");
+    },
+  );
   it("submits the canonical technical type for embedding models", () => {
     expect(getModelTypeForCapability("EMBEDDING")).toBe("embed");
   });

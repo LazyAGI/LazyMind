@@ -15,6 +15,8 @@ func LazyLLMSource(providerName string) string {
 		"volcengine":    "doubao",
 		"zhipu":         "glm",
 		"zhipuai":       "glm",
+		"vllm":          "openai",
+		"lmdeploy":      "openai",
 	}
 	if source := aliases[normalized]; source != "" {
 		return source

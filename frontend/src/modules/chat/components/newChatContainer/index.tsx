@@ -70,7 +70,7 @@ function getSkillDepositStats(messageList: any[]): SkillDepositStats {
           stats.userTurns += 1;
         }
       }
-      if (item?.role === RoleTypes.ASSISTANT) {
+      if (item?.role === RoleTypes.ASSISTANT && !item?.archived_failure) {
         const toolCallTurns = Number(item.tool_call_turns ?? 0);
         if (Number.isFinite(toolCallTurns) && toolCallTurns > 0) {
           stats.toolCallTurns += toolCallTurns;
@@ -559,6 +559,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
+        {conversation.modelFallbackNotificationHolder}
         <div className="chat-box">
           <div className="chat-main-column">
             <MessageList

@@ -19,6 +19,10 @@ endif
 export DOCKER_BUILDKIT ?= 1
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
+.PHONY: model-catalog
+model-catalog:
+	$(PYTHON) frontend/scripts/generate_upstream_model_catalog.py
+
 GO ?= go
 LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
@@ -338,6 +342,7 @@ lint-state-backend-boundary: install-golangci-lint
 	@echo "🔒 Checking state backend Redis boundary..."
 	@set -e; for dir in $(GO_MODULE_DIRS); do \
 		if [ -f "$$dir/go.mod" ]; then \
+			echo "Checking Redis boundary in $$dir..."; \
 			(cd "$$dir" && "$(GOLANGCI_LINT)" run --config "$(CURDIR)/.golangci.yml" --enable-only depguard --tests=false ./...); \
 		fi; \
 	done

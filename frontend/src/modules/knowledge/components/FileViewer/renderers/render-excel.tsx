@@ -158,6 +158,7 @@ function requiresTableRenderer(fileData: ArrayBuffer): boolean {
 
 interface RenderOfficeProps {
   fileData: ArrayBuffer;
+  onPreviewError?: () => void;
   fileType: "excel";
   content: Segment["content"] | null;
   metadata: Record<string, unknown> | null;
@@ -166,6 +167,8 @@ interface RenderOfficeProps {
 
 const RenderExcel = (props: RenderOfficeProps) => {
   const { fileData, fileType, content, metadata } = props;
+  const errorCallback = useRef(props.onPreviewError);
+  errorCallback.current = props.onPreviewError;
   const reader = useRef<JsPreviewType | null>(null);
   const showFile = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
@@ -425,6 +428,7 @@ const RenderExcel = (props: RenderOfficeProps) => {
         }
       }
     } catch (err) {
+      if (showFile.current) errorCallback.current?.();
       console.error("Office preview error:", err);
     } finally {
       setLoading(false);

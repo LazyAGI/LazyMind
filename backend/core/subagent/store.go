@@ -52,8 +52,8 @@ type CreateTaskInput struct {
 // lockConversationSeq serializes seq_in_conversation allocation per conversation.
 // PostgreSQL forbids FOR UPDATE together with aggregate functions (MAX), so we take a
 // transaction-scoped advisory lock keyed by conversation_id instead. The lock is released
-// automatically when the transaction commits or rolls back. Other dialects (e.g. SQLite in
-// tests) run serially, so this is a no-op there; uq_sat_conv_seq remains the final safeguard.
+// automatically when the transaction commits or rolls back. SQLite writers are serialized
+// by taskTransaction; uq_sat_conv_seq remains the final safeguard.
 func lockConversationSeq(tx *gorm.DB, conversationID string) error {
 	if tx.Dialector.Name() == "postgres" {
 		return tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", conversationID).Error
@@ -72,7 +72,7 @@ func normalizeJSON(raw json.RawMessage, fallback string) json.RawMessage {
 func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubAgentTask, error) {
 	now := time.Now().UTC()
 	var task *orm.SubAgentTask
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
 		if err := lockConversationSeq(tx, in.ConversationID); err != nil {
 			return err
 		}

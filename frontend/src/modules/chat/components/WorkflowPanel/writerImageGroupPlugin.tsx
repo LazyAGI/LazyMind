@@ -6,7 +6,7 @@ import {
   $applyNodeReplacement, $createParagraphNode, $getRoot, $isElementNode, $isParagraphNode, $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, $isTextNode,
   ElementNode, RootNode, setDOMUnmanaged, type LexicalNode, type NodeKey, type SerializedElementNode,
 } from 'lexical';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { WriterImageGroupControls } from './WriterImageGroupControls';
@@ -83,7 +83,8 @@ function GroupControls() {
   const { t } = useTranslation();
   const [groups, setGroups] = useState<ReturnType<typeof groupState>>([]);
   const [editable, setEditable] = useState(false);
-  useEffect(() => {
+  // Publish layout metadata in the same commit as the portal controls.
+  useLayoutEffect(() => {
     for (const group of groups) {
       const element = editor?.getElementByKey(group.key);
       element?.setAttribute('data-layout', imageGroupLayout(configuredGroups, group.images) ?? 'vertical');

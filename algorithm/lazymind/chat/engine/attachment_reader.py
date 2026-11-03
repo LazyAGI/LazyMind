@@ -113,6 +113,8 @@ def _log_parse_done(
 
 
 def read_chat_document_text(file_path: str) -> str:
+    if _suffix(file_path) == '.pptx':
+        raise ValueError('PPTX is not preprocessed or converted. Use pptx_analyzer to inspect native pages on demand.')
     started_at = _log_parse_start(file_path, kind='document')
     reader = _get_document_reader()
     nodes = reader(file_path)
@@ -210,6 +212,12 @@ def build_attachment_reference_prompt(files: List[str], *, priority: int = 0) ->
         try:
             if not is_chat_attachment_file(path):
                 LOG.info(f'[AttachmentReader] unsupported attachment skipped: {path}')
+                continue
+            if _suffix(path) == '.pptx':
+                sections.append(_build_reference_section(
+                    path, 'PPTX uploaded, content NOT read. Use pptx_analyzer on demand; '
+                    'do not convert to PDF or infer contents from the filename.', kind='document',
+                ))
                 continue
             body = parse_attachment_content(path, priority=priority)
             if body:

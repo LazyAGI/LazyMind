@@ -162,7 +162,11 @@ const CreateKnowledgeBaseModal = forwardRef<
     setVisible(false);
   }
 
+  const selectedScene = Form.useWatch("learning_profile_key", form);
   function onSceneChange(key: string) {
+    if (key === "academic_papers" && form.getFieldValue("processing_level") === "stored") {
+      form.setFieldValue("processing_level", processingLevels.find(level => level !== "stored") || "parsed");
+    }
     const builtin = learningCatalog?.profiles.find(item => item.key === key);
     if (builtin) {
       form.setFieldsValue({
@@ -376,7 +380,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                   />
                 </Form.Item>
                 <Form.Item name="learning_profile_key" label={t("learning.capabilityProfile")}>
-                  <Select options={[...(learningCatalog?.profiles || []).map((profile) => ({ value:profile.key, label:t(profile.name_i18n_key) })),...customProfiles.map(profile=>({value:profile.id,label:profile.custom_name})), ...(developerModeActive ? [{value:"custom",label:t("learning.customProfile")}] : [])]}
+                  <Select options={[...(learningCatalog?.profiles || []).map((profile) => ({ value:profile.key, label:t(profile.name_i18n_key), disabled: profile.key === "academic_papers" && !processingLevels.some(level => level !== "stored") })),...customProfiles.map(profile=>({value:profile.id,label:profile.custom_name})), ...(developerModeActive ? [{value:"custom",label:t("learning.customProfile")}] : [])]}
                     onChange={onSceneChange} />
                 </Form.Item>
                 <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_profile_key!==b.learning_profile_key}>{({getFieldValue})=>getFieldValue("learning_profile_key")==="custom"?<Form.Item name="learning_profile_name" label={t("learning.customProfileName")} ><Input/></Form.Item>:null}</Form.Item>
@@ -394,7 +398,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                         <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
                           value: level,
                           label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-                          disabled: !processingLevels.includes(level),
+                          disabled: !processingLevels.includes(level) || (selectedScene === "academic_papers" && level === "stored"),
                         }))} />
                       </Form.Item>
                       {ragReady && algorithm.length !== 1 && (

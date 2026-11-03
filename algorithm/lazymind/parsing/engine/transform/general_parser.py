@@ -9,6 +9,7 @@ from lazyllm.tools.rag import NodeTransform
 from lazyllm.tools.rag.doc_node import DocNode
 
 from lazymind.config import config as _cfg
+from lazymind.embedding_options import embedding_passage_prefix_bytes
 from lazymind.parsing.engine.utils import spawn_child_doc_node
 
 
@@ -71,8 +72,11 @@ class GeneralParser(NodeTransform):
         self._len_split = len(split_by)
 
     def sig_fields(self) -> dict:
-        return {'max_length': self._max_length, 'split_by': self._split_by,
-                'embed_max_input_tokens': _runtime_embed_max_input_tokens(), 'budget_version': 1}
+        fields = {'max_length': self._max_length, 'split_by': self._split_by,
+                  'embed_max_input_tokens': _runtime_embed_max_input_tokens(), 'budget_version': 1}
+        if prefix_bytes := embedding_passage_prefix_bytes():
+            fields['embedding_passage_prefix_bytes'] = prefix_bytes
+        return fields
 
     def _image_path_transform(self, text: str) -> str:
         def _replace(match: re.Match) -> str:
@@ -182,9 +186,12 @@ class GeneralParser(NodeTransform):
         content = ppl(document.text or '')
         if max_input_tokens is not None:
             # Conservative byte budget for byte-based tokenizers, including
-            # Chinese/emoji. Leave room for model prefixes and node metadata.
+            # Chinese/emoji. Account for the exact prefix and retain the
+            # existing reserve for node metadata.
             # Character count alone is not an embedding input bound.
-            budget = max(1, max_input_tokens - min(128, max_input_tokens // 4))
+            budget = max_input_tokens - min(128, max_input_tokens // 4) - embedding_passage_prefix_bytes()
+            if budget <= 0:
+                raise ValueError('embedding passage prefix leaves no room for text within the model input limit')
             fitted = []
             for text in content:
                 part, used = [], 0

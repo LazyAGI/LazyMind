@@ -277,8 +277,9 @@ def _install_fake_build(monkeypatch):
 def _install_fake_translator(monkeypatch):
     """AgentEventFrameTranslator that turns text events into {text:...} frames."""
     class FakeTranslator:
-        def __init__(self, query=''):
+        def __init__(self, query='', run_id=''):
             self.citation_state: Dict[str, Any] = {}
+            self.run = MagicMock(fallback_code='')
 
         def feed(self, item):
             tag = item.get('tag', '')
@@ -617,7 +618,8 @@ async def _run_completion_review_scenario(
 
 
 @pytest.mark.asyncio
-async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path):
+@pytest.mark.parametrize('agent_type', ['research', 'workflow_step'])
+async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path, agent_type):
     verdict = json.dumps({
         'completed': True,
         'requires_artifact': False,
@@ -654,7 +656,7 @@ async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path
 
     monkeypatch.setattr(runner_mod, '_evaluate_completion_async', timed_evaluate)
     _raw, events = await _run_completion_review_scenario(
-        monkeypatch, tmp_path, SlowModel(),
+        monkeypatch, tmp_path, SlowModel(), agent_type=agent_type,
     )
 
     assert timer is not None
@@ -724,7 +726,8 @@ async def test_missing_resumed_file_is_not_completion_evidence(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path):
+@pytest.mark.parametrize('agent_type', ['research', 'workflow_step'])
+async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path, agent_type):
     evaluation_started = threading.Event()
 
     class SlowModel:
@@ -754,7 +757,7 @@ async def test_cancel_during_completion_review_discards_late_success(monkeypatch
         evaluation_boundary = asyncio.get_running_loop().time()
 
     raw, events = await _run_completion_review_scenario(
-        monkeypatch, tmp_path, SlowModel(), before_final=before_final,
+        monkeypatch, tmp_path, SlowModel(), before_final=before_final, agent_type=agent_type,
     )
 
     assert asyncio.get_running_loop().time() - evaluation_boundary < 0.15
@@ -1005,9 +1008,15 @@ def test_stopped_task_never_evaluates_or_succeeds(completion_case, stopped):
 def test_workflow_output_contracts_keep_their_existing_rules(completion_case, params, save, expected):
     events, model, _ = completion_case(
         agent_type='workflow_step', params=params, output_slots=['document'], save=save,
+        objective='Explain the result.' if not params else 'Generate the declared document.',
+        verdict={'completed': True, 'requires_artifact': False, 'artifact_keys': [],
+                 'reason': 'The explanation is complete.'},
     )
     assert _terminal(events)['status'] == expected
-    model.share.assert_not_called()
+    if params:
+        model.share.assert_not_called()
+    else:
+        model.share.assert_called_once()
 
 
 def test_text_cannot_replace_a_declared_file_artifact(completion_case):
@@ -1036,13 +1045,9 @@ def test_required_text_draft_is_committed_before_completion(completion_case):
 
 
 @pytest.mark.parametrize('final', [
-    '成功 9 页，0 失败。',
     '成功 9 页，失败 0。',
-    'The first conversion failed, but the retry succeeded.',
-    'I cannot complete the required action.',
-    '缺少页脚，需要用户审核。',
 ])
-def test_workflow_summary_does_not_introduce_model_review(completion_case, final):
+def test_workflow_zero_failure_counts_do_not_introduce_model_review(completion_case, final):
     events, model, _ = completion_case(
         agent_type='workflow_step', final=final,
         params={'required_output_artifact_keys': ['document'],
@@ -1054,6 +1059,59 @@ def test_workflow_summary_does_not_introduce_model_review(completion_case, final
     assert _terminal(events)['status'] == 'succeeded'
     assert any(event['type'] == 'artifact' for event in events)
     model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('final,completed', [
+    ('成功 9 页，0 失败。', True),
+    ('The first conversion failed, but the retry succeeded.', True),
+    ('I cannot complete the required action.', False),
+    ('缺少页脚，需要用户审核。', False),
+])
+def test_workflow_uncertain_completion_is_reviewed_without_losing_artifacts(completion_case, final, completed):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', final=final,
+        params={'required_output_artifact_keys': ['document'],
+                'output_slot_types': {'document': 'file'}},
+        output_slots=['document'], save=('document', 'file'),
+        verdict={'completed': completed, 'requires_artifact': True, 'artifact_keys': ['document'],
+                 'reason': 'Required action completed.' if completed else 'Required action incomplete.'},
+    )
+    assert _terminal(events)['status'] == ('succeeded' if completed else 'failed')
+    assert any(event['type'] == 'artifact' for event in events)
+    model.share.assert_called_once()
+
+
+@pytest.mark.parametrize('objective,final,completed', [
+    ('使用记忆写入工具更新项目记忆文件。', '步骤结论：任务失败，缺少更新记忆文件工具，未写入任何文件。', False),
+    ('读取章节并提出复核意见，不写入文件。', '已完成复核，情节与摘要一致。', True),
+])
+def test_workflow_without_outputs_checks_actual_completion(completion_case, objective, final, completed):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', objective=objective, final=final,
+        params={'required_output_artifact_keys': []}, output_slots=[],
+        verdict={'completed': completed, 'requires_artifact': False, 'artifact_keys': [], 'reason': final},
+    )
+    terminal = _terminal(events)
+    assert terminal['status'] == ('succeeded' if completed else 'failed')
+    assert terminal['summary'] == final
+    if not completed:
+        assert terminal['type'] == 'error'
+        assert terminal['current_phase'] == 'objective_incomplete'
+    assert not any(event['type'] == 'artifact' for event in events)
+    model.share.assert_called_once()
+
+
+def test_completed_negative_review_is_not_an_execution_failure(completion_case):
+    final = '复核完成：passed=false，章节超过用户要求的200字，审核失败。'
+    events, model, _ = completion_case(
+        agent_type='workflow_step', objective='审核章节，输出审核结果，可以通过或不通过。', final=final,
+        params={'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'text'}},
+        output_slots=['document'], save=('document', 'text'),
+        verdict={'completed': True, 'requires_artifact': True, 'artifact_keys': ['document'], 'reason': final},
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_called_once()
+    assert 'negative findings' in model.share.return_value.call_args.args[0]
 
 
 def test_workflow_without_model_review_still_requires_actual_delivery(completion_case):
@@ -1145,6 +1203,24 @@ def test_completion_review_keeps_reasoning_separate_from_json(monkeypatch, verdi
     assert llm._stream is False
     assert llm._formatter is original_formatter
     enqueue.assert_not_called()
+
+
+def test_completion_review_preserves_json_artifact_evidence(monkeypatch):
+    content = {'user_instruction': "研究 O'Reilly 的方法", 'papers': []}
+
+    def review(_model, prompt):
+        line = next(line for line in prompt.splitlines() if line.startswith('Actually saved artifacts: '))
+        evidence = json.loads(line.split(': ', 1)[1])
+        assert json.loads(evidence[0]['value']) == {'data': content}
+        return json.dumps({'completed': True, 'requires_artifact': True,
+                           'artifact_keys': ['result'], 'reason': 'JSON result was saved.'})
+
+    monkeypatch.setattr(runner_mod, '_silent_background_model_call', review)
+    completed, _, phase = runner_mod._evaluate_completion(
+        object(), 'Save a JSON result', [],
+        [{'slot': 'result', 'content_type': 'json', 'value': {'data': content}}], 'Saved',
+    )
+    assert completed and phase == ''
 
 
 @pytest.mark.parametrize('during_evaluation', [False, True])
@@ -1250,6 +1326,73 @@ def test_subagent_plan_preserves_extension_params_without_structured_duplicates(
     assert all(section.section_id != 'editable_writing' for section in plan.prompt.sections)
 
 
+@pytest.mark.parametrize('agent_type', ['workflow_step', 'general'])
+def test_empty_output_contract_does_not_invite_undeclared_workflow_artifacts(tmp_path, agent_type):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='empty-outputs', conversation_id='conversation', agent_type=agent_type,
+        objective='Update project memory using the declared writer.', params={},
+        workspace_path=str(tmp_path), input_slots=[], output_slots=[], db=None,
+        emit=lambda _event: None,
+    )
+    plan = runner_mod._build_subagent_plan(ctx, None, tools=[], tool_prompt_appendices={})
+    contract = next(s.content for s in plan.prompt.sections if s.section_id == 'subagent_output_contract')
+    if agent_type == 'workflow_step':
+        assert 'an empty declared list forbids artifact writes' in contract
+        assert 'report the missing capability as a task failure' in contract
+        assert 'can still require a deliverable: save it' not in contract
+        assert 'Exact save_artifacts call shape' not in contract
+    else:
+        assert 'can still require a deliverable: save it' in contract
+        assert 'Exact save_artifacts call shape' in contract
+
+
+@pytest.mark.parametrize('params,expected', [
+    ({'user_input': '请写约200字的章节。'}, '请写约200字的章节。'),
+    ({'launch_user_input': '请写约200字的章节。', 'user_input': '继续',
+      'current_user_input': '继续'}, '请写约200字的章节。'),
+    ({'launch_user_input': '请写约200字的章节。', 'current_user_input': '重新执行',
+      'runtime_instruction': '本次改为约300字。'}, '本次改为约300字。'),
+])
+def test_workflow_plan_keeps_runtime_length_above_step_defaults_without_db(tmp_path, params, expected):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='runtime-length', conversation_id='conversation', agent_type='workflow_step',
+        objective='生成2000–3000字的章节并保存到chapter_text。', params=params,
+        workspace_path=str(tmp_path), input_slots=[], output_slots=['chapter_text'], db=None,
+        emit=lambda _event: None,
+    )
+    plan = runner_mod._build_subagent_plan(ctx, None, tools=[], tool_prompt_appendices={})
+    intent = next(s for s in plan.prompt.sections if s.section_id == 'subagent_intent')
+    assert expected in intent.content
+    assert '请写约200字的章节。' in intent.content
+    assert intent.authoritative
+    assert intent.content_kind == 'instruction'
+    assert 'instead of conflicting defaults or examples in the step prompt' in intent.content
+    assert 'declared output keys/types' in intent.content
+    assert 'tool permissions, workflow transitions or approval gates' in intent.content
+    assert '继续' not in intent.content
+    assert '重新执行' not in intent.content
+    contract = next(s.content for s in plan.prompt.sections if s.section_id == 'subagent_output_contract')
+    assert 'chapter_text' in contract
+
+
+def test_completion_review_uses_the_same_runtime_length_requirement(completion_case):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', objective='生成2000–3000字章节。',
+        params={'launch_user_input': '请写约200字的章节。', 'runtime_instruction': '本次改为约300字。'},
+        output_slots=[], final='已完成约300字的章节。',
+        verdict={'completed': True, 'requires_artifact': False, 'artifact_keys': [], 'reason': '满足本次字数要求。'},
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    prompt = model.share.return_value.call_args.args[0]
+    assert '请写约200字的章节。' in prompt
+    assert '本次改为约300字。' in prompt
+    assert 'runtime content requirements over conflicting step defaults' in prompt
+
+
 def test_subagent_plan_uses_200_rounds_in_max_mode(tmp_path):
     import lazyllm
     from lazymind.chat.engine.subagent.context import SubAgentContext
@@ -1345,14 +1488,15 @@ def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
 
 
 @pytest.mark.parametrize('retrieval', [False, True])
-def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retrieval):
+@pytest.mark.parametrize('tools_only', [False, True])
+def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retrieval, tools_only):
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
     monkeypatch.setitem(runner_mod.lazyllm.globals, 'agentic_config', {'enable_tool_retrieval': retrieval})
     ctx = SubAgentContext(
         task_id='task-workflow-skill', conversation_id='conv-1', agent_type='workflow_step',
         objective='generate a presentation background',
-        params={'_inherited_skills': ['design/image-prompt-craft']},
+        params={'_inherited_skills': ['design/image-prompt-craft'], 'tools_only': tools_only},
         workspace_path=str(tmp_path), input_slots=[], output_slots=[], db=None,
         emit=lambda _event: None,
     )
@@ -1365,7 +1509,7 @@ def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retri
     assert plan.execution_options.fs is None
     assert plan.execution_options.skills_dir is None
     assert plan.execution_options.preload_all_tools is True
-    assert plan.execution_options.enable_builtin_tools is (False if retrieval else None)
+    assert plan.execution_options.enable_builtin_tools is (False if retrieval or tools_only else None)
 
 
 # ---------------------------------------------------------------------------
@@ -1580,7 +1724,8 @@ def test_run_subagent_stream_missing_artifact_emits_error(monkeypatch):
 # Test: AgentExecutor raises → outer except → error frame
 # ---------------------------------------------------------------------------
 
-def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
+@pytest.mark.parametrize('argument_failure', [False, True])
+def test_run_subagent_stream_agent_exception_emits_error(monkeypatch, argument_failure):
     _install_fake_db(monkeypatch)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
@@ -1588,6 +1733,8 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
 
     class ExplodingExecutor:
         async def stream(self, llm, plan):
+            if argument_failure:
+                raise runner_mod.ToolArgumentRetryExhausted('参数修复次数已耗尽')
             raise RuntimeError('llm exploded')
             yield  # pragma: no cover
 
@@ -1602,7 +1749,12 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
     events_out = _sse_to_events(raw)
     error_events = [e for e in events_out if e.get('type') == 'error']
     assert error_events
-    assert 'llm exploded' in error_events[0]['message']
+    if argument_failure:
+        assert error_events[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
+        assert '参数修复次数已耗尽' in error_events[0]['message']
+    else:
+        assert 'llm exploded' in error_events[0]['message']
+        assert 'error_code' not in error_events[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1886,7 +2038,7 @@ def test_fastapi_subagent_launch_identity_reaches_runner_privately(monkeypatch, 
     _install_fake_db(monkeypatch, task)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_translator(monkeypatch)
-    monkeypatch.setattr(runner_mod, '_resolve_runtime_tools', lambda *_: [])
+    monkeypatch.setattr(runner_mod, '_resolve_runtime_tools', lambda *_, **__: [])
     monkeypatch.setattr(runner_mod, '_build_subagent_tools', lambda *_, **__: [])
     configs, prompts = [], []
     runner_mod.lazyllm.globals.__setitem__.side_effect = lambda key, value: configs.append(value) if key == 'agentic_config' else None
@@ -2074,9 +2226,17 @@ def test_zero_failure_counter_does_not_trigger_extra_review(completion_case, fin
     model.share.assert_not_called()
 
 
-@pytest.mark.parametrize('text', ['失败 01', '失败 0.5', 'failed: 0.5', '失败 0，但缺少页脚', 'failed: 0, missing footer'])
+@pytest.mark.parametrize('text', [
+    '失败 01', '失败 0.5', 'failed: 0.5', '失败 0，但缺少页脚', 'failed: 0, missing footer',
+    '无失败项，但缺少页脚', '没有任何失败记录，但未完成保存', '没有失败原因说明',
+])
 def test_zero_counter_does_not_hide_real_concerns(text):
     assert runner_mod._has_completion_concern(text)
+
+
+@pytest.mark.parametrize('text', ['全部通过，无失败项。', '没有任何失败记录。', '没有失败。'])
+def test_explicit_failure_negation_does_not_request_a_second_verdict(text):
+    assert not runner_mod._has_completion_concern(text)
 
 
 def test_completion_retries_invalid_format_once_and_accepts_fenced_content():
@@ -2097,8 +2257,10 @@ def test_completion_invalid_format_retry_preserves_negative_verdict():
     assert model.share.call_count == 2
 
 
-def test_invalid_reviewer_retains_saved_delivery(completion_case):
+@pytest.mark.parametrize('agent_type', ['document_generation', 'workflow_step'])
+def test_invalid_reviewer_retains_saved_delivery(completion_case, agent_type):
     events, model, _ = completion_case(
+        agent_type=agent_type, params={'required_output_artifact_keys': ['document']},
         output_slots=['document'], save=('document', 'file'),
         final='The conversion failed before retrying.', verdict={'completed': 'true'},
     )
@@ -2209,8 +2371,9 @@ async def test_subagent_forwards_execution_scoped_operation_receipts(monkeypatch
 def test_attachment_registration_cannot_bypass_subagent_visibility(agent_type, params):
     config = {'files': {'1': ['paper.pdf']}, 'disabled_tools': ['find_user_attachment', 'string_replace']}
     configs = runner_mod._resolve_attachment_configs(config, agent_type, params)
-    assert [item.name for item in configs] == ['read_user_attachment']
-    config['disabled_tools'].append('read_user_attachment')
+    expected = ['pptx_analyzer', 'read_user_attachment', 'edit_presentation'] if agent_type == 'research' else ['read_user_attachment']
+    assert [item.name for item in configs] == expected
+    config['disabled_tools'].extend(expected)
     assert runner_mod._resolve_attachment_configs(config, agent_type, params) == []
 
 
@@ -2218,3 +2381,68 @@ def test_subagent_has_no_unscoped_knowledge_management_helper(monkeypatch):
     # Native retrieval being ready must not expose the old management API outside MCP.
     monkeypatch.setattr(runner_mod, 'tool_is_active', lambda _: True)
     assert runner_mod.subagent_tools.list_knowledge_bases not in runner_mod._build_subagent_tools([])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tools_only,tools,enabled', [
+    (False, [], True),
+    (True, [], False),
+    (True, ['knowledge_management'], True),
+])
+async def test_restricted_subagent_only_enables_declared_knowledge_runtime(monkeypatch, tools_only, tools, enabled):
+    from lazymind.chat.service import knowledge_management
+    task = {**_DEFAULT_TASK, 'params': {**_DEFAULT_TASK['params'], 'tools_only': tools_only}}
+    _install_fake_db(monkeypatch, task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    _install_fake_drive(monkeypatch, [])
+    build = MagicMock(return_value=None)
+    monkeypatch.setattr(knowledge_management, 'build_knowledge_runtime', build)
+    raw = await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, task_spec=task, tools=tools))
+    assert 'task_start' in raw
+    assert build.call_count == int(enabled)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('page_count', [9, 10, 11])
+async def test_issue869_outline_count_does_not_trigger_model_verdict(monkeypatch, tmp_path, page_count):
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={'required_output_artifact_keys': ['slide_outline'],
+                'output_slot_types': {'slide_outline': 'text'}},
+        output_slots=['slide_outline'],
+        artifacts=[{'slot': 'slide_outline', 'content_type': 'text', 'seq': index + 1,
+                    'value': {'text': f'Page {index + 1} outline'}} for index in range(page_count)],
+        final=f'已发布 {page_count} 条 outline，全部通过，无失败项。',
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing_required', [False, True])
+async def test_issue869_material_collection_does_not_require_skip_marker(monkeypatch, tmp_path, missing_required):
+    import yaml
+    from pathlib import Path
+
+    state_path = Path(__file__).parents[3] / 'workflows/ppt-workflow/scenario/state.yml'
+    state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
+    outputs = state['steps']['analyze_requirements']['outputs']
+    required = [item['material'] for item in outputs if item.get('required', True)]
+    assert 'skip_material_collection' not in required
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={'required_output_artifact_keys': required,
+                'output_slot_types': {item['material']: 'text' for item in outputs}},
+        output_slots=[item['material'] for item in outputs],
+        artifacts=[{'slot': key, 'content_type': 'text', 'seq': index + 1, 'value': {'text': 'saved'}}
+                   for index, key in enumerate(required)
+                   if not (missing_required and key == 'requirement_analysis')],
+        final='' if missing_required else '需求分析完成，需要收集真实素材，未设置 skip_material_collection。',
+    )
+    assert _terminal(events)['status'] == ('failed' if missing_required else 'succeeded')
+    if missing_required:
+        assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()

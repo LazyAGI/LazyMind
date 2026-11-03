@@ -68,6 +68,39 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
+func TestOrdinaryModelFallbackOpenAPIUsesSharedPublicFacts(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	for _, name := range []string{"TaskEvent", "TaskModelRuntimeEvent"} {
+		if schemas[name] == nil {
+			t.Fatalf("missing task execution contract %s", name)
+		}
+	}
+	properties := func(name string) map[string]any { return schemas[name].(map[string]any)["properties"].(map[string]any) }
+	for _, name := range []string{"PublicProcessStep", "OrdinaryTaskView"} {
+		if ref := properties(name)["model_switch"].(map[string]any)["$ref"]; ref != "#/components/schemas/ChatModelSwitchRecord" {
+			t.Fatalf("%s duplicated the switch record: %v", name, ref)
+		}
+	}
+	if ref := properties("TaskEvent")["model_output"].(map[string]any)["$ref"]; ref != "#/components/schemas/ChatModelOutput" {
+		t.Fatalf("task call identity differs from Chat: %v", ref)
+	}
+	if got := properties("TaskModelRuntimeEvent")["type"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []any{"model_switched"}) {
+		t.Fatalf("task runtime exposed unrelated SDK or Chat terminal events: %v", got)
+	}
+	if got := properties("OrdinaryTaskView")["failure_code"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []any{"model_fallback_exhausted", "model_context_not_fit"}) {
+		t.Fatalf("unstable ordinary recovery codes: %v", got)
+	}
+	private := subagentModelSchemas()["SubagentRunRequest"].(map[string]any)["properties"].(map[string]any)
+	for _, field := range []string{"model_fallback_current_id", "model_fallback_candidates", "model_fallback_initial_switch"} {
+		if private[field] == nil {
+			t.Fatalf("private execution input missing %s", field)
+		}
+	}
+	if private["inherited_model_origin"] != nil || schemas["SubagentRunRequest"] != nil || schemas["TaskModelCandidate"] != nil || schemas["TaskModelFallbackInitialSwitch"] != nil {
+		t.Fatal("Core trust origin became a client input")
+	}
+}
+
 func TestChatHTTPErrorsReuseRunTerminalContract(t *testing.T) {
 	schemas := manualSchemas()
 	response := schemaPropertiesForTest(t, schemas, "ChatErrorResponse")
@@ -1324,7 +1357,7 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	if !ok {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest properties missing")
 	}
-	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active", "sensitive_word_filter_enabled", "schedules_enabled", "skills_enabled", "workflows_enabled"} {
+	for _, name := range []string{"chat_preference_notice_dismissed", "workflow_trust_notice_dismissed", "developer_mode_active", "sensitive_word_filter_enabled", "schedules_enabled", "skills_enabled", "workflows_enabled"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("userUIPreferencesPatchOpenAPIRequest expected property %q", name)
 		}
@@ -2127,5 +2160,78 @@ func TestOpenAPISkillDiscoveryMetadataAndOrganizationPolicy(t *testing.T) {
 	}
 	if _, ok := responses["200"]; ok {
 		t.Error("retired choice endpoint cannot advertise successful mutation")
+	}
+}
+
+func TestOpenAPIModelFallbackContainsOnlyPublicRecords(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, name := range []string{"ChatChunkResponse", "ConversationHistoryItem", "FailedRunAttempt"} {
+		properties := schemaPropertiesForTest(t, schemas, name)
+		field, ok := properties["model_switches"].(map[string]any)
+		if !ok || field["type"] != "array" || field["items"].(map[string]any)["$ref"] != "#/components/schemas/ChatModelSwitchRecord" {
+			t.Fatalf("%s has no public replacement record array", name)
+		}
+	}
+	data := schemaPropertiesForTest(t, schemas, "ChatModelSwitchedData")
+	for _, field := range []string{"switch_index", "from", "to", "reason_code", "from_max_input_tokens", "to_max_input_tokens", "context_compacted"} {
+		if _, ok := data[field]; !ok {
+			t.Fatalf("missing replacement fact %s", field)
+		}
+	}
+	for _, field := range []string{"phase", "model_call_id", "status"} {
+		if _, ok := data[field]; ok {
+			t.Fatalf("successful switch contains attempt metadata %s", field)
+		}
+	}
+	finished := schemaPropertiesForTest(t, schemas, "ModelCallFinishedData")
+	for _, field := range []string{"candidate_id", "switch_index", "fallback_code"} {
+		if _, ok := finished[field]; ok {
+			t.Fatalf("SDK outcome contains Host switch metadata %s", field)
+		}
+	}
+	if strings.Contains(string(raw), "model_fallback_candidates") || strings.Contains(string(raw), "model_fallback_current_id") || strings.Contains(string(raw), "model_fallback_initial_switch") {
+		t.Fatal("Host-private candidate wire entered public OpenAPI")
+	}
+}
+
+func TestOpenAPIModelOutputProjectionMetadata(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	metadata := schemaPropertiesForTest(t, schemas, "ChatModelOutput")
+	for _, field := range []string{"run_id", "call_index", "phase"} {
+		if _, ok := metadata[field]; !ok {
+			t.Fatalf("metadata missing %s", field)
+		}
+	}
+	if metadata["call_index"].(map[string]any)["minimum"] != float64(0) {
+		t.Fatal("Core's closed initial cursor must be representable")
+	}
+	for _, name := range []string{"ChatChunkResponse", "ConversationHistoryItem"} {
+		properties := schemaPropertiesForTest(t, schemas, name)
+		if properties["model_output"].(map[string]any)["$ref"] != "#/components/schemas/ChatModelOutput" {
+			t.Fatalf("%s has no output cursor", name)
+		}
+	}
+	if _, ok := schemaPropertiesForTest(t, schemas, "FailedRunAttempt")["model_output"]; ok {
+		t.Fatal("static failed attempts must not acquire an active cursor")
 	}
 }

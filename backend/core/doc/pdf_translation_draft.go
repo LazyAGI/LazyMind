@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +14,60 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
+
+var (
+	errPDFTranslationSourceMissing = errors.New("translation service is not configured")
+	errPDFRevisionSourceChanged    = errors.New("translation source changed; retranslate the block with the currently selected source")
+	errPDFRevisionSourceInvalid    = errors.New("provider_type and provider must both be supplied for a retranslated block")
+)
+
+func loadCurrentPDFTranslationSnapshot(ctx context.Context, db *gorm.DB, userID string) (*modelconfig.TranslationConfigSnapshot, error) {
+	config, err := modelconfig.LoadTranslationConfigSnapshot(ctx, db, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load translation service: %w", err)
+	}
+	if config == nil {
+		return nil, errPDFTranslationSourceMissing
+	}
+	return config, nil
+}
+
+// A manual edit keeps its source artifact's provenance. API retranslation must
+// name the source returned by the retranslation request and still selected now.
+func resolvePDFRevisionProvenance(ctx context.Context, db *gorm.DB, userID string, base pdfArtifactRecord, providerType, provider string) (pdfArtifactRecord, error) {
+	providerType, provider = strings.ToLower(strings.TrimSpace(providerType)), strings.TrimSpace(provider)
+	if providerType == "" && provider == "" {
+		return base, nil
+	}
+	if providerType == "" || provider == "" {
+		return pdfArtifactRecord{}, errPDFRevisionSourceInvalid
+	}
+	switch providerType {
+	case "api":
+		config, err := loadCurrentPDFTranslationSnapshot(ctx, db, userID)
+		if err != nil {
+			return pdfArtifactRecord{}, err
+		}
+		if !strings.EqualFold(provider, config.ProviderName) {
+			return pdfArtifactRecord{}, errPDFRevisionSourceChanged
+		}
+		base.ProviderType, base.Provider, base.Model = "api", config.ProviderName, ""
+	case "llm":
+		if provider != "LazyMind LLM" {
+			return pdfArtifactRecord{}, errPDFRevisionSourceInvalid
+		}
+		base.ProviderType, base.Provider, base.Model = "llm", "LazyMind LLM", "document-context"
+	default:
+		return pdfArtifactRecord{}, errPDFRevisionSourceInvalid
+	}
+	return base, nil
+}
 
 func loadPDFTranslationDraft(ext documentExt, artifactID string) (*pdfArtifactRecord, pdfTranslationDraft, error) {
 	artifact := findArtifact(ext, artifactID)
@@ -89,12 +140,27 @@ func RetranslatePDFDraftBlock(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "translation draft block not found", http.StatusNotFound)
 		return
 	}
-	translated, err := translateDocumentChunk(r.Context(), store.UserID(r), providerType, block.SourceText, draft.TargetLanguage)
+	provider := "LazyMind LLM"
+	var apiConfig *modelconfig.TranslationConfigSnapshot
+	if providerType == "api" {
+		apiConfig, err = loadCurrentPDFTranslationSnapshot(r.Context(), store.DB(), store.UserID(r))
+		if err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, errPDFTranslationSourceMissing) {
+				status = http.StatusPreconditionFailed
+			}
+			common.ReplyErr(w, err.Error(), status)
+			return
+		}
+		provider = apiConfig.ProviderName
+	}
+	translated, err := translateDocumentChunk(r.Context(), store.UserID(r), providerType, block.SourceText, draft.TargetLanguage, apiConfig)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	common.ReplyOK(w, map[string]any{"block_id": block.ID, "translated_text": translated})
+	common.ReplyOK(w, map[string]any{"block_id": block.ID, "translated_text": translated,
+		"provider_type": providerType, "provider": provider})
 }
 
 func copyTranslationFile(source, destination string) error {
@@ -127,7 +193,9 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Overrides map[string]string `json:"overrides"`
+		Overrides    map[string]string `json:"overrides"`
+		ProviderType string            `json:"provider_type,omitempty"`
+		Provider     string            `json:"provider,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Overrides) == 0 {
 		common.ReplyErr(w, "at least one translation override is required", http.StatusBadRequest)
@@ -145,6 +213,19 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		translations[id] = strings.TrimSpace(value)
+	}
+	provenance, err := resolvePDFRevisionProvenance(r.Context(), store.DB(), store.UserID(r), *base, req.ProviderType, req.Provider)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, errPDFTranslationSourceMissing) {
+			status = http.StatusPreconditionFailed
+		} else if errors.Is(err, errPDFRevisionSourceChanged) {
+			status = http.StatusConflict
+		} else if !errors.Is(err, errPDFRevisionSourceInvalid) {
+			status = http.StatusInternalServerError
+		}
+		common.ReplyErr(w, err.Error(), status)
+		return
 	}
 	if base.SourcePath == "" || base.LayoutPath == "" {
 		common.ReplyErr(w, "translation source or layout is unavailable", http.StatusUnprocessableEntity)
@@ -216,7 +297,7 @@ func RevisePDFTranslation(w http.ResponseWriter, r *http.Request) {
 	artifact := pdfArtifactRecord{ID: artifactID, Kind: pdfArtifactTranslation, CacheKey: base.CacheKey + ":revision:" + artifactID,
 		StoredPath: outputPath, SourcePath: sourcePath, LayoutPath: layoutPath, DraftPath: draftPath, HasLayout: true, HasDraft: true,
 		Filename: filename, ContentType: mime.TypeByExtension(".pdf"), TargetLanguage: base.TargetLanguage,
-		ProviderType: base.ProviderType, Provider: base.Provider, Model: base.Model, WarningCount: renderResult.WarningCount,
+		ProviderType: provenance.ProviderType, Provider: provenance.Provider, Model: provenance.Model, WarningCount: renderResult.WarningCount,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	ext.PDFArtifacts = append(ext.PDFArtifacts, artifact)
 	rawExt, err := json.Marshal(ext)

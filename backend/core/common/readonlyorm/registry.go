@@ -25,6 +25,11 @@ func Specs() []TableSpec {
 		},
 		{
 			Schema:          schema,
+			Table:           "lazyllm_doc_parse_state",
+			RequiredColumns: requiredColumnsOf(reflect.TypeOf(LazyLLMDocParseStateRow{})),
+		},
+		{
+			Schema:          schema,
 			Table:           "lazyllm_kb_documents",
 			RequiredColumns: requiredColumnsOf(reflect.TypeOf(LazyLLMKBDocRow{})),
 		},

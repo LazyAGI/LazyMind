@@ -1,4 +1,5 @@
 vi.mock('./writerListNumberingPlugin', () => ({ writerListNumberingPlugin: () => ({}) }));
+vi.mock('./writerImageDownloadPlugin', () => ({ writerImageDownloadPlugin: () => ({}) }));
 vi.mock('./writerLocalSourcePlugin', () => ({ writerLocalSourcePlugin: () => ({}), writerLocalCodeEditor: {} }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';

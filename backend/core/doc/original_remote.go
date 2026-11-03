@@ -110,7 +110,11 @@ func (s *OriginalService) acquireResponse(ctx context.Context, caller DatasetCat
 	if resp.StatusCode != http.StatusOK {
 		return OriginalRef{}, fmt.Errorf("original download returned HTTP %d", resp.StatusCode)
 	}
-	if resp.ContentLength > originalMaxBytes {
+	limit := originalMaxBytes
+	if req.MaxBytes > 0 && req.MaxBytes < limit {
+		limit = req.MaxBytes
+	}
+	if resp.ContentLength > limit {
 		return OriginalRef{}, errors.New("original exceeds size limit")
 	}
 	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" && encoding != "identity" {
@@ -148,11 +152,11 @@ func (s *OriginalService) acquireResponse(ctx context.Context, caller DatasetCat
 		expected = actualMIME
 	}
 	// HTML is a valid explicit web document, but cannot masquerade as a PDF or office original.
-	ref, err := s.AcquireOriginal(ctx, caller, AcquireOriginalRequest{Filename: name, ContentType: expected, Reader: resp.Body, FinalURL: finalURL})
+	ref, err := s.AcquireOriginal(ctx, caller, AcquireOriginalRequest{Filename: name, ContentType: expected, Reader: io.LimitReader(resp.Body, limit+1), FinalURL: finalURL})
 	if err != nil {
 		return OriginalRef{}, err
 	}
-	if resp.ContentLength >= 0 && ref.Size != resp.ContentLength {
+	if ref.Size > limit || resp.ContentLength >= 0 && ref.Size != resp.ContentLength {
 		s.discardOriginal(ctx, caller, ref.FileRef)
 		return OriginalRef{}, io.ErrUnexpectedEOF
 	}

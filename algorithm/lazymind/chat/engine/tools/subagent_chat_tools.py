@@ -160,13 +160,15 @@ def create_subagent(
     conversation continues; or the work is simple enough to handle with ordinary tools or direct
     reasoning. When in doubt, do NOT create a SubAgent — instead, continue in the main
     conversation and ask the user to confirm any missing critical information first.
+    For a simple image request, call image_generator directly. Do not create a SubAgent
+    or search/load Skills merely to generate an image; the image tool handles configuration.
 
     To resume an interrupted task, set resume=True and pass the interrupted task's title so it
     continues from its last step.
 
     Args:
-        agent_type (str): The kind of SubAgent, e.g. 'image_generation', 'research'.
-        title (str): A short human-readable task title, e.g. 'generate image'.
+        agent_type (str): The kind of SubAgent, e.g. 'research', 'batch_processing'.
+        title (str): A short human-readable task title, e.g. 'research a topic'.
         objective (str): A clear description of what the SubAgent must accomplish.
         params (dict): Optional parameters for the task, e.g. {"count": 4}.
         input_slots (list): Slot ids this SubAgent may read from prior tasks.
@@ -184,6 +186,22 @@ def create_subagent(
         In auto mode, a summary after the SubAgent finishes. In manual mode, an immediate
         acknowledgement that the task is running in the background.
     """
+    # A media task cannot bypass the direct tool's configuration gate by
+    # delegating to an agent. Check before emitting task_created or polling.
+    media_role = {
+        'image_generation': 'image_generator',
+        'image_generator': 'image_generator',
+        'image_editing': 'image_editor',
+        'image_editor': 'image_editor',
+        'video_generation': 'video_generator',
+        'video_generator': 'video_generator',
+    }.get(str(agent_type or '').strip().lower())
+    if media_role:
+        from .multimodal import _missing_media_model_result
+        missing = _missing_media_model_result(media_role)
+        if missing is not None:
+            return missing
+
     mode = _mode()
     params = dict(params or {})
     cfg = _agentic_config()

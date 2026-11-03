@@ -78,6 +78,7 @@ import {
 } from '@/modules/knowledge/utils/imageUrl';
 import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
 import { writerEmptyHeadingPlugin } from './writerEmptyHeadingPlugin';
+import { writerImageDownloadPlugin } from './writerImageDownloadPlugin';
 import { writerListNumberingPlugin } from './writerListNumberingPlugin';
 import {
   applyWriterMarkdownInternalReference,
@@ -428,6 +429,7 @@ interface MarkdownArtifactEditorProps {
   toolbarActions?: ReactNode;
   markdown: string;
   resolveImageUrl?: MarkdownImageResolver;
+  onDownloadImage?: (source: string) => Promise<void>;
   numbering?: WriterNumberingState;
   numberingDocument?: string;
   sourceRevision: number;
@@ -505,6 +507,7 @@ export function MarkdownArtifactEditor({
   markdown,
   renderContext,
   resolveImageUrl,
+  onDownloadImage,
   numbering,
   numberingDocument,
   sourceRevision,
@@ -2116,6 +2119,7 @@ export function MarkdownArtifactEditor({
               imagePlugin({
                 imagePreviewHandler: resolveImageUrl ?? resolveMarkdownImageUrlAsync,
               }),
+              writerImageDownloadPlugin({ onDownload: onDownloadImage }),
               codeBlockPlugin({ defaultCodeBlockLanguage: 'text', codeBlockEditorDescriptors: [writerLocalCodeEditor] }),
               codeMirrorPlugin({ codeBlockLanguages: MARKDOWN_CODE_LANGUAGES }),
               markdownShortcutPlugin(),
