@@ -31,6 +31,7 @@ from lazyllm.tools.writer.utils import (
     parse_document_markdown,
     save_artifact_json,
     set_document_editable,
+    strip_heading_numbering,
     writer_document_from_lmd,
     writer_document_to_lmd,
     writer_document_to_markdown,
@@ -305,7 +306,7 @@ def _primary_data(result: dict) -> Any:
 
 
 def _markdown_heading_key(value: str) -> str:
-    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    text = strip_heading_numbering(str(value or ''))
     return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
 
 
@@ -329,6 +330,19 @@ def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
                 (index, len(heading.group('marks')), heading.group('title').strip())
             )
     return rows
+
+
+def normalize_generated_markdown(markdown: str) -> str:
+    """Remove numbering from generated headings."""
+    lines = markdown.splitlines(keepends=True)
+    for index, level, title in _markdown_heading_rows([line.rstrip('\r\n') for line in lines]):
+        if level == 1:
+            continue
+        clean = strip_heading_numbering(title)
+        if clean != title:
+            heading = _MARKDOWN_ATX_HEADING_RE.match(lines[index].rstrip('\r\n'))
+            lines[index] = lines[index][:heading.start('title')] + clean + lines[index][heading.end('title'):]
+    return ''.join(lines)
 
 
 def _normalize_streamed_markdown_section(
