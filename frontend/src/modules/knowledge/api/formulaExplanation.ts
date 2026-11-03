@@ -3,6 +3,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {axiosInstance, BASE_URL} from '@/components/request';
 import {AgentAppsAuth, AUTH_LOGOUT_EVENT, AUTH_USER_CHANGE_EVENT} from '@/components/auth';
 import type {PdfIRTarget} from './pdfIR';
+import {usePaperReaderSession} from './paperReader';
 export interface FormulaEvidence {id:string; text:string; page:number; bbox?:[number,number,number,number]}
 export interface FormulaExplanation {
   summary:string;
@@ -36,7 +37,8 @@ function writeFormulaMemoryCache(key:string,data:FormulaExplanation){
 export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, blockId?:string, autoExplain=false) {
   const {i18n}=useTranslation();
   const language=i18n.resolvedLanguage?.startsWith('zh') || i18n.language?.startsWith('zh') ? 'zh' : 'en';
-  const scope=`${AgentAppsAuth.getSessionIdentity()}/${target.dataset}/${target.document}/${sourceKey}/${language}`;
+  const identity=usePaperReaderSession();
+  const scope=`${identity}/${target.dataset}/${target.document}/${sourceKey}/${language}`;
   const controller=useRef<AbortController>();
   const key=`${scope}/${blockId || ''}`;
   const [state,setState]=useState<{key:string;status:'idle'|'loading'|'ready'|'error'|'cancelled';data?:FormulaExplanation;error?:string}>({key:'',status:'idle'});
@@ -50,14 +52,14 @@ export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, bloc
     try {
       const url=`${BASE_URL}/api/core/datasets/${encodeURIComponent(target.dataset)}/documents/${encodeURIComponent(target.document)}/pdf-ir/formulas/${encodeURIComponent(blockId)}/explanation`;
       const response=await axiosInstance.post<{data:FormulaExplanation}>(url,{force,language},{signal:request.signal,timeout:120000,silentError:true} as never);
-      if(request.signal.aborted)return;
+      if(request.signal.aborted || AgentAppsAuth.getSessionIdentity()!==identity)return;
       writeFormulaMemoryCache(key,response.data.data);
       setState({key,status:'ready',data:response.data.data});
     } catch(error) {
       const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;
-      if(!request.signal.aborted)setState(previous=>({key,status:'error',data:previous.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));
+      if(!request.signal.aborted && AgentAppsAuth.getSessionIdentity()===identity)setState(previous=>({key,status:'error',data:previous.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));
     }
-  },[target.dataset,target.document,blockId,key,language]);
+  },[target.dataset,target.document,blockId,key,language,identity]);
   useEffect(()=>{
     if(autoExplain)void load();
     else {

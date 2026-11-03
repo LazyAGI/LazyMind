@@ -347,3 +347,31 @@ it('preserves the reading anchor when a newly mounted page reveals a different h
  expect(scroll).toHaveBeenLastCalledWith({top:2200,behavior:'auto'});
  view.unmount();width.mockRestore();height.mockRestore();
 });
+
+
+it('closes the study dialog when returning to the reading position',async()=>{
+ const view=render(<RenderPdf fileData="return.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ fireEvent.click(screen.getByRole('button',{name:'pdfTable.openCatalog'}));
+ fireEvent.change(screen.getByRole('combobox',{name:'pdfTable.catalog'}),{target:{value:'table'}});
+ expect(screen.getByRole('dialog')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'pdfFormula.returnReading'}));
+ expect(screen.queryByRole('dialog')).toBeNull();
+ view.unmount();
+ await act(async()=>{});
+});
+
+it('scales zoom monotonically around the fitted reading baseline',async()=>{
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
+ const view=render(<RenderPdf fileData="zoom-fit.pdf" paperMode/>);
+ const page=view.container.querySelector('[data-pdf-page-index]');
+ expect(page).toHaveStyle({width:'780px'});
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomOut'}));
+ expect(page).toHaveStyle({width:'702px'});
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
+ expect(page).toHaveStyle({width:'780px'});
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
+ expect(page).toHaveStyle({width:'858px'});
+ view.unmount();width.mockRestore();height.mockRestore();
+ await act(async()=>{});
+});

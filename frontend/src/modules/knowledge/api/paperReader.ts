@@ -17,17 +17,17 @@ export function usePaperReaderResource<T extends {source_sha256:string}>(target:
  const current=useRef<AbortController>();
  const load=useCallback(async(force=false)=>{
   current.current?.abort();
-  const controller=new AbortController();current.current=controller;setState({key,status:'loading'});
+  const controller=new AbortController();current.current=controller;setState(previous=>({key,status:'loading',data:previous?.key===key?previous.data:undefined}));
   try{
    const url=`${BASE_URL}/api/core/datasets/${encodeURIComponent(target.dataset)}/documents/${encodeURIComponent(target.document)}/pdf-ir/${resource}`;
    const response=await axiosInstance.post<{data:T}>(url,{language,force,source_sha256:sourceHash},{signal:controller.signal,timeout:120000,silentError:true} as never);
    if(controller.signal.aborted)return;
    if(response.data.data.source_sha256!==sourceHash){setState({key,status:'error',sourceMismatch:true});return;}
    setState({key,status:'ready',data:response.data.data});
-  }catch(error){if(!controller.signal.aborted){const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;setState({key,status:'error',error:detail});}}
+  }catch(error){if(!controller.signal.aborted){const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;setState(previous=>({key,status:'error',data:previous?.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));}}
  },[key,target.dataset,target.document,sourceHash,resource,language]);
  useEffect(()=>{if(active)void load();return()=>current.current?.abort();},[active,load]);
- const cancel=()=>{current.current?.abort();setState({key,status:'cancelled'});};
+ const cancel=()=>{current.current?.abort();setState(previous=>({key,status:'cancelled',data:previous?.key===key?previous.data:undefined}));};
  return {...(state?.key===key?state:undefined),load,cancel};
 }
 // Convert textual PDF markup into readable text without injecting it into DOM.

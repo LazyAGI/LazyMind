@@ -59,3 +59,18 @@ it('retains a captured note draft when retrying metadata after a network failure
  await screen.findByText('Metadata unavailable');fireEvent.click(screen.getByRole('button',{name:'Retry'}));
  await screen.findByText('Read the evaluation.');expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('> Source quote\n\nDo not lose this note');
 });
+
+it('keeps document vocabulary accessible without a linked paper and retains it between info and notes',async()=>{
+ const value=library();value.data.attachments=[];api.get.mockResolvedValue({data:value});
+ const view=render(<PaperReaderDetails {...props} documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ await screen.findByText(/not linked to a paper/);
+ const section=screen.getByText('Vocabulary').closest('details')!;
+ fireEvent.click(screen.getByText('Vocabulary'));section.open=true;
+ const filter=screen.getByRole('textbox',{name:'Vocabulary filter'});
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes" documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ expect(filter).not.toBeVisible();
+ view.rerender(<PaperReaderDetails {...props} documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ expect(filter).toBeVisible();expect(filter).toHaveValue('saved word');
+ view.rerender(<PaperReaderDetails {...props}/>);
+ expect(screen.queryByText('Vocabulary')).not.toBeInTheDocument();
+});

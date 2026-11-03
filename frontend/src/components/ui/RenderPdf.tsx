@@ -291,15 +291,15 @@ export default function RenderPdf({
 
   const pageWidthPx = useMemo(() => {
     const baseScale = paperMode ? PDF_READING_BASE_SCALE : 1;
-    const fitDefaultPaper = (requested:number) => paperMode && zoom === 1 && containerWidth > 0
+    const fitDefaultPaper = (requested:number) => paperMode && containerWidth > 0
       ? Math.min(requested, Math.max(1, containerWidth - 20)) : requested;
     if (defaultPageWidth) {
-      return Math.round(fitDefaultPaper(defaultPageWidth * baseScale * zoom));
+      return Math.round(fitDefaultPaper(defaultPageWidth * baseScale) * zoom);
     }
     if (!containerWidth) {
       return Math.round(900 * baseScale * zoom);
     }
-    return Math.round(fitDefaultPaper(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * baseScale * zoom));
+    return Math.round(fitDefaultPaper(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * baseScale) * zoom);
   }, [defaultPageWidth, containerWidth, zoom, paperMode]);
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
@@ -863,6 +863,7 @@ export default function RenderPdf({
     const top=(pageTops[page] || 0) + studyReturn.progress * (pageHeightsPx[page] || 0);
     containerRef.current?.scrollTo({top,behavior:"auto"}); setScrollTop(top);
     setStudyHighlight(undefined); setPendingStudyNavigation(undefined); setStudyReturn(undefined);
+    setVisualSelection(undefined); setStudyOpen(false); setTableStudyOpen(false);
   };
 
   const navigateSourceBlock = (id:string) => {

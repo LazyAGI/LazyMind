@@ -5,7 +5,7 @@ import i18n from '@/i18n';
 import {PdfFormulaStudy} from './PdfFormulaStudy';
 import {PdfStudyDialog} from './PdfStudyDialog';
 import {CHAT_MODEL_SELECTION_CHANGED_EVENT} from '@/modules/chat/constants/chat';
-import {AUTH_USER_CHANGE_EVENT} from '@/components/auth';
+import {AgentAppsAuth,AUTH_USER_CHANGE_EVENT} from '@/components/auth';
 const mocks=vi.hoisted(()=>({post:vi.fn()}));
 vi.mock('@/components/request',()=>({axiosInstance:mocks,BASE_URL:''}));
 const block={id:'f',type:'formula',page:2,latex:'x^2'};
@@ -163,4 +163,72 @@ it('retains the previous explanation through regeneration failure and cancellati
  act(()=>result.current.cancel());
  expect(result.current.status).toBe('cancelled');
  expect(result.current.data?.summary).toBe('Summary');
+});
+
+it('isolates late responses when two papers share a source hash and formula ID',async()=>{
+ let finishOld!:(value:unknown)=>void;
+ mocks.post.mockReset().mockImplementationOnce(()=>new Promise(resolve=>{finishOld=resolve;})).mockResolvedValueOnce({data:{data:{...explanation,summary:'Second paper'}}});
+ const view=renderHook(({document})=>useFormulaExplanation({dataset:'d',document},'shared-hash','f',true),{initialProps:{document:'first-paper'}});
+ const oldSignal=mocks.post.mock.calls[0][2].signal;
+ view.rerender({document:'second-paper'});
+ await waitFor(()=>expect(view.result.current.data?.summary).toBe('Second paper'));
+ expect(oldSignal.aborted).toBe(true);
+ await act(async()=>finishOld({data:{data:{...explanation,summary:'Late first paper'}}}));
+ expect(view.result.current.data?.summary).toBe('Second paper');
+ view.unmount();
+ const oldPaper=renderHook(()=>useFormulaExplanation({dataset:'d',document:'first-paper'},'shared-hash','f',false));
+ expect(oldPaper.result.current.data).toBeUndefined();
+ expect(mocks.post).toHaveBeenCalledTimes(2);
+});
+
+it('does not replace a newer successful update with a cancelled late response',async()=>{
+ let finishCancelled!:(value:unknown)=>void;
+ mocks.post.mockReset().mockResolvedValueOnce({data:{data:explanation}});
+ const view=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'cancel-update-race','f',true));
+ await waitFor(()=>expect(view.result.current.status).toBe('ready'));
+ mocks.post.mockImplementationOnce(()=>new Promise(resolve=>{finishCancelled=resolve;}));
+ act(()=>{void view.result.current.load(true);});
+ act(()=>view.result.current.cancel());
+ expect(view.result.current.data?.summary).toBe('Summary');
+ mocks.post.mockResolvedValueOnce({data:{data:{...explanation,summary:'Fresh update'}}});
+ await act(async()=>{await view.result.current.load(true);});
+ await act(async()=>finishCancelled({data:{data:{...explanation,summary:'Cancelled update'}}}));
+ expect(view.result.current.data?.summary).toBe('Fresh update');
+ view.unmount();
+ const reopened=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'cancel-update-race','f',true));
+ await waitFor(()=>expect(reopened.result.current.data?.summary).toBe('Fresh update'));
+ expect(mocks.post).toHaveBeenCalledTimes(3);
+});
+
+it('cancels only the closing viewer while another viewer awaits the same formula',async()=>{
+ const resolveRequests:Array<(value:unknown)=>void>=[];
+ mocks.post.mockReset().mockImplementation(()=>new Promise(resolve=>resolveRequests.push(resolve)));
+ const first=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'concurrent-viewers','f',true));
+ const second=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'concurrent-viewers','f',true));
+ first.unmount();
+ expect(mocks.post.mock.calls[0][2].signal.aborted).toBe(true);
+ expect(mocks.post.mock.calls[1][2].signal.aborted).toBe(false);
+ await act(async()=>resolveRequests[1]({data:{data:explanation}}));
+ expect(second.result.current.data?.summary).toBe('Summary');
+ await act(async()=>resolveRequests[0]({data:{data:{...explanation,summary:'Closed viewer'}}}));
+ expect(second.result.current.data?.summary).toBe('Summary');
+});
+
+
+it('invalidates a mounted formula and aborts its request on session change',async()=>{
+ const identity=vi.spyOn(AgentAppsAuth,'getSessionIdentity').mockReturnValue('old-session');
+ let finish!:(value:unknown)=>void;
+ mocks.post.mockReset().mockResolvedValueOnce({data:{data:explanation}}).mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ const hook=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'session-invalidation','f',false));
+ await act(async()=>{await hook.result.current.load();});
+ expect(hook.result.current.data?.summary).toBe('Summary');
+ act(()=>{void hook.result.current.load(true);});
+ const signal=mocks.post.mock.calls[1][2].signal;
+ identity.mockReturnValue('new-session');
+ act(()=>window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT)));
+ expect(signal.aborted).toBe(true);
+ expect(hook.result.current.data).toBeUndefined();
+ await act(async()=>finish({data:{data:explanation}}));
+ expect(hook.result.current.data).toBeUndefined();
+ hook.unmount();identity.mockRestore();
 });

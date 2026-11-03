@@ -122,3 +122,30 @@ it('rebuilds click targets when a complete function meaning arrives, without cha
  expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Model parameters');
  expect(view.container.querySelector('[role="button"] [role="button"]')).toBeNull();
 });
+
+const cachedNormBound={"latex": "| \\mathcal {L} (\\mathbf {w} ^ {\\prime}) - \\mathcal {L} (\\mathbf {w}) | \\leq \\| \\nabla_ {\\mathbf {w}} \\mathcal {L} (\\mathbf {w}) \\| \\| \\delta \\mathbf {w} \\| + \\frac {1}{2} \\| H \\| \\| \\delta \\mathbf {w} \\| ^ {2},", "symbols": [{"symbol": "\\mathcal{L}(\\mathbf{w}^{\\prime})", "meaning": "压缩后权重$\\mathbf{w}^{\\prime}$对应的损失函数值。", "evidence_ids": ["66fd4c218a6148fa7d2e23cc"], "inferred": true}, {"symbol": "\\mathcal{L}(\\mathbf{w})", "meaning": "原始权重$\\mathbf{w}$对应的损失函数值。", "evidence_ids": ["66fd4c218a6148fa7d2e23cc"], "inferred": true}, {"symbol": "\\| \\nabla_{\\mathbf{w}} \\mathcal{L}(\\mathbf{w}) \\|", "meaning": "损失函数关于原始权重$\\mathbf{w}$的梯度的范数。", "evidence_ids": ["550077dc6afc93235e6f8b2a"], "inferred": true}, {"symbol": "\\| \\delta \\mathbf{w} \\|", "meaning": "压缩引入的权重扰动$\\delta \\mathbf{w} = \\mathbf{w}^{\\prime} - \\mathbf{w}$的范数。", "evidence_ids": ["66fd4c218a6148fa7d2e23cc", "550077dc6afc93235e6f8b2a"], "inferred": true}, {"symbol": "\\| H \\|", "meaning": "损失函数$\\mathcal{L}(\\mathbf{w})$的Hessian矩阵的范数。", "evidence_ids": ["550077dc6afc93235e6f8b2a"], "inferred": true}]};
+it('renders the cached norm bound intact and exposes every generated meaning on its complete term',()=>{
+ const view=render(<InteractiveFormula latex={cachedNormBound.latex} sourceKey="norm-bound" definitions={cachedNormBound.symbols} evidence={[]} compactEvidence onNavigate={vi.fn()}/>);
+ const expected=document.createElement('div');expected.innerHTML=katex.renderToString(cachedNormBound.latex,{displayMode:true});
+ expect(view.container.querySelector('.pdf-interactive-equation .katex-html')?.textContent).toBe(expected.querySelector('.katex-html')?.textContent);
+ const buttons=screen.getAllByRole('button',{name:/Symbol:/});
+ const matched=buttons.filter(button=>button.getAttribute('aria-label')?.includes(String.raw`\|`));
+ expect(matched).toHaveLength(4);
+ for(const button of matched){
+  fireEvent.click(button);
+  expect(screen.getByRole('region',{name:'Selected symbol'})).not.toHaveTextContent('No explanation is available');
+ }
+ expect(view.container.querySelector('[role="button"] [role="button"]')).toBeNull();
+});
+
+
+it('handles symbol Escape without dismissing its containing study',()=>{
+ const outer=vi.fn();
+ render(<div onKeyDown={outer}><InteractiveFormula latex="x" sourceKey="nested-escape" definitions={[]} evidence={[]} onNavigate={vi.fn()}/></div>);
+ const symbol=screen.getByRole('button',{name:'Symbol: x'});
+ fireEvent.click(symbol);
+ fireEvent.keyDown(screen.getByRole('region',{name:'Selected symbol'}),{key:'Escape'});
+ expect(screen.queryByRole('region',{name:'Selected symbol'})).toBeNull();
+ expect(symbol).toHaveFocus();
+ expect(outer).not.toHaveBeenCalled();
+});

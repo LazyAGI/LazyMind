@@ -1,5 +1,6 @@
 .pdf-study-overlay{position:fixed;inset:0;z-index:1450;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(29,44,65,.34);backdrop-filter:blur(3px)}
 .pdf-study-dialog{position:relative;box-sizing:border-box;width:min(780px,100%);max-height:min(84vh,880px);overflow:auto;border:1px solid #d8e2ee;border-radius:18px;background:#fff;color:#26374c;box-shadow:0 22px 70px rgba(24,47,76,.2);font:14px/1.65 system-ui,sans-serif;outline:none}
+.pdf-study-dialog-actions{position:sticky;top:0;height:0;z-index:5}
 .pdf-study-dialog-close{position:absolute;right:16px;top:13px;z-index:5;display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid #dce5ef;border-radius:50%;background:#fff;color:#596b7f;font-size:22px;line-height:1;cursor:pointer}
 .pdf-study-dialog-close:hover{background:#f0f5fa;color:#244f79}
 .pdf-study-dialog-close:focus-visible,.pdf-study-dialog button:focus-visible,.pdf-study-dialog select:focus-visible{outline:2px solid #4486c8;outline-offset:2px}

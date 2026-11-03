@@ -1,10 +1,10 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {axiosInstance,BASE_URL} from '@/components/request';
 import {addLibraryNote,decodePersistedLibrary,mergeLibraryChanges,type PersistedPaperLibrary} from '@/modules/knowledge/paper/store';
 import {safePaperUrl,type PaperMetadata} from '@/modules/knowledge/paper/model';
 import './PaperReaderDetails.scss';
-export interface PaperReaderDetailsProps {datasetId:string;documentId:string;fileName:string;canWrite:boolean;draftRequest?:{documentId:string;requestId:number;text:string};initialTab?:'info'|'notes';onNavigatePage?:(page:number)=>void}
+export interface PaperReaderDetailsProps {documentVocabulary?:ReactNode;datasetId:string;documentId:string;fileName:string;canWrite:boolean;draftRequest?:{documentId:string;requestId:number;text:string};initialTab?:'info'|'notes';onNavigatePage?:(page:number)=>void}
 function bibEscape(value:string){return value.replace(/[\\{}&%$#_~^]/g,char=>char==='\\'?'\\textbackslash{}':char==='~'?'\\textasciitilde{}':char==='^'?'\\textasciicircum{}':`\\${char}`).replace(/[\r\n]+/g,' ');}
 function bibliography(metadata:PaperMetadata){
  const fields:Record<string,string>={title:metadata.title};
@@ -15,7 +15,7 @@ function bibliography(metadata:PaperMetadata){
  if(metadata.identifiers.arxiv)fields.eprint=metadata.identifiers.arxiv;
  return `@article{paper,\n${Object.entries(fields).map(([key,value])=>`  ${key} = {${bibEscape(value)}}`).join(',\n')}\n}`;
 }
-export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',onNavigatePage}:PaperReaderDetailsProps){
+export default function PaperReaderDetails({datasetId,documentId,fileName,canWrite,draftRequest,initialTab='info',onNavigatePage,documentVocabulary}:PaperReaderDetailsProps){
  const {i18n}=useTranslation();const zh=i18n.language.startsWith('zh');const label=(en:string,cn:string)=>zh?cn:en;
  const tab=initialTab;const [result,setResult]=useState<{key:string;library?:PersistedPaperLibrary;error?:string}>();
  const [revision,setRevision]=useState(0);const [draft,setDraft]=useState('');const [saving,setSaving]=useState(false);const [saveError,setSaveError]=useState('');const [copyStatus,setCopyStatus]=useState('');
@@ -74,6 +74,7 @@ export default function PaperReaderDetails({datasetId,documentId,fileName,canWri
      {writable?<form onSubmit={event=>{event.preventDefault();void save();}}><label htmlFor="paper-reader-new-note">{label('New note','新笔记')}</label><textarea id="paper-reader-new-note" value={draft} disabled={saving} onChange={event=>{setDraft(event.target.value);noteId.current='';}} rows={5} placeholder={label('What would you like to remember?','想记住什么？')}/>{saveError&&<p role="alert">{saveError}</p>}<button type="submit" disabled={saving||!draft.trim()}>{saving?label('Saving…','正在保存…'):label('Save note','保存笔记')}</button></form>:<p className="paper-reader-details__muted">{label('You have read-only access to these notes.','你可以查看这些笔记，当前没有编辑权限。')}</p>}
     </>}
    </>}
+   {documentVocabulary&&<details hidden={tab!=='info'}><summary>{label('Vocabulary','生词')}</summary>{documentVocabulary}</details>}
   </div>
  </aside>;
 }

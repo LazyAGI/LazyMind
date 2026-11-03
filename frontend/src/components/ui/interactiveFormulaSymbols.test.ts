@@ -107,3 +107,29 @@ it('never groups a call across array rows',()=>{
  const result=interactiveFormulaSymbols(String.raw`\begin{array}{c} L(w\\+v) \end{array}`,['L(w+v)']);
  expect(result.unmatchedDefinitions).toEqual([0]);
 });
+
+const normBound={"latex": "| \\mathcal {L} (\\mathbf {w} ^ {\\prime}) - \\mathcal {L} (\\mathbf {w}) | \\leq \\| \\nabla_ {\\mathbf {w}} \\mathcal {L} (\\mathbf {w}) \\| \\| \\delta \\mathbf {w} \\| + \\frac {1}{2} \\| H \\| \\| \\delta \\mathbf {w} \\| ^ {2},", "symbols": [{"symbol": "\\mathcal{L}(\\mathbf{w}^{\\prime})", "meaning": "压缩后权重$\\mathbf{w}^{\\prime}$对应的损失函数值。", "evidence_ids": ["66fd4c218a6148fa7d2e23cc"], "inferred": true}, {"symbol": "\\mathcal{L}(\\mathbf{w})", "meaning": "原始权重$\\mathbf{w}$对应的损失函数值。", "evidence_ids": ["66fd4c218a6148fa7d2e23cc"], "inferred": true}, {"symbol": "\\| \\nabla_{\\mathbf{w}} \\mathcal{L}(\\mathbf{w}) \\|", "meaning": "损失函数关于原始权重$\\mathbf{w}$的梯度的范数。", "evidence_ids": ["550077dc6afc93235e6f8b2a"], "inferred": true}, {"symbol": "\\| \\delta \\mathbf{w} \\|", "meaning": "压缩引入的权重扰动$\\delta \\mathbf{w} = \\mathbf{w}^{\\prime} - \\mathbf{w}$的范数。", "evidence_ids": ["66fd4c218a6148fa7d2e23cc", "550077dc6afc93235e6f8b2a"], "inferred": true}, {"symbol": "\\| H \\|", "meaning": "损失函数$\\mathcal{L}(\\mathbf{w})$的Hessian矩阵的范数。", "evidence_ids": ["550077dc6afc93235e6f8b2a"], "inferred": true}]};
+it('binds the complete gradient and norm terms from the cached DeepCompress explanation',()=>{
+ const result=interactiveFormulaSymbols(normBound.latex,normBound.symbols.map(item=>item.symbol));
+ expect(result.unmatchedDefinitions).toEqual([]);
+ expect(result.occurrences.filter(item=>item.definitionIndices.includes(3))).toHaveLength(2);
+ expect(result.occurrences.filter(item=>item.definitionIndices.includes(2))).toHaveLength(1);
+ expect(result.occurrences.filter(item=>item.latex===String.raw`\mathbf {w}`)).toHaveLength(0);
+ expect(result.occurrences.every((item,index)=>!index||result.occurrences[index-1].end<=item.start)).toBe(true);
+});
+it.each([
+ [String.raw`\left\|\delta w\right\|^2`,String.raw`\lVert\delta w\rVert`],
+ [String.raw`\bigl\lVert x\bigr\rVert`,String.raw`\|x\|`],
+ [String.raw`\lVert x\rVert_2`,String.raw`\|x\|_2`],
+ [String.raw`\left|x\right|`,String.raw`\lvert x\rvert`],
+])('matches equivalent delimiter notation while preserving the original source: %s',(latex,definition)=>{
+ const result=interactiveFormulaSymbols(latex,[definition]);
+ expect(result.unmatchedDefinitions).toEqual([]);
+ const matched=result.occurrences.find(item=>item.definitionIndices.includes(0));
+ expect(matched).toBeDefined();
+ expect(latex.slice(matched!.start,matched!.end)).toBe(matched!.latex);
+});
+it('does not confuse absolute values with norms or match a norm inside a subscript',()=>{
+ expect(interactiveFormulaSymbols('|w|',[String.raw`\|w\|`]).unmatchedDefinitions).toEqual([0]);
+ expect(interactiveFormulaSymbols(String.raw`x_{\|w\|}`,[String.raw`\|w\|`]).unmatchedDefinitions).toEqual([0]);
+});

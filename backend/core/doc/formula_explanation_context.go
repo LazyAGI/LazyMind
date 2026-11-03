@@ -68,7 +68,9 @@ func formulaExplanationContext(d pdfir.Document, id string) (pdfir.Block, []form
 			return false
 		}
 		switch b.Type {
-		case "formula", "image", "table", "heading", "title":
+		case "formula", "image", "table", "heading", "title", "table_caption", "image_caption":
+			// Projected captions are appended outside the source reading order;
+			// their explicit visual associations do not make them adjacent prose.
 			return false
 		}
 		return true

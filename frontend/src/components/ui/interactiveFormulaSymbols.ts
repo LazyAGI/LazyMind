@@ -26,7 +26,10 @@ function namedOperator(value:string){
 }
 export function normalizeFormulaSymbol(value:string){
  if(!withinSymbolBudget(value))return "";
- const input=stripDelimiters(value).replace(/\\(?:left|right)\b/g,'');let cursor=0;
+ const input=stripDelimiters(value)
+  .replace(/\\(?:left|right|big[lrm]?|Big[lrm]?|bigg[lrm]?|Bigg[lrm]?)\b/g,'')
+  .replace(/\\(?:lVert|rVert|Vert)(?![A-Za-z])|\\\|/g,'‖')
+  .replace(/\\(?:lvert|rvert|vert)(?![A-Za-z])/g,'|');let cursor=0;
  const skip=()=>{while(cursor<input.length && /\s/.test(input[cursor]))cursor++;};
  const sequence=(group=false):string=>{
   let result='';
@@ -110,7 +113,7 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
     if(name==='begin' && env==='array'){const format=skip(i);i=groupEnd(format)||i;}
     continue;
    }
-   if(structural.has(name) || !/^[a-zA-Z]+$/.test(name)){i+=command[0].length;continue;}
+   if(structural.has(name) || /^(?:lVert|rVert|Vert|lvert|rvert|vert)$/.test(name) || !/^[a-zA-Z]+$/.test(name)){i+=command[0].length;continue;}
   }else if(!/[a-zA-Z0-9\u0370-\u03ff]/.test(latex[i])){i++;continue;}
   const end=atomEnd(i);
   if(occurrences.length>=512)return empty;
@@ -193,6 +196,39 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
     break;
    }
   }
+ });
+ // Delimiters are not ordinary atoms. Pair them explicitly so returned norm
+ // and absolute-value definitions own their complete, balanced source range.
+ // Keep outer powers separate unless the model explained that full power.
+ const delimiters=/(\\(?:left|right|bigl|bigr|Bigl|Bigr|biggl|biggr|Biggl|Biggr|big|Big|bigg|Bigg)\s*)?(\\(?:lVert|rVert|Vert|lvert|rvert|vert)(?![A-Za-z])|\\\||[|‖])/g;
+ const open:Array<{start:number;kind:string}>=[];
+ const ranges:Array<{start:number;end:number}>=[];
+ for(const match of latex.matchAll(delimiters)){
+  const start=match.index!;
+  if(start>0&&latex[start-1]==='\\')continue;
+  const prefix=match[1]||'',token=match[2];
+  const kind=normalizeFormulaSymbol(token);
+  const left=/\\(?:left|bigl|Bigl|biggl|Biggl)\b/.test(prefix)||/^\\(?:lVert|lvert)$/.test(token);
+  const right=/\\(?:right|bigr|Bigr|biggr|Biggr)\b/.test(prefix)||/^\\(?:rVert|rvert)$/.test(token);
+  const previous=open[open.length-1];
+  if(!left&&previous?.kind===kind){
+   open.pop();
+   const end=start+match[0].length;
+   ranges.push({start:previous.start,end});
+   const scriptedEnd=atomEnd(start+prefix.length);
+   if(scriptedEnd>end)ranges.push({start:previous.start,end:scriptedEnd});
+  }else if(!right)open.push({start,kind});
+ }
+ ranges.sort((a,b)=>(b.end-b.start)-(a.end-a.start)).forEach(({start,end})=>{
+  const source=latex.slice(start,end);
+  if(/\\\\|&|\\(?:begin|end)\b/.test(source))return;
+  const value=normalizeFormulaSymbol(source);
+  const definitionIndices=normalized.flatMap((definition,index)=>value&&definition===value?[index]:[]);
+  if(!definitionIndices.length)return;
+  // Do not split an enclosing identifier, script, or already matched group.
+  if(occurrences.some(item=>item.start<end&&item.end>start&&(item.start<start||item.end>end)))return;
+  occurrences=occurrences.filter(item=>item.end<=start||item.start>=end);
+  occurrences.push({start,end,latex:source,definitionIndices});
  });
  occurrences.sort((a,b)=>a.start-b.start);
  const matched=new Set(occurrences.flatMap(o=>o.definitionIndices));
