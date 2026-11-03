@@ -117,7 +117,8 @@ def render(payload):
     rc = dict(contract.get('rc', {}))
     installed = {font.name for font in font_manager.fontManager.ttflist}
     cjk = next((name for name in ('Noto Serif CJK SC', 'Noto Serif CJK JP', 'Noto Sans CJK SC',
-                                  'Noto Sans CJK JP', 'Arial Unicode MS') if name in installed), 'DejaVu Sans')
+                                  'Noto Sans CJK JP', 'Arial Unicode MS', 'SimSun', 'Microsoft YaHei',
+                                  'SimHei') if name in installed), 'DejaVu Sans')
     families = [name for name in ('STIXGeneral', 'DejaVu Serif', cjk) if name in installed]
     rc.update({'font.family': families, 'font.serif': families, 'mathtext.fontset': 'stix'})
     colors = contract.get('colors')

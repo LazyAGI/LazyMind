@@ -1,4 +1,4 @@
-"""Run a bounded, sandboxed Python child inside the existing Chat container."""
+"""Run bounded Python children in the Linux service sandbox or Windows AppContainer."""
 from __future__ import annotations
 
 import ctypes
@@ -18,12 +18,20 @@ class ContainerEnvironmentError(RuntimeError):
 
 
 def validate_environment():
-    if sys.platform != 'linux' or not any(Path(p).exists() for p in ('/.dockerenv', '/run/.containerenv')):
-        raise ContainerEnvironmentError('container 执行后端必须运行在 Linux 服务容器内，不允许宿主进程回退')
+    if sys.platform == 'win32':
+        from . import windows
+        try:
+            windows.validate_environment()
+        except (OSError, AttributeError) as exc:
+            raise ContainerEnvironmentError('Windows Python 沙箱不可用: ' + str(exc)) from exc
+    elif sys.platform != 'linux' or not any(Path(p).exists() for p in ('/.dockerenv', '/run/.containerenv')):
+        raise ContainerEnvironmentError('执行后端需要 Linux 服务容器或 Windows AppContainer，不允许无隔离执行')
     missing = [name for name in ('numpy', 'scipy', 'pandas', 'matplotlib', 'seaborn')
                if importlib.util.find_spec(name) is None]
     if missing:
-        raise ContainerEnvironmentError('Chat 镜像缺少科学计算依赖，请重建镜像: ' + ', '.join(missing))
+        raise ContainerEnvironmentError('Python 执行环境缺少科学计算依赖: ' + ', '.join(missing))
+    if sys.platform == 'win32':
+        return
     try:
         seccomp = ctypes.CDLL('libseccomp.so.2')
         seccomp.seccomp_syscall_resolve_name.restype = ctypes.c_int
@@ -40,14 +48,15 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
     launcher = Path(__file__).with_name('sandbox.py').resolve()
     with tempfile.TemporaryDirectory(prefix='lazymind-paper-') as directory:
         root = Path(directory)
-        root.chmod(0o711)
+        if sys.platform != 'win32':
+            root.chmod(0o711)
         scratch = root / 'work'
         scratch.mkdir(mode=0o700)
         # The child drops root before executing generated code. Other jobs' scratch is private.
-        if os.geteuid() == 0:
+        if sys.platform != 'win32' and os.geteuid() == 0:
             os.chown(scratch, 65534, 65534)
         paths = [root / name for name in ('input.json', 'stdout', 'stderr')]
-        paths[0].write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False))
+        paths[0].write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding='utf-8')
         env = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': str(scratch), 'TMPDIR': str(scratch),
                'MPLCONFIGDIR': str(scratch / 'matplotlib'), 'MPLBACKEND': 'Agg',
                'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1',
@@ -56,8 +65,12 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
         process = None
         try:
             with paths[0].open('rb') as source, paths[1].open('wb') as out, paths[2].open('wb') as err:
-                process = subprocess.Popen(command, stdin=source, stdout=out, stderr=err, env=env,
-                                           cwd=scratch, close_fds=True, start_new_session=True)
+                if sys.platform == 'win32':
+                    from . import windows
+                    process = windows.start(worker, scratch, timeout, (source, out, err), env)
+                else:
+                    process = subprocess.Popen(command, stdin=source, stdout=out, stderr=err, env=env,
+                                               cwd=scratch, close_fds=True, start_new_session=True)
                 deadline = time.monotonic() + timeout
                 while process.poll() is None:
                     if time.monotonic() >= deadline:
@@ -67,11 +80,11 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                     time.sleep(0.05)
             if any(p.stat().st_size > 16 * 1024 * 1024 for p in paths[1:]):
                 raise RuntimeError(f'{label}输出超过 16 MiB')
-            stderr = paths[2].read_text(errors='replace')[-3000:]
+            stderr = paths[2].read_text(encoding='utf-8', errors='replace')[-3000:]
             if process.returncode == 78:
                 raise ContainerEnvironmentError('容器内 Python 沙箱启动失败: ' + stderr)
             try:
-                result = json.loads(paths[1].read_text())
+                result = json.loads(paths[1].read_text(encoding='utf-8'))
             except ValueError as exc:
                 raise RuntimeError(f'{label}没有返回有效 JSON: ' + stderr) from exc
             if not isinstance(result, dict) or process.returncode or 'error' in result:
@@ -87,11 +100,14 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                 raise RuntimeError(f'{label}执行失败: ' + str(detail)[-6000:])
             return result
         except OSError as exc:
-            raise ContainerEnvironmentError('容器内 Python 执行器不可用: ' + str(exc)) from exc
+            raise ContainerEnvironmentError('Python 沙箱执行器不可用: ' + str(exc)) from exc
         finally:
             if process is not None:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait(timeout=5)
+                if sys.platform == 'win32':
+                    process.close()
+                else:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=5)
