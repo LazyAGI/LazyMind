@@ -290,6 +290,11 @@ class WeChatConnectionService:
             self._connection_probe.check_accounts(
                 self._store.list_accounts(owner_user_id, 'wechat'), force=True, wait=True)
 
+    def archive_account(self, owner_user_id: str, account_id: str) -> None:
+        self._store.archive_account(owner_user_id, account_id)
+        if self._on_account_disconnected:
+            self._on_account_disconnected(account_id)
+
     def disconnect_account(self, owner_user_id: str, account_id: str) -> None:
         account = self._store.get_account(owner_user_id, account_id)
         if not account:

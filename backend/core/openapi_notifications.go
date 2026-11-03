@@ -49,7 +49,7 @@ func notificationPaths() map[string]any {
 	for _, entry := range []struct{ Path, Method, Input, Output, Description string }{
 		{"/user/notification-preferences", "get", "", "NotificationPreferences", "Read scheduled-task notification defaults and global gate"},
 		{"/user/wechat-notification-targets", "get", "", "WeChatNotificationTargets", "List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity"},
-		{"/user/notification-preferences", "patch", "NotificationPreferencesPatch", "NotificationPreferences", "Compare revision; closing requires the exact current affected run IDs"},
+		{"/user/notification-preferences", "patch", "NotificationPreferencesPatch", "NotificationPreferences", "Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation"},
 		{"/schedules/{schedule_id}/notifications", "get", "", "ScheduleNotificationView", "Read configuration and current channel availability"},
 		{"/schedules/{schedule_id}/notifications", "put", "ScheduleNotificationUpdate", "ScheduleNotificationView", "Update next-run configuration with an independent revision"},
 		{"/schedules/{schedule_id}/notifications:reset", "post", "ScheduleNotificationReset", "ScheduleNotificationView", "Copy current defaults into this schedule"},

@@ -572,6 +572,7 @@ func purgeConversationWithNotify(ctxDB *gorm.DB, conversationID, userID string, 
 			args  []any
 		}{
 			{&orm.ChatRunPerformance{}, "conversation_id IN ? AND user_id = ?", []any{conversationIDs, userID}},
+			{&orm.ConversationFollowUp{}, "conversation_id IN ? AND create_user_id = ?", []any{conversationIDs, userID}},
 			{&orm.ChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.MultiAnswersChatHistory{}, "conversation_id IN ?", []any{conversationIDs}},
 			{&orm.ConversationArtifact{}, "conversation_id IN ? AND create_user_id = ?", []any{conversationIDs, userID}},

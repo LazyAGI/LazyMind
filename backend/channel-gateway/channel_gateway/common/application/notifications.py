@@ -29,6 +29,8 @@ class NotificationService:
                 # Cached recipients must not hide an authorization that needs
                 # the user's action. Keep the fallback for temporary outages.
                 if exc.code in {'WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED'}:
+                    self._store.mark_wecom_authorization_required(
+                        owner, account_id, account['credential_revision'], exc.code)
                     raise
                 cached = self._store.notification_targets(owner, account_id, limit=1)['items']
                 if not cached:

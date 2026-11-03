@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
+FEISHU_BOT_MENU_UNAVAILABLE = 'FEISHU_BOT_MENU_UNAVAILABLE'
+
+
 ACTIVE_CONNECTION_SESSION_STATUSES = (
     'preparing',
     'waiting_scan',
@@ -59,6 +62,16 @@ def account_identity(row: dict[str, Any]) -> dict[str, str]:
 def account_view(row: dict[str, Any]) -> dict[str, Any]:
     identity = account_identity(row) if row['provider'] in {'feishu', 'wecom'} else {}
     label = row['label']
+    runtime_status = row.get('runtime_status') or 'stopped'
+    last_error = str(row.get('last_error') or '')
+    # A connected Feishu socket can be degraded only by optional bot-menu
+    # setup. Keep that distinct from the same runtime's reconnecting state.
+    # Recognize pre-upgrade menu errors until the next runtime status update.
+    menu_pending = row['provider'] == 'feishu' and runtime_status == 'degraded' and last_error.startswith((
+        FEISHU_BOT_MENU_UNAVAILABLE + ':', 'Feishu bot menu ',
+    ))
+    connection_ready = bool(row['status'] == 'connected' and row.get('credentials_ciphertext')
+                            and (runtime_status == 'running' or menu_pending))
     if row['provider'] == 'wecom' and not row.get('label_custom'):
         if identity['bot_name']:
             label = identity['bot_name']
@@ -74,7 +87,7 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
         'binding_status': ('unbound' if not row.get('credentials_ciphertext') else
                            'connected' if row['status'] == 'connected' else 'paused'),
         'status': row['status'],
-        'runtime_status': row.get('runtime_status') or 'stopped',
+        'runtime_status': runtime_status,
         'connected_at': _iso(row.get('connected_at')),
         'last_poll_at': _iso(row.get('last_poll_at')),
         'last_message_at': _iso(row.get('last_message_at')),
@@ -88,6 +101,17 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
             'notification_ready': (row['provider'] != 'wechat'
                                    or bool(row.get('notification_ready'))),
             'media_delivery': row['provider'] != 'wecom',
+            **({
+                'authorization_required': row.get('connection_error_code') in {
+                    'WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED',
+                },
+            } if row['provider'] == 'wecom' else {}),
+            **({
+                'connection_ready': connection_ready,
+                'bot_menu_ready': connection_ready and not menu_pending,
+                'bot_menu_error': ('permission_required' if 'code=99991672' in last_error else 'unavailable')
+                if menu_pending else '',
+            } if row['provider'] == 'feishu' else {}),
             **({
                 'connection_check_status': row.get('connection_check_status') or 'unknown',
                 'connection_checked_at': _iso(row.get('connection_checked_at')),

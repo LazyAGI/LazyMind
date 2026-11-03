@@ -22,17 +22,17 @@ function WeChatStatusTag({ status }: { status: WeChatStatus }) {
   return status ? <Tag className="notification-wechat-status" color={status === 'connected' ? 'success' : 'warning'}>{t('notifications.' + wechatStatusLabel(status))}</Tag> : null;
 }
 
-function ConfiguredChannel({ channel, rule, unavailable, blocked, wechatStatus, liveAccount }: { channel: ChannelName; rule: ChannelRule; unavailable: boolean; blocked: boolean; wechatStatus?: WeChatStatus; liveAccount?: ChannelAccount }) {
+function ConfiguredChannel({ channel, rule, unavailable, blocked, wechatStatus, liveAccount, refreshKey }: { channel: ChannelName; rule: ChannelRule; unavailable: boolean; blocked: boolean; wechatStatus?: WeChatStatus; liveAccount?: ChannelAccount; refreshKey: number }) {
   const { t } = useTranslation();
   const [account, setAccount] = useState<AccountDetail>();
   useEffect(() => {
     let active = true;
-    setAccount(undefined);
+    setAccount(previous => previous?.id === rule.account_id ? previous : undefined);
     if (rule.account_id) void getAccountDetail(rule.account_id).then(value => { if (active) setAccount(value); }).catch(() => undefined);
     return () => { active = false; };
-  }, [rule.account_id]);
+  }, [rule.account_id, refreshKey]);
   const displayAccount = liveAccount?.id === rule.account_id ? liveAccount : account?.id === rule.account_id ? account : undefined;
-  return <div className="notification-row"><ChannelBrand channel={channel} avatar={displayAccount?.avatar_url} /><div className="notification-grow"><strong>{t('notifications.' + channel)}</strong><p>{[displayAccount?.label || rule.account_id, rule.recipient_id].filter(Boolean).join(' · ')}</p></div><Tag>{t('notifications.' + (rule.enabled ? 'on' : 'off'))}</Tag>{channel === 'wechat' && <WeChatStatusTag status={wechatStatus} />}{blocked && <Tag color="warning">{t('notifications.channelPaused')}</Tag>}{unavailable && rule.enabled && !blocked && <Tag color="warning">{t('notifications.unavailable')}</Tag>}</div>;
+  return <div className="notification-row"><ChannelBrand channel={channel} avatar={displayAccount?.avatar_url} /><div className="notification-grow"><strong>{t('notifications.' + channel)}</strong><p>{[displayAccount?.label || rule.account_id, rule.recipient_id].filter(Boolean).join(' · ')}</p></div><Tag color={blocked ? 'warning' : undefined}>{t('notifications.' + (blocked ? 'channelPaused' : rule.enabled ? 'on' : 'off'))}</Tag>{channel === 'wechat' && <WeChatStatusTag status={wechatStatus} />}{unavailable && rule.enabled && !blocked && <Tag color="warning">{t('notifications.unavailable')}</Tag>}</div>;
 }
 
 export default function ScheduleNotificationPanel({ scheduleId, taskId: selectedTaskId, compact = false, draftMode = false, showHistory = true, summaryCard = false, editorOnly = false, title, editorOpen, onEditorOpenChange, onDraftChange }: {
@@ -47,7 +47,6 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   const [draft, setDraft] = useState<NotificationConfig | null>();
   const [preferences, setPreferences] = useState<Preferences>();
   const [preferencesBusy, setPreferencesBusy] = useState(false);
-  const [preferencesError, setPreferencesError] = useState(false);
   const enabled = preferences?.enabled ?? true;
   const [internalOpen, setInternalOpen] = useState(false);
   const open = editorOpen ?? internalOpen;
@@ -57,10 +56,12 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   const [accountsRefresh, setAccountsRefresh] = useState(0);
   const [requestedChannel, setRequestedChannel] = useState<ChannelName>();
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [errorAccount, setErrorAccount] = useState<{ id: string; label: string }>();
   const [conflict, setConflict] = useState(false);
+  const [conflictConfig, setConflictConfig] = useState<ScheduleNotifications>();
   const [runs, setRuns] = useState<Task[]>([]);
   const [runPage, setRunPage] = useState(1);
   const [runTotal, setRunTotal] = useState(0);
@@ -69,6 +70,8 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   const preferencesGeneration = useRef(0);
   useEffect(() => {
     setPreferencesBusy(false);
+    setRefreshing(false);
+    setConflictConfig(undefined);
     return () => { loadGeneration.current += 1; preferencesGeneration.current += 1; };
   }, [scheduleId]);
   const load = useCallback(async () => {
@@ -85,7 +88,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
       // guidance, so a temporary network failure is never called activation.
       const reportedIssue = availabilityError(current, p);
       const issue = reportedIssue?.provider === 'wechat' ? undefined : reportedIssue;
-      setConfig(current); setDraft(current.config); setPreferences(previous => previous && previous.revision > p.revision ? previous : p); setPreferencesError(false); setConflict(false);
+      setConfig(current); setDraft(current.config); setPreferences(previous => previous && previous.revision > p.revision ? previous : p); setConflict(false); setConflictConfig(undefined);
       if (issue?.account_id) {
         void getAccountDetail(issue.account_id).then(account => { if (currentRequest()) setErrorAccount({ id: issue.account_id, label: channelAccountLabel(account) }); }).catch(() => { if (currentRequest()) setErrorAccount({ id: issue.account_id, label: issue.provider }); });
       }
@@ -101,14 +104,47 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
     try {
       const current = await getPreferences();
       if (!currentRequest()) return undefined;
-      setPreferences(previous => previous && previous.revision > current.revision ? previous : current); setPreferencesError(false);
+      setPreferences(previous => previous && previous.revision > current.revision ? previous : current);
       return current;
     } catch (error) {
       if (!currentRequest()) return undefined;
-      setPreferences(undefined); setPreferencesError(true);
+      setPreferences(undefined);
       throw error;
     } finally { if (currentRequest()) setPreferencesBusy(false); }
   }, []);
+  const refreshStatus = async () => {
+    if (loading || refreshing || saving || preferencesBusy) return;
+    if (!config) { await load(); return; }
+    const generation = ++loadGeneration.current;
+    const session = AgentAppsAuth.getSessionIdentity();
+    const currentRequest = () => loadGeneration.current === generation && session === AgentAppsAuth.getSessionIdentity();
+    setRefreshing(true);
+    try {
+      const [current, currentPreferences] = await Promise.all([
+        scheduleId ? getScheduleNotifications(scheduleId) : Promise.resolve(config),
+        refreshPreferences(),
+      ]);
+      if (!currentRequest()) return;
+      // Availability can change without changing the saved rule. Keep the
+      // editor, its draft and its original save revision in place.
+      const changed = current.revision !== config.revision;
+      if (!changed) setConfig(previous => previous && { ...previous, availability: current.availability });
+      setConflict(changed);
+      setConflictConfig(changed ? current : undefined);
+      setError(changed ? 'conflict' : '');
+      setAccountsRefresh(value => value + 1);
+      const issue = availabilityError(current, currentPreferences);
+      setErrorAccount(undefined);
+      if (issue?.account_id && issue.provider !== 'wechat') {
+        void getAccountDetail(issue.account_id).then(account => {
+          if (currentRequest()) setErrorAccount({ id: issue.account_id, label: channelAccountLabel(account) });
+        }).catch(() => {
+          if (currentRequest()) setErrorAccount({ id: issue.account_id, label: issue.provider });
+        });
+      }
+    } catch { if (currentRequest()) setError('loadFailed'); }
+    finally { if (currentRequest()) setRefreshing(false); }
+  };
   useEffect(() => {
     const changed = () => { void refreshPreferences().catch(() => setError('loadFailed')); };
     return subscribeNotificationChange(NOTIFICATION_PREFERENCES_CHANGED_EVENT, changed, true);
@@ -123,8 +159,11 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
     return () => { active = false; };
   }, [scheduleId, compact, runPage, showHistory]);
   const save = async (value = draft) => {
-    if (!config || value === undefined || saving) return;
-    const reason = value ? ruleError(value, false, preferences ? { preferences, original: config.config } : undefined) : undefined;
+    if (!config || value === undefined || saving || refreshing || (conflict && !conflictConfig)) return;
+    // A status reload reads the latest revision while preserving the draft.
+    // Save that draft normally; another concurrent update still returns 409.
+    const original = conflictConfig || config;
+    const reason = value ? ruleError(value, false, preferences ? { preferences, original: original.config } : undefined) : undefined;
     if (reason) {
       setError(reason);
       if (reason === 'NOTIFICATION_TARGET_REQUIRED' && value?.channels.wecom?.enabled && !value.channels.wecom.recipient_id) {
@@ -135,15 +174,17 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
     setSaving(true); setError('');
     try {
       if (draftMode) {
-        onDraftChange?.({ revision: config.revision, ...(value === null ? { clear: true } : { config: value }) });
-        setConfig({ ...config, config: value, configured: value !== null });
-      } else if (scheduleId) setConfig(await putScheduleNotifications(scheduleId, config.revision, value));
+        onDraftChange?.({ revision: original.revision, ...(value === null ? { clear: true } : { config: value }) });
+        setConfig({ ...original, config: value, configured: value !== null });
+      } else if (scheduleId) setConfig(await putScheduleNotifications(scheduleId, original.revision, value));
+      setConflict(false); setConflictConfig(undefined);
       setOpen(false);
     }
     catch (e) {
       const detail = notificationError(e);
       const reason = detail.reason === 'NOTIFICATION_CONFIG_CONFLICT' ? 'conflict' : detail.reason;
       setError(reason); setConflict(detail.reason === 'NOTIFICATION_CONFIG_CONFLICT');
+      setConflictConfig(undefined);
       const provider = ({
         WECHAT_NOTIFICATION_CONTEXT_REQUIRED: 'wechat',
         WECOM_NOTIFICATION_TARGET_UNAVAILABLE: 'wecom',
@@ -196,7 +237,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   };
   const channelEnabled = (current: Preferences) => {
     setAccountsRefresh(value => value + 1);
-    setPreferences(current); setPreferencesError(false); setSettingsOpen(false); setSettingsBusy(false);
+    setPreferences(current); setSettingsOpen(false); setSettingsBusy(false);
     if (requestedChannel) setDraft(previous => {
       const value = previous || emptyRule();
       return { ...value, channels: { ...value.channels, [requestedChannel]: { ...value.channels[requestedChannel], enabled: true } } };
@@ -215,7 +256,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
   const reportedIssue = availabilityError(config, preferences);
   const currentError = error || (reportedIssue?.provider !== 'wechat' ? reportedIssue?.reason : undefined);
   const currentErrorAccount = error || errorAccount?.id === reportedIssue?.account_id ? errorAccount?.label : undefined;
-  const errorView = currentError && <Alert type="error" message={t('notifications.' + currentError, { account: currentErrorAccount || t('notifications.account'), defaultValue: t('notifications.saveFailed') })} action={<Button onClick={() => { if (preferencesError) void refreshPreferences().then(current => { if (current) setError(''); }).catch(() => setError('loadFailed')); else void load(); }}>{t('notifications.reload')}</Button>} />;
+  const errorView = currentError && <Alert type={currentError === 'conflict' && conflictConfig ? 'info' : 'error'} message={t('notifications.' + (currentError === 'conflict' ? conflictConfig ? 'taskConfigReloaded' : 'taskConfigConflict' : currentError), { account: currentErrorAccount || t('notifications.account'), defaultValue: t('notifications.saveFailed') })} action={<Button aria-label={t('notifications.reload')} loading={refreshing} disabled={loading || saving || refreshing || preferencesBusy} onClick={() => void refreshStatus()}>{t('notifications.reload')}</Button>} />;
   const activeChannels = channels.filter(channel => config?.config?.channels[channel]?.enabled);
   const blocked = (channel: ChannelName) => Boolean(preferences && !channelGateEnabled(preferences, channel));
   const configuredWechat = config?.configured ? config.config?.channels.wechat : undefined;
@@ -254,7 +295,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
       {errorView}
       {config && <div className="notification-surface">
         <div className="notification-row"><ChannelBrand channel="desktop" /><div><strong>{t('notifications.' + (config.configured ? 'configured' : 'unconfigured'))}</strong><p>{t('notifications.' + (config.configured ? 'snapshotHint' : 'emptyHint'))}</p></div></div>
-        {config.config && channels.filter(c => (c === 'desktop' && config.config?.channels.desktop) || config.config?.channels[c]?.enabled || config.config?.channels[c]?.account_id).map(c => <ConfiguredChannel key={c} channel={c} rule={config.config!.channels[c]!} blocked={Boolean(config.config?.channels[c]?.enabled && blocked(c))} unavailable={c !== 'wechat' && config.availability[c]?.state === 'unavailable'} wechatStatus={c === 'wechat' ? wechatStatus : undefined} liveAccount={c === 'wechat' ? wechat.account : undefined} />)}
+        {config.config && channels.filter(c => (c === 'desktop' && config.config?.channels.desktop) || config.config?.channels[c]?.enabled || config.config?.channels[c]?.account_id).map(c => <ConfiguredChannel key={c} channel={c} rule={config.config!.channels[c]!} blocked={Boolean(config.config?.channels[c]?.enabled && blocked(c))} unavailable={c !== 'wechat' && config.availability[c]?.state === 'unavailable'} wechatStatus={c === 'wechat' ? wechatStatus : undefined} liveAccount={c === 'wechat' ? wechat.account : undefined} refreshKey={accountsRefresh} />)}
       </div>}
       {!enabled && <Alert type="warning" message={t('notifications.paused')} />}
     </>}
@@ -270,9 +311,9 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
       {taskId ? <NotificationHistory key={taskId} taskId={taskId} /> : <p>{t('notifications.noHistory')}</p>}</>}
     </>}
     </>}
-    <Drawer className="notification-editor-drawer" zIndex={1200} width={680} open={open} title={<><div>{t('notifications.configure')}</div><small>{title} · {t('notifications.onlyThisTask')}</small></>} onClose={cancelEditor} footer={<div className="notification-footer"><Button className="notification-restore-defaults" type="link" disabled={loading || saving || conflict || preferencesBusy} onClick={restoreGlobalDefaults}>{t('notifications.restoreGlobalDefaults')}</Button><div className="notification-footer-actions"><Button disabled={saving || preferencesBusy} onClick={cancelEditor}>{t('notifications.cancel')}</Button><Button type="primary" loading={saving} disabled={draft === undefined || loading || conflict || preferencesBusy || !preferences} onClick={() => void save()}>{t('notifications.save')}</Button></div></div>}>
+    <Drawer className="notification-editor-drawer" zIndex={1200} width={680} open={open} title={<><div>{t('notifications.configure')}</div><small>{title} · {t('notifications.onlyThisTask')}</small></>} onClose={cancelEditor} footer={<div className="notification-footer"><Button className="notification-restore-defaults" type="link" disabled={loading || saving || refreshing || conflict || preferencesBusy} onClick={restoreGlobalDefaults}>{t('notifications.restoreGlobalDefaults')}</Button><div className="notification-footer-actions"><Button disabled={saving || preferencesBusy} onClick={cancelEditor}>{t('notifications.cancel')}</Button><Button type="primary" loading={saving} disabled={draft === undefined || loading || refreshing || (conflict && !conflictConfig) || preferencesBusy || !preferences} onClick={() => void save()}>{t('notifications.save')}</Button></div></div>}>
       {errorView}
-      {loading ? <Spin /> : draft !== undefined && <><Alert className="notification-task-info" type={enabled ? 'info' : 'warning'} showIcon message={t('notifications.' + (enabled ? 'draftSaveHint' : 'paused'))} action={!enabled && <Button onClick={() => openSettings()}>{t('notifications.openSettings')}</Button>} /><div className="notification-task-overview"><span className="notification-task-overview-icon"><BellOutlined /></span><div className="notification-grow"><h3>{t('notifications.taskOverview')}</h3><NotificationSummary value={draft} preferences={preferences} /></div><Tag className="notification-task-channel-count" color="blue">{t('notifications.configuredChannelCount', { count: channels.filter(channel => draft?.channels[channel]?.enabled).length })}</Tag></div><RuleEditor variant="task" value={draft || emptyRule()} onChange={next => void change(next)} preferences={preferences} onOpenSettings={openSettings} accountsRefresh={accountsRefresh} disabled={saving || conflict || preferencesBusy || !preferences} /></>}
+      {loading ? <Spin /> : draft !== undefined && <><Alert className="notification-task-info" type={enabled ? 'info' : 'warning'} showIcon message={t('notifications.' + (enabled ? 'draftSaveHint' : 'paused'))} action={!enabled && <Button onClick={() => openSettings()}>{t('notifications.openSettings')}</Button>} /><div className="notification-task-overview"><span className="notification-task-overview-icon"><BellOutlined /></span><div className="notification-grow"><h3>{t('notifications.taskOverview')}</h3><NotificationSummary value={draft} preferences={preferences} /></div><Tag className="notification-task-channel-count" color="blue">{t('notifications.configuredChannelCount', { count: channels.filter(channel => draft?.channels[channel]?.enabled).length })}</Tag></div><RuleEditor variant="task" value={draft || emptyRule()} onChange={next => void change(next)} preferences={preferences} onOpenSettings={openSettings} accountsRefresh={accountsRefresh} disabled={saving || preferencesBusy || !preferences} /></>}
       {open && selectedTaskId && <section><h3>{t('taskCenter.currentExecutionNotifications')}</h3><NotificationHistory key={selectedTaskId} taskId={selectedTaskId} /></section>}
     </Drawer>
     <Modal zIndex={1300} width={1000} open={settingsOpen} title={t('notifications.title')} maskClosable={!settingsBusy} keyboard={!settingsBusy} footer={<Button disabled={settingsBusy} onClick={closeSettings}>{t('notifications.return')}</Button>} onCancel={closeSettings}>{settingsOpen && <NotificationSettings requestedChannel={requestedChannel} onChannelEnabled={channelEnabled} onBusyChange={setSettingsBusy} connectionInPlace />}</Modal>

@@ -419,7 +419,7 @@ func ClaimDocumentPublicationWrite(ctx context.Context, db *gorm.DB, owner, id s
 		return tx.Model(op).Updates(map[string]any{"status": "write_started", "updated_at": time.Now().UTC()}).Error
 	})
 }
-func finishPublicationBeforeWrite(ctx context.Context, db *gorm.DB, owner, id, status, errorCode string) error {
+func finishPublicationBeforeWrite(ctx context.Context, db *gorm.DB, owner, id, status, errorCode string, confirmedStates ...string) error {
 	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		op, err := publicationLockedOperation(ctx, tx, owner, id)
 		if err != nil {
@@ -428,7 +428,11 @@ func finishPublicationBeforeWrite(ctx context.Context, db *gorm.DB, owner, id, s
 		if op.Status == status {
 			return nil
 		}
-		if op.Status != "preparing" {
+		allowed := op.Status == "preparing"
+		for _, state := range confirmedStates {
+			allowed = allowed || op.Status == state
+		}
+		if !allowed {
 			return publicationError("PUBLICATION_STATE_CONFLICT")
 		}
 		if err := publicationReserved(tx, op); err != nil {

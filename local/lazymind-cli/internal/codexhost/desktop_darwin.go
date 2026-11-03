@@ -12,26 +12,47 @@ import (
 	"time"
 )
 
+var runDarwinDesktopCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, command, args...).CombinedOutput()
+}
+
+// Some NSRunningApplication entries have no bundle URL, including applications
+// that disappear during shutdown. Check the URL before sending it any messages.
+const darwinQuitApplicationHandlers = `use framework "AppKit"
+use scripting additions
+on closeApplications(runningApps, appPath)
+set closingPIDs to {}
+repeat with runningApp in runningApps
+ set appURL to runningApp's bundleURL()
+ if appURL is not missing value then
+  set bundlePath to appURL's |path|()
+  if bundlePath is not missing value and (bundlePath as text) is appPath then
+   set closingPID to runningApp's processIdentifier() as integer
+   if closingPID > 0 then
+    if not (runningApp's terminate() as boolean) then error "Codex refused to close; finish its pending dialog and retry"
+    set end of closingPIDs to closingPID
+   end if
+  end if
+ end if
+end repeat
+return closingPIDs
+end closeApplications
+`
+
 func launchDesktop(ctx context.Context, application string, port int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// A normal quit lets Codex finish its own shutdown and save its state.
 	// Never force-kill a desktop that refuses to close.
 	// Query process objects instead of AppleScript application objects: resolving
 	// an application object during shutdown can relaunch it without CDP flags.
-	script := `use framework "AppKit"
-use scripting additions
+	script := darwinQuitApplicationHandlers + `
 on run argv
 set appPath to item 1 of argv
-set closingPIDs to {}
-repeat with runningApp in (current application's NSWorkspace's sharedWorkspace()'s runningApplications())
- set bundlePath to runningApp's bundleURL()'s |path|()
- if bundlePath is not missing value and (bundlePath as text) is appPath then
-  if not (runningApp's terminate() as boolean) then error "Codex refused to close; finish its pending dialog and retry"
-  set end of closingPIDs to runningApp's processIdentifier() as integer
- end if
-end repeat
-return closingPIDs
+return closeApplications(current application's NSWorkspace's sharedWorkspace()'s runningApplications(), appPath)
 end run`
-	output, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script, application).CombinedOutput()
+	output, err := runDarwinDesktopCommand(ctx, "/usr/bin/osascript", "-e", script, application)
 	if err != nil {
 		return fmt.Errorf("close Codex normally and retry: %s: %w", output, err)
 	}
@@ -64,7 +85,7 @@ end run`
 	}
 	reportRecovery(ctx, "starting")
 	args := append([]string{"-n", "-a", application, "--args"}, desktopLaunchArguments(ctx, port)...)
-	if output, err := exec.CommandContext(ctx, "/usr/bin/open", args...).CombinedOutput(); err != nil {
+	if output, err := runDarwinDesktopCommand(ctx, "/usr/bin/open", args...); err != nil {
 		return fmt.Errorf("start Codex: %s: %w", output, err)
 	}
 	return nil

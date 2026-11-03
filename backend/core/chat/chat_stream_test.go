@@ -544,7 +544,7 @@ func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
 			if err != nil {
 				t.Fatalf("connect db: %v", err)
 			}
-			if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.TaskCenterTask{}); err != nil {
+			if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.TaskCenterTask{}, &orm.ConversationFollowUp{}); err != nil {
 				t.Fatalf("auto migrate: %v", err)
 			}
 			now := time.Now().UTC()

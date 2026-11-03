@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   startScan: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('react-i18next', () => ({
+vi.mock('react-i18next', async importOriginal => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
@@ -26,6 +27,8 @@ vi.mock('react-i18next', () => ({
         'channelGateway.feishu.accountsEmpty': '暂无已连接的飞书账号',
         'channelGateway.wechat.accountStatusMap.connected': '已连接',
         'channelGateway.wechat.accountStatusMap.pendingActivation': '待激活',
+        'notifications.wecomAuthorizationExpired': '待授权',
+        'notifications.wecomRepairAuthorization': '处理授权',
         'channelGateway.wechat.runtimeStatusMap.running': '运行中',
       };
       if (key === 'channelGateway.terminal.connectedCount') {
@@ -42,18 +45,10 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../api', () => ({
+vi.mock('../api', async importOriginal => ({
+  ...await importOriginal<typeof import('../api')>(),
   listChannelAccounts: mocks.listChannelAccounts,
   channelAccountLabel: (account: { label: string }) => account.label,
-  isChannelAccountPendingActivation: (account: { provider: string; status: string; capabilities?: { notification_ready?: boolean } }) => (
-    account.provider === 'wechat'
-    && account.status === 'connected'
-    && account.capabilities?.notification_ready === false
-  ),
-  isChannelAccountAvailable: (account: { provider: string; status: string; capabilities?: { notification_ready?: boolean } }) => (
-    account.status === 'connected'
-    && !(account.provider === 'wechat' && account.capabilities?.notification_ready === false)
-  ),
 }));
 
 vi.mock('../hooks/useChannelConnection', () => ({
@@ -193,4 +188,22 @@ describe('TerminalConnectionQuickPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /channelGateway\.feishu\.startScan/ }));
     expect(mocks.startScan).toHaveBeenCalledWith({ createNew: true });
   });
+});
+
+it('shows WeCom awaiting authorization and opens management instead of creating another QR bot', async () => {
+  const onManage = vi.fn();
+  mocks.listChannelAccounts.mockImplementation(async (provider: string) => ({ items: provider === 'wecom' ? [{
+    id: 'auth-required', provider: 'wecom', label: 'Needs permission', status: 'connected',
+    runtime_status: 'running', binding_status: 'connected', updated_at: '2026-10-30',
+    capabilities: { authorization_required: true },
+  }] : [] }));
+  render(<TerminalConnectionQuickPanel onManage={onManage} />);
+  const count = await screen.findByRole('button', { name: /0 个已连接/ });
+  fireEvent.click(screen.getByRole('tab', { name: '企业微信' }));
+  fireEvent.click(count);
+  expect(await screen.findByText(/待授权/)).toBeInTheDocument();
+  const previousScans = mocks.startScan.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '处理授权' }));
+  expect(onManage).toHaveBeenCalledTimes(1);
+  expect(mocks.startScan).toHaveBeenCalledTimes(previousScans);
 });
