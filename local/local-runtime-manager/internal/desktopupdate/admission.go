@@ -225,11 +225,6 @@ func BeginStartup(ctx context.Context, root string, scope UpdateScope, owner, ro
 		return nil, err
 	}
 	defer releaseLock(lock)
-	if UnsignedTestBuild {
-		if err := CheckUnsignedCaller(scope.Installation, os.Getenv("LAZYMIND_UNSIGNED_EXPECTED_RELEASE"), os.Getenv("LAZYMIND_UNSIGNED_EXPECTED_VERSION")); err != nil {
-			return nil, err
-		}
-	}
 	if err = checkJournals(root, scope); err != nil {
 		return nil, err
 	}
@@ -273,52 +268,4 @@ func (lease *StartupLease) Close() error {
 	}
 	lease.path = ""
 	return nil
-}
-
-func sourceRegistrations(root string, scope UpdateScope, owner string) ([]ProcessIdentity, []ProcessIdentity, error) {
-	dir := filepath.Join(root, "startup", "v1")
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	var writers, coordinators []ProcessIdentity
-	seen := map[string]map[ProcessIdentity]bool{"writer": {}, "coordinator": {}}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".trust-") && strings.HasSuffix(entry.Name(), ".tmp") {
-			continue
-		}
-		var record startupRecord
-		path := filepath.Join(dir, entry.Name())
-		if !validID(strings.TrimSuffix(entry.Name(), ".json")) || readMetadata(path, &record) != nil || record.Version != 1 || (record.Role != "writer" && record.Role != "coordinator") {
-			return nil, nil, failure("registration_corrupt", nil)
-		}
-		live, err := SameProcess(record.Actor)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !live {
-			if err = os.Remove(path); err != nil {
-				return nil, nil, err
-			}
-			continue
-		}
-		if !scopesOverlap(record.Scope, scope) {
-			continue
-		}
-		if record.OwnerDigest != digestBytes([]byte(owner)) {
-			return nil, nil, failure("runtime_busy", nil)
-		}
-		if !seen[record.Role][record.Actor] {
-			if record.Role == "writer" {
-				writers = append(writers, record.Actor)
-			} else {
-				coordinators = append(coordinators, record.Actor)
-			}
-			seen[record.Role][record.Actor] = true
-		}
-	}
-	return writers, coordinators, nil
 }

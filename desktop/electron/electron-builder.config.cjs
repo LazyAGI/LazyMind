@@ -4,9 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
 const { writeNativeUpdateMetadata } = require("../scripts/native-update-metadata.cjs");
-const unsignedTestBuild = require("../scripts/unsigned-test-build.cjs").unsignedTestBuild(process.env);
-const unsignedConfiguration = unsignedTestBuild ? JSON.parse(fs.readFileSync(process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG, "utf8")) : null;
-const productName = unsignedTestBuild ? "LazyMind Test" : "LazyMind";
+const productName = "LazyMind";
 
 const execFile = util.promisify(childProcess.execFile);
 const delay = (milliseconds) => new Promise((resolve) => {
@@ -35,7 +33,7 @@ const extraResources = [
   {
     from: runtimeStage,
     to: "runtime",
-    ...(!unsignedTestBuild ? { filter: ["**/*", "!bin/unsigned-update-helper"] } : {}),
+    filter: ["**/*", "!bin/unsigned-update-helper"],
   },
 ];
 
@@ -223,9 +221,9 @@ async function splitPythonComponents(runtimeRoot) {
       throw new Error(`Bundled Python architecture does not match native build: ${machine.trim()}`);
     }
     if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
-      // A fixed published bundle may have been signed by another team (or ad-hoc).
-      // Developer ID builds must split the binaries signed above in this build.
-      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true";
+      // Match CI: pair components with the current resolved base by default.
+      // Published reuse is explicit; Developer ID must use this build's signatures.
+      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS !== "false";
       const published = componentArch === "arm64" && !rebuild;
       const componentArgs = [
         path.resolve(__dirname, published ? "../scripts/stage-published-python-components.py" : "../scripts/build-python-components.py"),
@@ -237,7 +235,6 @@ async function splitPythonComponents(runtimeRoot) {
         "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
       );
       if (rebuild) componentArgs.push("--slim-providers");
-      if (unsignedTestBuild && !published) componentArgs.push("--allow-test-loopback-http");
       const { stdout } = await execFile(python, componentArgs, { maxBuffer: 4 * 1024 * 1024 });
       console.log(stdout);
       if (rebuild) {
@@ -456,9 +453,8 @@ module.exports = {
     if (!arch) throw new Error(`Unsupported macOS recording helper architecture: ${context.arch}`);
     require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch, identity });
   },
-  appId: unsignedTestBuild ? "ai.lazymind.desktop.test" : "ai.lazymind.desktop",
+  appId: "ai.lazymind.desktop",
   productName,
-  ...(unsignedTestBuild ? { extraMetadata: { name: "lazymind-desktop-test", lazymindUnsignedTest: true, lazymindUnsignedRelease: unsignedConfiguration.releaseId } } : {}),
   artifactName: "LazyMind-${os}-${arch}.${ext}",
   asar: true,
   asarUnpack: ["node_modules/uiohook-napi/**/*", "node_modules/node-gyp-build/**/*"],
@@ -468,9 +464,9 @@ module.exports = {
   },
   files: [
     "src/**/*",
+    "!src/unsigned-test-*.js",
     "assets/**/*",
     "package.json",
-    ...(!unsignedTestBuild ? ["!src/unsigned-test-*.js"] : []),
   ],
   extraResources,
   mac: {

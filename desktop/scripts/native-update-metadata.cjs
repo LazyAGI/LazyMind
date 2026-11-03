@@ -32,23 +32,17 @@ async function writeNativeUpdateMetadata(context, options = {}) {
   const signingMode = options.signingMode ?? (platform === "darwin" ? process.env.LAZYMIND_DESKTOP_SIGNING_MODE || "adhoc"
     : process.env.WIN_CSC_LINK || process.env.CSC_LINK ? "authenticode" : "none");
   const metadata = await nativeUpdateMetadata({ configuration, packageVersion: context.packager.appInfo.version,
-    platform, arch: { 1: "amd64", 3: "arm64" }[context.arch], signingMode,
-    allowUnsignedTest: process.env.LAZYMIND_DESKTOP_ALLOW_UNSIGNED_UPDATE_TEST === "true" });
+    platform, arch: { 1: "amd64", 3: "arm64" }[context.arch], signingMode });
+  // Clear a stale local-test marker when repackaging an existing output.
+  fs.rmSync(path.join(resources, "unsigned-test.json"), { force: true });
   if (!metadata) {
     fs.rmSync(destination, { force: true });
-    fs.rmSync(path.join(resources, "unsigned-test.json"), { force: true });
     return null;
   }
   fs.mkdirSync(resources, { recursive: true });
   // JSON is valid YAML; the runtime can verify these exact fields without a
   // second YAML parser. The updater never checks this disabled remote URL.
   fs.writeFileSync(destination, `${JSON.stringify(metadata, null, 2)}\n`);
-  const testMarker = path.join(resources, "unsigned-test.json");
-  if (metadata.lazymind.mode === "unsigned-test") {
-    if (platform !== "darwin" || product !== "LazyMind Test") throw new Error("Unsigned test package identity mismatch");
-    fs.writeFileSync(testMarker, JSON.stringify({ ...metadata.lazymind, appId: "ai.lazymind.desktop.test",
-      trustDomain: configuration.trustDomain, audience: configuration.audience, channel: configuration.channel }));
-  } else fs.rmSync(testMarker, { force: true });
   return destination;
 }
 module.exports = { nativeUpdateMetadata, writeNativeUpdateMetadata };

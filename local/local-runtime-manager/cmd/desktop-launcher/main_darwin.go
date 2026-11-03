@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
-
-	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 // The packaged Electron binary stays available under an internal name because
@@ -47,13 +45,6 @@ func logLaunch(format string, args ...any) {
 		return
 	}
 	logPath := filepath.Join(home, "Library", "Logs", "LazyMind", "desktop-launcher.log")
-	if desktopupdate.UnsignedTestBuild {
-		p, err := desktopupdate.UnsignedPaths()
-		if err != nil {
-			return
-		}
-		logPath = filepath.Join(p.Logs, "desktop-launcher.log")
-	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return
 	}

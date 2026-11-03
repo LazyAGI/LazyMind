@@ -23,14 +23,11 @@ import (
 
 func TestActualHelperDiscoverAndDownloadCommands(t *testing.T) {
 	f := newHelperProcessFixture(t)
-	f.config.Mode = "unsigned-test"
-	f.config.Audience = "personal-network"
-	f.config.Channel = "personal-test"
 	var signedPolicy []byte
 	var holdPackage atomic.Bool
 	started := make(chan struct{}, 2)
 	files := map[string][]byte{"/package": []byte("synthetic candidate archive"), "/feed": []byte("synthetic immutable feed"), "/components": []byte("synthetic component catalog")}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/policy.json" {
 			_, _ = w.Write(signedPolicy)
 			return
@@ -50,6 +47,7 @@ func TestActualHelperDiscoverAndDownloadCommands(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
+	f.tlsCertificate = server.Certificate().Raw
 	f.config.PolicyURL = server.URL + "/policy.json"
 	f.config.AllowedOrigins = append(f.config.AllowedOrigins, server.URL)
 	var request map[string]json.RawMessage

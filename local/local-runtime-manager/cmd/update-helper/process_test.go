@@ -5,9 +5,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -19,11 +22,26 @@ import (
 )
 
 // This test-only child calls the actual command entrypoint. Only the OS config
-// directory lookup and compiled build value are supplied by the harness; no
+// directory lookup, fixture TLS trust and compiled build value are supplied by the harness; no
 // production argument or environment variable can replace either authority.
 func TestUpdateHelperSubprocess(t *testing.T) {
 	if os.Getenv("LAZYMIND_UPDATE_UNIT_CHILD") != "1" {
 		return
+	}
+	if encoded := os.Getenv("LAZYMIND_UPDATE_UNIT_TLS_CERT"); encoded != "" {
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			os.Exit(91)
+		}
+		cert, err := x509.ParseCertificate(raw)
+		if err != nil {
+			os.Exit(92)
+		}
+		roots := x509.NewCertPool()
+		roots.AddCert(cert)
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		http.DefaultTransport = transport
 	}
 	embeddedConfig = os.Getenv("LAZYMIND_UPDATE_UNIT_CONFIG")
 	resolveRecoveryBase = func() (string, error) { return os.Getenv("LAZYMIND_UPDATE_UNIT_ROOT"), nil }
@@ -37,10 +55,11 @@ func TestUpdateHelperSubprocess(t *testing.T) {
 }
 
 type helperProcessFixture struct {
-	config  desktopupdate.Config
-	private ed25519.PrivateKey
-	root    string
-	now     time.Time
+	tlsCertificate []byte
+	config         desktopupdate.Config
+	private        ed25519.PrivateKey
+	root           string
+	now            time.Time
 }
 
 func newHelperProcessFixture(t *testing.T) *helperProcessFixture {
@@ -69,6 +88,7 @@ func (f *helperProcessFixture) command(t *testing.T, args ...string) *exec.Cmd {
 	encodedArgs, _ := json.Marshal(args)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestUpdateHelperSubprocess$")
 	cmd.Env = append(os.Environ(), "LAZYMIND_UPDATE_UNIT_CHILD=1", "LAZYMIND_UPDATE_UNIT_CONFIG="+base64.StdEncoding.EncodeToString(config), "LAZYMIND_UPDATE_UNIT_ROOT="+f.root, "LAZYMIND_UPDATE_UNIT_ARGS="+string(encodedArgs), "LAZYMIND_DESKTOP_UPDATE_CONFIG=untrusted-runtime-override")
+	cmd.Env = append(cmd.Env, "LAZYMIND_UPDATE_UNIT_TLS_CERT="+base64.StdEncoding.EncodeToString(f.tlsCertificate))
 	return cmd
 }
 

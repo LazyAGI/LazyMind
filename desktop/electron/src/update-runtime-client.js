@@ -1,6 +1,6 @@
 const path = require("node:path");
 const failure = code => Object.assign(new Error(code), { code });
-function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAuxiliary, stopGuard, verifyStartup }) {
+function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAuxiliary, verifyStartup }) {
   let epoch;
   async function invoke(action, requestedEpoch) {
     let value;
@@ -46,11 +46,7 @@ function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAu
       if (epoch !== value || localWork() !== 0) throw failure("tasks_active");
       // Stop browser/agent auxiliary owners first, then the service supervisor.
       await stopAuxiliary();
-      const result = await invoke("stop", value);
-      // The unsigned helper shares startup admission with the resident guard.
-      // Retire that guard only after services are confirmed stopped.
-      await stopGuard?.();
-      return result;
+      return invoke("stop", value);
     },
     verifyStartup,
   };

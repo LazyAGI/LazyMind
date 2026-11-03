@@ -105,8 +105,6 @@ const windowsDesktopPaths = isWindows
   : null;
 
 const isPackaged = app.isPackaged;
-const unsignedTestProfile = isPackaged && require("../package.json").lazymindUnsignedTest === true
-  ? require("./unsigned-test-profile").initializeTestProfile({ app, build: require("../package.json") }) : null;
 const desktopDevURL = !isPackaged
   ? normalizeLoopbackURL(process.env.LAZYMIND_DESKTOP_DEV_URL, "LAZYMIND_DESKTOP_DEV_URL")
   : "";
@@ -132,11 +130,10 @@ const cloudConfiguration = loadDesktopCloudConfiguration({
   environment: process.env,
 });
 const cloudBaseURL = cloudConfiguration.baseURL;
-if (unsignedTestProfile && cloudBaseURL) throw new Error("unsigned_test_cloud_disabled");
 const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
-const explicitRuntimeRoot = unsignedTestProfile?.runtime || process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
+const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
 try {
@@ -146,7 +143,6 @@ try {
   app.exit(1);
   throw error;
 }
-if (unsignedTestProfile) require("./unsigned-test-profile").activateTestProfile(app, unsignedTestProfile);
 if (windowsDesktopPaths) {
   for (const dir of [windowsDesktopPaths.profileDir, windowsDesktopPaths.logsDir, windowsDesktopPaths.crashDumpsDir]) {
     fs.mkdirSync(dir, { recursive: true });
@@ -1121,7 +1117,6 @@ async function runMacInstallationWarmupIfNeeded() {
 }
 
 function startGuard() {
-  if (unsignedTestProfile && runtimeStopping) return;
   if (guardProcess || guardPID || !fs.existsSync(sidecarPath)) {
     return;
   }
@@ -2567,10 +2562,7 @@ function assertBrowserIPC(event) {
   }
 }
 const invokeUpdateHelper = createUpdateHelperClient({ helperPath: path.join(runtimeResourcesRoot, "bin", isWindows ? "lazymind-update-helper.exe" : "lazymind-update-helper") });
-const nativeUpdateInstaller = unsignedTestProfile
-  ? require("./unsigned-test-installer").createUnsignedTestInstaller({ profile: unsignedTestProfile, resourcesPath: process.resourcesPath,
-    currentVersion: app.getVersion(), setQuitting: (value) => { isQuitting = value; allowWindowClose = value; }, quit: () => app.quit() })
-  : createNativeUpdateInstaller({ currentVersion: app.getVersion(), isPackaged: app.isPackaged,
+const nativeUpdateInstaller = createNativeUpdateInstaller({ currentVersion: app.getVersion(), isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath, setQuitting: (value) => { isQuitting = value; allowWindowClose = value; }, quit: () => app.quit() });
 const updateRuntime = createUpdateRuntimeClient({
   runSidecar,
@@ -2587,7 +2579,6 @@ const updateRuntime = createUpdateRuntimeClient({
     // it before the strict process census to avoid waiting for its own marker.
     await Promise.all([stopDesktopUpdateChild(agentHostProcess), stopDesktopUpdateChild(runtimeProcess)]);
   },
-  stopGuard: unsignedTestProfile ? () => stopDesktopUpdateChild(guardProcess) : undefined,
   verifyStartup: async () => {
     const status = await waitForRuntimeReady();
     if (status.overallStatus !== "ready" || !status.ownerMatched) throw Object.assign(new Error("update_startup_failed"), { code: "update_startup_failed" });
@@ -2614,7 +2605,7 @@ app.on("will-quit", () => desktopUpdater.dispose());
 let nativeRecordingOwner = null;
 const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
   source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
-  root: path.join(app.getPath("appData"), unsignedTestProfile ? "LazyMind Test" : "LazyMind", "recording-helper"),
+  root: path.join(app.getPath("appData"), "LazyMind", "recording-helper"),
   onEvent: (message) => { if (nativeRecordingOwner && !nativeRecordingOwner.isDestroyed()) nativeRecordingOwner.send("lazymind:recordingNativeEvent", message); },
   log: (stage, message) => appendStartupLog("recording-helper", `${stage}: ${message}`),
 }) : null;

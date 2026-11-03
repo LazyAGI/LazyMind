@@ -45,16 +45,7 @@ func TestRuntimeEntrypointsRejectPendingUpdateBeforeMutation(t *testing.T) {
 	saved := resolveRuntimeRecoveryRoot
 	resolveRuntimeRecoveryRoot = func() (string, error) { return root, nil }
 	t.Cleanup(func() { resolveRuntimeRecoveryRoot = saved })
-	scope, err := runtimeUpdateScope(f.cfg, f.paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := desktopupdate.TransactionPlan{TrustDomain: "fixture", Audience: "fixture-personal", Channel: "personal-test", Mode: "unsigned-test", Platform: "darwin", Arch: "arm64", SigningIdentity: "adhoc", UpdaterProtocol: 1, Scope: scope, SourceID: "source", TargetID: "target", SourceVersion: "1.0.0", TargetVersion: "1.1.0", SourceManifestSHA256: strings.Repeat("a", 64), SourcePackageSHA256: strings.Repeat("b", 64), TargetPackageSHA256: strings.Repeat("c", 64), PolicySequence: 1, PolicyDigest: strings.Repeat("d", 64), DataProfile: "fixture-v1", TargetDataProfile: "fixture-v1", Units: []desktopupdate.SnapshotUnit{{Path: f.paths.DataDir}}, Reservations: []desktopupdate.InstallSpaceReservation{{Directory: root, InstallBytes: 1024, RecoveryBytes: 1024}}, OwnerToken: f.cfg.OwnerToken}
-	tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Close()
+	writePendingAdmissionJournal(t, root, admissionPlan(t, f, root))
 	before, err := os.ReadFile(f.paths.StateFile)
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ type UpdateScope struct {
 	DataRoots    []string `json:"dataRoots"`
 }
 
+// These fields remain part of persisted v1 journal validation.
 type SnapshotUnit struct {
 	Path    string   `json:"path"`
 	Exclude []string `json:"exclude,omitempty"`
@@ -17,30 +18,6 @@ type SnapshotUnit struct {
 
 type InstallSpaceReservation struct {
 	Directory     string `json:"directory"`
-	InstallBytes  int64  `json:"installBytes"`
-	RecoveryBytes int64  `json:"recoveryBytes"`
-}
-
-type SnapshotRecord struct {
-	ActivePath string `json:"activePath"`
-	BackupPath string `json:"backupPath"`
-	ReadyPath  string `json:"readyPath"`
-	FailedPath string `json:"failedPath"`
-	Existed    bool   `json:"existed"`
-	Digest     string `json:"digest"`
-}
-
-type SnapshotManifest struct {
-	Version       int                   `json:"version"`
-	TransactionID string                `json:"transactionId"`
-	Units         []SnapshotRecord      `json:"units"`
-	Reservations  []SnapshotReservation `json:"reservations"`
-	Complete      bool                  `json:"complete"`
-}
-
-type SnapshotReservation struct {
-	InstallPath   string `json:"installPath"`
-	RecoveryPath  string `json:"recoveryPath"`
 	InstallBytes  int64  `json:"installBytes"`
 	RecoveryBytes int64  `json:"recoveryBytes"`
 }
@@ -69,7 +46,6 @@ type TransactionPlan struct {
 	Units                []SnapshotUnit            `json:"units"`
 	SQLiteFiles          []string                  `json:"sqliteFiles,omitempty"`
 	Reservations         []InstallSpaceReservation `json:"reservations"`
-	OwnerToken           string                    `json:"-"`
 }
 
 type UpdateJournal struct {

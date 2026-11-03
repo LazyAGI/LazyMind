@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 const cloudCredentialKeyEnvVar = "LAZYMIND_AUTH_CLOUD_SECRET_KEY"
@@ -43,13 +41,6 @@ func cloudCredentialKey() (string, error) {
 }
 
 func credentialDeviceIdentityPath() string {
-	if desktopupdate.UnsignedTestBuild {
-		p, err := desktopupdate.UnsignedPaths()
-		if err != nil {
-			return ""
-		}
-		return filepath.Join(p.Profile, "credential-device.json")
-	}
 	return credentialDeviceIdentityPathForOS(runtime.GOOS, hostHomeDir(), os.Getenv("LOCALAPPDATA"))
 }
 

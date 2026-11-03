@@ -22,7 +22,7 @@ function context() {
   spawn:()=>{const p=Object.assign(new EventEmitter(),{stdout:new PassThrough(),stderr:new PassThrough(),kill(){}});children.push(p);return p;},
   runtimeStopping:false,isQuitting:false,runtimeRestartPromise:null,inputRecorder:{isActive:()=>false},nativeRecording:null,
   agentHostRestartTimer:null,agentHostStableTimer:null,clearTimeout,managedBrowser:{clear:async()=>{}},
-  agentHostProcess:null,runtimeProcess:null,unsignedTestProfile:null,
+  agentHostProcess:null,runtimeProcess:null,
   stopDesktopUpdateChild:async()=>{},
   runSidecar:async(_,args)=>{calls.push(args[1]);return JSON.stringify(args[1]==='stop'?{status:'stopped'}:{paused:true,epoch:Number(args[3]),active:0});},
  };

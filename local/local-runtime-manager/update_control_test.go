@@ -42,12 +42,14 @@ func TestDesktopUpdateControlUsesPersistedOwnershipAndPorts(t *testing.T) {
 }
 func TestDesktopUpdateControlAggregatesPeersAndResumesAmbiguousPause(t *testing.T) {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "fixture-token")
+	// Credentials remain stable once initialized by another runtime test.
+	token := internalServiceToken()
 	var mu sync.Mutex
 	calls := map[string][]string{}
 	failCore := false
 	server := func(name string, active int64) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/internal/desktop-update" || r.Header.Get("X-LazyMind-Internal-Token") != "fixture-token" {
+			if r.URL.Path != "/internal/desktop-update" || r.Header.Get("X-LazyMind-Internal-Token") != token {
 				t.Error("unexpected control endpoint/token")
 				w.WriteHeader(403)
 				return

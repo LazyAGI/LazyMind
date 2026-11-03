@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 
 const fields = new Set(["trustDomain", "audience", "channel", "mode", "releaseId", "version", "platform", "arch", "signingIdentity", "updaterProtocol", "policyURL", "allowedOrigins", "publicKeys"]);
 
-export function prepareUpdateBuildConfig({ configuration, packageVersion, platform, arch, signingMode, allowUnsignedTest = false }) {
+export function prepareUpdateBuildConfig({ configuration, packageVersion, platform, arch, signingMode }) {
   if (configuration === undefined) return "";
   if (!configuration || Array.isArray(configuration) || typeof configuration !== "object") throw new Error("Invalid public update configuration");
   for (const key of Object.keys(configuration)) if (!fields.has(key)) throw new Error(`Unknown public update configuration field: ${key}`);
@@ -23,11 +23,6 @@ export function prepareUpdateBuildConfig({ configuration, packageVersion, platfo
     if (!["stable", "beta", "canary"].includes(configuration.channel)
       || (configuration.channel === "stable" && prerelease)
       || (configuration.channel === "beta" && prerelease && !/^(beta|rc)(\.|$)/.test(prerelease))) throw new Error("Package version does not match its update channel");
-  } else if (configuration.mode === "unsigned-test") {
-    if (allowUnsignedTest !== true) throw new Error("Unsigned update testing requires explicit enablement");
-    if (!configuration.audience || configuration.audience === "official") throw new Error("Unsigned tests require an isolated audience");
-    if (configuration.channel !== "personal-test") throw new Error("Unsigned tests require the personal-test channel");
-    if (platform === "darwin" && !["adhoc", "developer-id"].includes(signingMode)) throw new Error("macOS test updates still require ad-hoc signing");
   } else throw new Error("Invalid update mode");
   if (!configuration.publicKeys || Array.isArray(configuration.publicKeys) || typeof configuration.publicKeys !== "object" || !Object.keys(configuration.publicKeys).length) throw new Error("Update public keys are required");
   for (const value of Object.values(configuration.publicKeys)) {
@@ -56,8 +51,7 @@ function main(args) {
     if (process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG) configuration = JSON.parse(fs.readFileSync(process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG, "utf8"));
   } catch { throw new Error("Unable to read package or public update configuration"); }
   const encoded = prepareUpdateBuildConfig({ configuration, packageVersion: packageJson.version,
-    platform: options["--platform"], arch: options["--arch"], signingMode: options["--signing-mode"],
-    allowUnsignedTest: process.env.LAZYMIND_DESKTOP_ALLOW_UNSIGNED_UPDATE_TEST === "true" });
+    platform: options["--platform"], arch: options["--arch"], signingMode: options["--signing-mode"] });
   if (options["--verify-helper"]) {
     let staged;
     try {

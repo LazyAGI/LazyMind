@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
-func TestRuntimeCustomMilvusScopeProtectsBothAdmissionDirections(t *testing.T) {
-	for _, direction := range []string{"existing-instance", "pending-transaction"} {
+func TestRuntimeCustomMilvusScopeRegistersAndBlocksPendingUpdates(t *testing.T) {
+	for _, direction := range []string{"registered-scope", "pending-transaction"} {
 		t.Run(direction, func(t *testing.T) {
 			shared := t.TempDir()
 			t.Setenv(localMilvusLiteDataDirEnvVar, shared)
@@ -20,23 +18,14 @@ func TestRuntimeCustomMilvusScopeProtectsBothAdmissionDirections(t *testing.T) {
 				t.Fatal("custom storage was not selected")
 			}
 			root := t.TempDir()
-			if direction == "existing-instance" {
+			if direction == "registered-scope" {
 				out, err := admissionCommand(t, first, root, "coordinator").Output()
 				if err != nil {
 					t.Fatalf("normal source guard: %s %v", out, err)
 				}
-				if tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, admissionPlan(t, second, root)); desktopupdate.ErrorCode(err) != "runtime_busy" {
-					if tx != nil {
-						tx.Close()
-					}
-					t.Fatalf("shared actual Milvus directory did not block prepare: %v", err)
-				}
+				requireRegisteredDataRoot(t, root, shared)
 			} else {
-				tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, admissionPlan(t, first, root))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer tx.Close()
+				writePendingAdmissionJournal(t, root, admissionPlan(t, first, root))
 				out, err := admissionCommand(t, second, root, "coordinator").Output()
 				var result struct {
 					Error string `json:"error"`

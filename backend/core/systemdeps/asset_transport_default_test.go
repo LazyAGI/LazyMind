@@ -1,5 +1,3 @@
-//go:build !lazymind_unsigned_test
-
 package systemdeps
 
 import "testing"

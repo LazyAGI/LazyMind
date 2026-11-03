@@ -15,6 +15,10 @@ import sysconfig
 from urllib.parse import urlparse
 import zipfile
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+
 # Shared readers, BM25 and scientific libraries remain in core for attachments/Skills.
 SEEDS = {
     'rag': {'milvus-lite', 'pymilvus', 'spacy', 'sentencepiece', 'nltk'},
@@ -30,9 +34,6 @@ def encoded(value):
 
 
 def dependency_groups(distributions, protected):
-    from packaging.requirements import Requirement
-    from packaging.utils import canonicalize_name
-
     edges = {}
     for name, dist in distributions.items():
         edges[name] = set()
@@ -104,26 +105,14 @@ def distribution_files(dist, site):
 DEFAULT_BASE_URL = 'https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/RAG/'
 
 
-def validate_base_url(base_url, allow_test_loopback_http=False):
-    parsed = urlparse(base_url)
-    if not base_url or parsed.scheme == 'https':
-        return
-    if (allow_test_loopback_http and parsed.scheme == 'http' and parsed.hostname == '127.0.0.1'
-            and parsed.username is None and parsed.password is None and not parsed.query and not parsed.fragment):
-        return
-    raise ValueError('Component download base URL must use HTTPS')
-
-
-def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False, allow_test_loopback_http=False):
-    from packaging.requirements import Requirement
-    from packaging.utils import canonicalize_name
-
+def split(runtime, output, base_url=DEFAULT_BASE_URL, slim_providers=False):
     # Windows TEMP may use an 8.3 alias (e.g. CUISHA~1); compare canonical paths
     # against the resolved runtime root rather than rejecting the same directory.
     site = Path(sysconfig.get_path('purelib')).resolve()
     if not site.is_relative_to((runtime / 'deps/python/algorithm').resolve()):
         raise RuntimeError('Run this script with the staged algorithm Python, not the system Python')
-    validate_base_url(base_url, allow_test_loopback_http)
+    if base_url and urlparse(base_url).scheme != 'https':
+        raise ValueError('Component download base URL must use HTTPS')
     bootstrap_versions = {canonicalize_name(d.metadata['Name']): d.version
                           for d in metadata.distributions(path=[str(site)]) if d.metadata.get('Name')}
     if slim_providers:
@@ -230,9 +219,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--slim-providers', action='store_true',
                         help='Remove unused desktop providers and include gRPC in the newly generated RAG bundle')
-    parser.add_argument('--allow-test-loopback-http', action='store_true',
-                        help='Allow 127.0.0.1 HTTP only for isolated unsigned-test packages')
     args = parser.parse_args()
     split(args.runtime.resolve(), args.output.resolve(),
-          os.environ.get('LAZYMIND_PYTHON_COMPONENT_BASE_URL') or DEFAULT_BASE_URL, args.slim_providers,
-          args.allow_test_loopback_http)
+          os.environ.get('LAZYMIND_PYTHON_COMPONENT_BASE_URL') or DEFAULT_BASE_URL, args.slim_providers)

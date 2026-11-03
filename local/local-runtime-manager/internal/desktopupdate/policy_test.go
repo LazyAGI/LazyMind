@@ -367,27 +367,12 @@ func TestBridgeTieUsesPublisherPriorityAndRechecksDataAtEachHop(t *testing.T) {
 	}
 }
 
-func TestExplicitUnsignedTestHTTPAndProductionIsolation(t *testing.T) {
+func TestNormalHelperRejectsLocalTestMode(t *testing.T) {
 	f := newPolicyFixture(t)
+	t.Setenv("LAZYMIND_DESKTOP_ALLOW_UNSIGNED_UPDATE_TEST", "true")
 	f.config.Mode = "unsigned-test"
-	f.config.Audience = "personal-fixture"
-	f.config.Channel = "personal-test"
-	f.policy["audience"] = "personal-fixture"
-	f.policy["channel"] = "personal-test"
-	f.config.PolicyURL = "http://127.0.0.1:8000/policy.json"
-	f.config.AllowedOrigins = []string{"http://127.0.0.1:8000"}
-	for _, release := range f.policy["releases"].([]any) {
-		for _, kind := range []string{"package", "feed", "components"} {
-			a := release.(map[string]any)[kind].(map[string]any)
-			a["url"] = strings.Replace(a["url"].(string), "https://updates.example.invalid", "http://127.0.0.1:8000", 1)
-		}
-	}
-	if d, err := f.check(t); err != nil || d.Status != "bridge" {
-		t.Fatalf("explicit local test decision=%+v err=%v", d, err)
-	}
-	f.config.Mode = "official"
 	if _, err := f.check(t); err == nil {
-		t.Fatal("production mode accepted test trust and HTTP source")
+		t.Fatal("normal helper accepted local test mode")
 	}
 }
 

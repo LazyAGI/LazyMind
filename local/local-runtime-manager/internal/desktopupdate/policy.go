@@ -72,10 +72,6 @@ func ValidateConfig(c Config) error {
 		if c.Audience != "official" || !(c.Channel == "stable" || c.Channel == "beta" || c.Channel == "canary") {
 			return failure("configuration_invalid", nil)
 		}
-	} else if c.Mode == "unsigned-test" {
-		if c.Audience == "official" || c.Channel != "personal-test" {
-			return failure("configuration_invalid", nil)
-		}
 	} else {
 		return failure("configuration_invalid", nil)
 	}
@@ -84,7 +80,7 @@ func ValidateConfig(c Config) error {
 	}
 	for _, origin := range c.AllowedOrigins {
 		u, err := url.Parse(origin)
-		if err != nil || u.Host == "" || u.User != nil || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !(c.Mode == "unsigned-test" && u.Scheme == "http")) {
+		if err != nil || u.Host == "" || u.User != nil || u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" || u.Scheme != "https" {
 			return failure("configuration_invalid", nil)
 		}
 	}
@@ -117,7 +113,7 @@ func ResolveURL(c Config, raw string) (string, error) {
 		}
 		u = base.ResolveReference(u)
 	}
-	if u.Host == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || (u.Scheme != "https" && !(c.Mode == "unsigned-test" && u.Scheme == "http")) {
+	if u.Host == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Scheme != "https" {
 		return "", failure("source_not_allowed", nil)
 	}
 	for _, origin := range c.AllowedOrigins {

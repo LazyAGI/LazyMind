@@ -1,21 +1,18 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 // These URLs use the same file under SQLAlchemy's pysqlite dialect. The
 // database part is literal (not URL-unescaped); connection options are separate.
-func TestRuntimeAuthSQLiteURLsProtectBothAdmissionDirections(t *testing.T) {
+func TestRuntimeAuthSQLiteURLsRegisterAndBlockPendingUpdates(t *testing.T) {
 	for _, form := range []string{"plain", "driver", "timeout", "driver-options", "literal-percent", "path-alias"} {
-		for _, direction := range []string{"existing-instance", "pending-transaction"} {
+		for _, direction := range []string{"registered-scope", "pending-transaction"} {
 			t.Run(form+"/"+direction, func(t *testing.T) {
 				first, second := newUpdateStateFixture(t), newUpdateStateFixture(t)
 				first.cfg.OwnerToken, second.cfg.OwnerToken = "first-owner", "second-owner"
@@ -52,24 +49,14 @@ func TestRuntimeAuthSQLiteURLsProtectBothAdmissionDirections(t *testing.T) {
 				second.cfg.UpdateStorage.Databases["auth"] = shared
 				t.Setenv(authServiceDatabaseURLEnvVar, address)
 				root := t.TempDir()
-				if direction == "existing-instance" {
+				if direction == "registered-scope" {
 					out, err := admissionCommand(t, first, root, "coordinator").Output()
 					if err != nil {
 						t.Fatalf("supported source URL could not start: %s %v", out, err)
 					}
-					tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, admissionPlan(t, second, root))
-					if tx != nil {
-						defer tx.Close()
-					}
-					if desktopupdate.ErrorCode(err) != "runtime_busy" {
-						t.Fatalf("shared auth writer did not block update: %v", err)
-					}
+					requireRegisteredDataRoot(t, root, shared)
 				} else {
-					tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, admissionPlan(t, second, root))
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer tx.Close()
+					writePendingAdmissionJournal(t, root, admissionPlan(t, second, root))
 					out, err := admissionCommand(t, first, root, "coordinator").Output()
 					var result struct {
 						Error string `json:"error"`

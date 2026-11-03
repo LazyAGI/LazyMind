@@ -9,7 +9,7 @@ import { prepareUpdateBuildConfig } from "./prepare-update-build-config.mjs";
 
 function options() {
   const key = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64");
-  return { packageVersion: "1.0.0", platform: "darwin", arch: "arm64", signingMode: "developer-id", allowUnsignedTest: false,
+  return { packageVersion: "1.0.0", platform: "darwin", arch: "arm64", signingMode: "developer-id",
     configuration: { trustDomain: "fixture", audience: "official", channel: "stable", mode: "official", releaseId: "fixture-1.0.0", signingIdentity: "FIXTURE_TEAM", updaterProtocol: 1,
       policyURL: "https://updates.example.invalid/policy.json", allowedOrigins: ["https://updates.example.invalid"], publicKeys: { key } } };
 }
@@ -35,13 +35,10 @@ test("official configuration cannot be embedded in unsigned packages or stable p
   assert.throws(() => prepareUpdateBuildConfig({ ...input, platform: "windows", arch: "amd64", signingMode: "none" }), /sign/);
 });
 
-test("unsigned personal test requires explicit enablement and an isolated audience/channel", () => {
+test("normal builds reject local test mode even with the old opt-in flag", () => {
   const input = options();
-  const configuration = { ...input.configuration, mode: "unsigned-test", audience: "personal-fixture", channel: "personal-test", signingIdentity: "adhoc", policyURL: "http://127.0.0.1:8000/policy.json", allowedOrigins: ["http://127.0.0.1:8000"] };
-  assert.throws(() => prepareUpdateBuildConfig({ ...input, configuration, signingMode: "adhoc" }), /explicit/);
-  assert.doesNotThrow(() => prepareUpdateBuildConfig({ ...input, configuration, signingMode: "adhoc", allowUnsignedTest: true }));
-  assert.throws(() => prepareUpdateBuildConfig({ ...input, configuration: { ...configuration, audience: "official" }, signingMode: "adhoc", allowUnsignedTest: true }), /audience/);
-  assert.throws(() => prepareUpdateBuildConfig({ ...input, configuration: { ...configuration, channel: "stable" }, signingMode: "adhoc", allowUnsignedTest: true }), /channel/);
+  assert.throws(() => prepareUpdateBuildConfig({ ...input, allowUnsignedTest: true,
+    configuration: { ...input.configuration, mode: "unsigned-test" } }), /Invalid update mode/);
 });
 
 test("unknown build fields cannot accidentally embed a private key", () => {

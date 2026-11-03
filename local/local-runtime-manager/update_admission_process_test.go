@@ -4,11 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -80,7 +84,7 @@ func admissionPlan(t *testing.T, f *updateStateFixture, root string) desktopupda
 	if err != nil {
 		t.Fatal(err)
 	}
-	return desktopupdate.TransactionPlan{TrustDomain: "fixture", Audience: "fixture-personal", Channel: "personal-test", Mode: "unsigned-test", Platform: "darwin", Arch: "arm64", SigningIdentity: "adhoc", UpdaterProtocol: 1, Scope: scope, SourceID: "source", TargetID: "target", SourceVersion: "1.0.0", TargetVersion: "1.1.0", SourceManifestSHA256: strings.Repeat("a", 64), SourcePackageSHA256: strings.Repeat("b", 64), TargetPackageSHA256: strings.Repeat("c", 64), PolicySequence: 1, PolicyDigest: strings.Repeat("d", 64), DataProfile: "fixture", TargetDataProfile: "fixture", Units: []desktopupdate.SnapshotUnit{{Path: f.paths.DataDir}}, Reservations: []desktopupdate.InstallSpaceReservation{{Directory: root, InstallBytes: 1024, RecoveryBytes: 1024}}, OwnerToken: f.cfg.OwnerToken}
+	return desktopupdate.TransactionPlan{TrustDomain: "fixture", Audience: "fixture-personal", Channel: "personal-test", Mode: "unsigned-test", Platform: "darwin", Arch: "arm64", SigningIdentity: "adhoc", UpdaterProtocol: 1, Scope: scope, SourceID: "source", TargetID: "target", SourceVersion: "1.0.0", TargetVersion: "1.1.0", SourceManifestSHA256: strings.Repeat("a", 64), SourcePackageSHA256: strings.Repeat("b", 64), TargetPackageSHA256: strings.Repeat("c", 64), PolicySequence: 1, PolicyDigest: strings.Repeat("d", 64), DataProfile: "fixture", TargetDataProfile: "fixture", Units: []desktopupdate.SnapshotUnit{{Path: f.paths.DataDir}}, Reservations: []desktopupdate.InstallSpaceReservation{{Directory: root, InstallBytes: 1024, RecoveryBytes: 1024}}}
 }
 
 func admissionCommand(t *testing.T, f *updateStateFixture, root, mode string) *exec.Cmd {
@@ -105,7 +109,6 @@ func admissionCommand(t *testing.T, f *updateStateFixture, root, mode string) *e
 func TestRuntimeStartupGuardRegistersItsLivingCoordinatorAfterReturning(t *testing.T) {
 	f := newUpdateStateFixture(t)
 	root := t.TempDir()
-	plan := admissionPlan(t, f, root)
 	cmd := admissionCommand(t, f, root, "coordinator")
 	output, err := cmd.Output()
 	if err != nil {
@@ -117,33 +120,20 @@ func TestRuntimeStartupGuardRegistersItsLivingCoordinatorAfterReturning(t *testi
 	if json.Unmarshal(output, &result) != nil || result.Status != "allowed" {
 		t.Fatalf("guard did not authorize: %s", output)
 	}
-	foreign := plan
-	foreign.OwnerToken = "another-owner"
-	if _, err = desktopupdate.BeginUpdateTransaction(context.Background(), root, foreign); desktopupdate.ErrorCode(err) != "runtime_busy" {
-		t.Fatalf("short-lived guard lost its living parent: %v", err)
-	}
-	tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Close()
 	self, err := desktopupdate.CurrentProcessIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinators := tx.Journal().SourceCoordinators
-	if len(coordinators) != 1 || coordinators[0] != self {
-		t.Fatalf("guard registered wrong process, expected its parent: %+v / %+v", coordinators, self)
-	}
-	if err = tx.AbortBeforeInstall(); err != nil {
-		t.Fatal(err)
+	records := readAdmissionRecords(t, root)
+	digest := sha256.Sum256([]byte(f.cfg.OwnerToken))
+	if len(records) != 1 || records[0].Role != "coordinator" || records[0].Actor != self || records[0].OwnerDigest != hex.EncodeToString(digest[:]) {
+		t.Fatalf("guard did not preserve its parent's registration: %+v", records)
 	}
 }
 
 func TestRuntimeNormalUpEntryKeepsWriterRegistrationUntilExit(t *testing.T) {
 	f := newUpdateStateFixture(t)
 	root := t.TempDir()
-	plan := admissionPlan(t, f, root)
 	cmd := admissionCommand(t, f, root, "writer")
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -171,35 +161,23 @@ func TestRuntimeNormalUpEntryKeepsWriterRegistrationUntilExit(t *testing.T) {
 	if result.Actor.PID != cmd.Process.Pid || result.Actor.StartID == 0 {
 		t.Fatal("not the actual long-lived CLI process")
 	}
-	foreign := plan
-	foreign.OwnerToken = "another-owner"
-	if _, err = desktopupdate.BeginUpdateTransaction(context.Background(), root, foreign); desktopupdate.ErrorCode(err) != "runtime_busy" {
-		t.Fatalf("normal up entry omitted registration: %v", err)
+	records := readAdmissionRecords(t, root)
+	if len(records) != 1 || records[0].Role != "writer" || records[0].Actor != result.Actor {
+		t.Fatalf("normal up entry omitted its actual writer registration: %+v", records)
 	}
-	tx, err := desktopupdate.BeginUpdateTransaction(context.Background(), root, plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Close()
-	if processes := tx.Journal().SourceProcesses; len(processes) != 1 || processes[0] != result.Actor {
-		t.Fatalf("writer identity not captured: %+v", processes)
-	}
-	if err = tx.BeginDrain(); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.ConfirmStopped(context.Background()); desktopupdate.ErrorCode(err) != "processes_running" {
-		t.Fatalf("live CLI was declared stopped: %v", err)
+	if alive, err := desktopupdate.SameProcess(result.Actor); err != nil || !alive {
+		t.Fatalf("live CLI was declared stopped: %v %v", alive, err)
 	}
 	_, _ = in.Write([]byte("done\n"))
 	_ = in.Close()
 	if err = cmd.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if err = tx.ConfirmStopped(context.Background()); err != nil {
-		t.Fatal(err)
+	if records := readAdmissionRecords(t, root); len(records) != 0 {
+		t.Fatalf("exited CLI left a writer lease: %+v", records)
 	}
-	if err = tx.AbortBeforeInstall(); err != nil {
-		t.Fatal(err)
+	if alive, err := desktopupdate.SameProcess(result.Actor); err != nil || alive {
+		t.Fatalf("exited CLI still alive: %v %v", alive, err)
 	}
 }
 
@@ -219,4 +197,89 @@ func TestRuntimeAndHelperUseSharedRecoveryBase(t *testing.T) {
 	if !bytes.Contains(source, []byte("desktopupdate.RecoveryBase")) {
 		t.Fatal("helper still resolves a separate service HOME root")
 	}
+}
+
+// Journal input is a persisted fixture, not a call to a production transaction writer.
+func writePendingAdmissionJournal(t *testing.T, root string, plan desktopupdate.TransactionPlan) {
+	t.Helper()
+	plan.Scope.Installation = canonicalAdmissionFixturePath(t, plan.Scope.Installation)
+	roots := map[string]string{}
+	for _, name := range plan.Scope.DataRoots {
+		actual := canonicalAdmissionFixturePath(t, name)
+		key := actual
+		if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+			key = strings.ToLower(key)
+		}
+		roots[key] = actual
+	}
+	plan.Scope.DataRoots = nil
+	for _, actual := range roots {
+		plan.Scope.DataRoots = append(plan.Scope.DataRoots, actual)
+	}
+	sort.Strings(plan.Scope.DataRoots)
+	journal := desktopupdate.UpdateJournal{Version: 1, ID: strings.Repeat("1", 32), Stage: "PREPARED", Revision: 1, Plan: plan, ResolvedScope: plan.Scope}
+	raw, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(root, "transactions", "v1", journal.ID, "journal.json")
+	if err = os.MkdirAll(filepath.Dir(name), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(name, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func canonicalAdmissionFixturePath(t *testing.T, name string) string {
+	t.Helper()
+	actual, err := filepath.EvalSymlinks(name)
+	if err == nil {
+		return actual
+	}
+	if !os.IsNotExist(err) || filepath.Dir(name) == name {
+		t.Fatal(err)
+	}
+	return filepath.Join(canonicalAdmissionFixturePath(t, filepath.Dir(name)), filepath.Base(name))
+}
+
+type admissionRecordFixture struct {
+	Role        string
+	OwnerDigest string
+	Actor       desktopupdate.ProcessIdentity
+	Scope       desktopupdate.UpdateScope
+}
+
+func readAdmissionRecords(t *testing.T, root string) []admissionRecordFixture {
+	t.Helper()
+	names, err := filepath.Glob(filepath.Join(root, "startup", "v1", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []admissionRecordFixture
+	for _, name := range names {
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var record admissionRecordFixture
+		if err = json.Unmarshal(raw, &record); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+func requireRegisteredDataRoot(t *testing.T, root, expected string) {
+	t.Helper()
+	records := readAdmissionRecords(t, root)
+	want := canonicalAdmissionFixturePath(t, expected)
+	for _, record := range records {
+		for _, name := range record.Scope.DataRoots {
+			if canonicalAdmissionFixturePath(t, name) == want {
+				return
+			}
+		}
+	}
+	t.Fatalf("registration omitted expected shared root %s", expected)
 }

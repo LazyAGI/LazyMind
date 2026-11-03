@@ -31,17 +31,8 @@ type transferFixture struct {
 }
 
 func newTransferFixture(t *testing.T) *transferFixture {
-	return newTransferFixtureWithTLS(t, false)
-}
-
-func newTransferFixtureWithTLS(t *testing.T, secure bool) *transferFixture {
 	t.Helper()
 	f := &transferFixture{policyFixture: newPolicyFixture(t), files: map[string][]byte{}, serveArtifacts: map[string]func(http.ResponseWriter, *http.Request, []byte){}}
-	f.config.Mode = "unsigned-test"
-	f.config.Audience = "personal-transfer"
-	f.config.Channel = "personal-test"
-	f.policy["audience"] = f.config.Audience
-	f.policy["channel"] = f.config.Channel
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/policy.json" {
 			f.policyRequests.Add(1)
@@ -72,11 +63,7 @@ func newTransferFixtureWithTLS(t *testing.T, secure bool) *transferFixture {
 		}
 		_, _ = w.Write(body)
 	})
-	if secure {
-		f.server = httptest.NewTLSServer(handler)
-	} else {
-		f.server = httptest.NewServer(handler)
-	}
+	f.server = httptest.NewTLSServer(handler)
 	t.Cleanup(f.server.Close)
 	f.config.PolicyURL = f.server.URL + "/policy.json"
 	f.config.AllowedOrigins = []string{f.server.URL}
@@ -341,7 +328,7 @@ func TestDownloadCancellationDoesNotPublishPartialArtifact(t *testing.T) {
 
 func TestRedirectCannotExpandCompiledAllowedOrigins(t *testing.T) {
 	var received atomic.Int32
-	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received.Add(1); _, _ = w.Write([]byte("untrusted")) }))
+	other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received.Add(1); _, _ = w.Write([]byte("untrusted")) }))
 	defer other.Close()
 	f := newTransferFixture(t)
 	f.servePackage = func(w http.ResponseWriter, r *http.Request, body []byte) {
@@ -378,7 +365,7 @@ func TestTrustedRedirectWorksButRedirectLoopsAreBounded(t *testing.T) {
 }
 
 func TestOfficialHTTPSDoesNotDisableCertificateVerification(t *testing.T) {
-	f := newTransferFixtureWithTLS(t, true)
+	f := newTransferFixture(t)
 	f.config.Mode = "official"
 	f.config.Audience = "official"
 	f.config.Channel = "stable"
