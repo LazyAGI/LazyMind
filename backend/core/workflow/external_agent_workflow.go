@@ -513,7 +513,10 @@ func advanceExternalStep(ctx context.Context, db *gorm.DB, task orm.ExternalAgen
 		WorkflowRevisionID: session.WorkflowRevisionID, WorkflowRevisionNo: session.WorkflowRevisionNo,
 		WorkflowTreeHash: session.WorkflowTreeHash, WorkflowRemoteRoot: session.WorkflowRemoteRoot,
 		ConversationID: session.ConversationID, UserID: session.CreateUserID, WorkflowMode: session.WorkflowMode,
-		Targets: []transitionTarget{{TargetStepID: stepID, Objective: externalWorkflowRuntimeObjective(task.TaskDescription), UserInput: task.TaskDescription}},
+		// Derive the objective from the pinned step, just as standard Retry does.
+		// The complete request remains context; downstream deliverables are not
+		// additional completion requirements for every intermediate attempt.
+		Targets: []transitionTarget{{TargetStepID: stepID, UserInput: task.TaskDescription}},
 	}
 	response, _ := transitionWorkflowSession(ctx, db, session.ID, payload)
 	if !response.Accepted {
@@ -538,14 +541,6 @@ func latestLinkedWorkflowForSkill(ctx context.Context, db *gorm.DB, userID strin
 		}
 	}
 	return orm.WorkflowResource{}, false
-}
-
-func externalWorkflowRuntimeObjective(userInput string) string {
-	userInput = strings.TrimSpace(userInput)
-	if userInput == "" {
-		return ""
-	}
-	return "Complete this external Agent task exactly. Treat the runtime user input as the source of truth for the concrete request, search keywords, filters, output requirements, and final answer. Runtime task:\n" + userInput
 }
 
 func externalWorkflowReusableForTask(ctx context.Context, db *gorm.DB, workflow orm.WorkflowResource, task orm.ExternalAgentWorkflowTask) bool {
