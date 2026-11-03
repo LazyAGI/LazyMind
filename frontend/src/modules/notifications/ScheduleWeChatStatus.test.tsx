@@ -220,9 +220,9 @@ for (const provider of ['feishu', 'wecom', 'wechat'] as const) {
     const row = container.querySelector(`.notification-surface .notification-brand.is-${provider}`)?.closest('.notification-row');
     expect(row).toBeDefined();
     const content = within(row as HTMLElement);
-    expect(content.getByText('notifications.' + (gate === 'task-channel' ? 'off' : 'on'))).toBeInTheDocument();
+    expect(content.getByText('notifications.' + (gate === 'task-channel' ? 'off' : 'channelPaused'))).toBeInTheDocument();
+    expect(content.queryByText('notifications.on')).not.toBeInTheDocument();
     expect(content.queryByText('notifications.unavailable')).not.toBeInTheDocument();
-    if (gate !== 'task-channel') expect(content.getByText('notifications.channelPaused')).toBeInTheDocument();
     expect(row?.querySelector('.notification-wechat-status')).not.toBeInTheDocument();
     expect(container.querySelector('.ant-alert-error')).not.toBeInTheDocument();
     expect(mocks.targets).not.toHaveBeenCalled();

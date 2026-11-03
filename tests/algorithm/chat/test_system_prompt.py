@@ -4,6 +4,8 @@ from lazymind.chat.engine.prompts.system_prompt import (
     build_standard_prompt_bundle,
     build_system_prompt,
 )
+from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
+from lazymind.chat.engine.prompts.guidance import CHAT_EXPORT_GUIDANCE, EDITABLE_WRITING_GUIDANCE
 
 
 def test_system_prompt_uses_user_timezone_time() -> None:
@@ -61,6 +63,21 @@ def test_main_chat_prompt_describes_editable_writing_blocks() -> None:
     assert '```editable' in prompt
     assert 'articles, marketing or sales copy' in prompt
     assert 'Do not put citation refs or source links' in prompt
+    assert 'an explicit request for editable text takes precedence' in prompt
+    assert 'Never duplicate or nest the same document' in prompt
+
+
+def test_main_chat_delivery_protocols_have_explicit_non_duplicate_priority() -> None:
+    builder = PromptBuilder.for_role(AgentRole.CHAT)
+    builder.system('editable_writing', 'Editable writing', EDITABLE_WRITING_GUIDANCE, 'chat.protocol', priority=15)
+    assert ':::export' not in builder.build().current_input
+    builder.runtime('chat_exports', 'Save complete chat documents', CHAT_EXPORT_GUIDANCE,
+                    'chat.protocol', priority=39, content_kind='instruction')
+    bundle = builder.build()
+    assert 'an explicit request for editable text takes precedence' in bundle.system_prompt
+    assert 'request for editable text takes precedence and uses only an editable fence' in bundle.current_input
+    assert 'standalone plans, reports and checklists use only this export wrapper' in bundle.current_input
+    assert 'Do not duplicate a document across wrappers' in bundle.current_input
 
 
 def test_system_prompt_does_not_embed_tool_specific_web_guidance() -> None:

@@ -38,6 +38,16 @@ def test_code_fences_are_literal_and_body_fences_do_not_close_export():
     assert len(final['exports']) == 1
 
 
+def test_editable_and_export_documents_remain_distinct_without_nested_parsing():
+    editable = '```editable\n可编辑文章\n```\n'
+    _, result = parse(editable + OPEN + '# 另一份报告\n完整结论\n:::\n')
+    assert result['content'].startswith(editable)
+    assert len(result['exports']) == 1
+    item = result['exports'][0]
+    encoded = result['content'].encode('utf-16-le')
+    assert encoded[item['start'] * 2:item['end'] * 2].decode('utf-16-le') == '# 另一份报告\n完整结论'
+
+
 def test_plain_markdown_streams_without_waiting_for_newline():
     parser = ChatExportStream()
     assert parser.feed('Hello ') == 'Hello '
@@ -70,3 +80,16 @@ def test_export_offsets_only_include_answer_after_tool_previews():
     snapshot = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['export_snapshot']
     assert snapshot['content'] == '# 完整报告'
     assert snapshot['exports'][0]['start'] == 0
+
+
+def test_steering_resets_only_reply_local_export_and_completion_state():
+    translator = AgentEventFrameTranslator(query='报告', enable_exports=True)
+    translator.feed({'tag': 'text', 'delta': '之前的部分回复'})
+    translator.feed({'tag': 'text', 'delta': '\n```'})
+    frames = translator.begin_steering_segment()
+    assert ''.join(frame.get('text') or '' for frame in frames).endswith('```')
+    # A non-streamed final after a streamed interrupted reply must still render.
+    final = translator.finish(OPEN + '新报告\n:::\n')
+    assert '新报告' in ''.join(frame.get('text') or '' for frame in final)
+    snapshot = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['export_snapshot']
+    assert snapshot['content'] == '新报告'

@@ -3,7 +3,10 @@ import { forwardRef, useImperativeHandle } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import {
+  NEW_CHAT_INPUT_DRAFT_KEY,
+  useChatInputStore,
+} from "@/modules/chat/store/chatInput";
 import NewChatPage from "./index";
 import type { ShowcaseCase } from "@/modules/showcase/api";
 
@@ -215,7 +218,7 @@ vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
 
 describe("NewChatPage featured templates", () => {
   beforeEach(() => {
-    useChatInputStore.getState().setModeDraft();
+    useChatInputStore.getState().clearAllInputContents();
     window.sessionStorage.clear();
     mocks.setThinkingDepth.mockClear();
     mocks.listShowcaseCases.mockReset();
@@ -312,6 +315,62 @@ describe("NewChatPage featured templates", () => {
     await waitFor(() => expect(mocks.latestChatInputProps.runInBackground).toBe(true));
     expect(mocks.latestChatInputProps.value).toBe('Keep this draft @');
     expect(mocks.clearFiles).toHaveBeenCalledTimes(cleared);
+  });
+
+  it('restores an unsent welcome draft after leaving and reopening Quick Q&A', async () => {
+    const firstView = render(
+      <MemoryRouter initialEntries={['/agent/chat/home']}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mocks.latestChatInputProps).not.toBeNull());
+
+    act(() => mocks.latestChatInputProps.onChange('不要丢失这段快速问答草稿'));
+    expect(
+      useChatInputStore.getState().getInputContent(NEW_CHAT_INPUT_DRAFT_KEY),
+    ).toBe('不要丢失这段快速问答草稿');
+
+    firstView.unmount();
+    mocks.latestChatInputProps = null;
+    render(
+      <MemoryRouter initialEntries={['/agent/chat/home']}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.value).toBe('不要丢失这段快速问答草稿');
+    });
+  });
+
+  it('restores an unsent New task draft after visiting another conversation', async () => {
+    window.sessionStorage.setItem('chat_new_run_in_background', '1');
+    render(
+      <MemoryRouter initialEntries={['/agent/chat/home']}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+    });
+
+    act(() => mocks.latestChatInputProps.onChange('继续完成这项后台任务'));
+    act(() => {
+      window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: 'another-conversation', source: 'sidebar' },
+      }));
+    });
+    useChatInputStore.getState().setModeDraft({ text: '', mentions: [], files: [] });
+    act(() => {
+      window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: '', runInBackground: true, source: 'sidebar' },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+      expect(mocks.latestChatInputProps.value).toBe('继续完成这项后台任务');
+    });
   });
 
   it('restores the draft transferred from a historical conversation on mode change', async () => {

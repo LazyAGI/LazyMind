@@ -373,7 +373,18 @@ export function ProviderWorkspace(props: Props) {
     let saved = false;
     let savedGroupId = group?.id || "";
     try {
-      if (group) {
+      if (group?.credentialUnavailable) {
+        await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
+          modelProviderId: provider.id,
+          groupId: group.id,
+          updateModelProviderGroupOpenAPIRequest: {
+            name: group.name,
+            base_url: group.baseUrl,
+            api_key: apiKey.trim(),
+            verify: false,
+          },
+        }, { timeout: 180000 });
+      } else if (group) {
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
           { modelProviderId: provider.id, groupId: group.id },
           withModelProviderJsonOptions({
@@ -845,6 +856,10 @@ export function ProviderWorkspace(props: Props) {
                   className="provider-workspace-api-keys"
                   aria-label={t("modelProvider.apiKeyLabel")}
                 >
+                  {group?.credentialUnavailable ? <Alert type="warning" showIcon
+                    message={t("modelProvider.credentialUnavailable")}
+                    description={t("modelProvider.credentialUnavailableHelp")}
+                  /> : null}
                   <ProviderKeyManager
                     providerId={provider.id}
                     providerName={providerDisplayName}
@@ -869,6 +884,7 @@ export function ProviderWorkspace(props: Props) {
                         type="text"
                         onClick={() => void withProviderModels(props.onCheck)}
                         disabled={
+                          group?.credentialUnavailable ||
                           endpointDirty ||
                           endpointSaving ||
                           keySaving ||

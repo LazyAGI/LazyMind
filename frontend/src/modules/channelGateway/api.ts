@@ -26,6 +26,12 @@ const connectionSessionsApi = ConnectionSessionsApiFactory(
 );
 
 export type ChannelProvider = 'wechat' | 'feishu' | 'wecom';
+export const CHANNEL_ACCOUNTS_CHANGED_EVENT = 'lazymind:channel-accounts-changed';
+
+function accountsChanged() {
+  window.dispatchEvent(new Event(CHANNEL_ACCOUNTS_CHANGED_EVENT));
+}
+
 export const WECHAT_CONNECTION_CHECK_INTERVAL_MS = 20 * 60 * 1000;
 export type ConnectionSessionStatus = ConnectionSessionView['status'];
 export type ConnectionAllowedAction = ConnectionSessionView['allowed_actions'][number];
@@ -53,24 +59,29 @@ export async function listChannelAccounts(
 
 export async function disconnectChannelAccount(accountId: string): Promise<void> {
   await channelAccountsApi.disconnectChannelAccount({ accountId });
+  accountsChanged();
 }
 
 export async function pauseChannelAccount(accountId: string): Promise<void> {
   await channelAccountsApi.pauseChannelAccount({ accountId });
+  accountsChanged();
 }
 
 export async function resumeChannelAccount(accountId: string, options?: { silentError?: boolean }): Promise<ChannelAccount> {
   const requestOptions: RawAxiosRequestConfig & { silentError?: boolean } = options || {};
   const response = await channelAccountsApi.resumeChannelAccount({ accountId }, requestOptions);
+  accountsChanged();
   return response.data;
 }
 
 export async function archiveChannelAccount(accountId: string): Promise<void> {
   await channelAccountsApi.archiveChannelAccount({ accountId });
+  accountsChanged();
 }
 
 export async function renameChannelAccount(accountId: string, label: string): Promise<ChannelAccount> {
   const response = await channelAccountsApi.renameChannelAccount({ accountId, renameChannelAccountRequest: { label } });
+  accountsChanged();
   return response.data;
 }
 
@@ -101,14 +112,30 @@ export function channelAccountLabel(account: ChannelAccount, peers: ChannelAccou
   return storedLabel;
 }
 
+export function isChannelAccountAuthorizationRequired(account: ChannelAccount): boolean {
+  return account.provider === 'wecom' && account.status === 'connected'
+    && !['paused', 'unbound'].includes(account.binding_status || '')
+    && account.capabilities?.authorization_required === true;
+}
+
+export function channelAccountConnectionStatus(account: ChannelAccount): 'connected' | 'connecting' | 'disconnected' | 'authorization_required' {
+  if (account.status === 'provisioning') return 'connecting';
+  if (account.status !== 'connected' || ['paused', 'unbound'].includes(account.binding_status || '')) return 'disconnected';
+  if (isChannelAccountAuthorizationRequired(account)) return 'authorization_required';
+  if (account.runtime_status === 'starting') return 'connecting';
+  if (account.provider === 'feishu' && account.runtime_status === 'degraded' && account.capabilities?.connection_ready === true) return 'connected';
+  if (['stopped', 'failed', 'degraded', 'unsupported'].includes(account.runtime_status)) return 'disconnected';
+  return 'connected';
+}
+
 export function isChannelAccountPendingActivation(account: ChannelAccount): boolean {
   return account.provider === 'wechat'
-    && account.status === 'connected'
+    && channelAccountConnectionStatus(account) === 'connected'
     && account.capabilities?.notification_ready === false;
 }
 
 export function isChannelAccountAvailable(account: ChannelAccount): boolean {
-  return account.status === 'connected' && !isChannelAccountPendingActivation(account);
+  return channelAccountConnectionStatus(account) === 'connected' && !isChannelAccountPendingActivation(account);
 }
 
 export async function createConnectionSession(

@@ -372,6 +372,33 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 		if json.Unmarshal(converted.Result, &value) != nil || value.Provider != op.Provider || value.Format == "" || len(value.Content) == 0 || string(value.Content) == "null" || value.SourceDocument == nil || value.MediaReferences == nil {
 			return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
 		}
+		if op.Provider == "obsidian" || op.Provider == "github" && len(target) == 0 {
+			title := op.Title
+			if title == "" {
+				title, _ = value.SourceDocument["title"].(string)
+			}
+			parent := op.ParentURI
+			if op.SharedTarget && op.Provider == "github" && len(target) == 0 && parent == "" {
+				parent = sessionIntentText(session.IntentContext)
+			}
+			checked, err := checkPublicationTarget(ctx, owner, op.Provider, op.ConnectionID, title, parent, target)
+			if err != nil {
+				return failBefore(publicationFailure(err))
+			}
+			if checked.State != "ready" || len(checked.TargetDocument) == 0 {
+				return failBefore(documentFailure(publicationTargetErrorCode(checked.Code), 422))
+			}
+			target = checked.TargetDocument
+			// Persist the exact intended destination before crossing the write boundary.
+			updated := db.Model(&DocumentPublicationOperation{}).Where("id = ? AND owner_user_id = ? AND status = ?", op.ID, owner, "preparing").Update("target_document", target)
+			if updated.Error != nil {
+				return failBefore(updated.Error)
+			}
+			if updated.RowsAffected != 1 {
+				return failBefore(publicationError("PUBLICATION_STATE_CONFLICT"))
+			}
+			op.TargetDocument = target
+		}
 		if op.PublicationID != "" {
 			// Reuse the adapter's existing revision precondition without storing a historical body.
 			var destination struct {
@@ -407,9 +434,6 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 		if op.ParentURI != "" {
 			args["parent_uri"] = op.ParentURI
 		}
-		if op.SharedTarget && op.Provider == "github" && len(target) == 0 && op.ParentURI == "" {
-			args["user_input"] = sessionIntentText(session.IntentContext)
-		}
 		request.Reference = "builtin:document.write_document.v1"
 		request.Arguments = args
 	}
@@ -424,6 +448,23 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 	if err != nil {
 		_ = MarkDocumentPublicationUnknown(clean, db, owner, op.ID)
 		return publicationFailureState(clean, db, owner, op, documentFailure("PUBLICATION_OUTCOME_UNKNOWN", 502))
+	}
+	var rejected struct {
+		Success bool `json:"success"`
+		Patch   struct {
+			Meta struct {
+				NoWrite bool   `json:"no_write"`
+				Code    string `json:"code"`
+			} `json:"meta"`
+		} `json:"patch_result"`
+	}
+	if json.Unmarshal(response.Result, &rejected) == nil && !rejected.Success && rejected.Patch.Meta.NoWrite && op.Provider == "obsidian" {
+		code := publicationTargetErrorCode(rejected.Patch.Meta.Code)
+		if err := finishPublicationBeforeWrite(clean, db, owner, op.ID, "failed_no_write", code, "write_started"); err != nil {
+			return publicationFailureState(clean, db, owner, op, err)
+		}
+		op.Status, op.ErrorCode = "failed_no_write", code
+		return nil, op, documentFailure(code, 409)
 	}
 	receipt, err := publicationReceiptFromResult(op, response.Result, target, syncIR)
 	if err != nil {

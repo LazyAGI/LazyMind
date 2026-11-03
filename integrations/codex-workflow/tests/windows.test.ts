@@ -72,3 +72,19 @@ it('routes native control by the bound thread owner and never retries a failed m
  await expect(native.start(thread,'client2','continue',signal)).rejects.toThrow('disconnected')
  expect(model.calls.filter(x=>x.kind==='start').map(x=>x.target)).toEqual(['b'])
 })
+
+it.each([['window','window'],['host','window'],[undefined,undefined]])('still rejects independent or mixed owner scopes %s/%s',async(a,b)=>{
+ const thread='01a1770e-5cca-7100-81da-d9f69e3b02ab',signal=new AbortController().signal
+ model.reads.set('a',{id:thread,active:false,turns:[],owner:true,ownerScope:a})
+ model.reads.set('b',{id:thread,active:false,turns:[],owner:true,ownerScope:b})
+ await expect(new CodexNative(9334).start(thread,'client','continue',signal)).rejects.toThrow('conflicting owners')
+ expect(model.calls.some(x=>x.kind==='start')).toBe(false)
+})
+
+it('chooses one shared host client and does not retry an uncertain mutation in another window',async()=>{
+ const thread='01a1770e-5cca-7100-81da-d9f69e3b02ab',signal=new AbortController().signal
+ for(const id of ['a','b'])model.reads.set(id,{id:thread,active:false,turns:[],owner:true,ownerScope:'host'})
+ model.targets.reverse();model.failStart=true
+ await expect(new CodexNative(9334).start(thread,'client','continue',signal)).rejects.toThrow('disconnected')
+ expect(model.calls.filter(x=>x.kind==='start').map(x=>x.target)).toEqual(['a'])
+})

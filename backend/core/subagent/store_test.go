@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 )
@@ -59,6 +62,37 @@ func TestCreateTaskAllocatesSequentialSeq(t *testing.T) {
 	}
 	if t3.SeqInConversation != 1 {
 		t.Fatalf("expected seq 1 for new conversation, got %d", t3.SeqInConversation)
+	}
+}
+
+func TestCreateTaskRetriesSQLiteWriterContention(t *testing.T) {
+	db := newTestDB(t)
+	if db.Dialector.Name() != "sqlite" {
+		t.Skip("SQLite busy retry regression")
+	}
+
+	attempts := 0
+	if err := db.Callback().Create().Before("gorm:create").Register("create_task_busy_once", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*orm.SubAgentTask); !ok {
+			return
+		}
+		attempts++
+		if attempts == 1 {
+			tx.AddError(errors.New("database is locked (517)"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := CreateTask(t.Context(), db.DB, CreateTaskInput{
+		TaskID: "task-retry", ConversationID: "conv-retry", AgentType: "research",
+		Title: "retry", Mode: "auto",
+	})
+	if err != nil || attempts != 2 {
+		t.Fatalf("create task retry: task=%+v attempts=%d err=%v", task, attempts, err)
+	}
+	if task.SeqInConversation != 1 {
+		t.Fatalf("expected seq 1 after retry, got %d", task.SeqInConversation)
 	}
 }
 

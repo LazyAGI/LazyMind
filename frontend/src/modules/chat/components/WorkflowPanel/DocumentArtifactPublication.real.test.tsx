@@ -8,7 +8,7 @@ import { SlotEditingContext, type SlotFooterAction } from './slotEditingContext'
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const capture = vi.hoisted(() => ({ change: undefined as MDXEditorProps['onChange'], editor: null as MDXEditorMethods | null }));
-const api = vi.hoisted(() => ({ listDocumentProviders: vi.fn(), publishDocument: vi.fn(), saveDocumentArtifact: vi.fn(), getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn() }));
+const api = vi.hoisted(() => ({ listDocumentProviders: vi.fn(), publishDocument: vi.fn(), saveDocumentArtifact: vi.fn(), getPublicationTargets: vi.fn(), preflightPublication: vi.fn(async () => ({ data: { data: { targets: [] } } })), createPublicationGroup: vi.fn() }));
 vi.mock('@mdxeditor/editor', async () => {
   const actual = await vi.importActual<typeof import('@mdxeditor/editor')>('@mdxeditor/editor');
   const React = await import('react');
