@@ -369,6 +369,10 @@
   background: var(--color-text-tertiary, #8691a2);
 }
 .paper-expansion-mode-output { color: var(--color-primary, #2858b8); font-size: 12px; }
+.paper-expansion-mode-step.step-chooseDirection {
+  color: var(--color-warning-text-active, #93590a);
+  background: var(--color-warning-bg, #fff3d9);
+}
 .paper-task-launch-flow-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--color-text-secondary, #687589); }
 .paper-task-launch-flow-hint > .anticon { margin-top: 3px; }
 .paper-task-launch-modal .paper-task-launch-selection { margin: 18px 0; padding: 14px 16px; background: var(--color-fill-quaternary, #f7f9fc); border-radius: 8px; }

@@ -622,7 +622,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
                 <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'} />
                 {launch.kind === 'expansion' && budgetMode !== 'fast' && <section className="paper-direction-selection">
-                    <Typography.Text strong>{t('paperTasks.expansionDepth.preparation')}</Typography.Text>
+                    <Typography.Text strong>{t('paperTasks.expansionDepth.directionSelection')}</Typography.Text>
                     <Radio.Group aria-label={t('paperTasks.expansionDepth.directionSelection')} value={directionSelection} onChange={(event: RadioChangeEvent) => setDirectionSelection(event.target.value)} disabled={busy}>
                         <Radio value="all">{t('paperTasks.expansionDepth.allDirections')}</Radio>
                         <Radio value="manual">{t('paperTasks.expansionDepth.yourChoice')}</Radio>

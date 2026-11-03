@@ -32,6 +32,10 @@ export default function ResearchDepth({ value, onChange, expansion = false }: { 
         <span className="paper-research-depth-name"><input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} />{option.label}</span>
         <span className="paper-research-depth-description">{option.description.map(line => <span key={line}>{line}</span>)}</span>
         {expansion && <span className="paper-expansion-mode-flow" role="list">
+          {option.value !== 'fast' && ['research', 'chooseDirection'].map(step => <span key={step} role="listitem"
+            className={`paper-expansion-mode-step step-${step}`}>
+            {t(`paperTasks.expansionDepth.steps.${step}`)}
+          </span>)}
           {expansionSteps[option.value].map((step, index) => <span key={step} role="listitem"
             className={`paper-expansion-mode-step step-${step}`}>
             {index + 1}. {t(`paperTasks.expansionDepth.steps.${step}`)}

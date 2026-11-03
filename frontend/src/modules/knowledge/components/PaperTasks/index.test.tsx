@@ -218,8 +218,8 @@ describe('paper task startup routes', () => {
         expect(screen.getByRole('radio', { name: '默认全选' })).toBeChecked();
         expect(screen.getByText('调研完成后，按全部方向自动继续。')).toBeInTheDocument();
         for (const [name, steps] of [
-            [/^标准扩展/, ['1. 检索与拓展', '2. 筛选与补充']],
-            [/^深入分析/, ['1. 检索与拓展', '2. 筛选与补充', '3. 关系分析与证据核验']],
+            [/^标准扩展/, ['初步调研', '确定研究方向', '1. 检索与拓展', '2. 筛选与补充']],
+            [/^深入分析/, ['初步调研', '确定研究方向', '1. 检索与拓展', '2. 筛选与补充', '3. 关系分析与证据核验']],
         ] as const) {
             const card = screen.getByRole('radio', { name }).closest('label')!;
             expect(within(card).getAllByRole('listitem').map(item => item.textContent)).toEqual(steps);
