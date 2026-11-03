@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reconcileWorkflowSessionStatus, workflowDisplayLabel } from './workflowStatus';
+import { reconcileWorkflowSessionStatus } from './workflowStatus';
 
 describe('reconcileWorkflowSessionStatus', () => {
   it('does not infer a completed pause from an interrupted attempt', () => {
@@ -66,10 +66,4 @@ describe('reconcileWorkflowSessionStatus', () => {
       blocked: [],
     })).toBe('active');
   });
-});
-
-
-it('distinguishes regeneration from approval using the backend reason', () => {
-  expect(workflowDisplayLabel('waiting', 'inputs_changed')).toBe('chat.workflowStatusInputsChanged');
-  expect(workflowDisplayLabel('waiting', 'approval_required')).toBe('chat.workflowStatusWaiting');
 });

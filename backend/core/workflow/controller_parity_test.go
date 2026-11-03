@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
-	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/graphengine"
 )
@@ -23,12 +22,7 @@ func TestControllerAdvanceParity(t *testing.T) {
 	for _, scenario := range []string{"ready", "rewind-completed", "rewind-failed", "retry", "retry-with-sibling", "user-retry", "retry-exhausted", "approval", "skip-approval", "stopped", "stale-version"} {
 		for _, controller := range []string{"lazymind", "external-agent"} {
 			t.Run(scenario+"/"+controller, func(t *testing.T) {
-				db, hash := setupBatchTransitionSession(t)
-				if err := db.AutoMigrate(&orm.WorkflowCommand{}, &orm.WorkflowHostAction{}); err != nil {
-					t.Fatal(err)
-				}
-				graph := graphengine.CompiledStateGraph{SchemaVersion: graphengine.SchemaVersion, GraphHash: hash,
-					StartRoute: "all", Nodes: map[string]graphengine.CompiledNode{"draft": {ID: "draft", Mode: "auto"}},
+				graph := graphengine.CompiledStateGraph{StartRoute: "all", Nodes: map[string]graphengine.CompiledNode{"draft": {ID: "draft", Mode: "auto"}},
 					ControlEdges: []graphengine.CompiledEdge{{ID: "start", From: "__start__", To: "draft"}, {ID: "end", From: "draft", To: "__end__"}}}
 				if scenario == "approval" || scenario == "skip-approval" {
 					graph.Nodes["draft"] = graphengine.CompiledNode{ID: "draft", Mode: "human"}
@@ -39,12 +33,12 @@ func TestControllerAdvanceParity(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				must(db.Model(&orm.WorkflowRevision{}).Where("id = ?", "batch-revision").Update("compiled_graph", graph.JSON()).Error)
-				putRevisionWorkflowYAML(t, db, "batch-revision", "id: batch-plugin\n")
-				updates := map[string]any{"controller_host": controller, "status": "active"}
+				provider := "native"
 				if controller == "external-agent" {
-					updates["control_protocol"] = controlpolicy.Protocol
+					provider = controller
 				}
+				db, session := newControllerTestSession(t, provider, graph)
+				updates := map[string]any{"status": "active"}
 				status, wantCode, origin := "", "", "automatic"
 				switch scenario {
 				case "rewind-completed":
@@ -63,7 +57,6 @@ func TestControllerAdvanceParity(t *testing.T) {
 					wantCode = "STATE_VERSION_CONFLICT"
 				}
 				must(db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(updates).Error)
-				var session orm.WorkflowSession
 				must(db.First(&session, "id = ?", "batch-session").Error)
 				if status != "" {
 					step := orm.WorkflowSessionStep{ID: "old", TaskID: "old-task", SessionID: session.ID, StepID: "draft", Attempt: 1, Status: status, Validity: "effective", ReviewRequired: scenario == "approval"}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
-	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
@@ -15,15 +14,13 @@ import (
 
 func runControlCheckpoint(t *testing.T, provider, scenario string) (*orm.DB, orm.WorkflowSession, orm.WorkflowReviewCheckpoint) {
 	t.Helper()
-	db, hash := setupBatchTransitionSession(t)
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	must(db.AutoMigrate(&orm.WorkflowHostAction{}, &orm.WorkflowCommand{}))
-	graph := graphengine.CompiledStateGraph{SchemaVersion: graphengine.SchemaVersion, GraphHash: hash, StartRoute: "all",
+	graph := graphengine.CompiledStateGraph{StartRoute: "all",
 		Nodes:        map[string]graphengine.CompiledNode{"review": {ID: "review", Mode: "human"}, "next": {ID: "next", Mode: "auto"}},
 		ControlEdges: []graphengine.CompiledEdge{{ID: "start", From: "__start__", To: "review"}, {ID: "next", From: "review", To: "next"}, {ID: "end", From: "next", To: "__end__"}},
 	}
@@ -36,15 +33,7 @@ func runControlCheckpoint(t *testing.T, provider, scenario string) (*orm.DB, orm
 		graph.Nodes["other"] = graphengine.CompiledNode{ID: "other", Mode: "human"}
 		graph.ControlEdges = append(graph.ControlEdges, graphengine.CompiledEdge{ID: "other", From: "__start__", To: "other"})
 	}
-	must(db.Model(&orm.WorkflowRevision{}).Where("id = ?", "batch-revision").Update("compiled_graph", graph.JSON()).Error)
-	updates := map[string]any{"controller_host": "lazymind"}
-	if provider != "native" {
-		updates = map[string]any{"controller_host": "external-agent", "control_protocol": controlpolicy.Protocol,
-			"control_binding_json": `{"required":true,"connector_id":"connector","driver_session_id":"driver","provider":"` + provider + `"}`}
-	}
-	must(db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(updates).Error)
-	var session orm.WorkflowSession
-	must(db.First(&session, "id = ?", "batch-session").Error)
+	db, session := newControllerTestSession(t, provider, graph)
 	var review orm.WorkflowReviewCheckpoint
 	now := time.Now().UTC()
 	for _, id := range []string{"other", "review"} {
@@ -72,7 +61,7 @@ func runControlCheckpoint(t *testing.T, provider, scenario string) (*orm.DB, orm
 }
 
 func TestRunControlStateParity(t *testing.T) {
-	for _, provider := range []string{"native", "workbuddy", "deepseek-harness", "codex"} {
+	for _, provider := range regressionControllers {
 		for _, scenario := range []string{"next", "skip-following", "final", "parallel"} {
 			t.Run(provider+"/"+scenario, func(t *testing.T) {
 				db, session, review := runControlCheckpoint(t, provider, scenario)

@@ -45,6 +45,28 @@ describe('versioned workflow synchronization', () => {
       payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'review' } } });
     expect(old.projection.display).toEqual({ status: 'paused', reason: 'user_stopped', approval_step_id: '' });
   });
+  it('accepts the edit snapshot after its artifact event and rejects an older approval', () => {
+    let state = reduceWorkflowEvent(emptyWorkflowProjection(), {
+      ...snapshot(47, 2161, 'waiting'), payload: {
+        display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'plan' },
+        projection: { current: [], ready: [], nodes: { plan: { execution: 'succeeded', validity: 'effective' } } },
+      },
+    });
+    state = reduceWorkflowEvent(state, { type: 'artifact.upsert', cursor: 2171, state_version: 48,
+      entity_id: 'edited-outline', payload: { slot: 'deck_outline', revision: 2 } });
+    state = reduceWorkflowEvent(state, { ...snapshot(48, 2172, 'waiting'), payload: {
+      status: 'waiting', display: { status: 'waiting', reason: 'inputs_changed', approval_step_id: '' },
+      projection: { current: [], ready: ['plan'], nodes: { plan: { execution: 'none', validity: 'stale' } } },
+      attempt_history: { plan: [{ attempt: 1, status: 'succeeded', validity: 'stale' }] },
+    } });
+    state = reduceWorkflowEvent(state, { type: 'workflow.patch', cursor: 2173, state_version: 47,
+      payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'plan' } } });
+    expect(state.projection.display).toEqual({ status: 'waiting', reason: 'inputs_changed', approval_step_id: '' });
+    expect(state.projection.ready).toEqual(['plan']);
+    expect(state.projection.attempt_history).toEqual({ plan: [{ attempt: 1, status: 'succeeded', validity: 'stale' }] });
+    expect(state.resyncRequired).toBe(false);
+  });
+
   it('clears automatic execution when a chat stop arrives as a waiting snapshot', () => {
     const store = useWorkflowStore.getState();
     store.setSession('c', { ...session(), status: 'active' });

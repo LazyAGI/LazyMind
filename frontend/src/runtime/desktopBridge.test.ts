@@ -31,16 +31,6 @@ describe("browser Assistant Bridge session synchronization", () => {
     Reflect.deleteProperty(window, "lazymindDesktop");
   });
 
-  it("forces installation discovery only on an explicit refresh in Desktop", async () => {
-    const status = vi.fn().mockResolvedValue({ agents: {} });
-    Object.defineProperty(window, "lazymindDesktop", { configurable: true, value: {
-      agentIntegrationStatuses: status, assistantSessionClear: vi.fn().mockResolvedValue({ ok: true }),
-    } });
-    await agentIntegrationStatuses();
-    await agentIntegrationStatuses(true);
-    expect(status.mock.calls).toEqual([[false], [true]]);
-  });
-
   it("passes an explicit refresh to the browser Assistant Bridge", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ agents: {} }), { status: 200 }));
     await agentIntegrationStatuses(true);
@@ -112,7 +102,7 @@ describe("browser Assistant Bridge session synchronization", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("updates the Assistant session before reading status through Desktop IPC", async () => {
+  it.each([false, true])("syncs the current session before Desktop status (refresh=%s)", async refresh => {
     mocks.user.mockReturnValue({ token: "new-access", refreshToken: "new-refresh" });
     const desktopStatus = vi.fn().mockResolvedValue({ agents: {} });
     const sessionSet = vi.fn().mockResolvedValue({ ok: true });
@@ -122,12 +112,14 @@ describe("browser Assistant Bridge session synchronization", () => {
     });
     const fetchMock = vi.spyOn(globalThis, "fetch");
 
-    await agentIntegrationStatuses();
+    const result = await (refresh ? agentIntegrationStatuses(true) : agentIntegrationStatuses());
 
+    expect(result).toEqual({ ok: true, data: {} });
     expect(sessionSet).toHaveBeenCalledWith(expect.objectContaining({
       access_token: "new-access", refresh_token: "new-refresh",
     }));
-    expect(desktopStatus).toHaveBeenCalledOnce();
+    expect(desktopStatus.mock.calls).toEqual([[refresh]]);
+    expect(sessionSet.mock.invocationCallOrder[0]).toBeLessThan(desktopStatus.mock.invocationCallOrder[0]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
