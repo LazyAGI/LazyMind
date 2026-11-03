@@ -1066,7 +1066,7 @@ def _write_research_report(relation):
         task_type='academic.report', instruction=_REPORT_INSTRUCTION, input=LLMTaskInput(data=data),
         llm_config={'llm': {'model': _model_metrics().get('model')}}, response_format={'type': 'json_object'},
         options={'max_retries': 1, 'model_retry_attempts': 0, 'timeout_seconds': remaining,
-                 'wall_timeout_seconds': remaining, 'output_limit': 8192,
+                 'wall_timeout_seconds': remaining,
                  'stream_output': {'_stream_sink': lambda _event: None}},
     )
     ctx.emit({'type': 'progress', 'current_phase': '正在撰写研究报告'})
