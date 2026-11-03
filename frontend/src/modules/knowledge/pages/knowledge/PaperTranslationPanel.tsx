@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Button, Empty, Input, Modal, Select, Spin } from "antd";
-import { SendOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Input, Modal, Select, Spin, Tooltip } from "antd";
+import { ArrowUpOutlined, SettingOutlined, DownOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { DocumentTranslationProvider } from "@/modules/knowledge/api/translation";
 import { translationProviderDisplayName } from "@/modules/modelProvider/translationProviderNames";
@@ -23,6 +23,8 @@ export default function PaperTranslationPanel(props: Props) {
   const language = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [draft, setDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const provider = props.providers.find(item => item.group_id === props.providerGroupId);
+  const providerName = provider ? translationProviderDisplayName(provider.provider_name, language) : "设置翻译引擎";
   const submit = () => {
     const text = draft.trim();
     if (!text || props.providerSaving) return;
@@ -30,30 +32,35 @@ export default function PaperTranslationPanel(props: Props) {
     props.onTranslate(text);
   };
   return <section className="knowledge-reader-translation" aria-label="论文翻译">
+    <div className="paper-assistant-ready"><span aria-hidden="true"/><span>{props.loading ? "正在翻译" : "选中文字，即可翻译"}</span><span className="paper-assistant-ready__scope">原文对照</span></div>
+    <div className="knowledge-reader-translation-content">
     <section className="knowledge-reader-translation-pane is-result" aria-label="翻译结果" aria-live="polite" aria-busy={props.loading}>
       <div className="knowledge-reader-translation-heading">
         <h3>译文</h3>
-        <Button aria-label="设置翻译引擎" icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>设置翻译引擎</Button>
-        <Button aria-label="用大模型重新翻译" size="small" disabled={!props.source.trim() || props.loading}
+        <Button type="text" aria-label="用大模型重新翻译" size="small" disabled={!props.source.trim() || props.loading}
           onClick={props.onRetranslateWithLLM}>用大模型重新翻译</Button>
       </div>
       {props.loading ? <Spin tip="正在翻译…"><div className="knowledge-reader-translation-loading" /></Spin>
-        : <div className="knowledge-translation-text">{props.result}</div>}
+        : props.result ? <div className="knowledge-translation-text">{props.result}</div>
+        : <div className="paper-assistant-welcome knowledge-reader-translation-welcome"><h2>读懂每一段原文</h2><p>选中论文中的文字后点击翻译，或在下方输入。译文与原文会显示在这里，方便对照阅读。</p></div>}
     </section>
-    <section className="knowledge-reader-translation-pane" aria-label="翻译原文">
+    {props.source && <section className="knowledge-reader-translation-pane is-source" aria-label="翻译原文">
       <h3>原文</h3>
-      {props.source ? <div className="knowledge-translation-text">{props.source}</div>
-        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中论文文字后点击翻译，或在底部输入文字" />}
-    </section>
+      <div className="knowledge-translation-text">{props.source}</div>
+    </section>}
+    </div>
     <form className="knowledge-reader-translation-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-      <Input.TextArea aria-label="输入要翻译的文字" placeholder="输入文字，Enter 翻译，Shift + Enter 换行"
-        autoSize={{ minRows: 1, maxRows: 4 }} value={draft} onChange={(event) => setDraft(event.target.value)}
+      <Input.TextArea aria-label="输入要翻译的文字" placeholder="输入要翻译的文字，或在论文中选中文字…"
+        autoSize={{ minRows: 2, maxRows: 6 }} value={draft} onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
             event.preventDefault(); submit();
           }
         }} />
-      <Button type="text" htmlType="submit" icon={<SendOutlined />} aria-label="翻译输入文字" disabled={!draft.trim() || props.providerSaving} />
+      <div className="knowledge-reader-translation-composer-actions">
+        <Tooltip title="设置翻译引擎" placement="top"><Button className="knowledge-reader-translation-provider" aria-label="设置翻译引擎" icon={<SettingOutlined />} loading={props.providerSaving} onClick={() => setSettingsOpen(true)}><span>{providerName}</span><DownOutlined/></Button></Tooltip>
+        <Tooltip title="翻译 · Enter" placement="top"><Button className="knowledge-reader-translation-send" type="primary" shape="circle" htmlType="submit" icon={<ArrowUpOutlined />} aria-label="翻译输入文字" disabled={!draft.trim() || props.providerSaving} /></Tooltip>
+      </div>
     </form>
     <Modal title="设置翻译引擎" open={settingsOpen} footer={null} onCancel={() => setSettingsOpen(false)}>
       <div className="pdf-translation-config">

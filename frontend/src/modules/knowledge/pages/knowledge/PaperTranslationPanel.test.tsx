@@ -21,8 +21,7 @@ describe("paper translation panel", () => {
     const result = screen.getByRole("region", { name: "翻译结果" });
     const source = screen.getByRole("region", { name: "翻译原文" });
     expect(result.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(result).getByRole("heading", { name: "译文" }).parentElement)
-      .toContainElement(screen.getByRole("button", { name: "设置翻译引擎" }));
+    expect(composer.closest("form")).toContainElement(screen.getByRole("button", { name: "设置翻译引擎" }));
   });
 
   it("shows the Chinese provider name in the reader's translation settings", () => {
@@ -31,10 +30,10 @@ describe("paper translation panel", () => {
       providerGroupId="google" providerSaving={false} providersLoading={false}
       onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "设置翻译引擎" }));
-    expect(screen.getByText("谷歌翻译（网页）")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("谷歌翻译（网页）")).toBeInTheDocument();
   });
 
-  it("retranslates the current source with an LLM from beside engine settings", () => {
+  it("retranslates the current source with an LLM from the result header", () => {
     const onRetranslateWithLLM = vi.fn();
     const { rerender } = render(<PaperTranslationPanel source="paper sentence" result="旧译文" loading={false}
       providers={[]} providerSaving={false} providersLoading={false}
