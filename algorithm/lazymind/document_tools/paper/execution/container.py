@@ -73,11 +73,15 @@ def execute(payload, worker: Path, timeout: int, *, label: str) -> dict:
                                                cwd=scratch, close_fds=True, start_new_session=True)
                 deadline = time.monotonic() + timeout
                 while process.poll() is None:
+                    if sys.platform == 'win32':
+                        process.check_storage()
                     if time.monotonic() >= deadline:
                         raise RuntimeError(f'{label}执行超时（{timeout} 秒）')
                     if any(p.stat().st_size > 16 * 1024 * 1024 for p in paths[1:]):
                         raise RuntimeError(f'{label}输出超过 16 MiB')
                     time.sleep(0.05)
+                if sys.platform == 'win32':
+                    process.check_storage()  # Include children that exit before the first polling interval.
             if any(p.stat().st_size > 16 * 1024 * 1024 for p in paths[1:]):
                 raise RuntimeError(f'{label}输出超过 16 MiB')
             stderr = paths[2].read_text(encoding='utf-8', errors='replace')[-3000:]

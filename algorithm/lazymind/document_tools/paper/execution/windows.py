@@ -13,6 +13,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -30,6 +31,9 @@ JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100
 JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION = 0x400
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
 LOG = logging.getLogger(__name__)
+FILE_LIMIT = 16 * 1024 ** 2
+STORAGE_LIMIT = 64 * 1024 ** 2
+ENTRY_LIMIT = 1024
 
 
 class StartupInfo(ct.Structure):
@@ -80,6 +84,7 @@ class WinAPI:
         base = ct.WinDLL('kernelbase', use_last_error=True)
         security = ct.WinDLL('advapi32', use_last_error=True)
         profiles = ct.WinDLL('userenv', use_last_error=True)
+        ole = ct.WinDLL('ole32', use_last_error=True)
 
         def bind(library, name, arguments, result=BOOL, checked=True):
             function = getattr(library, name)
@@ -120,6 +125,8 @@ class WinAPI:
         bind(profiles, 'CreateAppContainerProfile',
              [PWSTR, PWSTR, PWSTR, PVOID, DWORD, ct.POINTER(PVOID)], ct.c_int32, False)
         bind(profiles, 'DeleteAppContainerProfile', [PWSTR], ct.c_int32, False)
+        bind(profiles, 'GetAppContainerFolderPath', [PWSTR, ct.POINTER(PWSTR)], ct.c_int32, False)
+        bind(ole, 'CoTaskMemFree', [PVOID], None, False)
         directory = ct.create_unicode_buffer(32768)
         self.GetSystemDirectoryW(directory, len(directory))
         self.system = Path(directory.value)
@@ -146,6 +153,16 @@ class WinAPI:
             return self.sid_text(ct.cast(buffer, ct.POINTER(SidAndAttributes)).contents.sid)
         finally:
             self.CloseHandle(token)
+
+    def profile_directory(self, sid):
+        path = PWSTR()
+        result = self.GetAppContainerFolderPath(sid, ct.byref(path))
+        try:
+            if result < 0:
+                raise OSError(f'无法获取 Windows 沙箱私有目录: 0x{result & 0xffffffff:08x}')
+            return Path(path.value)
+        finally:
+            self.CoTaskMemFree(ct.cast(path, PVOID))
 
     def derive_runtime_sid(self):
         groups, capabilities = PVOID(), PVOID()
@@ -261,6 +278,31 @@ def validate_environment():
         _validated = True
 
 
+def check_storage(roots):
+    """Bound scratch and profile storage; polling can briefly overshoot these budgets."""
+    pending, total, count = list(roots), 0, 0
+    while pending:
+        with os.scandir(pending.pop()) as entries:
+            for entry in entries:
+                count += 1
+                if count > ENTRY_LIMIT:
+                    raise RuntimeError('Windows 沙箱临时文件数量超过限制')
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:  # A temporary file can disappear during a scan.
+                    continue
+                if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+                    raise RuntimeError('Windows 沙箱临时目录不允许链接或重解析点')
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append(entry.path)
+                else:
+                    if info.st_size > FILE_LIMIT:
+                        raise RuntimeError('Windows 沙箱临时文件超过 16 MiB')
+                    total += info.st_size
+                    if total > STORAGE_LIMIT:
+                        raise RuntimeError('Windows 沙箱临时存储合计超过 64 MiB')
+
+
 class Process:
     """Own both kernel handles and the profile until the child has stopped."""
     def __init__(self, api, profile, sid):
@@ -269,6 +311,10 @@ class Process:
         self.info = ProcessInfo()
         self.returncode = None
         self.closed = False
+        self.storage = ()
+
+    def check_storage(self):
+        check_storage(self.storage)
 
     def poll(self):
         status = self.api.WaitForSingleObject(self.info.process, 0)
@@ -391,6 +437,8 @@ def start(worker, scratch, timeout, streams, environment):
         program = scratch.parent / 'worker.py'
         shutil.copyfile(worker, program)
         package_sid = api.sid_text(sid)
+        process.storage = (scratch, api.profile_directory(package_sid))
+        process.check_storage()  # Fail before launch if private storage cannot be inspected.
         api.secure_directory(scratch.parent, package_sid)
         api.secure_directory(scratch, package_sid, writable=True)
         executable = str(Path(getattr(sys, '_base_executable', None) or sys.executable).resolve())

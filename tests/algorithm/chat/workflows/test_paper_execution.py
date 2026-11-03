@@ -34,16 +34,22 @@ def test_windows_environment_validation(monkeypatch, available):
     validate.assert_called_once()
 
 
-@pytest.mark.parametrize('timeout', [False, True])
-def test_execution_result_and_cleanup(monkeypatch, tmp_path, timeout):
+@pytest.mark.parametrize('code,error', [
+    ('import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False))', None),
+    ('import time; time.sleep(30)', '超时'),
+    ('from pathlib import Path; Path("large").write_bytes(b"x" * 2048)', '临时文件超过'),
+    ('from pathlib import Path\nfor name in ("one", "two"):\n    Path(name).write_bytes(b"x" * 1024)', '临时存储合计'),
+])
+def test_execution_result_and_cleanup(monkeypatch, tmp_path, code, error):
     """Exercise the shared protocol with a real trusted worker on every platform."""
     worker = tmp_path / '协议 worker.py'
-    code = ('import time; time.sleep(30)' if timeout else
-            'import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False))')
     worker.write_text(code, encoding='utf-8')
     children = []
 
     class Child(subprocess.Popen):
+        def check_storage(self):
+            windows.check_storage([Path(self.cwd)])
+
         def close(self):
             if self.poll() is None:
                 self.kill()
@@ -54,14 +60,19 @@ def test_execution_result_and_cleanup(monkeypatch, tmp_path, timeout):
             env = dict(env, SystemRoot=os.environ['SystemRoot'])
         child = Child([sys.executable, '-I', '-X', 'utf8', str(program)], cwd=scratch,
                       stdin=streams[0], stdout=streams[1], stderr=streams[2], env=env)
+        child.cwd = scratch
         children.append((child, scratch))
+        if error and error != '超时':
+            child.wait(timeout=5)  # Verify final inspection even when the worker has already exited.
         return child
 
     monkeypatch.setattr(container, 'sys', SimpleNamespace(platform='win32', executable=sys.executable))
     monkeypatch.setattr(windows, 'start', start)
-    if timeout:
-        with pytest.raises(RuntimeError, match='超时'):
-            container.execute({}, worker, 1, label='test')
+    monkeypatch.setattr(windows, 'FILE_LIMIT', 1024)
+    monkeypatch.setattr(windows, 'STORAGE_LIMIT', 1536)
+    if error:
+        with pytest.raises(RuntimeError, match=error):
+            container.execute({}, worker, 1 if error == '超时' else 5, label='test')
     else:
         payload = {'message': '均值 μ = 2'}
         assert container.execute(payload, worker, 5, label='test') == payload
@@ -151,14 +162,30 @@ print(json.dumps(checks))
 
 
 @NATIVE_WINDOWS
-def test_real_windows_timeout_kills_child_and_cleans_scratch(tmp_path, monkeypatch):
-    # Use a Unicode path with spaces, as in a real Desktop user profile.
-    temporary = tmp_path / '绘图 temp'
-    temporary.mkdir()
-    monkeypatch.setattr(container.tempfile, 'tempdir', str(temporary))
-    with pytest.raises(RuntimeError, match='超时'):
-        _native_worker(tmp_path, 'import time; time.sleep(30)', timeout=1)
-    assert list(temporary.iterdir()) == []
+@pytest.mark.parametrize('failure', ['timeout', 'scratch', 'profile'])
+def test_real_windows_failure_terminates_and_cleans(tmp_path, monkeypatch, failure):
+    launch = windows._launch
+    directories = []
+
+    def capture(process, command, scratch, streams, environment, timeout):
+        directories.extend((scratch.parent, process.storage[1]))
+        environment['PAPER_TEST_TARGET'] = str(process.storage[1 if failure == 'profile' else 0] / 'large.bin')
+        launch(process, command, scratch, streams, environment, timeout)
+
+    monkeypatch.setattr(windows, '_launch', capture)
+    # Trusted runner bypasses AST diagnostics: parent supervision must still apply.
+    code = '''from numpy import memmap as mapped
+import os, time
+array = mapped(os.environ['PAPER_TEST_TARGET'], dtype='uint8', mode='w+', shape=(20 * 1024 ** 2,))
+array[:] = 1
+array.flush()
+time.sleep(30)
+'''
+    if failure == 'timeout':
+        code = 'import time; time.sleep(30)'
+    with pytest.raises(RuntimeError, match='超时' if failure == 'timeout' else '临时文件超过'):
+        _native_worker(tmp_path, code, timeout=1 if failure == 'timeout' else 20)
+    assert directories and all(not root.exists() for root in directories)
 
 
 @NATIVE_WINDOWS
