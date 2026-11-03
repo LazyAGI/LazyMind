@@ -25,14 +25,3 @@ func TestVisualContextAndValidationUseOnlyExtractedEvidence(t *testing.T) {
 		t.Fatal("text block accepted as image/table")
 	}
 }
-
-func TestPaperReadingPromptsRequireDistinctGroundedFindings(t *testing.T) {
-	for _, phrase := range []string{"3 to 5 distinct", "Do not enumerate duplicate captions", "purpose", "how to read", "exact reported values", "statistical significance", "no image pixels"} {
-		if !strings.Contains(paperVisualInstruction, phrase) {
-			t.Errorf("visual quality constraint missing: %s", phrase)
-		}
-	}
-	if paperReadingPromptVersion == "paper-reading-v1" {
-		t.Fatal("old generic explanations would remain cached")
-	}
-}

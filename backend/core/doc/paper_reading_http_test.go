@@ -56,8 +56,8 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 					}
 					return `{"translated_text":"原始段落。"}`, nil
 				default:
-					if !strings.Contains(instruction, "no image pixels") {
-						t.Error("visual input limitation missing")
+					if instruction != "paper.visual.explain" || (!strings.Contains(content, `"language":"zh"`) && !strings.Contains(content, `"language":"en"`)) {
+						t.Error("visual task or language missing")
 					}
 					return `{"summary":"Contextual explanation","observations":[{"text":"Architecture","evidence_ids":["v"]}]}`, nil
 				}

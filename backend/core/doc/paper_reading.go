@@ -32,6 +32,9 @@ type paperTranslation struct {
 
 func servePaperReading(kind string, w http.ResponseWriter, r *http.Request) {
 	paperReadingHandler{kind: kind, model: formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, config map[string]any) (string, error) {
+		if kind == "visual" {
+			return generateStructuredPaperResult(ctx, content, algo.VisualExplanationTask, algo.VisualExplanationTaskVersion, config)
+		}
 		return algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: content, UserInstruct: instruction, LLMConfig: config})
 	}}}.ServeHTTP(w, r)
 }
@@ -114,7 +117,8 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		input["target_block"] = map[string]any{"id": target.ID, "type": target.Type, "page": target.Page}
 		input["source_blocks"] = evidence
-		instruction = paperVisualInstruction
+		instruction = algo.VisualExplanationTask
+		input["language"] = request.Language
 	case "translation":
 		for _, b := range d.Blocks {
 			if b.ID == blockID && b.Type != "image" && b.Type != "table" && b.Type != "formula" && strings.TrimSpace(b.Text) != "" {

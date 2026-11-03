@@ -110,14 +110,8 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 		},
 		generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 			calls++
-			if !strings.Contains(instruction, "SAME response") {
-				t.Error("repair and symbol definitions must be requested in one generation")
-			}
-			if !strings.Contains(instruction, "standard mathematical meaning") || !strings.Contains(instruction, "named operators such as Attention") {
-				t.Error("generic operator explanations must be allowed without pretending the paper defined them")
-			}
-			if !strings.Contains(instruction, "at most 2 short steps") || !strings.Contains(instruction, "one concise sentence per symbol") {
-				t.Error("formula output must stay concise to reduce generation latency")
+			if instruction != "paper.formula.explain" {
+				t.Error("formula must use the registered structured task")
 			}
 			if !strings.Contains(content, "x is distance.") {
 				t.Error("missing neighboring source")
@@ -127,6 +121,9 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 			}
 			var input map[string]any
 			json.Unmarshal([]byte(content), &input)
+			if input["language"] != "zh" && input["language"] != "en" {
+				t.Error("language must be structured task data")
+			}
 			for _, rawBlock := range input["source_blocks"].([]any) {
 				block := rawBlock.(map[string]any)
 				if len(block) != 2 || block["id"] == nil || block["text"] == nil {
@@ -134,9 +131,6 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 				}
 			}
 			if focus, ok := input["target_symbol"].(string); ok {
-				if !strings.Contains(instruction, "target_symbol") {
-					t.Error("focused instruction missing")
-				}
 				if focusedMode == "missing" {
 					return `{"summary":"Missing","symbols":[],"steps":[]}`, nil
 				}
