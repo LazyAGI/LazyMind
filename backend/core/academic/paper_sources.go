@@ -145,6 +145,22 @@ func bindLibraryDocument(db *gorm.DB, source paperSource, state orm.AcademicDocu
 	} else if source.Paper.SourceProvider != "arxiv" {
 		source.Hash = ""
 	}
+	var metadata struct {
+		Provenance struct {
+			PublishedAt       string `json:"published_at"`
+			SourceVersionDate string `json:"source_version_date"`
+			PDFVersion        string `json:"pdf_version"`
+		} `json:"provenance"`
+	}
+	_ = json.Unmarshal(state.MetadataJSON, &metadata)
+	if metadata.Provenance.PublishedAt != "" {
+		source.Paper.PublishedAt = metadata.Provenance.PublishedAt
+	}
+	// A work's shared metadata can describe a different revision from this PDF.
+	source.Paper.SourceVersionDate = ""
+	if source.Paper.SourceVersion != "" && metadata.Provenance.PDFVersion == source.Paper.SourceVersion {
+		source.Paper.SourceVersionDate = metadata.Provenance.SourceVersionDate
+	}
 	pinPaperURLs(&source.Paper)
 	return source, nil
 }

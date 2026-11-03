@@ -13,7 +13,7 @@ vi.mock('@/modules/chat/store/conversationRunning', () => ({ useConversationRunn
 const i18n = createInstance();
 void i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN } }, initImmediate: false });
 const papers = ['A', 'B', 'C'].map(id => ({ paper: { paper_id: id, title: id, abstract: null }, is_seed: false, is_important: false }));
-const expansion: Expansion = { id: 'source', dataset_id: 'd', conversation_id: 'expansion-chat', title: '工具学习扩展', goal: 'expansion', status: 'completed', version: 1, preparation_revision: 1, budget_mode: 'balanced', created_at: '2026-10-28T08:00:00Z', updated_at: '2026-10-28T08:00:00Z', result: { user_instruction: '', papers, candidate_directions: [], selected_directions: [] } };
+const expansion: Expansion = { id: 'source', dataset_id: 'd', conversation_id: 'expansion-chat', title: '工具学习扩展', goal: 'expansion', status: 'completed', version: 1, preparation_revision: 1, budget_mode: 'balanced', created_at: '2026-10-28T08:00:00Z', updated_at: '2026-10-30T08:00:00Z', result: { user_instruction: '', papers, candidate_directions: [], selected_directions: [] } };
 const review: ReviewRecord = { id: 'review', conversation_id: 'review-chat', expansion_id: 'source', version: 1, title: '工具学习综述', paper_count: 2, source_title: expansion.title, source_available: true, created_at: '2026-10-29T08:00:00Z', updated_at: '2026-10-29T08:00:00Z' };
 const direct = { ...review, id: 'direct', conversation_id: 'direct-chat', title: '直接综述', expansion_id: '', source_title: '', source_available: false };
 function mount(ui: React.ReactNode) {
@@ -31,6 +31,9 @@ it('shows independent reviews with expansions and filters without changing the r
     mount(<ResearchRecords expansions={[expansion]} reviews={[review, direct]} open loading={false} error={false} statusLabel={() => '已完成'} onExpansion={onExpansion} onReview={onReview} />);
     const rows = screen.getAllByRole('listitem');
     expect(rows[0]).toHaveTextContent('综述');
+    const expansionRow = rows[2];
+    expect(expansionRow).toHaveTextContent('扩展档位：标准');
+    expect(expansionRow.querySelector('time')).toHaveAttribute('datetime', expansion.created_at);
     expect(screen.getByText('来自论文库 · 未扩展')).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: '论文综述 2' }));
     expect(screen.queryByRole('button', { name: '查看扩展成果: 工具学习扩展' })).not.toBeInTheDocument();

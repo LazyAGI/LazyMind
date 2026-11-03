@@ -55,6 +55,7 @@ func ResolveExpansionPapers(w http.ResponseWriter, r *http.Request) {
 		state := map[string]any{"paper_id": id, "status": "unavailable", "source_version": source.Paper.SourceVersion}
 		if content, err := findSourceContent(db, user, source); err == nil {
 			state["status"], state["source_kind"], state["source_version"] = content.Status, content.SourceKind, content.SourceVersion
+			state["content_hash"] = content.ContentHash
 			state["error"] = content.Error
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			replyError(w, 500, "READ_FAILED", err.Error())

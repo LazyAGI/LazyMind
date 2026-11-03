@@ -9,6 +9,8 @@ export interface PaperRef {
   document_id?: string;
   source_version?: string;
   source_provider?: string;
+  published_at?: string;
+  source_version_date?: string;
   paper_id: string;
   title?: string;
   authors?: string[];
@@ -28,19 +30,72 @@ export interface WorkflowPaper {
   direction_relation?: string;
   key_contribution?: string;
 }
-export interface ReviewWorkflowInput {
+export interface ReviewWorkflowInput extends PaperInvestigation {
   user_instruction: string;
   candidate_directions: string[];
   selected_directions: string[];
   papers: WorkflowPaper[];
 }
 export type BudgetMode = 'fast' | 'balanced' | 'deep';
-export interface ExpansionReport {
- narrative?: string; reading_order?: string[]; limitations?: string[];
+export interface PaperRecommendation {
+ paper_id: string;
+ reason: string;
+ direction?: string;
+}
+export interface PaperResearchStructure {
+ directions: Array<{ id: string; name: string; question: string }>;
+ nodes: Array<{ paper_id: string; direction_id: string; branch_question?: string; reason?: string }>;
+}
+export interface PaperRelation {
+ id: string; source_paper_id: string; target_paper_id: string; relation_type: string; statement: string; conditions?: string;
+ evidence: Array<{ paper_id: string; positions: number[]; content_hash?: string; source_version?: string }>;
+ verification: { status: string; scope_status?: string; reason?: string; scope_reason?: string; verification_error?: string };
+}
+export interface PaperInvestigation {
+ research_questions?: Array<{ id: string; direction: string; question: string; category: string }>;
+ named_clues?: Array<{
+  name: string; role: string; source_paper_id: string; source_location: string; source_version: string;
+  source_excerpt: string;
+  /** Zero-based body block positions. */
+  positions?: number[];
+  reference_key?: string;
+  identity: Record<string, string>; question_ids: string[]; paper_id?: string;
+ }>;
+ investigation?: Array<{
+  question_id: string; direction: string; kind: 'predecessor' | 'successor' | 'peer'; question: string;
+  status: 'resolved' | 'excluded' | 'blocked' | 'open'; conclusion: string;
+  paper_ids: string[]; queries: string[]; unresolved_clues: string[]; gaps: string[]; relation_ids?: string[]; query_ids?: string[];
+  clue_resolutions?: Array<{
+   source_paper_id: string; name: string; status: 'resolved' | 'excluded' | 'open' | 'blocked';
+   paper_id?: string; reason: string; query_ids: string[];
+  }>;
+ }>;
+ research_complete?: boolean;
+ completion?: { status: 'complete' | 'incomplete'; reason: 'verified' | 'budget_exhausted' | 'material_limited' | 'technical_failure' };
+ coverage_gaps?: Array<{ direction: string; kind: string; question_id?: string; clue_name?: string; reason?: string }>;
+}
+export interface PaperSelectionChanges {
+ before_count: number;
+ changes: Array<{ action: 'added' | 'removed'; paper: WorkflowPaper; reason: string }>;
+}
+export interface PaperRelationAnalysis extends PaperInvestigation {
+ selection?: PaperSelectionChanges;
+ input: ReviewWorkflowInput; research_structure?: PaperResearchStructure; relations?: PaperRelation[];
+ reading?: ExpansionReport['reading']; analysis_version?: string;
+}
+export interface ExpansionReport extends PaperInvestigation {
+ list_mode?: 'fast' | 'balanced';
+ recommendations?: PaperRecommendation[];
+ selection?: PaperSelectionChanges;
+ input?: ReviewWorkflowInput;
+ research_structure?: PaperResearchStructure; relations?: PaperRelation[];
+ analysis_version?: string;
+ narrative?: string; limitations?: string[];
  claims?: Array<{ paper_id: string; statement: string; status: string; reason: string; content_hash: string; positions: number[] }>;
  reading?: Record<string, { read_level: string; positions: number[]; pages: number[]; total_blocks: number }>;
  currency_cost?: number | null;
  execution_elapsed_ms?: number;
+ result_projection_delay_ms?: number;
  stage_timing?: Array<{step_id: string; attempt: number; status: string; queue_and_execution_ms: number}>;
  stage_metrics?: Record<string, {model?: string; provider_usage_records?: unknown[]}>;
  compose_metrics?: {model?: string; provider_usage_records?: unknown[]};
@@ -48,6 +103,7 @@ export interface ExpansionReport {
  preparation_attempts?: Array<{revision: number; model: string; metrics?: unknown}>;
 }
 export interface ExpansionPreparation {
+ skipped?: boolean;
  original_instruction?: string;
  user_instruction: string; summary: string; error?: string;
  questions: Array<{ id: string; question: string; options?: string[] }>;
@@ -62,7 +118,7 @@ export interface Expansion {
   reading?: ExpansionReport['reading'];
   report?: ExpansionReport;
   discovery_mode?: string;
-  progress?: Record<string, Partial<ReviewWorkflowInput> & { input?: Partial<ReviewWorkflowInput>; plan?: string[]; gaps?: string[] }>;
+  progress?: Record<string, Partial<ReviewWorkflowInput> & { input?: Partial<ReviewWorkflowInput>; plan?: string[]; gaps?: string[]; list_mode?: BudgetMode; screening_pending?: boolean; recommendations?: ExpansionReport['recommendations']; projection_delay_ms?: number }>;
   id: string;
   dataset_id: string;
   conversation_id: string;

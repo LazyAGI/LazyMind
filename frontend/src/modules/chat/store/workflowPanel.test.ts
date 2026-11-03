@@ -86,6 +86,27 @@ describe('hydrateWorkflowUI', () => {
 });
 
 describe('filterWorkflowTabs', () => {
+  it.each([
+    ['fast', ['screening_not_required', 'expansion_list_ready'], ['screen_and_supplement', 'analyze_relations', 'compose_result'], ['expand_and_screen']],
+    ['balanced', ['screened_candidates', 'screened_list_ready'], ['analyze_relations', 'compose_result'], ['expand_and_screen', 'screen_and_supplement']],
+    ['deep', ['screened_candidates'], [], ['expand_and_screen', 'screen_and_supplement', 'analyze_relations', 'compose_result']],
+  ])('shows the actual paper expansion stages for %s delivery', (_mode, materials, bypassed, expected) => {
+    const tabs = [
+      { id: 'expand_and_screen', label: 'Search', slots: [] },
+      { id: 'screen_and_supplement', label: 'Screen', slots: [], hide_when_material: 'screening_not_required' },
+      { id: 'analyze_relations', label: 'Analyze', slots: [], hide_when_material: 'expansion_list_ready' },
+      { id: 'compose_result', label: 'Report', slots: [], hide_when_material: 'expansion_list_ready' },
+    ];
+    const slots = ['candidate_set', ...materials].map(slot => ({ slot, selected: true })) as SlotRevision[];
+    expect(filterWorkflowTabs(tabs, slots, 'candidate_set', { projection: { bypassed } }).map(tab => tab.id)).toEqual(expected);
+  });
+
+  it('shows a conditional stage again when a rewind clears its runtime bypass', () => {
+    const tabs = [{ id: 'analysis', label: 'Analysis', slots: [], hide_when_material: 'list_ready' }];
+    expect(filterWorkflowTabs(tabs, [], undefined, { projection: { bypassed: ['analysis'] } })).toEqual([]);
+    expect(filterWorkflowTabs(tabs, [], undefined, { projection: { bypassed: [], ready: ['analysis'] } })).toEqual(tabs);
+  });
+
   it('shows executed collection or academic analysis in the shared materials tab', () => {
     const tabs = [{ id: 'materials', label: 'Materials', step_id: 'collect_materials',
       status_step_ids: ['collect_materials', 'analyze_academic_sources'], slots: [],

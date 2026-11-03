@@ -272,10 +272,29 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			mode := firstNonEmpty(req.BudgetMode, "balanced")
 			preparation := expansionPreparation{OriginalInstruction: instruction, UserInstruction: instruction, Answers: map[string]string{}, Questions: []preparationQuestion{}, Directions: []preparationDirection{}}
 			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, Title: truncateTitle(instruction), Goal: req.Kind, Status: "preparing", ResultJSON: marshal(input), PreparationRevision: 1, PreparationJSON: marshal(preparation), BudgetMode: mode, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			if req.Kind == "expansion" && mode == "fast" {
+				scope := firstNonEmpty(strings.TrimSpace(req.Direction), "围绕所选论文")
+				input.CandidateDirections = []string{scope}
+				input.SelectedDirections = []string{scope}
+				preparation.Selected = input.SelectedDirections
+				preparation.Skipped = true
+				convID, e = newAcademicConversation(tx, user, req.DatasetID, "论文扩展："+record.Title, "expansion")
+				if e != nil {
+					return e
+				}
+				record.ConversationID = convID
+				record.Status = "pending"
+				record.PreparationRevision = 0
+				record.ResultJSON = marshal(input)
+				record.PreparationJSON = marshal(preparation)
+			}
 			if e = tx.Create(&record).Error; e != nil {
 				return e
 			}
 			recordID = record.ID
+			if preparation.Skipped {
+				return enqueueAcademicChat(r.Context(), tx, user, convID, "paper_expansion", directExpansionLaunchInstruction, "direct:"+record.ID)
+			}
 			return enqueuePreparation(r.Context(), tx, record)
 		}
 		handoff, e := createPaperHandoff(r.Context(), tx, user, req.DatasetID, "", 0, req.Kind, req.RequestKey, input, nil, req.ReflectionFirst)
@@ -723,12 +742,65 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	if err != nil {
 		return asyncjob.Result{}, err
 	}
+	finalArtifacts := artifacts
+	completedSnapshot := len(payload.CompletedArtifacts) > 0
+	if completedSnapshot {
+		finalArtifacts = payload.CompletedArtifacts
+	}
+	finalSlot, finalStep := "expansion_result", "compose_result"
+	var listMarker *workflowstore.Artifact
+	if record.Goal == "expansion" && (record.BudgetMode == "fast" || record.BudgetMode == "balanced") {
+		for i := range finalArtifacts {
+			artifact := &finalArtifacts[i]
+			if artifact.ProducerAttemptID == "" || artifact.Validity != "effective" || !artifact.Selected || artifact.Deleted {
+				continue
+			}
+			switch artifact.Slot {
+			case "expansion_list_ready": // Fast and historical standard runs.
+				listMarker = artifact
+				finalSlot, finalStep = "candidate_set", "expand_and_screen"
+			case "screened_list_ready":
+				listMarker = artifact
+				finalSlot, finalStep = "screened_candidates", "screen_and_supplement"
+			}
+		}
+	}
 	progress := map[string]json.RawMessage{}
 	for _, artifact := range artifacts {
 		if artifact.Validity == "effective" && artifact.Selected && !artifact.Deleted {
 			value, err := academicArtifactJSON(artifact.Value)
 			if err != nil {
 				return asyncjob.Result{}, err
+			}
+			if record.Goal == "expansion" && (artifact.Slot == "candidate_set" || artifact.Slot == "screened_candidates") {
+				var candidate map[string]any
+				if json.Unmarshal(value, &candidate) == nil && (artifact.Slot == "screened_candidates" || candidate["screening_pending"] == true || candidate["list_mode"] == "deep") {
+					stepID := "expand_and_screen"
+					if artifact.Slot == "screened_candidates" {
+						stepID = "screen_and_supplement"
+					}
+					var step orm.WorkflowSessionStep
+					e := db.Where("id=? AND session_id=? AND step_id=? AND status='succeeded' AND validity='effective'", artifact.ProducerAttemptID, session.ID, stepID).Take(&step).Error
+					if errors.Is(e, gorm.ErrRecordNotFound) {
+						continue
+					}
+					if e != nil {
+						return asyncjob.Result{}, e
+					}
+					if candidate["list_mode"] == "deep" {
+						var previous map[string]struct {
+							ArtifactID string `json:"artifact_id"`
+							DelayMS    int64  `json:"projection_delay_ms"`
+						}
+						_ = json.Unmarshal(record.ProgressJSON, &previous)
+						delay := max(0, time.Since(step.UpdatedAt).Milliseconds())
+						if prior := previous[artifact.Slot]; prior.ArtifactID == artifact.ID {
+							delay = prior.DelayMS
+						}
+						candidate["artifact_id"], candidate["projection_delay_ms"] = artifact.ID, delay
+						value = marshal(candidate)
+					}
+				}
 			}
 			progress[artifact.Slot] = value
 		}
@@ -764,7 +836,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 		return asyncjob.Result{}, e
 	}
 	currentSession := latestSession.ID == session.ID
-	if currentSession {
+	if currentSession && !(listMarker != nil && status == "completed") {
 		if err = db.Model(&orm.AcademicExpansion{}).Where("id=? AND deleted_at IS NULL", record.ID).Where("EXISTS (SELECT 1 FROM plugin_sessions WHERE id=? AND state_version=?)", session.ID, session.StateVersion).Updates(map[string]any{"status": status, "progress_json": marshal(progress), "updated_at": time.Now().UTC()}).Error; err != nil {
 			return asyncjob.Result{}, err
 		}
@@ -779,20 +851,18 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			}
 		}
 	}
-	finalArtifacts := artifacts
-	completedSnapshot := len(payload.CompletedArtifacts) > 0
-	if completedSnapshot {
-		finalArtifacts = payload.CompletedArtifacts
-	}
 	for _, artifact := range finalArtifacts {
 		if !completedSnapshot && session.Status != "completed" {
 			break
 		}
-		if artifact.Slot != "expansion_result" || artifact.Validity != "effective" || artifact.Deleted || !artifact.Selected {
+		if artifact.Slot != finalSlot || artifact.Validity != "effective" || artifact.Deleted || !artifact.Selected {
+			continue
+		}
+		if listMarker != nil && (listMarker.ProducerAttemptID != artifact.ProducerAttemptID || listMarker.Attempt != artifact.Attempt) {
 			continue
 		}
 		var step orm.WorkflowSessionStep
-		q := db.Where("session_id=? AND step_id='compose_result' AND status='succeeded'", session.ID)
+		q := db.Where("session_id=? AND step_id=? AND status='succeeded'", session.ID, finalStep)
 		if !completedSnapshot {
 			q = q.Where("validity='effective'")
 		}
@@ -815,6 +885,17 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 		}
 		if err = json.Unmarshal(raw, &input); err != nil {
 			return rejectExpansionResult(db, record, session, artifact, err)
+		}
+		if listMarker != nil {
+			var list struct {
+				Mode string `json:"list_mode"`
+			}
+			if e := json.Unmarshal(raw, &list); e != nil {
+				return rejectExpansionResult(db, record, session, artifact, e)
+			}
+			if list.Mode != record.BudgetMode {
+				return rejectExpansionResult(db, record, session, artifact, errors.New("paper list mode does not match the confirmed depth"))
+			}
 		}
 		if len(input.SelectedDirections) == 0 || len(input.CandidateDirections) == 0 {
 			return rejectExpansionResult(db, record, session, artifact, errors.New("expansion requires selected directions"))
@@ -907,7 +988,17 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if e := tx.Create(&round).Error; e != nil {
 				return e
 			}
-			return tx.Model(&record).Updates(map[string]any{"version": version, "result_json": marshal(input), "report_json": report, "updated_at": now}).Error
+			updates := map[string]any{"version": version, "result_json": marshal(input), "report_json": report, "updated_at": now}
+			if listMarker != nil && currentSession && status == "completed" {
+				var current int64
+				if e := tx.Model(&orm.WorkflowSession{}).Where("id=? AND state_version=?", session.ID, session.StateVersion).Count(&current).Error; e != nil {
+					return e
+				}
+				if current != 0 {
+					updates["status"], updates["progress_json"] = status, marshal(progress)
+				}
+			}
+			return tx.Model(&record).Updates(updates).Error
 		})
 		if err != nil {
 			if errors.Is(err, errUnregisteredExpansionPaper) {
@@ -915,6 +1006,9 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			}
 			return asyncjob.Result{}, err
 		}
+	}
+	if listMarker != nil {
+		return asyncjob.Result{}, nil
 	}
 	// Full text uses only the expansion sources verified above.
 	var latest orm.AcademicExpansion
@@ -940,12 +1034,24 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 		}
 		processing = processing || content.Status == "processing"
 	}
-	if latest.Version > 0 && latest.Goal == "review" && latest.AutoReviewID == "" {
+	research, err := readExpansionResearchState(latest.ReportJSON)
+	if err != nil {
+		return asyncjob.Result{}, err
+	}
+	canAutoReview := research.ResearchComplete == nil || *research.ResearchComplete
+	if latest.Version > 0 && latest.Goal == "review" && latest.AutoReviewID == "" && canAutoReview {
 		err = conversationgroup.UserTransaction(ctx, db, record.UserID, func(tx *gorm.DB) error {
 			if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&latest).Error; e != nil {
 				return e
 			}
 			if latest.AutoReviewID != "" {
+				return nil
+			}
+			research, err := readExpansionResearchState(latest.ReportJSON)
+			if err != nil {
+				return err
+			}
+			if research.ResearchComplete != nil && !*research.ResearchComplete {
 				return nil
 			}
 			if e := json.Unmarshal(latest.ResultJSON, &input); e != nil {
@@ -965,7 +1071,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			return asyncjob.Result{}, err
 		}
 	}
-	if processing && session.Status == "completed" && latest.Goal == "review" {
+	if processing && session.Status == "completed" && latest.Goal == "review" && canAutoReview {
 		// A short rescheduled job releases the worker while downloads/parsing run.
 		_, err = asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, RunAt: time.Now().Add(5 * time.Second), MaxAttempts: 3})
 	}
@@ -1094,8 +1200,15 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 			importance[mark.PaperID] = mark.IsImportant
 		}
 	}
-	depth, _ := depthFor(record.BudgetMode)
-	common.ReplyJSON(w, map[string]any{"record": record, "research_guidance": depth.Guidance, "rounds": rounds, "chat_status": chatStatus, "contents": contents, "handoffs": handoffs, "presence": presence, "paper_importance": importance, "user_updates": updates, "interactions": interactions})
+	depth, _ := depthForExpansion(record)
+	var searches []paperDiscovery
+	if len(record.DiscoveryJSON) > 0 {
+		if err := json.Unmarshal(record.DiscoveryJSON, &searches); err != nil {
+			replyError(w, 500, "READ_FAILED", err.Error())
+			return
+		}
+	}
+	common.ReplyJSON(w, map[string]any{"record": record, "research_guidance": depth.Guidance, "source_queries": searchQueryReceipts(searches), "rounds": rounds, "chat_status": chatStatus, "contents": contents, "handoffs": handoffs, "presence": presence, "paper_importance": importance, "user_updates": updates, "interactions": interactions})
 }
 func DeleteExpansion(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)
@@ -1117,7 +1230,7 @@ func DeleteExpansion(w http.ResponseWriter, r *http.Request) {
 		if record.DeletedAt != nil {
 			return nil
 		}
-		if _, e := asyncjob.CancelResourceJobs(r.Context(), tx, preparationJobType, "academic_expansion", record.ID, "expansion deleted"); e != nil {
+		if _, e := asyncjob.CancelResourceJobs(r.Context(), tx, PreparationJobType, "academic_expansion", record.ID, "expansion deleted"); e != nil {
 			return e
 		}
 		if e := func() error {
@@ -1243,7 +1356,12 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 				next = handoff.ConversationID
 			}
 		}
-		common.ReplyJSON(w, academicChatSummary{Kind: "expansion", Goal: record.Goal, ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, PaperCount: len(input.Papers)})
+		research, err := readExpansionResearchState(record.ReportJSON)
+		if err != nil {
+			replyError(w, 500, "READ_FAILED", err.Error())
+			return
+		}
+		common.ReplyJSON(w, academicChatSummary{expansionResearchState: research, Kind: "expansion", Goal: record.Goal, ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, PaperCount: len(input.Papers)})
 		return
 	}
 	var handoff orm.AcademicHandoff

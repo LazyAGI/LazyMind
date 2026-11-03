@@ -86,6 +86,8 @@ def test_expansion_result_contract_rejects_nested_relation_metadata(tmp_path, mo
 
 def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeypatch):
     import importlib.util
+    import httpx
+    from lazyllm.tools.agent import ToolExecutionError
     path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
     spec = importlib.util.spec_from_file_location('paper_expansion_transport', path)
     module = importlib.util.module_from_spec(spec)
@@ -94,7 +96,22 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
 
     def request(method, url, **kwargs):
         requests.append((method, url, kwargs))
-        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'data': {'papers': []}})
+        if kwargs.get('json', {}).get('cursor') == 'bad-cursor':
+            return httpx.Response(400, json={'code': 'INVALID_CURSOR', 'message': 'invalid cursor'},
+                                  request=httpx.Request(method, url))
+        body = {'papers': []}
+        if url.endswith('/paper-contents:read'):
+            body = {
+                'paper': {'paper_id': 'discovered-paper', 'title': 'Original title',
+                          'authors': ['Author ' + str(index) for index in range(592)],
+                          'published_at': '2025-01-01T00:00:00Z'},
+                'pages': [{'page': 1, 'text': 'Verbatim method and comparison evidence.'}],
+                'positions': [0], 'content_hash': 'checked-body', 'source_version': 'v1',
+                'references': [{'reference_key': '7', 'raw_text': 'Original citation text.',
+                                'paper': {'paper_id': 'resolved-paper', 'title': 'Resolved title',
+                                          'authors': ['Repeated author list']}}],
+            }
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'data': body})
 
     monkeypatch.setattr(module, '_client', lambda: SimpleNamespace(base_url='http://core',
                         transport=SimpleNamespace(request=request), _headers=lambda: {'X-User-Id': 'owner'}))
@@ -104,14 +121,39 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
         'expansion_id': 'owned-expansion', 'query': 'all:agents', 'max_results': 10,
         'sources': [], 'mode': 'keyword', 'paper_id': '',
     }
-    module.academic_read_paper('owned-expansion', 'discovered-paper')
+    observation = module.academic_read_paper('owned-expansion', 'discovered-paper')
+    assert observation['pages'][0]['text'] == 'Verbatim method and comparison evidence.'
+    assert observation['positions'] == [0] and observation['content_hash'] == 'checked-body'
+    assert observation['paper']['published_at'] == '2025-01-01T00:00:00Z'
+    assert 'authors' not in observation['paper']
+    assert 'authors' not in observation['references'][0]['paper']
+    assert observation['references'][0]['raw_text'] == 'Original citation text.'
     assert requests[-1][2]['json'] == {
         'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper',
-        'keywords': [], 'page_start': 0, 'page_end': 0,
+        'view': 'content', 'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5,
     }
     module.academic_read_paper('owned-expansion', cursor='bound-cursor')
     assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'cursor': 'bound-cursor'}
     assert requests[-1][2]['headers'] == {'X-User-Id': 'owner'}
+    module.academic_read_paper('owned-expansion', 'discovered-paper', positions=[0, 3])
+    assert requests[-1][2]['json']['positions'] == [0, 3]
+    module.academic_read_paper('owned-expansion', 'discovered-paper', positions=[], page_start=3, page_end=4)
+    assert 'positions' not in requests[-1][2]['json'] and requests[-1][2]['json']['page_start'] == 3
+    before = len(requests)
+    with pytest.raises(ToolExecutionError, match='omit cursor'):
+        module.academic_read_paper('owned-expansion', 'different-paper', cursor='bound-cursor', positions=[1])
+    with pytest.raises(ToolExecutionError, match='max_results must be 1..5'):
+        module.academic_read_paper('owned-expansion', 'discovered-paper', max_results=20)
+    assert len(requests) == before
+    with pytest.raises(ToolExecutionError, match='INVALID_CURSOR: invalid cursor'):
+        module.academic_read_paper('owned-expansion', cursor='bad-cursor')
+    module.academic_read_paper('owned-expansion', 'discovered-paper', view='references', reference_keys=['7'])
+    assert requests[-1][2]['json'] == {
+        'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper', 'view': 'references',
+        'keywords': [], 'reference_keys': ['7'], 'max_results': 5,
+    }
+    monkeypatch.setattr(module, '_call', lambda *args, **kwargs: {'status': 'stage_timeout'})
+    assert module.academic_read_paper('owned-expansion', 'discovered-paper') == {'status': 'stage_timeout'}
 
 
 def test_search_tool_validates_search_contract_before_sending_requests(monkeypatch):

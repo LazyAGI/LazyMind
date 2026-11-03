@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var citationYearTitlePattern = regexp.MustCompile(`(?i)(?:\(|\b)(?:19|20)\d{2}[a-z]?(?:\)|\.)?\s*[.,:]?\s*(.+)$`)
+var citationYearTitlePattern = regexp.MustCompile(`(?i)(?:\(|\b)(?:19|20)\d{2}[a-z]?\b(?:\)|\.)?\s*[.,:]?\s*(.+)$`)
 var brokenWordPattern = regexp.MustCompile(`([\p{L}\p{N}])-\s*\p{M}*\s+([\p{L}\p{N}])`)
 
 func citationTitle(citation string) string {
@@ -100,5 +100,5 @@ func arxivWorkInput(paper arxivsource.Metadata) WorkInput {
 	return WorkInput{Title: paper.Title, Authors: paper.Authors, Abstract: paper.Abstract,
 		Year: paper.Year, Venue: paper.Venue, DOI: paper.DOI, ArxivID: paper.BaseID,
 		Provider: "arxiv", ProviderWorkID: paper.BaseID,
-		Provenance: map[string]any{"pdf_url": paper.PDFURL, "pdf_version": paper.Version, "source": "arxiv"}}
+		Provenance: map[string]any{"pdf_url": paper.PDFURL, "pdf_version": paper.Version, "source": "arxiv", "published_at": paper.PublishedAt, "source_version_date": paper.SourceVersionDate}}
 }

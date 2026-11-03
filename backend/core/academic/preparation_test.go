@@ -22,7 +22,7 @@ func TestPreparationCreatesRecordsWithoutChatsAndConfirmsOnce(t *testing.T) {
 	db := paperFixture(t)
 	for _, key := range []string{"topic-one", "topic-two", "topic-one"} {
 		w := httptest.NewRecorder()
-		LaunchPaperWorkflow(w, paperRequest(string(marshal(map[string]any{"kind": "expansion", "dataset_id": "papers", "direction": "RAG reliability", "request_key": key, "budget_mode": "fast"}))))
+		LaunchPaperWorkflow(w, paperRequest(string(marshal(map[string]any{"kind": "expansion", "dataset_id": "papers", "direction": "RAG reliability", "request_key": key, "budget_mode": "balanced"}))))
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
@@ -42,7 +42,7 @@ func TestPreparationCreatesRecordsWithoutChatsAndConfirmsOnce(t *testing.T) {
 	if nulls != 2 {
 		t.Fatal("uncreated Chat locators must use SQL NULL")
 	}
-	if record.Status != "preparing" || record.BudgetMode != "fast" || record.PreparationRevision != 1 {
+	if record.Status != "preparing" || record.BudgetMode != "balanced" || record.PreparationRevision != 1 {
 		t.Fatalf("bad initial state: %+v", record)
 	}
 	var input ReviewWorkflowInput
@@ -64,7 +64,7 @@ func TestPreparationCreatesRecordsWithoutChatsAndConfirmsOnce(t *testing.T) {
 		t.Fatal("confirmation must create exactly one Chat", chats)
 	}
 	db.Where("id=?", record.ID).Take(&record)
-	if record.BudgetMode != "fast" || record.Status != "pending" {
+	if record.BudgetMode != "balanced" || record.Status != "pending" {
 		t.Fatal("confirmation did not preserve the launch depth/state")
 	}
 	input = ReviewWorkflowInput{}
@@ -337,6 +337,15 @@ func TestPreparationUsesNewlyRegisteredCandidatesAndFencesLateCompletion(t *test
 			t.Fatal(err)
 		}
 	}
+	mode, source, modelID := "fixed", "own", "scoped-kimi-model"
+	for _, row := range []any{
+		&orm.UserModelProviderGroupModel{ID: modelID, UserModelProviderID: "preparation-provider", UserModelProviderGroupID: "preparation-group", ProviderName: "OpenAI", Name: "k3", ModelType: "llm", BaseModel: base},
+		&orm.Conversation{ID: "scoped-chat", ChatModelMode: &mode, ChatModelID: &modelID, ChatModelSource: &source, ChatModelVersion: 1, BaseModel: base},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	work, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{Title: "Actual representative study", DOI: "10.1234/representative"})
 	if err != nil {
 		t.Fatal(err)
@@ -351,21 +360,34 @@ func TestPreparationUsesNewlyRegisteredCandidatesAndFencesLateCompletion(t *test
 			w.WriteHeader(400)
 			return
 		}
-		if payload.LLM["llm"]["model"] != "gpt-5" {
-			t.Error("preparation did not use the selected default model")
+		expectedModel := "gpt-5"
+		if payload.ExpansionID == "scoped" {
+			expectedModel = "k3"
+		}
+		if payload.LLM["llm"]["model"] != expectedModel {
+			t.Errorf("preparation model = %v, want %s", payload.LLM["llm"]["model"], expectedModel)
 		}
 		if payload.ExpansionID == "stale" {
 			db.Model(&orm.AcademicExpansion{}).Where("id=?", "stale").Updates(map[string]any{"preparation_revision": 2, "preparation_json": marshal(expansionPreparation{Summary: "new attempt", UserInstruction: "new scope"})})
 		} else {
 			db.Model(&orm.AcademicExpansion{}).Where("id=?", payload.ExpansionID).Update("discovery_json", marshal([]paperDiscovery{{Papers: []PaperRef{paperRef(work)}}}))
 		}
-		json.NewEncoder(w).Encode(expansionPreparation{Summary: "Grounded scope", Directions: []preparationDirection{{Name: "retrieval correction", Question: "When does correction help?", Difference: "retrieval-side changes", Reason: "registered representative", PaperIDs: []string{work.ID}}}})
+		json.NewEncoder(w).Encode(expansionPreparation{
+			Summary:           "Grounded scope",
+			Directions:        []preparationDirection{{Name: "retrieval correction", Question: "When does correction help?", Difference: "retrieval-side changes", Reason: "registered representative", PaperIDs: []string{work.ID}}},
+			ResearchQuestions: []preparationResearchQuestion{{ID: "origin", Direction: "retrieval correction", Question: "Which design source explains correction?", Category: "predecessor"}},
+			NamedClues: []preparationNamedClue{{Name: "Query Router", Role: "named mechanism", SourcePaperID: work.ID,
+				SourceLocation: "Section 3, p. 4", SourceVersion: "source-v1", SourceExcerpt: "The Query Router selects a retrieval strategy.", Positions: []int{0}, Identity: map[string]string{"doi": "10.1234/representative"}, QuestionIDs: []string{"origin"}, PaperID: work.ID}},
+		})
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "preparation-fixture")
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	for _, id := range []string{"fresh", "stale"} {
+	for _, id := range []string{"fresh", "scoped", "stale"} {
 		record := orm.AcademicExpansion{ID: id, UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: id, Status: "preparing", PreparationRevision: 1, BudgetMode: "fast", DiscoveryMode: "external", DiscoveryJSON: marshal([]paperDiscovery{}), ResultJSON: marshal(ReviewWorkflowInput{Papers: []WorkflowPaper{}}), PreparationJSON: marshal(expansionPreparation{UserInstruction: "RAG reliability"})}
+		if id == "scoped" {
+			record.ConversationID = "scoped-chat"
+		}
 		if err = db.Create(&record).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -377,8 +399,20 @@ func TestPreparationUsesNewlyRegisteredCandidatesAndFencesLateCompletion(t *test
 		}
 		var preparation expansionPreparation
 		json.Unmarshal(record.PreparationJSON, &preparation)
-		if id == "fresh" && (record.Status != "pending" || !preparation.AutoConfirmed || len(preparation.Directions) != 1 || len(preparation.Directions[0].Papers) != 1) {
+		if (id == "fresh" || id == "scoped") && (record.Status != "pending" || !preparation.AutoConfirmed || len(preparation.Directions) != 1 || len(preparation.Directions[0].Papers) != 1) {
 			t.Fatal("newly registered candidates were not validated and materialized", record.Status, preparation.Error)
+		}
+		if id == "scoped" && preparation.Model != "k3" {
+			t.Fatalf("preparation attempt recorded model %q, want k3", preparation.Model)
+		}
+		if id == "fresh" {
+			if len(preparation.ResearchQuestions) != 1 || preparation.ResearchQuestions[0].Category != "predecessor" || len(preparation.NamedClues) != 1 {
+				t.Fatal("preparation dropped structured research questions or named clues", preparation)
+			}
+			clue := preparation.NamedClues[0]
+			if clue.Name != "Query Router" || clue.SourcePaperID != work.ID || clue.SourceLocation != "Section 3, p. 4" || clue.SourceVersion != "source-v1" || clue.SourceExcerpt != "The Query Router selects a retrieval strategy." || len(clue.Positions) != 1 || clue.Positions[0] != 0 || clue.Identity["doi"] != "10.1234/representative" || len(clue.QuestionIDs) != 1 || clue.QuestionIDs[0] != "origin" {
+				t.Fatal("preparation dropped original clue provenance or question links", clue)
+			}
 		}
 		if id == "stale" && (record.PreparationRevision != 2 || record.Status != "preparing" || preparation.Summary != "new attempt") {
 			t.Fatal("old attempt overwrote newer preparation")
@@ -430,5 +464,56 @@ func TestPDFParserVersionMismatchCannotBecomeUsableText(t *testing.T) {
 	pages, _, err = parsePaperPDF(t.Context(), path, "")
 	if err != nil || len(pages) != 1 {
 		t.Fatal("matching parser contract rejected", err)
+	}
+}
+
+func TestPreparationRequiresAnchoredNamedClues(t *testing.T) {
+	db := paperFixture(t)
+	source := PaperRef{PaperID: "a", SourceProvider: "arxiv", SourceVersion: "v1"}
+	record := orm.AcademicExpansion{DatasetID: "papers", SeedSnapshotJSON: marshal([]paperSource{}), DiscoveryJSON: marshal([]paperDiscovery{{Papers: []PaperRef{source}}})}
+	preparation := expansionPreparation{Summary: "Grounded research scope", Directions: []preparationDirection{{Name: "cache sharing", Question: "What is shared?", Reason: "Original method", PaperIDs: []string{"a"}}},
+		ResearchQuestions: []preparationResearchQuestion{{ID: "origin", Direction: "cache sharing", Question: "Which source method is used?", Category: "predecessor"}}}
+	clue := preparationNamedClue{Name: "Original method", Role: "design source", SourcePaperID: "a", SourceVersion: "v1", SourceExcerpt: "We build on Original method.", Positions: []int{0}, QuestionIDs: []string{"origin"}}
+	cases := []struct {
+		name   string
+		change func(*preparationNamedClue)
+		valid  bool
+	}{
+		{name: "content block", change: func(*preparationNamedClue) {}, valid: true},
+		{name: "bibliography reference", change: func(c *preparationNamedClue) { c.Positions = nil; c.ReferenceKey = "7" }, valid: true},
+		{name: "missing excerpt", change: func(c *preparationNamedClue) { c.SourceExcerpt = " " }},
+		{name: "missing anchor", change: func(c *preparationNamedClue) { c.Positions = nil }},
+		{name: "too many blocks", change: func(c *preparationNamedClue) { c.Positions = []int{0, 1, 2, 3, 4, 5} }},
+		{name: "negative block", change: func(c *preparationNamedClue) { c.Positions = []int{-1} }},
+		{name: "duplicate block", change: func(c *preparationNamedClue) { c.Positions = []int{0, 0} }},
+		{name: "different source revision", change: func(c *preparationNamedClue) { c.SourceVersion = "v2" }},
+		{name: "missing known source revision", change: func(c *preparationNamedClue) { c.SourceVersion = "" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := clue
+			tc.change(&candidate)
+			preparation.NamedClues = []preparationNamedClue{candidate}
+			err := validatePreparation(db.DB, record, preparation)
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, got error %v", tc.valid, err)
+			}
+		})
+	}
+	preparation.Questions = []preparationQuestion{{ID: "scope", Question: "Which workload should be studied?"}}
+	clue.SourceExcerpt = ""
+	preparation.NamedClues = []preparationNamedClue{clue}
+	if err := validatePreparation(db.DB, record, preparation); err == nil {
+		t.Fatal("awaiting user information allowed an unanchored original-source clue")
+	}
+
+}
+
+func TestPaperUserInstructionOmitsConfirmedLaunchTemplate(t *testing.T) {
+	for _, launch := range []string{directExpansionLaunchInstruction, confirmedExpansionLaunchInstruction, "请按照已确认范围执行四步论文拓展。准备成果已保存，请先读取任务上下文。"} {
+		got := paperUserInstruction("缓存压缩", []string{launch, "关注共享机制"})
+		if got != "缓存压缩\n\n关注共享机制" {
+			t.Fatalf("launch template leaked into research scope: %q", got)
+		}
 	}
 }

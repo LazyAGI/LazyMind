@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type openAlexPDFLocation struct {
@@ -22,7 +21,7 @@ type openAlexPDFLocation struct {
 }
 
 func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi, apiKey string) ([]FulltextCandidate, error) {
-	ctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, paperPDFMetadataTimeout)
 	defer cancel()
 	doi = NormalizeDOI(doi)
 	value := "https://doi.org/" + doi
@@ -145,6 +144,7 @@ func discoverDOIPDFs(ctx context.Context, client *http.Client, doi, openAlexKey 
 	}
 	outcomes := make([]outcome, len(providers))
 	result := paperPDFLookup{}
+collect:
 	for range providers {
 		select {
 		case out := <-results:
@@ -152,7 +152,8 @@ func discoverDOIPDFs(ctx context.Context, client *http.Client, doi, openAlexKey 
 		case <-ctx.Done():
 			result.Warnings = append(result.Warnings, "开放来源: "+ctx.Err().Error())
 			result.Err = ctx.Err()
-			return nil, result
+			result.Retryable = transientPDFError(ctx.Err())
+			break collect
 		}
 	}
 	candidates := []FulltextCandidate{}
@@ -161,6 +162,7 @@ func discoverDOIPDFs(ctx context.Context, client *http.Client, doi, openAlexKey 
 		if out.err != nil {
 			result.Warnings = append(result.Warnings, providers[i].name+": "+out.err.Error())
 			result.Err = errors.Join(result.Err, out.err)
+			result.Retryable = result.Retryable || transientPDFError(out.err)
 		}
 		for _, c := range out.candidates {
 			u, e := url.Parse(c.URL)

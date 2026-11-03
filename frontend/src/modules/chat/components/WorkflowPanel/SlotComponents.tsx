@@ -5413,20 +5413,22 @@ function SlotPaperExpansion({ slot, session, slotId, revisionCount, onRefresh, r
     ? session.slots?.find(item => item.slot === 'expansion_result' && item.selected && (item.list_index ?? -1) === -1)
     : undefined;
   const result = usePaperArtifactSource(resultSlot);
-  const reportSlot = slotId === 'relation_analysis' ? session.slots?.find(item => item.slot === 'expansion_report' && item.selected) : undefined;
-  const report = usePaperArtifactSource(reportSlot);
-  const reportData = useMemo(() => parsePaperExpansionArtifact(report.source), [report.source]);
+  const analysisSlot = slotId === 'expansion_report' ? session.slots?.find(item => item.slot === 'relation_analysis' && item.selected && (item.list_index ?? -1) === -1) : undefined;
+  const analysis = usePaperArtifactSource(analysisSlot);
+  const analysisData = useMemo(() => parsePaperExpansionArtifact(analysis.source), [analysis.source]);
   const data = useMemo(() => parsePaperExpansionArtifact(artifact.source), [artifact.source]);
   const resultData = useMemo(() => parsePaperExpansionArtifact(result.source), [result.source]);
+  const hasFrozenInput = slotId === 'expansion_report' && canDisplayPaperExpansion('expansion_result', data?.input);
+  const resultFailed = Boolean(result.failed) && !hasFrozenInput;
   if (artifact.pending) return <SlotPending type='text' />;
   if (artifact.failed) return <div className='workflow-slot workflow-slot--paper-expansion' role='alert'>
     {t('chat.slots.contentLoadFailed')} <button type='button' onClick={artifact.retry}>{t('common.retry')}</button>
   </div>;
   return <div className='workflow-slot workflow-slot--paper-expansion'>
     {data && canDisplayPaperExpansion(slotId, data)
-      ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} result={resultData} report={reportData} resultUnavailable={Boolean(result.failed)} />
+      ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} result={resultData} relationAnalysis={analysisData} resultUnavailable={resultFailed} />
       : <pre className='workflow-slot__text'>{artifact.source}</pre>}
-    {result.failed && <button type='button' onClick={result.retry}>{t('paperTasks.workflowResult.retryTitles')}</button>}
+    {resultFailed && <button type='button' onClick={result.retry}>{t('paperTasks.workflowResult.retryTitles')}</button>}
     <div className='workflow-slot__text-meta'>
       <ArtifactSourceButton value={artifact.source} />
       {revisionCount !== undefined && revisionCount > 0 && <SlotVersionPopover

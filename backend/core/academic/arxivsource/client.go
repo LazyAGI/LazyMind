@@ -21,16 +21,18 @@ const (
 
 // Metadata describes a verified revision. Version is always nonempty on success.
 type Metadata struct {
-	Title    string   `json:"title"`
-	Authors  []string `json:"authors"`
-	Year     int      `json:"year"`
-	Abstract string   `json:"abstract"`
-	DOI      string   `json:"doi,omitempty"`
-	Venue    string   `json:"venue"`
-	BaseID   string   `json:"base_id"`
-	Version  string   `json:"version"`
-	AbsURL   string   `json:"abs_url"`
-	PDFURL   string   `json:"pdf_url"`
+	PublishedAt       string   `json:"published_at"`
+	SourceVersionDate string   `json:"source_version_date,omitempty"`
+	Title             string   `json:"title"`
+	Authors           []string `json:"authors"`
+	Year              int      `json:"year"`
+	Abstract          string   `json:"abstract"`
+	DOI               string   `json:"doi,omitempty"`
+	Venue             string   `json:"venue"`
+	BaseID            string   `json:"base_id"`
+	Version           string   `json:"version"`
+	AbsURL            string   `json:"abs_url"`
+	PDFURL            string   `json:"pdf_url"`
 }
 
 // LookupError lets callers distinguish invalid input, upstream HTTP/network
@@ -208,6 +210,7 @@ type atomEntry struct {
 	ID        string   `xml:"http://www.w3.org/2005/Atom id"`
 	Title     string   `xml:"http://www.w3.org/2005/Atom title"`
 	Summary   string   `xml:"http://www.w3.org/2005/Atom summary"`
+	Updated   string   `xml:"http://www.w3.org/2005/Atom updated"`
 	Published string   `xml:"http://www.w3.org/2005/Atom published"`
 	Authors   []struct {
 		Name string `xml:"http://www.w3.org/2005/Atom name"`
@@ -291,11 +294,19 @@ func metadataForEntry(entry atomEntry, requested Identifier) (Metadata, error) {
 	if err != nil {
 		return Metadata{}, invalidResponse("arXiv 响应缺少有效发表日期", err)
 	}
+	versionDate := ""
+	if strings.TrimSpace(entry.Updated) != "" {
+		updated, err := time.Parse(time.RFC3339, strings.TrimSpace(entry.Updated))
+		if err != nil {
+			return Metadata{}, invalidResponse("arXiv 响应包含无效版本日期", err)
+		}
+		versionDate = updated.UTC().Format(time.RFC3339)
+	}
 	abstract := cleanText(entry.Summary)
 	if abstract == "" {
 		return Metadata{}, invalidResponse("arXiv 响应缺少论文摘要", nil)
 	}
-	return Metadata{Title: title, Authors: authors, Year: published.Year(), Abstract: abstract, DOI: cleanText(entry.DOI), Venue: "arXiv", BaseID: actual.BaseID, Version: actual.Version, AbsURL: actual.AbsURL(), PDFURL: actual.PDFURL()}, nil
+	return Metadata{PublishedAt: published.UTC().Format(time.RFC3339), SourceVersionDate: versionDate, Title: title, Authors: authors, Year: published.Year(), Abstract: abstract, DOI: cleanText(entry.DOI), Venue: "arXiv", BaseID: actual.BaseID, Version: actual.Version, AbsURL: actual.AbsURL(), PDFURL: actual.PDFURL()}, nil
 }
 
 func cleanText(value string) string { return strings.Join(strings.Fields(value), " ") }

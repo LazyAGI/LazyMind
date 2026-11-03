@@ -122,6 +122,32 @@ describe('paper Chat navigation', () => {
         expect(screen.queryByRole('region', { name: '论文综述流程' })).not.toBeInTheDocument();
     });
 
+    it('refreshes a failed expansion through retry and completion without focus or navigation', async () => {
+        get.mockResolvedValueOnce({ data: { ...summary, kind: 'expansion', status: 'failed' } })
+            .mockResolvedValueOnce({ data: { ...summary, kind: 'expansion', status: 'running' } })
+            .mockResolvedValue({ data: { ...summary, kind: 'expansion', status: 'completed' } });
+        render(<MemoryRouter><Page conversation="retry-chat" /></MemoryRouter>);
+        await tick();
+        expect(screen.getByText('自动扩展 · 失败')).toBeVisible();
+        await tick(3000);
+        expect(screen.getByText('自动扩展 · 进行中')).toBeVisible();
+        await tick(3000);
+        expect(screen.getByText('自动扩展 · 已完成')).toBeVisible();
+        await tick(9000);
+        expect(get).toHaveBeenCalledTimes(3);
+    });
+
+    it('stops refreshing an unresolved failed expansion when the banner unmounts', async () => {
+        get.mockResolvedValue({ data: { ...summary, kind: 'expansion', status: 'failed' } });
+        const view = render(<MemoryRouter><Page conversation="failed-chat" /></MemoryRouter>);
+        await tick();
+        await tick(3000);
+        expect(get).toHaveBeenCalledTimes(2);
+        view.unmount();
+        await tick(9000);
+        expect(get).toHaveBeenCalledTimes(2);
+    });
+
     it('does not repeatedly request an inaccessible or ordinary Chat', async () => {
         get.mockRejectedValue({ isAxiosError: true, response: { status: 404 } });
         render(<MemoryRouter><Page conversation="ordinary-chat" /></MemoryRouter>);

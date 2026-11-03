@@ -46,6 +46,8 @@ export interface AbortUploadResponse {
     'upload_state'?: string;
 }
 export interface AcademicChatContext {
+    'completion'?: AcademicResearchCompletion;
+    'coverage_gaps'?: Array<AcademicCoverageGap>;
     'dataset_id': string;
     'expansion_id'?: string;
     'goal'?: string;
@@ -54,6 +56,7 @@ export interface AcademicChatContext {
     'next_conversation_id'?: string;
     'paper_count'?: number;
     'ready_count'?: number;
+    'research_complete'?: boolean;
     'source_available'?: boolean;
     'source_conversation_id'?: string;
     'status': string;
@@ -61,6 +64,8 @@ export interface AcademicChatContext {
     'input'?: AcademicHandoffInput;
 }
 export interface AcademicChatSummary {
+    'completion'?: AcademicResearchCompletion;
+    'coverage_gaps'?: Array<AcademicCoverageGap>;
     'dataset_id': string;
     'expansion_id'?: string;
     'goal'?: string;
@@ -69,11 +74,30 @@ export interface AcademicChatSummary {
     'next_conversation_id'?: string;
     'paper_count'?: number;
     'ready_count'?: number;
+    'research_complete'?: boolean;
     'source_available'?: boolean;
     'source_conversation_id'?: string;
     'status': string;
     'version': number;
 }
+export interface AcademicClueResolution {
+    'name': string;
+    'paper_id'?: string;
+    'query_ids': Array<string>;
+    'reason': string;
+    'source_paper_id': string;
+    'status': AcademicClueResolutionStatusEnum;
+}
+
+export const AcademicClueResolutionStatusEnum = {
+    Resolved: 'resolved',
+    Excluded: 'excluded',
+    Blocked: 'blocked',
+    Open: 'open'
+} as const;
+
+export type AcademicClueResolutionStatusEnum = typeof AcademicClueResolutionStatusEnum[keyof typeof AcademicClueResolutionStatusEnum];
+
 /**
  * @type AcademicContentRead
  */
@@ -82,20 +106,51 @@ export type AcademicContentRead = AcademicContentReadOneOf | AcademicContentRead
 export interface AcademicContentReadOneOf {
     'expansion_id': string;
     'keywords'?: Array<string>;
+    /**
+     * content/fulltext returns 1..5 blocks (default 5); references returns 1..20 clues (default 20), or at most 5 when resolving selected clues. The cursor preserves this limit.
+     */
+    'max_results'?: number;
     'page_end'?: number;
     'page_start'?: number;
     'paper_id': string;
     'positions'?: Array<number>;
     'preparation_revision'?: number;
+    'reference_keys'?: Array<string>;
+    'view'?: AcademicContentReadOneOfViewEnum;
 }
+
+export const AcademicContentReadOneOfViewEnum = {
+    Content: 'content',
+    Fulltext: 'fulltext',
+    References: 'references'
+} as const;
+
+export type AcademicContentReadOneOfViewEnum = typeof AcademicContentReadOneOfViewEnum[keyof typeof AcademicContentReadOneOfViewEnum];
+
 export interface AcademicContentReadOneOf1 {
     'handoff_id': string;
     'keywords'?: Array<string>;
+    /**
+     * content/fulltext returns 1..5 blocks (default 5); references returns 1..20 clues (default 20), or at most 5 when resolving selected clues. The cursor preserves this limit.
+     */
+    'max_results'?: number;
     'page_end'?: number;
     'page_start'?: number;
     'paper_id': string;
     'positions'?: Array<number>;
+    'preparation_revision'?: number;
+    'reference_keys'?: Array<string>;
+    'view'?: AcademicContentReadOneOf1ViewEnum;
 }
+
+export const AcademicContentReadOneOf1ViewEnum = {
+    Content: 'content',
+    Fulltext: 'fulltext',
+    References: 'references'
+} as const;
+
+export type AcademicContentReadOneOf1ViewEnum = typeof AcademicContentReadOneOf1ViewEnum[keyof typeof AcademicContentReadOneOf1ViewEnum];
+
 export interface AcademicContentReadOneOf2 {
     'cursor': string;
     'expansion_id'?: string;
@@ -104,16 +159,20 @@ export interface AcademicContentReadOneOf2 {
 export interface AcademicContentResponse {
     'content_hash': string;
     'content_level': AcademicContentResponseContentLevelEnum;
+    'matched_references'?: number;
     'next_cursor': string;
-    'pages': Array<AcademicContentResponsePagesInner>;
+    'pages'?: Array<AcademicContentResponsePagesInner>;
     'paper': AcademicPaperRef;
     'parser_version'?: string;
     'positions'?: Array<number>;
     'quality'?: object;
+    'references'?: Array<AcademicContentResponseReferencesInner>;
     'source_kind'?: AcademicContentResponseSourceKindEnum;
     'source_version'?: string;
     'status': AcademicContentResponseStatusEnum;
     'total_blocks'?: number;
+    'total_references'?: number;
+    'view'?: AcademicContentResponseViewEnum;
     'warnings': Array<string>;
 }
 
@@ -139,10 +198,74 @@ export const AcademicContentResponseStatusEnum = {
 } as const;
 
 export type AcademicContentResponseStatusEnum = typeof AcademicContentResponseStatusEnum[keyof typeof AcademicContentResponseStatusEnum];
+export const AcademicContentResponseViewEnum = {
+    Content: 'content',
+    References: 'references'
+} as const;
+
+export type AcademicContentResponseViewEnum = typeof AcademicContentResponseViewEnum[keyof typeof AcademicContentResponseViewEnum];
 
 export interface AcademicContentResponsePagesInner {
     'page': number;
     'text': string;
+}
+export interface AcademicContentResponseReferencesInner {
+    'arxiv_id'?: string;
+    'doi'?: string;
+    'error'?: string;
+    'paper'?: AcademicPaperRef;
+    'raw_text'?: string;
+    'reference_key'?: string;
+    'resolution_status'?: AcademicContentResponseReferencesInnerResolutionStatusEnum;
+    'title'?: string;
+    'year'?: number;
+}
+
+export const AcademicContentResponseReferencesInnerResolutionStatusEnum = {
+    Unresolved: 'unresolved',
+    Resolved: 'resolved',
+    Conflict: 'conflict',
+    Failed: 'failed'
+} as const;
+
+export type AcademicContentResponseReferencesInnerResolutionStatusEnum = typeof AcademicContentResponseReferencesInnerResolutionStatusEnum[keyof typeof AcademicContentResponseReferencesInnerResolutionStatusEnum];
+
+export interface AcademicCoverageGap {
+    'clue_name'?: string;
+    'direction': string;
+    'kind': AcademicCoverageGapKindEnum;
+    'question_id'?: string;
+    'reason'?: string;
+}
+
+export const AcademicCoverageGapKindEnum = {
+    Predecessor: 'predecessor',
+    Successor: 'successor',
+    Peer: 'peer'
+} as const;
+
+export type AcademicCoverageGapKindEnum = typeof AcademicCoverageGapKindEnum[keyof typeof AcademicCoverageGapKindEnum];
+
+export interface AcademicDiscoveryQuery {
+    'cache_key'?: string;
+    'candidates'?: { [key: string]: Array<AcademicImportCandidate>; };
+    'created_at'?: string;
+    'leads'?: Array<AcademicDiscoveryQueryLeadsInner>;
+    'max_results'?: number;
+    'mode'?: string;
+    'next'?: object;
+    'paper_id'?: string;
+    'papers'?: Array<AcademicPaperRef>;
+    'position'?: object;
+    'preparation_revision'?: number;
+    'query'?: string;
+    'session_id'?: string;
+    'sources'?: Array<AcademicSourceOutcome>;
+}
+export interface AcademicDiscoveryQueryLeadsInner {
+    'snippet'?: string;
+    'title'?: string;
+    'url'?: string;
 }
 export interface AcademicDocumentIdentity {
     'kind'?: AcademicDocumentIdentityKindEnum;
@@ -227,8 +350,11 @@ export interface AcademicExpansionPreparation {
     'directions'?: Array<AcademicExpansionPreparationDirectionsInner>;
     'error'?: string;
     'metrics'?: object;
+    'named_clues'?: Array<AcademicExpansionPreparationNamedCluesInner>;
     'questions'?: Array<AcademicExpansionPreparationQuestionsInner>;
+    'research_questions'?: Array<AcademicExpansionPreparationResearchQuestionsInner>;
     'selected_directions'?: Array<string>;
+    'skipped'?: boolean;
     'summary'?: string;
     'user_instruction'?: string;
 }
@@ -240,11 +366,45 @@ export interface AcademicExpansionPreparationDirectionsInner {
     'question': string;
     'reason': string;
 }
+/**
+ * Original-source clue. The excerpt must come from actually read content blocks or the named bibliography entry, with the matching source version.
+ */
+export interface AcademicExpansionPreparationNamedCluesInner {
+    'identity': { [key: string]: string; };
+    'name': string;
+    'paper_id'?: string;
+    'positions'?: Set<number>;
+    'question_ids': Array<string>;
+    'reference_key'?: string;
+    'role': string;
+    'source_excerpt': string;
+    'source_location': string;
+    'source_paper_id': string;
+    'source_version': string;
+}
+export interface AcademicExpansionPreparationNamedCluesInnerAnyOf {
+    'reference_key': string;
+}
 export interface AcademicExpansionPreparationQuestionsInner {
     'id': string;
     'options'?: Array<string>;
     'question': string;
 }
+export interface AcademicExpansionPreparationResearchQuestionsInner {
+    'category': AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum;
+    'direction': string;
+    'id': string;
+    'question': string;
+}
+
+export const AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum = {
+    Predecessor: 'predecessor',
+    Successor: 'successor',
+    Peer: 'peer'
+} as const;
+
+export type AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum = typeof AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum[keyof typeof AcademicExpansionPreparationResearchQuestionsInnerCategoryEnum];
+
 export interface AcademicExpansionReadingValue {
     'content_hash'?: string;
     'pages'?: Array<number>;
@@ -262,44 +422,138 @@ export const AcademicExpansionReadingValueReadLevelEnum = {
 export type AcademicExpansionReadingValueReadLevelEnum = typeof AcademicExpansionReadingValueReadLevelEnum[keyof typeof AcademicExpansionReadingValueReadLevelEnum];
 
 export interface AcademicExpansionReport {
-    'claims'?: Array<AcademicExpansionReportClaimsInner>;
+    'analysis_version'?: string;
+    'claims'?: Array<AcademicVerifiedClaim>;
+    'completion'?: AcademicResearchCompletion;
     'compose_metrics'?: AcademicExpansionReportComposeMetrics;
+    'coverage_gaps'?: Array<AcademicCoverageGap>;
     'currency_cost'?: number | null;
     'execution_elapsed_ms'?: number;
+    'input'?: AcademicReviewInput;
+    'investigation'?: Array<AcademicInvestigation>;
     'limitations'?: Array<string>;
+    'list_mode'?: AcademicExpansionReportListModeEnum;
     'materials'?: Array<object>;
     'narrative'?: string;
     'preparation_attempts'?: Array<object>;
+    'preparation_metrics'?: object;
     'reading'?: { [key: string]: AcademicExpansionReadingValue; };
-    'reading_order'?: Array<string>;
-    'reused_source_queries'?: Array<object>;
-    'source_queries'?: Array<object>;
+    'recommendations'?: Array<AcademicExpansionReportRecommendationsInner>;
+    'relations'?: Array<AcademicExpansionReportRelationsInner>;
+    'research_complete'?: boolean;
+    'research_structure'?: AcademicExpansionReportResearchStructure;
+    'result_projection_delay_ms'?: number;
+    'reused_source_queries'?: Array<AcademicDiscoveryQuery>;
+    'selection'?: AcademicPaperSelection;
+    'source_queries'?: Array<AcademicDiscoveryQuery>;
+    'source_versions'?: Array<AcademicSourceVersion>;
     'stage_metrics'?: { [key: string]: AcademicExpansionReportComposeMetrics; };
     'stage_timing'?: Array<AcademicExpansionReportStageTimingInner>;
 }
-export interface AcademicExpansionReportClaimsInner {
-    'content_hash'?: string;
-    'field'?: string;
-    'paper_id'?: string;
-    'positions'?: Array<number>;
-    'reason'?: string;
-    'source_version'?: string;
-    'statement'?: string;
-    'status'?: AcademicExpansionReportClaimsInnerStatusEnum;
-}
 
-export const AcademicExpansionReportClaimsInnerStatusEnum = {
-    Supported: 'supported',
-    Unsupported: 'unsupported',
-    Uncertain: 'uncertain'
+export const AcademicExpansionReportListModeEnum = {
+    Fast: 'fast',
+    Balanced: 'balanced'
 } as const;
 
-export type AcademicExpansionReportClaimsInnerStatusEnum = typeof AcademicExpansionReportClaimsInnerStatusEnum[keyof typeof AcademicExpansionReportClaimsInnerStatusEnum];
+export type AcademicExpansionReportListModeEnum = typeof AcademicExpansionReportListModeEnum[keyof typeof AcademicExpansionReportListModeEnum];
 
 export interface AcademicExpansionReportComposeMetrics {
     'currency_cost'?: number | null;
     'model'?: string;
     'provider_usage_records'?: Array<object>;
+    'verification'?: AcademicExpansionReportComposeMetricsVerification;
+}
+export interface AcademicExpansionReportComposeMetricsVerification {
+    'batches'?: Array<object>;
+    'completed_fields'?: number;
+    'elapsed_seconds'?: number;
+    'failed_fields'?: number;
+    'model_calls'?: number;
+    'reused_fields'?: number;
+    'semantic_rounds'?: number;
+    'submitted_fields'?: number;
+}
+export interface AcademicExpansionReportRecommendationsInner {
+    'direction'?: string;
+    'paper_id': string;
+    'reason': string;
+}
+export interface AcademicExpansionReportRelationsInner {
+    'conditions': string;
+    'evidence': Array<AcademicSourceEvidence>;
+    'id': string;
+    'relation_type': AcademicExpansionReportRelationsInnerRelationTypeEnum;
+    'source_paper_id': string;
+    'statement': string;
+    'target_paper_id': string;
+    'verification': AcademicExpansionReportRelationsInnerVerification;
+}
+
+export const AcademicExpansionReportRelationsInnerRelationTypeEnum = {
+    MethodModification: 'method_modification',
+    DesignInspiration: 'design_inspiration',
+    ComponentUse: 'component_use',
+    ExperimentalComparison: 'experimental_comparison',
+    MechanismComparison: 'mechanism_comparison',
+    BackgroundCitation: 'background_citation'
+} as const;
+
+export type AcademicExpansionReportRelationsInnerRelationTypeEnum = typeof AcademicExpansionReportRelationsInnerRelationTypeEnum[keyof typeof AcademicExpansionReportRelationsInnerRelationTypeEnum];
+
+export interface AcademicExpansionReportRelationsInnerVerification {
+    'parts'?: Array<AcademicExpansionReportRelationsInnerVerificationPartsInner>;
+    'reason'?: string;
+    'scope_reason'?: string;
+    'scope_status'?: AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum;
+    'status'?: AcademicExpansionReportRelationsInnerVerificationStatusEnum;
+    'verification_error'?: string;
+}
+
+export const AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum = {
+    Supported: 'supported',
+    Uncertain: 'uncertain'
+} as const;
+
+export type AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationScopeStatusEnum];
+export const AcademicExpansionReportRelationsInnerVerificationStatusEnum = {
+    Supported: 'supported',
+    Uncertain: 'uncertain',
+    Unsupported: 'unsupported'
+} as const;
+
+export type AcademicExpansionReportRelationsInnerVerificationStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationStatusEnum];
+
+export interface AcademicExpansionReportRelationsInnerVerificationPartsInner {
+    'part_index'?: number;
+    'reason'?: string;
+    'sources'?: Array<string>;
+    'status'?: AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum;
+    'text'?: string;
+}
+
+export const AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum = {
+    Supported: 'supported',
+    Uncertain: 'uncertain',
+    Unsupported: 'unsupported'
+} as const;
+
+export type AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum];
+
+export interface AcademicExpansionReportResearchStructure {
+    'directions'?: Array<AcademicExpansionReportResearchStructureDirectionsInner>;
+    'nodes'?: Array<AcademicExpansionReportResearchStructureNodesInner>;
+}
+export interface AcademicExpansionReportResearchStructureDirectionsInner {
+    'id'?: string;
+    'name'?: string;
+    'question'?: string;
+}
+export interface AcademicExpansionReportResearchStructureNodesInner {
+    'branch_question'?: string;
+    'direction_id'?: string;
+    'paper_id'?: string;
+    'reason'?: string;
 }
 export interface AcademicExpansionReportStageTimingInner {
     'attempt'?: number;
@@ -463,10 +717,43 @@ export interface AcademicImportQueueItemCurrentDocument {
     'processing_error'?: string;
     'processing_status'?: string;
 }
+export interface AcademicInvestigation {
+    'clue_resolutions'?: Array<AcademicClueResolution>;
+    'conclusion': string;
+    'direction': string;
+    'gaps': Array<string>;
+    'kind': AcademicInvestigationKindEnum;
+    'paper_ids': Array<string>;
+    'queries': Array<string>;
+    'query_ids'?: Array<string>;
+    'question': string;
+    'question_id': string;
+    'relation_ids'?: Array<string>;
+    'status': AcademicInvestigationStatusEnum;
+    'unresolved_clues': Array<string>;
+}
+
+export const AcademicInvestigationKindEnum = {
+    Predecessor: 'predecessor',
+    Successor: 'successor',
+    Peer: 'peer'
+} as const;
+
+export type AcademicInvestigationKindEnum = typeof AcademicInvestigationKindEnum[keyof typeof AcademicInvestigationKindEnum];
+export const AcademicInvestigationStatusEnum = {
+    Resolved: 'resolved',
+    Excluded: 'excluded',
+    Blocked: 'blocked',
+    Open: 'open'
+} as const;
+
+export type AcademicInvestigationStatusEnum = typeof AcademicInvestigationStatusEnum[keyof typeof AcademicInvestigationStatusEnum];
+
 export interface AcademicModelMetrics {
     'currency_cost'?: number | null;
     'model'?: string;
     'provider_usage_records'?: Array<object>;
+    'verification'?: AcademicExpansionReportComposeMetricsVerification;
 }
 export interface AcademicPaperRef {
     'abstract': string | null;
@@ -478,12 +765,34 @@ export interface AcademicPaperRef {
     'paper_id': string;
     'paper_url'?: string;
     'pdf_url'?: string;
+    'published_at'?: string;
     'source_provider'?: string;
     'source_version'?: string;
+    'source_version_date'?: string;
     'title'?: string;
     'venue'?: string;
     'year'?: number;
 }
+/**
+ * Frozen changes against the candidate_set bound to the checked analysis, including the original paper metadata and a reason for every addition or removal.
+ */
+export interface AcademicPaperSelection {
+    'before_count': number;
+    'changes': Array<AcademicPaperSelectionChange>;
+}
+export interface AcademicPaperSelectionChange {
+    'action': AcademicPaperSelectionChangeActionEnum;
+    'paper': AcademicWorkflowPaper;
+    'reason': string;
+}
+
+export const AcademicPaperSelectionChangeActionEnum = {
+    Added: 'added',
+    Removed: 'removed'
+} as const;
+
+export type AcademicPaperSelectionChangeActionEnum = typeof AcademicPaperSelectionChangeActionEnum[keyof typeof AcademicPaperSelectionChangeActionEnum];
+
 export interface AcademicPaperTaskInput {
     'notes'?: Array<AcademicPaperTaskNote>;
     'papers': Array<AcademicPaperRef>;
@@ -513,11 +822,55 @@ export interface AcademicPresenceDocument {
     'source_provider'?: string;
     'source_version'?: string;
 }
+/**
+ * Checked relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
+ */
+export interface AcademicRelationAnalysis {
+    'analysis_version': string;
+    'claims': Array<AcademicVerifiedClaim>;
+    'completion': AcademicResearchCompletion;
+    'coverage_gaps': Array<AcademicCoverageGap>;
+    'input': AcademicReviewInput;
+    'investigation': Array<AcademicInvestigation>;
+    'metrics': AcademicExpansionReportComposeMetrics;
+    'reading': { [key: string]: AcademicExpansionReadingValue; };
+    'relations': Array<AcademicExpansionReportRelationsInner>;
+    'research_complete': boolean;
+    'research_structure': AcademicExpansionReportResearchStructure;
+    'selection': AcademicPaperSelection;
+    'source_queries': Array<AcademicSourceQueryReceipt>;
+    'source_versions': Array<AcademicSourceVersion>;
+    'submission_hash': string;
+}
+/**
+ * Research outcome for the checked analysis, independent of the Workflow execution status. A complete outcome is verified; an incomplete outcome preserves its actual stopping reason.
+ */
+export interface AcademicResearchCompletion {
+    'reason': AcademicResearchCompletionReasonEnum;
+    'status': AcademicResearchCompletionStatusEnum;
+}
+
+export const AcademicResearchCompletionReasonEnum = {
+    Verified: 'verified',
+    BudgetExhausted: 'budget_exhausted',
+    MaterialLimited: 'material_limited',
+    TechnicalFailure: 'technical_failure'
+} as const;
+
+export type AcademicResearchCompletionReasonEnum = typeof AcademicResearchCompletionReasonEnum[keyof typeof AcademicResearchCompletionReasonEnum];
+export const AcademicResearchCompletionStatusEnum = {
+    Complete: 'complete',
+    Incomplete: 'incomplete'
+} as const;
+
+export type AcademicResearchCompletionStatusEnum = typeof AcademicResearchCompletionStatusEnum[keyof typeof AcademicResearchCompletionStatusEnum];
+
 export interface AcademicResolvedPapers {
     'contents': Array<AcademicResolvedPapersContentsInner>;
     'papers': Array<AcademicWorkflowPaper>;
 }
 export interface AcademicResolvedPapersContentsInner {
+    'content_hash'?: string;
     'error'?: string;
     'paper_id': string;
     'source_kind'?: string;
@@ -551,6 +904,12 @@ export interface AcademicReviewRecord {
     'updated_at': string;
     'version': number;
 }
+export interface AcademicSourceEvidence {
+    'content_hash'?: string;
+    'paper_id': string;
+    'positions': Array<number>;
+    'source_version'?: string;
+}
 export interface AcademicSourceImportItem {
     'batch_id': string;
     'created_library': boolean;
@@ -570,6 +929,49 @@ export interface AcademicSourceImportItem {
     'target_dataset_id': string;
     'target_name': string;
     'title': string;
+}
+export interface AcademicSourceOutcome {
+    'count': number;
+    'elapsed_ms': number;
+    'has_more': boolean;
+    'lead_count': number;
+    'limitation'?: string;
+    'new_paper_count': number;
+    'next_cursor'?: string;
+    'paper_count': number;
+    'retry_at'?: string;
+    'reused'?: boolean;
+    'source': string;
+    'status': AcademicSourceOutcomeStatusEnum;
+    'total_count'?: number;
+}
+
+export const AcademicSourceOutcomeStatusEnum = {
+    Ok: 'ok',
+    Empty: 'empty',
+    Failed: 'failed',
+    MissingConfiguration: 'missing_configuration',
+    AuthenticationFailed: 'authentication_failed',
+    RateLimited: 'rate_limited',
+    QuotaExhausted: 'quota_exhausted'
+} as const;
+
+export type AcademicSourceOutcomeStatusEnum = typeof AcademicSourceOutcomeStatusEnum[keyof typeof AcademicSourceOutcomeStatusEnum];
+
+export interface AcademicSourceQueryReceipt {
+    'created_at': string;
+    'id': string;
+    'mode': string;
+    'paper_id': string;
+    'paper_ids': Array<string>;
+    'query': string;
+    'sources': Array<AcademicSourceOutcome> | null;
+}
+export interface AcademicSourceVersion {
+    'content_hash': string;
+    'paper_id': string;
+    'source_version': string;
+    'status': string;
 }
 export interface AcademicTaskLaunch {
     /**
@@ -611,6 +1013,44 @@ export const AcademicTaskLaunchReviewScopeEnum = {
 } as const;
 
 export type AcademicTaskLaunchReviewScopeEnum = typeof AcademicTaskLaunchReviewScopeEnum[keyof typeof AcademicTaskLaunchReviewScopeEnum];
+
+export interface AcademicVerifiedClaim {
+    'available_sources'?: Array<string>;
+    'content_hash'?: string;
+    'evidence'?: Array<AcademicSourceEvidence>;
+    'field'?: AcademicVerifiedClaimFieldEnum;
+    'paper_id'?: string;
+    'parts'?: Array<AcademicExpansionReportRelationsInnerVerificationPartsInner>;
+    'positions'?: Array<number>;
+    'reason'?: string;
+    'scope_reason'?: string;
+    'scope_status'?: AcademicVerifiedClaimScopeStatusEnum;
+    'source_version'?: string;
+    'statement'?: string;
+    'status'?: AcademicVerifiedClaimStatusEnum;
+    'verification_error'?: string;
+}
+
+export const AcademicVerifiedClaimFieldEnum = {
+    SeedRelation: 'seed_relation',
+    DirectionRelation: 'direction_relation',
+    KeyContribution: 'key_contribution'
+} as const;
+
+export type AcademicVerifiedClaimFieldEnum = typeof AcademicVerifiedClaimFieldEnum[keyof typeof AcademicVerifiedClaimFieldEnum];
+export const AcademicVerifiedClaimScopeStatusEnum = {
+    Supported: 'supported',
+    Uncertain: 'uncertain'
+} as const;
+
+export type AcademicVerifiedClaimScopeStatusEnum = typeof AcademicVerifiedClaimScopeStatusEnum[keyof typeof AcademicVerifiedClaimScopeStatusEnum];
+export const AcademicVerifiedClaimStatusEnum = {
+    Supported: 'supported',
+    Uncertain: 'uncertain',
+    Unsupported: 'unsupported'
+} as const;
+
+export type AcademicVerifiedClaimStatusEnum = typeof AcademicVerifiedClaimStatusEnum[keyof typeof AcademicVerifiedClaimStatusEnum];
 
 export interface AcademicWorkflowPaper {
     'direction_relation'?: string;
@@ -1030,6 +1470,7 @@ export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
     'record'?: AcademicExpansion;
     'research_guidance'?: string;
     'rounds'?: Array<object>;
+    'source_queries'?: Array<AcademicSourceQueryReceipt>;
 }
 
 export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = {
@@ -1227,36 +1668,8 @@ export interface ApiCoreAcademicPapersSearchPost200Response {
     'leads'?: Array<object>;
     'mock'?: boolean;
     'papers'?: Array<AcademicPaperRef>;
-    'sources'?: Array<ApiCoreAcademicPapersSearchPost200ResponseSourcesInner>;
+    'sources'?: Array<AcademicSourceOutcome>;
 }
-export interface ApiCoreAcademicPapersSearchPost200ResponseSourcesInner {
-    'count'?: number;
-    'elapsed_ms'?: number;
-    'has_more'?: boolean;
-    'lead_count'?: number;
-    'limitation'?: string;
-    'new_paper_count'?: number;
-    'next_cursor'?: string;
-    'paper_count'?: number;
-    'retry_at'?: string;
-    'reused'?: boolean;
-    'source'?: string;
-    'status'?: ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum;
-    'total_count'?: number;
-}
-
-export const ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum = {
-    Ok: 'ok',
-    Empty: 'empty',
-    Failed: 'failed',
-    MissingConfiguration: 'missing_configuration',
-    AuthenticationFailed: 'authentication_failed',
-    RateLimited: 'rate_limited',
-    QuotaExhausted: 'quota_exhausted'
-} as const;
-
-export type ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum = typeof ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum[keyof typeof ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum];
-
 export interface ApiCoreAcademicPapersSearchPostRequest {
     'cursor'?: string;
     'expansion_id': string;
@@ -19042,6 +19455,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /academic/sources:lookup-pdfs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesLookupPdfsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/sources:lookup-pdfs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /academic/works:presence
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -33610,6 +34052,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /academic/sources:lookup-pdfs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicSourcesLookupPdfsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourcesLookupPdfsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourcesLookupPdfsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /academic/works:presence
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -39238,6 +39692,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicSourcesInspectPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/sources:lookup-pdfs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesLookupPdfsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicSourcesLookupPdfsPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -45808,6 +46271,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicSourcesInspectPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/sources:lookup-pdfs
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicSourcesLookupPdfsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicSourcesLookupPdfsPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

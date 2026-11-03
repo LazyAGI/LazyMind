@@ -53,6 +53,12 @@ components:
                   type: object
         AcademicChatSummary:
             properties:
+                completion:
+                    $ref: '#/components/schemas/AcademicResearchCompletion'
+                coverage_gaps:
+                    items:
+                        $ref: '#/components/schemas/AcademicCoverageGap'
+                    type: array
                 dataset_id:
                     type: string
                 expansion_id:
@@ -69,6 +75,8 @@ components:
                     type: integer
                 ready_count:
                     type: integer
+                research_complete:
+                    type: boolean
                 source_available:
                     type: boolean
                 source_conversation_id:
@@ -84,6 +92,34 @@ components:
                 - status
                 - version
             type: object
+        AcademicClueResolution:
+            properties:
+                name:
+                    type: string
+                paper_id:
+                    type: string
+                query_ids:
+                    items:
+                        type: string
+                    type: array
+                reason:
+                    type: string
+                source_paper_id:
+                    type: string
+                status:
+                    enum:
+                        - resolved
+                        - excluded
+                        - blocked
+                        - open
+                    type: string
+            required:
+                - source_paper_id
+                - name
+                - status
+                - reason
+                - query_ids
+            type: object
         AcademicContentRead:
             oneOf:
                 - properties:
@@ -93,6 +129,11 @@ components:
                         items:
                             type: string
                         type: array
+                    max_results:
+                        description: content/fulltext returns 1..5 blocks (default 5); references returns 1..20 clues (default 20), or at most 5 when resolving selected clues. The cursor preserves this limit.
+                        maximum: 20
+                        minimum: 1
+                        type: integer
                     page_end:
                         type: integer
                     page_start:
@@ -106,6 +147,16 @@ components:
                     preparation_revision:
                         format: int64
                         type: integer
+                    reference_keys:
+                        items:
+                            type: string
+                        type: array
+                    view:
+                        enum:
+                            - content
+                            - fulltext
+                            - references
+                        type: string
                   required:
                     - expansion_id
                     - paper_id
@@ -117,6 +168,11 @@ components:
                         items:
                             type: string
                         type: array
+                    max_results:
+                        description: content/fulltext returns 1..5 blocks (default 5); references returns 1..20 clues (default 20), or at most 5 when resolving selected clues. The cursor preserves this limit.
+                        maximum: 20
+                        minimum: 1
+                        type: integer
                     page_end:
                         type: integer
                     page_start:
@@ -127,6 +183,19 @@ components:
                         items:
                             type: integer
                         type: array
+                    preparation_revision:
+                        format: int64
+                        type: integer
+                    reference_keys:
+                        items:
+                            type: string
+                        type: array
+                    view:
+                        enum:
+                            - content
+                            - fulltext
+                            - references
+                        type: string
                   required:
                     - handoff_id
                     - paper_id
@@ -150,6 +219,8 @@ components:
                         - none
                         - fulltext
                     type: string
+                matched_references:
+                    type: integer
                 next_cursor:
                     type: string
                 pages:
@@ -175,6 +246,34 @@ components:
                 quality:
                     properties: {}
                     type: object
+                references:
+                    items:
+                        properties:
+                            arxiv_id:
+                                type: string
+                            doi:
+                                type: string
+                            error:
+                                type: string
+                            paper:
+                                $ref: '#/components/schemas/AcademicPaperRef'
+                            raw_text:
+                                type: string
+                            reference_key:
+                                type: string
+                            resolution_status:
+                                enum:
+                                    - unresolved
+                                    - resolved
+                                    - conflict
+                                    - failed
+                                type: string
+                            title:
+                                type: string
+                            year:
+                                type: integer
+                        type: object
+                    type: array
                 source_kind:
                     enum:
                         - kb
@@ -193,6 +292,13 @@ components:
                     type: string
                 total_blocks:
                     type: integer
+                total_references:
+                    type: integer
+                view:
+                    enum:
+                        - content
+                        - references
+                    type: string
                 warnings:
                     items:
                         type: string
@@ -202,9 +308,80 @@ components:
                 - paper
                 - content_level
                 - content_hash
-                - pages
                 - next_cursor
                 - warnings
+            type: object
+        AcademicCoverageGap:
+            properties:
+                clue_name:
+                    type: string
+                direction:
+                    type: string
+                kind:
+                    enum:
+                        - predecessor
+                        - successor
+                        - peer
+                    type: string
+                question_id:
+                    type: string
+                reason:
+                    type: string
+            required:
+                - direction
+                - kind
+            type: object
+        AcademicDiscoveryQuery:
+            properties:
+                cache_key:
+                    type: string
+                candidates:
+                    additionalProperties:
+                        items:
+                            $ref: '#/components/schemas/AcademicImportCandidate'
+                        type: array
+                    type: object
+                created_at:
+                    format: date-time
+                    type: string
+                leads:
+                    items:
+                        properties:
+                            snippet:
+                                type: string
+                            title:
+                                type: string
+                            url:
+                                type: string
+                        type: object
+                    type: array
+                max_results:
+                    type: integer
+                mode:
+                    type: string
+                next:
+                    properties: {}
+                    type: object
+                paper_id:
+                    type: string
+                papers:
+                    items:
+                        $ref: '#/components/schemas/AcademicPaperRef'
+                    type: array
+                position:
+                    properties: {}
+                    type: object
+                preparation_revision:
+                    format: int64
+                    type: integer
+                query:
+                    type: string
+                session_id:
+                    type: string
+                sources:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceOutcome'
+                    type: array
             type: object
         AcademicDocumentIdentity:
             properties:
@@ -323,6 +500,63 @@ components:
                         metrics:
                             properties: {}
                             type: object
+                        named_clues:
+                            items:
+                                anyOf:
+                                    - required:
+                                        - positions
+                                    - properties:
+                                        reference_key:
+                                            pattern: \S
+                                            type: string
+                                      required:
+                                        - reference_key
+                                description: Original-source clue. The excerpt must come from actually read content blocks or the named bibliography entry, with the matching source version.
+                                properties:
+                                    identity:
+                                        additionalProperties:
+                                            type: string
+                                        type: object
+                                    name:
+                                        type: string
+                                    paper_id:
+                                        type: string
+                                    positions:
+                                        items:
+                                            minimum: 0
+                                            type: integer
+                                        maxItems: 5
+                                        minItems: 1
+                                        type: array
+                                        uniqueItems: true
+                                    question_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    reference_key:
+                                        type: string
+                                    role:
+                                        type: string
+                                    source_excerpt:
+                                        pattern: \S
+                                        type: string
+                                    source_location:
+                                        type: string
+                                    source_paper_id:
+                                        type: string
+                                    source_version:
+                                        type: string
+                                required:
+                                    - name
+                                    - role
+                                    - source_paper_id
+                                    - source_location
+                                    - source_version
+                                    - source_excerpt
+                                    - identity
+                                    - question_ids
+                                type: object
+                            type: array
                         questions:
                             items:
                                 properties:
@@ -339,10 +573,34 @@ components:
                                     - question
                                 type: object
                             type: array
+                        research_questions:
+                            items:
+                                properties:
+                                    category:
+                                        enum:
+                                            - predecessor
+                                            - successor
+                                            - peer
+                                        type: string
+                                    direction:
+                                        type: string
+                                    id:
+                                        type: string
+                                    question:
+                                        type: string
+                                required:
+                                    - id
+                                    - direction
+                                    - question
+                                    - category
+                                type: object
+                            type: array
                         selected_directions:
                             items:
                                 type: string
                             type: array
+                        skipped:
+                            type: boolean
                         summary:
                             type: string
                         user_instruction:
@@ -403,33 +661,14 @@ components:
             type: object
         AcademicExpansionReport:
             properties:
+                analysis_version:
+                    type: string
                 claims:
                     items:
-                        properties:
-                            content_hash:
-                                type: string
-                            field:
-                                type: string
-                            paper_id:
-                                type: string
-                            positions:
-                                items:
-                                    type: integer
-                                type: array
-                            reason:
-                                type: string
-                            source_version:
-                                type: string
-                            statement:
-                                type: string
-                            status:
-                                enum:
-                                    - supported
-                                    - unsupported
-                                    - uncertain
-                                type: string
-                        type: object
+                        $ref: '#/components/schemas/AcademicVerifiedClaim'
                     type: array
+                completion:
+                    $ref: '#/components/schemas/AcademicResearchCompletion'
                 compose_metrics:
                     properties:
                         currency_cost:
@@ -442,17 +681,54 @@ components:
                                 properties: {}
                                 type: object
                             type: array
+                        verification:
+                            properties:
+                                batches:
+                                    items:
+                                        properties: {}
+                                        type: object
+                                    type: array
+                                completed_fields:
+                                    type: integer
+                                elapsed_seconds:
+                                    type: number
+                                failed_fields:
+                                    type: integer
+                                model_calls:
+                                    type: integer
+                                reused_fields:
+                                    type: integer
+                                semantic_rounds:
+                                    type: integer
+                                submitted_fields:
+                                    type: integer
+                            type: object
                     type: object
+                coverage_gaps:
+                    items:
+                        $ref: '#/components/schemas/AcademicCoverageGap'
+                    type: array
                 currency_cost:
                     nullable: true
                     type: number
                 execution_elapsed_ms:
                     format: int64
                     type: integer
+                input:
+                    $ref: '#/components/schemas/AcademicReviewInput'
+                investigation:
+                    items:
+                        $ref: '#/components/schemas/AcademicInvestigation'
+                    type: array
                 limitations:
                     items:
                         type: string
                     type: array
+                list_mode:
+                    enum:
+                        - fast
+                        - balanced
+                    type: string
                 materials:
                     items:
                         properties: {}
@@ -465,6 +741,9 @@ components:
                         properties: {}
                         type: object
                     type: array
+                preparation_metrics:
+                    properties: {}
+                    type: object
                 reading:
                     additionalProperties:
                         properties:
@@ -489,19 +768,143 @@ components:
                                 type: integer
                         type: object
                     type: object
-                reading_order:
+                recommendations:
                     items:
-                        type: string
+                        properties:
+                            direction:
+                                type: string
+                            paper_id:
+                                type: string
+                            reason:
+                                type: string
+                        required:
+                            - paper_id
+                            - reason
+                        type: object
                     type: array
+                relations:
+                    items:
+                        properties:
+                            conditions:
+                                type: string
+                            evidence:
+                                items:
+                                    $ref: '#/components/schemas/AcademicSourceEvidence'
+                                type: array
+                            id:
+                                type: string
+                            relation_type:
+                                enum:
+                                    - method_modification
+                                    - design_inspiration
+                                    - component_use
+                                    - experimental_comparison
+                                    - mechanism_comparison
+                                    - background_citation
+                                type: string
+                            source_paper_id:
+                                type: string
+                            statement:
+                                type: string
+                            target_paper_id:
+                                type: string
+                            verification:
+                                properties:
+                                    parts:
+                                        items:
+                                            properties:
+                                                part_index:
+                                                    type: integer
+                                                reason:
+                                                    type: string
+                                                sources:
+                                                    items:
+                                                        type: string
+                                                    type: array
+                                                status:
+                                                    enum:
+                                                        - supported
+                                                        - uncertain
+                                                        - unsupported
+                                                    type: string
+                                                text:
+                                                    type: string
+                                            type: object
+                                        type: array
+                                    reason:
+                                        type: string
+                                    scope_reason:
+                                        type: string
+                                    scope_status:
+                                        enum:
+                                            - supported
+                                            - uncertain
+                                        type: string
+                                    status:
+                                        enum:
+                                            - supported
+                                            - uncertain
+                                            - unsupported
+                                        type: string
+                                    verification_error:
+                                        type: string
+                                type: object
+                        required:
+                            - id
+                            - source_paper_id
+                            - target_paper_id
+                            - relation_type
+                            - statement
+                            - conditions
+                            - evidence
+                            - verification
+                        type: object
+                    type: array
+                research_complete:
+                    type: boolean
+                research_structure:
+                    properties:
+                        directions:
+                            items:
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                    question:
+                                        type: string
+                                type: object
+                            type: array
+                        nodes:
+                            items:
+                                properties:
+                                    branch_question:
+                                        type: string
+                                    direction_id:
+                                        type: string
+                                    paper_id:
+                                        type: string
+                                    reason:
+                                        type: string
+                                type: object
+                            type: array
+                    type: object
+                result_projection_delay_ms:
+                    format: int64
+                    type: integer
                 reused_source_queries:
                     items:
-                        properties: {}
-                        type: object
+                        $ref: '#/components/schemas/AcademicDiscoveryQuery'
                     type: array
+                selection:
+                    $ref: '#/components/schemas/AcademicPaperSelection'
                 source_queries:
                     items:
-                        properties: {}
-                        type: object
+                        $ref: '#/components/schemas/AcademicDiscoveryQuery'
+                    type: array
+                source_versions:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceVersion'
                     type: array
                 stage_metrics:
                     additionalProperties:
@@ -516,6 +919,28 @@ components:
                                     properties: {}
                                     type: object
                                 type: array
+                            verification:
+                                properties:
+                                    batches:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                    completed_fields:
+                                        type: integer
+                                    elapsed_seconds:
+                                        type: number
+                                    failed_fields:
+                                        type: integer
+                                    model_calls:
+                                        type: integer
+                                    reused_fields:
+                                        type: integer
+                                    semantic_rounds:
+                                        type: integer
+                                    submitted_fields:
+                                        type: integer
+                                type: object
                         type: object
                     type: object
                 stage_timing:
@@ -833,6 +1258,69 @@ components:
                 work_id:
                     type: string
             type: object
+        AcademicInvestigation:
+            properties:
+                clue_resolutions:
+                    items:
+                        $ref: '#/components/schemas/AcademicClueResolution'
+                    type: array
+                conclusion:
+                    type: string
+                direction:
+                    type: string
+                gaps:
+                    items:
+                        type: string
+                    type: array
+                kind:
+                    enum:
+                        - predecessor
+                        - successor
+                        - peer
+                    type: string
+                paper_ids:
+                    items:
+                        type: string
+                    type: array
+                queries:
+                    items:
+                        type: string
+                    type: array
+                query_ids:
+                    items:
+                        type: string
+                    type: array
+                question:
+                    type: string
+                question_id:
+                    type: string
+                relation_ids:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    enum:
+                        - resolved
+                        - excluded
+                        - blocked
+                        - open
+                    type: string
+                unresolved_clues:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - question_id
+                - direction
+                - kind
+                - question
+                - status
+                - conclusion
+                - paper_ids
+                - queries
+                - unresolved_clues
+                - gaps
+            type: object
         AcademicModelMetrics:
             properties:
                 currency_cost:
@@ -845,6 +1333,28 @@ components:
                         properties: {}
                         type: object
                     type: array
+                verification:
+                    properties:
+                        batches:
+                            items:
+                                properties: {}
+                                type: object
+                            type: array
+                        completed_fields:
+                            type: integer
+                        elapsed_seconds:
+                            type: number
+                        failed_fields:
+                            type: integer
+                        model_calls:
+                            type: integer
+                        reused_fields:
+                            type: integer
+                        semantic_rounds:
+                            type: integer
+                        submitted_fields:
+                            type: integer
+                    type: object
             type: object
         AcademicPaperRef:
             properties:
@@ -870,9 +1380,13 @@ components:
                     type: string
                 pdf_url:
                     type: string
+                published_at:
+                    type: string
                 source_provider:
                     type: string
                 source_version:
+                    type: string
+                source_version_date:
                     type: string
                 title:
                     type: string
@@ -883,6 +1397,35 @@ components:
             required:
                 - paper_id
                 - abstract
+            type: object
+        AcademicPaperSelection:
+            description: Frozen changes against the candidate_set bound to the checked analysis, including the original paper metadata and a reason for every addition or removal.
+            properties:
+                before_count:
+                    type: integer
+                changes:
+                    items:
+                        $ref: '#/components/schemas/AcademicPaperSelectionChange'
+                    type: array
+            required:
+                - before_count
+                - changes
+            type: object
+        AcademicPaperSelectionChange:
+            properties:
+                action:
+                    enum:
+                        - added
+                        - removed
+                    type: string
+                paper:
+                    $ref: '#/components/schemas/AcademicWorkflowPaper'
+                reason:
+                    type: string
+            required:
+                - action
+                - paper
+                - reason
             type: object
         AcademicPaperTaskInput:
             properties:
@@ -954,11 +1497,248 @@ components:
                 source_version:
                     type: string
             type: object
+        AcademicRelationAnalysis:
+            description: Checked relation_analysis Workflow artifact; identities, source versions and coverage gaps belong to this analysis_version.
+            properties:
+                analysis_version:
+                    type: string
+                claims:
+                    items:
+                        $ref: '#/components/schemas/AcademicVerifiedClaim'
+                    type: array
+                completion:
+                    $ref: '#/components/schemas/AcademicResearchCompletion'
+                coverage_gaps:
+                    items:
+                        $ref: '#/components/schemas/AcademicCoverageGap'
+                    type: array
+                input:
+                    $ref: '#/components/schemas/AcademicReviewInput'
+                investigation:
+                    items:
+                        $ref: '#/components/schemas/AcademicInvestigation'
+                    type: array
+                metrics:
+                    properties:
+                        currency_cost:
+                            nullable: true
+                            type: number
+                        model:
+                            type: string
+                        provider_usage_records:
+                            items:
+                                properties: {}
+                                type: object
+                            type: array
+                        verification:
+                            properties:
+                                batches:
+                                    items:
+                                        properties: {}
+                                        type: object
+                                    type: array
+                                completed_fields:
+                                    type: integer
+                                elapsed_seconds:
+                                    type: number
+                                failed_fields:
+                                    type: integer
+                                model_calls:
+                                    type: integer
+                                reused_fields:
+                                    type: integer
+                                semantic_rounds:
+                                    type: integer
+                                submitted_fields:
+                                    type: integer
+                            type: object
+                    type: object
+                reading:
+                    additionalProperties:
+                        properties:
+                            content_hash:
+                                type: string
+                            pages:
+                                items:
+                                    type: integer
+                                type: array
+                            positions:
+                                items:
+                                    type: integer
+                                type: array
+                            read_level:
+                                enum:
+                                    - related_sections
+                                    - full
+                                type: string
+                            source_version:
+                                type: string
+                            total_blocks:
+                                type: integer
+                        type: object
+                    type: object
+                relations:
+                    items:
+                        properties:
+                            conditions:
+                                type: string
+                            evidence:
+                                items:
+                                    $ref: '#/components/schemas/AcademicSourceEvidence'
+                                type: array
+                            id:
+                                type: string
+                            relation_type:
+                                enum:
+                                    - method_modification
+                                    - design_inspiration
+                                    - component_use
+                                    - experimental_comparison
+                                    - mechanism_comparison
+                                    - background_citation
+                                type: string
+                            source_paper_id:
+                                type: string
+                            statement:
+                                type: string
+                            target_paper_id:
+                                type: string
+                            verification:
+                                properties:
+                                    parts:
+                                        items:
+                                            properties:
+                                                part_index:
+                                                    type: integer
+                                                reason:
+                                                    type: string
+                                                sources:
+                                                    items:
+                                                        type: string
+                                                    type: array
+                                                status:
+                                                    enum:
+                                                        - supported
+                                                        - uncertain
+                                                        - unsupported
+                                                    type: string
+                                                text:
+                                                    type: string
+                                            type: object
+                                        type: array
+                                    reason:
+                                        type: string
+                                    scope_reason:
+                                        type: string
+                                    scope_status:
+                                        enum:
+                                            - supported
+                                            - uncertain
+                                        type: string
+                                    status:
+                                        enum:
+                                            - supported
+                                            - uncertain
+                                            - unsupported
+                                        type: string
+                                    verification_error:
+                                        type: string
+                                type: object
+                        required:
+                            - id
+                            - source_paper_id
+                            - target_paper_id
+                            - relation_type
+                            - statement
+                            - conditions
+                            - evidence
+                            - verification
+                        type: object
+                    type: array
+                research_complete:
+                    type: boolean
+                research_structure:
+                    properties:
+                        directions:
+                            items:
+                                properties:
+                                    id:
+                                        type: string
+                                    name:
+                                        type: string
+                                    question:
+                                        type: string
+                                type: object
+                            type: array
+                        nodes:
+                            items:
+                                properties:
+                                    branch_question:
+                                        type: string
+                                    direction_id:
+                                        type: string
+                                    paper_id:
+                                        type: string
+                                    reason:
+                                        type: string
+                                type: object
+                            type: array
+                    type: object
+                selection:
+                    $ref: '#/components/schemas/AcademicPaperSelection'
+                source_queries:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceQueryReceipt'
+                    type: array
+                source_versions:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceVersion'
+                    type: array
+                submission_hash:
+                    type: string
+            required:
+                - input
+                - selection
+                - claims
+                - relations
+                - research_structure
+                - investigation
+                - source_versions
+                - source_queries
+                - reading
+                - submission_hash
+                - metrics
+                - completion
+                - research_complete
+                - coverage_gaps
+                - analysis_version
+            type: object
+        AcademicResearchCompletion:
+            description: Research outcome for the checked analysis, independent of the Workflow execution status. A complete outcome is verified; an incomplete outcome preserves its actual stopping reason.
+            properties:
+                reason:
+                    enum:
+                        - verified
+                        - budget_exhausted
+                        - material_limited
+                        - technical_failure
+                    type: string
+                status:
+                    enum:
+                        - complete
+                        - incomplete
+                    type: string
+            required:
+                - status
+                - reason
+            type: object
         AcademicResolvedPapers:
             properties:
                 contents:
                     items:
                         properties:
+                            content_hash:
+                                type: string
                             error:
                                 type: string
                             paper_id:
@@ -1047,6 +1827,22 @@ components:
                 - created_at
                 - updated_at
             type: object
+        AcademicSourceEvidence:
+            properties:
+                content_hash:
+                    type: string
+                paper_id:
+                    type: string
+                positions:
+                    items:
+                        type: integer
+                    type: array
+                source_version:
+                    type: string
+            required:
+                - paper_id
+                - positions
+            type: object
         AcademicSourceImportItem:
             properties:
                 batch_id:
@@ -1097,6 +1893,101 @@ components:
                 - stage
                 - retryable
             type: object
+        AcademicSourceOutcome:
+            properties:
+                count:
+                    type: integer
+                elapsed_ms:
+                    format: int64
+                    type: integer
+                has_more:
+                    type: boolean
+                lead_count:
+                    type: integer
+                limitation:
+                    type: string
+                new_paper_count:
+                    type: integer
+                next_cursor:
+                    type: string
+                paper_count:
+                    type: integer
+                retry_at:
+                    format: date-time
+                    type: string
+                reused:
+                    type: boolean
+                source:
+                    type: string
+                status:
+                    enum:
+                        - ok
+                        - empty
+                        - failed
+                        - missing_configuration
+                        - authentication_failed
+                        - rate_limited
+                        - quota_exhausted
+                    type: string
+                total_count:
+                    type: integer
+            required:
+                - source
+                - status
+                - count
+                - elapsed_ms
+                - paper_count
+                - lead_count
+                - new_paper_count
+                - has_more
+            type: object
+        AcademicSourceQueryReceipt:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                mode:
+                    type: string
+                paper_id:
+                    type: string
+                paper_ids:
+                    items:
+                        type: string
+                    type: array
+                query:
+                    type: string
+                sources:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceOutcome'
+                    nullable: true
+                    type: array
+            required:
+                - id
+                - query
+                - mode
+                - paper_id
+                - created_at
+                - sources
+                - paper_ids
+            type: object
+        AcademicSourceVersion:
+            properties:
+                content_hash:
+                    type: string
+                paper_id:
+                    type: string
+                source_version:
+                    type: string
+                status:
+                    type: string
+            required:
+                - paper_id
+                - status
+                - content_hash
+                - source_version
+            type: object
         AcademicTaskLaunch:
             properties:
                 budget_mode:
@@ -1146,6 +2037,73 @@ components:
             required:
                 - kind
                 - request_key
+            type: object
+        AcademicVerifiedClaim:
+            properties:
+                available_sources:
+                    items:
+                        type: string
+                    type: array
+                content_hash:
+                    type: string
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/AcademicSourceEvidence'
+                    type: array
+                field:
+                    enum:
+                        - seed_relation
+                        - direction_relation
+                        - key_contribution
+                    type: string
+                paper_id:
+                    type: string
+                parts:
+                    items:
+                        properties:
+                            part_index:
+                                type: integer
+                            reason:
+                                type: string
+                            sources:
+                                items:
+                                    type: string
+                                type: array
+                            status:
+                                enum:
+                                    - supported
+                                    - uncertain
+                                    - unsupported
+                                type: string
+                            text:
+                                type: string
+                        type: object
+                    type: array
+                positions:
+                    items:
+                        type: integer
+                    type: array
+                reason:
+                    type: string
+                scope_reason:
+                    type: string
+                scope_status:
+                    enum:
+                        - supported
+                        - uncertain
+                    type: string
+                source_version:
+                    type: string
+                statement:
+                    type: string
+                status:
+                    enum:
+                        - supported
+                        - uncertain
+                        - unsupported
+                    type: string
+                verification_error:
+                    type: string
             type: object
         AcademicWorkflowPaper:
             properties:
@@ -18428,6 +19386,10 @@ paths:
                                             properties: {}
                                             type: object
                                         type: array
+                                    source_queries:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicSourceQueryReceipt'
+                                        type: array
                                 type: object
                     description: Read saved rounds, current papers, content states and Chat availability
             summary: Read saved rounds, current papers, content states and Chat availability
@@ -19441,44 +20403,7 @@ paths:
                                         type: array
                                     sources:
                                         items:
-                                            properties:
-                                                count:
-                                                    type: integer
-                                                elapsed_ms:
-                                                    format: int64
-                                                    type: integer
-                                                has_more:
-                                                    type: boolean
-                                                lead_count:
-                                                    type: integer
-                                                limitation:
-                                                    type: string
-                                                new_paper_count:
-                                                    type: integer
-                                                next_cursor:
-                                                    type: string
-                                                paper_count:
-                                                    type: integer
-                                                retry_at:
-                                                    format: date-time
-                                                    type: string
-                                                reused:
-                                                    type: boolean
-                                                source:
-                                                    type: string
-                                                status:
-                                                    enum:
-                                                        - ok
-                                                        - empty
-                                                        - failed
-                                                        - missing_configuration
-                                                        - authentication_failed
-                                                        - rate_limited
-                                                        - quota_exhausted
-                                                    type: string
-                                                total_count:
-                                                    type: integer
-                                            type: object
+                                            $ref: '#/components/schemas/AcademicSourceOutcome'
                                         type: array
                                 type: object
                     description: Search scholarly sources; continue one source with its task-bound cursor only
@@ -19542,6 +20467,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/sources:inspect
+    /api/core/academic/sources:lookup-pdfs:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/sources:lookup-pdfs
     /api/core/academic/workflow-launches:
         post:
             requestBody:

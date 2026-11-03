@@ -87,6 +87,9 @@ func TestLookupLocksActualVersionAndBuildsOfficialURLs(t *testing.T) {
 			if len(got.Authors) != 2 || got.Authors[0] != "Cheng-Ping Hsieh" || got.DOI != "10.1234/ruler" || got.Venue != "arXiv" {
 				t.Fatalf("unexpected authors/DOI/venue %#v", got)
 			}
+			if got.PublishedAt != "2024-04-09T18:00:00Z" || got.SourceVersionDate != "2024-08-29T18:00:00Z" {
+				t.Fatalf("publication and revision dates lost: %#v", got)
+			}
 			if got.BaseID != "2404.06654" || got.Version != "v3" || got.AbsURL != "https://arxiv.org/abs/2404.06654v3" || got.PDFURL != "https://arxiv.org/pdf/2404.06654v3" {
 				t.Fatalf("unsafe or unversioned result %#v", got)
 			}

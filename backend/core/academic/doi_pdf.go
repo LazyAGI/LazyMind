@@ -3,13 +3,16 @@ package academic
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/html"
@@ -17,15 +20,32 @@ import (
 
 const paperPDFLookupTimeout = 6 * time.Second
 const paperPDFProviderTimeout = 3 * time.Second
+const paperPDFMetadataTimeout = 5 * time.Second
 
 type paperPDFLookup struct {
 	Candidate *FulltextCandidate
 	Warnings  []string
 	Err       error
+	Retryable bool
 }
 type paperPDFClientKey struct{}
 
 func pdfLookupError(detail string) error { return fmt.Errorf("PDF 来源查询失败: %s", detail) }
+
+type paperPDFHTTPError int
+
+func (e paperPDFHTTPError) Error() string { return fmt.Sprintf("PDF 来源查询失败: HTTP %d", e) }
+
+func transientPDFError(err error) bool {
+	var status paperPDFHTTPError
+	if errors.As(err, &status) {
+		return status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504
+	}
+	var network net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		(errors.As(err, &network) && (network.Timeout() || network.Temporary()))
+}
 
 func newPaperPDFClient() *http.Client {
 	return &http.Client{Timeout: paperPDFLookupTimeout, Transport: zoteroTransport(false), CheckRedirect: func(r *http.Request, via []*http.Request) error {
@@ -55,7 +75,45 @@ func paperPDFClient(ctx context.Context) (*http.Client, func()) {
 func lookupOpenDOIPDF(ctx context.Context, doi string) paperPDFLookup {
 	client, release := paperPDFClient(ctx)
 	defer release()
-	return lookupDOIPDFSources(ctx, doi, nil, client)
+	// Source imports are an explicit lookup. Give discovery and validation
+	// separate budgets, bounded below the HTTP caller's 30-second timeout.
+	ctx, cancel := context.WithTimeout(ctx, 24*time.Second)
+	defer cancel()
+	var candidates []FulltextCandidate
+	seen := map[string]bool{}
+	var discovery, result paperPDFLookup
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt == 0 || discovery.Retryable {
+			discoveryCtx, stop := context.WithTimeout(ctx, paperPDFMetadataTimeout)
+			var found []FulltextCandidate
+			found, discovery = discoverDOIPDFs(discoveryCtx, client, doi, "")
+			stop()
+			for _, candidate := range found {
+				if !seen[candidate.URL] {
+					seen[candidate.URL] = true
+					candidates = append(candidates, candidate)
+				}
+			}
+		}
+		probeCtx, stop := context.WithTimeout(ctx, 6*time.Second)
+		result = probeOpenPDFCandidates(probeCtx, client, candidates, doi)
+		stop()
+		result.Warnings = append(append([]string(nil), discovery.Warnings...), result.Warnings...)
+		result.Err = errors.Join(discovery.Err, result.Err)
+		result.Retryable = discovery.Retryable || result.Retryable
+		if result.Candidate != nil || !result.Retryable || attempt == 2 || ctx.Err() != nil {
+			return result
+		}
+		timer := time.NewTimer(time.Duration(1<<attempt) * 300 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			result.Err = errors.Join(result.Err, ctx.Err())
+			return result
+		case <-timer.C:
+		}
+	}
+	return result
 }
 
 // Keep a small configurable shortlist. A reachable paper page is not
@@ -209,7 +267,7 @@ func fetchPaperSource(ctx context.Context, client *http.Client, address string, 
 	}
 	if resp.StatusCode != http.StatusOK && !(probe && resp.StatusCode == http.StatusPartialContent) {
 		resp.Body.Close()
-		return nil, pdfLookupError(fmt.Sprintf("HTTP %d", resp.StatusCode))
+		return nil, paperPDFHTTPError(resp.StatusCode)
 	}
 	return resp, nil
 }

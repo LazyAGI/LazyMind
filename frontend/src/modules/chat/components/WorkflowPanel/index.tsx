@@ -1427,14 +1427,24 @@ function NamedTabSlot({
     revisions.length === 0 || artifactStream.state === 'streaming'
   ));
 
+  const paperPendingKey = session.workflow_id === 'paper_expansion'
+    ? ({ candidate_set: 'chat.paperSearching', screened_candidates: 'chat.paperScreening', relation_analysis: 'chat.paperVerifying',
+      expansion_report: 'chat.paperComposing' } as Record<string, string>)[slotDef.id]
+    : undefined;
+  const emptyStateKey = compactEmptyStates || paperPendingKey
+    ? workflowEmptyStateKey(session, slotStepId) : undefined;
+
+  const pendingMessageKey = emptyStateKey === 'chat.workflowEmptyRunning' && paperPendingKey
+    ? paperPendingKey : emptyStateKey;
+
   const content = showStream && artifactStream ? (
     <SlotMarkdownStream stream={artifactStream} />
   ) : revisions.length === 0 ? (
     <div
-      className='workflow-panel__slot-placeholder'
+      className={`workflow-panel__slot-placeholder${paperPendingKey ? ' workflow-panel__slot-placeholder--paper-status' : ''}`}
       aria-label={`${slotLabel} pending`}
     >
-      <span>{compactEmptyStates ? t(workflowEmptyStateKey(session, slotStepId)) : '—'}</span>
+      <span>{pendingMessageKey ? t(pendingMessageKey) : '—'}</span>
     </div>
   ) : isImageList ? (
     <SortableImageList
@@ -1577,10 +1587,14 @@ function TabSlotGrid({
       tasks,
     )));
   };
-  const paperReportReady = session.workflow_id === 'paper_expansion'
+  const isPaperReportTab = session.workflow_id === 'paper_expansion'
+    && tab.slots.some(slot => slot.id === 'expansion_report');
+  const paperReportReady = isPaperReportTab
     && getTabSlotRevisions(session, tab, 'expansion_report').some(revision => revision.selected);
+  const paperResultReady = isPaperReportTab
+    && getTabSlotRevisions(session, tab, 'expansion_result').some(revision => revision.selected);
   const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session))
-    .filter(slot => !paperReportReady || slot.id !== 'expansion_result');
+    .filter(slot => slot.id !== 'expansion_result' || !isPaperReportTab || (!paperReportReady && paperResultReady));
   const documents = visibleSlots.flatMap(slotDef => getTabSlotRevisions(session, tab, slotDef.id)
     .filter(revision => revision.document)
     .map(revision => ({ slotDef, revision })));

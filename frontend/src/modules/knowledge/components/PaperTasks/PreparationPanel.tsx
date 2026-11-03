@@ -2,17 +2,26 @@ import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
 import { Alert, Button, Input, Spin, Steps, Tag, Typography } from 'antd';
 import { ArrowRightOutlined, BellOutlined, ExportOutlined, FileTextOutlined, LockOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { confirmExpansion, submitPreparation, type ExpansionDetail, type ExpansionPreparation, type PaperRef } from '../../api/paperWorkflows';
+import { confirmExpansion, submitPreparation, type Expansion, type ExpansionDetail, type ExpansionPreparation, type PaperRef } from '../../api/paperWorkflows';
 import { safePaperUrl } from '../../paper/model';
 import MarkdownViewer from '../MarkdownViewer';
 import { researchDepthLabels } from './ResearchDepth';
 
-export const expansionStages = [
-  { slot: 'expansion_plan', title: '准备参考论文与检索计划' },
-  { slot: 'candidate_set', title: '拓展与筛选' },
-  { slot: 'relation_analysis', title: '分析论文关系' },
-  { slot: 'expansion_result', title: '研究脉络与阅读建议' },
-];
+const expansionStages = ['candidate_set', 'relation_analysis', 'expansion_result'] as const;
+
+export function expansionProgressStages(record: Expansion) {
+  const candidate = record.progress?.candidate_set;
+  const mode = candidate?.list_mode;
+  const split = candidate?.screening_pending || record.progress?.screened_candidates
+    || (!candidate && record.status !== 'completed' && record.goal === 'expansion' && ['balanced', 'deep'].includes(record.budget_mode || ''));
+  if (split) {
+    return record.budget_mode === 'deep'
+      ? ['candidate_set', 'screened_candidates', 'relation_analysis', 'expansion_result'] as const
+      : ['candidate_set', 'screened_candidates'] as const;
+  }
+  return record.preparation?.skipped || mode === 'fast' || mode === 'balanced' || record.report?.list_mode
+    ? expansionStages.slice(0, 1) : expansionStages;
+}
 
 function PreparationQuestion({ question, disabled, onChange }: {
   question: ExpansionPreparation['questions'][number]; disabled: boolean; onChange: (answer: string) => void;
@@ -127,7 +136,9 @@ export default function PreparationPanel({ detail, onRefresh, onStart, embedded 
   const choices = preparation.directions || [];
   const confirmed = preparation.selected_directions || [];
   const summaryPreview = preparation.summary?.split('\n').find(line => line.trim() && !/^#{1,6}\s/.test(line)) || preparation.summary;
-  const currentStage = expansionStages.findIndex(stage => !record.progress?.[stage.slot]);
+  const stages = expansionProgressStages(record);
+  const stageDone = (index: number) => record.status === 'completed' || (index < stages.length - 1 && !!record.progress?.[stages[index]]);
+  const currentStage = stages.findIndex((_, index) => !stageDone(index));
   const preparationPhase = record.status === 'completed' ? 3 : record.status === 'awaiting_confirmation' ? 1 : pending ? 0 : 2;
   const confirmedChoices = choices.filter(direction => confirmed.includes(direction.name));
   const visibleChoices = compact && !directionsExpanded ? confirmedChoices.slice(0, 1) : confirmedChoices;
@@ -177,8 +188,8 @@ export default function PreparationPanel({ detail, onRefresh, onStart, embedded 
     {!pending && !compact && confirmedDirections}
     {running && !embedded && <>
       <div className="paper-preparation-section-heading"><h3>{review ? t('paperTasks.reviewFlow.stage.read') : '拓展进展'}</h3><span>{record.status === 'pending' ? '等待开始' : '后台执行中'}</span></div>
-      <ol className="paper-preparation-progress">{expansionStages.map((stage, index) => <li key={stage.slot} data-status={record.progress?.[stage.slot] ? 'done' : record.status !== 'pending' && index === currentStage ? 'running' : 'pending'}>
-        <span className="paper-preparation-progress-index">{index + 1}</span><span>{stage.title}</span><span className="paper-preparation-progress-status">{record.progress?.[stage.slot] ? '已完成' : record.status !== 'pending' && index === currentStage ? '进行中' : '待开始'}</span>
+      <ol className="paper-preparation-progress">{stages.map((slot, index) => <li key={slot} data-status={stageDone(index) ? 'done' : record.status !== 'pending' && index === currentStage ? 'running' : 'pending'}>
+        <span className="paper-preparation-progress-index">{index + 1}</span><span>{t(`paperTasks.stage.${record.goal === 'expansion' && record.budget_mode === 'deep' && slot === 'relation_analysis' ? 'deep_analysis' : slot}`)}</span><span className="paper-preparation-progress-status">{stageDone(index) ? '已完成' : record.status !== 'pending' && index === currentStage ? '进行中' : '待开始'}</span>
       </li>)}</ol>
       <div className="paper-preparation-running-footer"><span><BellOutlined />需要你处理或完成时会通知你。</span>{detail.chat_status === 'available' && <Button onClick={() => onStart(record.conversation_id)}>{review ? t('paperTasks.reviewFlow.openChat') : '打开拓展会话'}</Button>}</div>
     </>}

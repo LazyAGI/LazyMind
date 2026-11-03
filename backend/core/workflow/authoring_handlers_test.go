@@ -270,3 +270,20 @@ func TestAuthoringSourceContainsNoModelInvocation(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthoringExecutionBoundariesTreatExplorationBudgetsAsDefaults(t *testing.T) {
+	state := "steps:\n  research:\n    prompt: Search current sources and retrieve supporting evidence.\n    tools: [web_search, knowledge_search]\n"
+	generated, changed := injectExecutionBoundariesIntoStateSteps(state)
+	if !changed {
+		t.Fatal("research step did not receive execution boundaries")
+	}
+	for _, budget := range []string{
+		"Search budget: only when no explicit per-tool execution limits are provided, use the default of at most 6 search calls; explicit execution limits take precedence.",
+		"Retrieval budget: only when no explicit per-tool execution limits are provided, use the default of at most 4 retrieval rounds with focused queries; explicit execution limits take precedence.",
+	} {
+		// YAML wrapping is irrelevant to the instruction delivered to the model.
+		if !strings.Contains(strings.Join(strings.Fields(generated), " "), budget) {
+			t.Fatalf("generated research prompt lacks default-budget precedence: %s", generated)
+		}
+	}
+}

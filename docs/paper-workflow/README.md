@@ -21,9 +21,9 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 
 业务启动统一使用 `POST /api/core/academic/workflow-launches`，`kind` 为 `expansion / review / reflection / ppt`，`request_key` 为同次请求的稳定幂等键。从论文集启动时传 `dataset_id`、`document_ids` 和 `user_instruction`；PPT 可传 `reflection_first: true`。
 
-新建 expansion 或“先拓展后综述”返回 `expansion_id` 和准备状态，尚无 `conversation_id`。通过 `POST /academic/expansions/{id}/preparation` 提交 `action=answer/revise/retry`、准备 `revision` 和稳定 `request_key`；通过 `POST /academic/expansions/{id}:confirm` 提交同版本、方向选择和预算才启动正式 Chat。过期版本拒绝，重复确认返回同一正式任务。快速/均衡/深入分别为准备 2/3/5 分钟与正式 10/20/30 分钟，等待用户不计执行预算。
+新建 expansion 或“先拓展后综述”返回 `expansion_id` 和准备状态，尚无 `conversation_id`。通过 `POST /academic/expansions/{id}/preparation` 提交 `action=answer/revise/retry`、准备 `revision` 和稳定 `request_key`；通过 `POST /academic/expansions/{id}:confirm` 提交同版本、方向选择和预算才启动正式 Chat。过期版本拒绝，重复确认返回同一正式任务。快速、标准、深入通过执行轮次和工具调用次数限制调研范围，具体限额见服务端返回的执行策略。
 
-正式步骤为准备计划、拓展筛选、关系分析、脉络与阅读建议。结果仍是四字段 `ReviewWorkflowInput`，证据/阅读覆盖/质量/复核/用量独立在 `expansion_report` 和历史轮次报告。普通拓展按需取文，综述目标为最终清单补取；下载、解析、身份匹配和实际已读分别统计。分析不自动入库。
+正式步骤为检索与拓展、筛选与补充、关系分析与证据核验、研究报告与论文关系。独立快速拓展在检索后交付清单；标准拓展在筛选后交付按方向分组的清单；深入拓展继续生成关系图和报告。综述目标跳过独立筛选，继续核验与材料准备。结果仍是四字段 `ReviewWorkflowInput`，证据/阅读覆盖/质量/复核/用量独立在 `expansion_report` 和历史轮次报告。普通拓展按需取文，综述目标为最终清单补取；下载、解析、身份匹配和实际已读分别统计。关系分析先通过 `academic_check_relations` 核验，再以最新 `check_id` 调用 `academic_submit_relations` 保存；报告绑定同一 `analysis_version`，来源内容变更后须重新核验。分析不自动入库。
 
 从已有拓展成果启动综述：
 

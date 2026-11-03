@@ -328,6 +328,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/library/folders/{folder_id}:delete", []string{"document.write"}, academic.DeleteLibraryFolder)
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
 	handleAPI(r, "POST", "/academic/sources:inspect", []string{"document.read"}, academic.InspectSources)
+	handleAPI(r, "POST", "/academic/sources:lookup-pdfs", []string{"document.write"}, academic.LookupSourcePDFs)
 	handleAPI(r, "GET", "/academic/source-targets", []string{"document.read"}, academic.ListSourceTargets)
 	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, systemdeps.RequireRAG(academic.CheckPresence))
 	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, systemdeps.RequireRAG(academic.PreviewImport))

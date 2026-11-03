@@ -24,7 +24,11 @@ export default function ResearchRecords({ expansions, reviews, open, loading, er
     const rows = [
         ...expansions.map(record => ({ kind: 'expansion' as const, record })),
         ...reviews.map(record => ({ kind: 'review' as const, record })),
-    ].filter(row => filter === 'all' || row.kind === filter).sort((a, b) => (Date.parse(b.record.updated_at) || 0) - (Date.parse(a.record.updated_at) || 0) || a.record.id.localeCompare(b.record.id));
+    ].filter(row => filter === 'all' || row.kind === filter).sort((a, b) => {
+        const aCreated = Date.parse(a.record.created_at) || 0;
+        const bCreated = Date.parse(b.record.created_at) || 0;
+        return bCreated - aCreated || a.record.id.localeCompare(b.record.id);
+    });
     return <>
         <Tabs activeKey={filter} onChange={setFilter} items={[
             { key: 'all', label: `${t('paperTasks.recordsAll')} ${expansions.length + reviews.length}` },
@@ -36,7 +40,7 @@ export default function ResearchRecords({ expansions, reviews, open, loading, er
         <List className="paper-expansion-history-list" rowKey={row => `${row.kind}:${row.record.id}`} dataSource={rows} loading={loading}
             locale={{ emptyText: error ? t('paperTasks.recordsLoadFailed') : t('paperTasks.noRecords') }} renderItem={row => {
                 const { record } = row;
-                const updated = dayjs(record.updated_at);
+                const created = dayjs(record.created_at);
                 const related = reviews.filter(review => review.expansion_id === record.id).length;
                 return <List.Item><button type="button" className="paper-expansion-history-row paper-research-record" aria-label={`${t(row.kind === 'review' ? 'paperTasks.viewReviewRecord' : 'paperTasks.viewResult')}: ${record.title}`}
                     onClick={() => row.kind === 'review' ? onReview(row.record) : onExpansion(record.id)}>
@@ -49,11 +53,12 @@ export default function ResearchRecords({ expansions, reviews, open, loading, er
                             <span>{t('paperTasks.contentPaperCount', { count: row.record.paper_count })}</span>
                             <span>{t(row.record.expansion_id ? 'paperTasks.recordsFromExpansion' : 'paperTasks.recordsFromLibrary')}</span>
                         </> : <>
+                            {row.record.budget_mode && <span>{t(`paperTasks.recordsExpansionDepth.${row.record.budget_mode}`)}</span>}
                             {row.record.status === 'completed' && <span>{t('paperTasks.recordsExpansionCount', { count: new Set(row.record.result?.papers.map(item => item.paper.paper_id) || []).size })}</span>}
                             {related > 0 && <span>{t('paperTasks.recordsRelatedCount', { count: related })}</span>}
                         </>}</span>
                         {row.kind === 'review' && row.record.expansion_id && <span className="paper-expansion-muted">{t('paperTasks.recordsSource', { title: row.record.source_title || t('paperTasks.recordsSourceUnavailable') })}</span>}
-                        {updated.isValid() && <time className="paper-expansion-muted" dateTime={record.updated_at}>{updated.format('MM-DD HH:mm')}</time>}
+                        {created.isValid() && <time className="paper-expansion-muted" dateTime={record.created_at}>{created.format('MM-DD HH:mm')}</time>}
                     </span>
                     <span className="paper-expansion-history-view" aria-hidden>{t('common.view')}<ArrowRightOutlined /></span>
                 </button></List.Item>;

@@ -152,9 +152,18 @@ class _FailureBatchDecision:
 class ToolCallQuota:
     """Cap how many times a tool may execute in one agent run."""
 
-    def __init__(self, call_limits: dict[str, int] | None = None):
+    def __init__(self, call_limits: dict[str, int] | None = None, observer=None):
+        self._observer = observer
         self._limits = {str(name): int(limit) for name, limit in (call_limits or {}).items()}
         self._counts: Counter = Counter()
+        self._publish_budget()
+
+    def _publish_budget(self):
+        if self._observer is not None:
+            names = set(self._counts) | {name for name in self._limits if not name.endswith('*')}
+            self._observer({name: {'limit': limit, 'used': self._counts[name],
+                                   'remaining': max(0, limit - self._counts[name])}
+                            for name in sorted(names) if (limit := self._limit_for(name)) is not None})
 
     def _limit_for(self, name: str) -> int | None:
         if name in self._limits:
@@ -189,6 +198,7 @@ class ToolCallQuota:
         for record in records:
             if record.disposition is ToolExecutionDisposition.EXECUTED:
                 self._counts[record.tool_name] += 1
+        self._publish_budget()
 
 
 class FailureRetryPolicy:

@@ -81,6 +81,7 @@ type scholarlyWork struct {
 	Title       string `json:"title"`
 	DOI         string `json:"doi"`
 	Year        int    `json:"publication_year"`
+	PublishedAt string `json:"publication_date"`
 	Citations   *int64 `json:"cited_by_count"`
 	Authorships []struct {
 		Author struct {
@@ -127,6 +128,10 @@ func openAlexGet(ctx context.Context, path string, params url.Values, key string
 }
 func scholarlyPaper(item scholarlyWork) discoveredPaper {
 	work := WorkInput{Title: item.Title, Year: item.Year, DOI: NormalizeDOI(item.DOI), Provider: "openalex", ProviderWorkID: strings.TrimPrefix(item.ID, "https://openalex.org/"), CitationCount: item.Citations, Provenance: map[string]any{}, TrustedFulltext: true}
+	if item.PublishedAt != "" {
+		// An index's publication date may describe a later journal edition.
+		work.Provenance["publication_date"] = item.PublishedAt
+	}
 	for _, author := range item.Authorships {
 		if author.Author.DisplayName != "" {
 			work.Authors = append(work.Authors, author.Author.DisplayName)

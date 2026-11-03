@@ -24,9 +24,11 @@ import (
 	"lazymind/core/workflow/graphengine"
 )
 
-const preparationJobType = "academic.prepare"
+const PreparationJobType = "academic.prepare"
 
 const maxPreparationDirections = 5
+
+const confirmedExpansionLaunchInstruction = "请按照已确认范围开展论文拓展。准备成果已保存，请先读取任务上下文。"
 
 type expansionDepth struct {
 	Guidance    string                                `json:"guidance"`
@@ -37,17 +39,17 @@ type expansionDepth struct {
 // Depth bounds investigation by work, rather than by elapsed wall time.
 func depthFor(mode string) (expansionDepth, bool) {
 	var guidance string
-	var preparation, plan, research, compose, searches, reads int
+	var preparation, research, compose, searches, reads int
 	switch mode {
 	case "fast":
 		guidance = "快速调研：聚焦核心问题与代表论文，阅读支撑关键结论的段落，核验主要依据并明确材料边界。"
-		preparation, plan, research, compose, searches, reads = 12, 8, 24, 8, 12, 24
+		preparation, research, compose, searches, reads = 12, 24, 8, 12, 24
 	case "", "balanced":
 		guidance = "标准调研：覆盖主要研究路线，比较代表方法与关键证据，阅读相关正文并核验重要结论及适用条件。"
-		preparation, plan, research, compose, searches, reads = 20, 12, 32, 8, 24, 48
+		preparation, research, compose, searches, reads = 20, 32, 8, 24, 48
 	case "deep":
 		guidance = "深入调研：在主要路线之外追踪相关工作、前后向引用及不同证据，扩大关键正文阅读，核验分歧、反例和适用边界。"
-		preparation, plan, research, compose, searches, reads = 28, 16, 48, 12, 36, 72
+		preparation, research, compose, searches, reads = 28, 48, 12, 36, 72
 	default:
 		return expansionDepth{}, false
 	}
@@ -55,12 +57,30 @@ func depthFor(mode string) (expansionDepth, bool) {
 		Guidance:    guidance,
 		Preparation: graphengine.ExecutionLimit{Rounds: preparation, ToolCalls: map[string]int{"search_papers": preparation * 2 / 3, "read_paper": preparation}},
 		Steps: map[string]graphengine.ExecutionLimit{
-			"prepare_plan":      {Rounds: plan, ToolCalls: map[string]int{"academic_search_papers": searches / 4}},
 			"expand_and_screen": {Rounds: research, ToolCalls: map[string]int{"academic_search_papers": searches}},
-			"analyze_relations": {Rounds: research, ToolCalls: map[string]int{"academic_read_paper": reads, "academic_submit_relations": 2}},
+			"analyze_relations": {Rounds: research, Timeout: 1800, ToolCalls: map[string]int{"academic_read_paper": reads, "academic_search_papers": searches / 3, "academic_check_relations": 6}},
 			"compose_result":    {Rounds: compose},
 		},
 	}, true
+}
+
+// Standalone expansion and assisted review have separate delivery contracts.
+func depthForExpansion(record orm.AcademicExpansion) (expansionDepth, bool) {
+	depth, ok := depthFor(record.BudgetMode)
+	if !ok || record.Goal != "expansion" {
+		return depth, ok
+	}
+	if record.BudgetMode == "fast" {
+		depth.Guidance = "围绕原问题做一轮定向查找，只保留同机制、同对象的直接来源或不可替代的对照。相同思路只保留最能解释问题的代表工作。"
+		depth.Steps["expand_and_screen"] = graphengine.ExecutionLimit{Rounds: 12, ToolCalls: map[string]int{"academic_search_papers": 5, "academic_read_paper": 3}}
+		return depth, ok
+	}
+	standard, _ := depthFor("balanced")
+	depth.Preparation = standard.Preparation
+	depth.Steps["expand_and_screen"] = standard.Steps["expand_and_screen"]
+	depth.Steps["screen_and_supplement"] = graphengine.ExecutionLimit{Rounds: 12, ToolCalls: map[string]int{"academic_search_papers": 8, "academic_read_paper": 5}}
+	depth.Guidance = "覆盖已确认方向，逐方向找方法来源、同类方法和后续工作，对覆盖薄弱的方向定点补查。"
+	return depth, ok
 }
 
 type preparationDirection struct {
@@ -70,6 +90,25 @@ type preparationDirection struct {
 	Difference string     `json:"difference"`
 	PaperIDs   []string   `json:"paper_ids"`
 	Papers     []PaperRef `json:"papers,omitempty"`
+}
+type preparationResearchQuestion struct {
+	ID        string `json:"id"`
+	Direction string `json:"direction"`
+	Question  string `json:"question"`
+	Category  string `json:"category"`
+}
+type preparationNamedClue struct {
+	Name           string            `json:"name"`
+	Role           string            `json:"role"`
+	SourcePaperID  string            `json:"source_paper_id"`
+	SourceLocation string            `json:"source_location"`
+	SourceVersion  string            `json:"source_version"`
+	SourceExcerpt  string            `json:"source_excerpt"`
+	Positions      []int             `json:"positions,omitempty"`
+	ReferenceKey   string            `json:"reference_key,omitempty"`
+	Identity       map[string]string `json:"identity"`
+	QuestionIDs    []string          `json:"question_ids"`
+	PaperID        string            `json:"paper_id,omitempty"`
 }
 type preparationQuestion struct {
 	ID       string   `json:"id"`
@@ -89,6 +128,7 @@ type preparationAttempt struct {
 	Error      string          `json:"error,omitempty"`
 }
 type expansionPreparation struct {
+	Skipped             bool                 `json:"skipped,omitempty"`
 	OriginalInstruction string               `json:"original_instruction"`
 	Updates             []string             `json:"updates,omitempty"`
 	AnsweredQuestions   []preparationAnswer  `json:"answered_questions,omitempty"`
@@ -98,26 +138,28 @@ type expansionPreparation struct {
 	ConfirmedAt        *time.Time `json:"confirmed_at,omitempty"`
 	AutoConfirmed      bool       `json:"auto_confirmed,omitempty"`
 
-	UserInstruction string                 `json:"user_instruction"`
-	Summary         string                 `json:"summary"`
-	Questions       []preparationQuestion  `json:"questions"`
-	Answers         map[string]string      `json:"answers"`
-	Directions      []preparationDirection `json:"directions"`
-	Selected        []string               `json:"selected_directions"`
-	StartedAt       *time.Time             `json:"started_at,omitempty"`
-	FinishedAt      *time.Time             `json:"finished_at,omitempty"`
-	Error           string                 `json:"error,omitempty"`
-	RequestKey      string                 `json:"request_key,omitempty"`
-	Model           string                 `json:"model,omitempty"`
-	Metrics         json.RawMessage        `json:"metrics,omitempty"`
+	UserInstruction   string                        `json:"user_instruction"`
+	Summary           string                        `json:"summary"`
+	Questions         []preparationQuestion         `json:"questions"`
+	Answers           map[string]string             `json:"answers"`
+	Directions        []preparationDirection        `json:"directions"`
+	Selected          []string                      `json:"selected_directions"`
+	ResearchQuestions []preparationResearchQuestion `json:"research_questions,omitempty"`
+	NamedClues        []preparationNamedClue        `json:"named_clues,omitempty"`
+	StartedAt         *time.Time                    `json:"started_at,omitempty"`
+	FinishedAt        *time.Time                    `json:"finished_at,omitempty"`
+	Error             string                        `json:"error,omitempty"`
+	RequestKey        string                        `json:"request_key,omitempty"`
+	Model             string                        `json:"model,omitempty"`
+	Metrics           json.RawMessage               `json:"metrics,omitempty"`
 }
 
 func init() {
-	asyncjob.Register(preparationJobType, runPreparation)
+	asyncjob.Register(PreparationJobType, runPreparation)
 	workflow.ConfigureHostStep = configureAcademicStep
 }
 func enqueuePreparation(ctx context.Context, tx *gorm.DB, record orm.AcademicExpansion) error {
-	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: preparationJobType, ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: fmt.Sprintf("%s:%d", record.ID, record.PreparationRevision), Payload: map[string]any{"revision": record.PreparationRevision}, MaxAttempts: 3})
+	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: PreparationJobType, ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: fmt.Sprintf("%s:%d", record.ID, record.PreparationRevision), Payload: map[string]any{"revision": record.PreparationRevision}, MaxAttempts: 3})
 	return err
 }
 func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
@@ -141,7 +183,7 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 	if preparation.StartedAt == nil {
 		preparation.StartedAt = &now
 	}
-	depth, _ := depthFor(record.BudgetMode)
+	depth, _ := depthForExpansion(record)
 	if err := db.Model(&record).Where("preparation_revision=? AND status='preparing'", payload.Revision).Update("preparation_json", marshal(preparation)).Error; err != nil {
 		return asyncjob.Result{}, err
 	}
@@ -150,9 +192,18 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 		Title string `json:"title"`
 	}{expansionPreparation: preparation}
 	output.Metrics = nil
-	role, err := chat.LoadDefaultChatLLMConfig(ctx, db, record.UserID)
+	var llmConfig map[string]any
+	var role map[string]any
+	var err error
+	if record.ConversationID != "" {
+		llmConfig, err = chat.LoadConversationLLMConfig(ctx, db, record.UserID, record.ConversationID)
+		role, _ = llmConfig["llm"].(map[string]any)
+	} else {
+		role, err = chat.LoadDefaultChatLLMConfig(ctx, db, record.UserID)
+		llmConfig = map[string]any{"llm": role}
+	}
 	if err == nil {
-		err = internalAcademic(ctx, "preparation:run", map[string]any{"expansion_id": record.ID, "user_id": record.UserID, "revision": payload.Revision, "input": json.RawMessage(record.ResultJSON), "preparation": preparation, "llm_config": map[string]any{"llm": role}, "depth": depth}, &output)
+		err = internalAcademic(ctx, "preparation:run", map[string]any{"expansion_id": record.ID, "user_id": record.UserID, "revision": payload.Revision, "input": json.RawMessage(record.ResultJSON), "preparation": preparation, "llm_config": llmConfig, "depth": depth}, &output)
 	}
 	result := output.expansionPreparation
 	// Search tools register candidates while the Agent runs. Validate against
@@ -240,6 +291,28 @@ func validatePreparation(db *gorm.DB, record orm.AcademicExpansion, p expansionP
 	if len(p.Directions) > maxPreparationDirections {
 		return fmt.Errorf("研究方向最多 %d 个，请合并重复方向后重试", maxPreparationDirections)
 	}
+	for _, clue := range p.NamedClues {
+		if strings.TrimSpace(clue.SourceExcerpt) == "" || len(clue.Positions) == 0 && strings.TrimSpace(clue.ReferenceKey) == "" {
+			return errors.New("原文研究线索须提供真实摘录及正文位置或参考文献编号")
+		}
+		if len(clue.Positions) > 5 {
+			return errors.New("研究线索最多关联5个正文块")
+		}
+		positions := map[int]bool{}
+		for _, position := range clue.Positions {
+			if position < 0 || positions[position] {
+				return errors.New("研究线索正文位置须为非负且不重复的块序号")
+			}
+			positions[position] = true
+		}
+		source, err := expansionSource(db, record, clue.SourcePaperID)
+		if err != nil {
+			return errors.New("研究线索的原文论文尚未登记于本次调研")
+		}
+		if source.Paper.SourceVersion != "" && clue.SourceVersion != source.Paper.SourceVersion {
+			return errors.New("研究线索来源版本与本次调研绑定的原文不一致")
+		}
+	}
 	if len(p.Questions) > 0 {
 		return nil
 	}
@@ -261,6 +334,28 @@ func validatePreparation(db *gorm.DB, record orm.AcademicExpansion, p expansionP
 	for _, name := range p.Selected {
 		if !seen[name] {
 			return errors.New("预选方向不在调研范围内")
+		}
+	}
+	questions := map[string]bool{}
+	for _, question := range p.ResearchQuestions {
+		if question.ID == "" || questions[question.ID] || !seen[question.Direction] || strings.TrimSpace(question.Question) == "" || (question.Category != "predecessor" && question.Category != "successor" && question.Category != "peer") {
+			return errors.New("研究问题缺少有效方向、唯一标识或前序/后续/同层类别")
+		}
+		questions[question.ID] = true
+	}
+	for _, clue := range p.NamedClues {
+		if strings.TrimSpace(clue.Name) == "" || strings.TrimSpace(clue.Role) == "" || len(clue.QuestionIDs) == 0 {
+			return errors.New("原文研究线索缺少名称、作用或关联问题")
+		}
+		if clue.PaperID != "" {
+			if _, err := expansionSource(db, record, clue.PaperID); err != nil {
+				return errors.New("研究线索对应论文尚未登记于本次调研")
+			}
+		}
+		for _, id := range clue.QuestionIDs {
+			if !questions[id] {
+				return errors.New("研究线索关联了不存在的研究问题")
+			}
 		}
 	}
 	return nil
@@ -297,6 +392,9 @@ func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
 		}
 		var p expansionPreparation
 		_ = json.Unmarshal(record.PreparationJSON, &p)
+		if p.Skipped {
+			return errors.New("快速扩展直接执行，无需初步调研")
+		}
 		if p.RequestKey == req.RequestKey {
 			return nil
 		}
@@ -462,7 +560,7 @@ func confirmPreparedExpansion(ctx context.Context, tx *gorm.DB, record *orm.Acad
 	if e := tx.Model(record).Updates(map[string]any{"conversation_id": record.ConversationID, "status": record.Status, "result_json": record.ResultJSON, "preparation_json": record.PreparationJSON, "updated_at": time.Now().UTC()}).Error; e != nil {
 		return e
 	}
-	return enqueueAcademicChat(ctx, tx, record.UserID, record.ConversationID, "paper_expansion", "请按照已确认范围执行四步论文拓展。准备成果已保存，请先读取任务上下文。", fmt.Sprintf("confirm:%d:%s", record.PreparationRevision, requestKey))
+	return enqueueAcademicChat(ctx, tx, record.UserID, record.ConversationID, "paper_expansion", confirmedExpansionLaunchInstruction, fmt.Sprintf("confirm:%d:%s", record.PreparationRevision, requestKey))
 }
 
 func ExpansionCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -517,11 +615,15 @@ func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation 
 	if preparation.ExecutionStartedAt == nil || record.Status == "completed" {
 		preparation.ExecutionStartedAt = &now
 	}
-	depth, ok := depthFor(record.BudgetMode)
+	depth, ok := depthForExpansion(record)
 	if !ok {
 		return errors.New("invalid research depth")
 	}
 	limit, ok := depth.Steps[params.StepID]
+	_, splitWorkflow := params.Runtime.ExecutionLimits["screen_and_supplement"]
+	if splitWorkflow && record.Goal == "expansion" && record.BudgetMode != "fast" && params.StepID == "expand_and_screen" {
+		limit = graphengine.ExecutionLimit{Rounds: 20, ToolCalls: map[string]int{"academic_search_papers": 16}}
+	}
 	if !ok {
 		return errors.New("unknown paper research step")
 	}

@@ -95,6 +95,52 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestFastExpansionLaunchesWithoutPreparation(t *testing.T) {
+	db := paperFixture(t)
+	for _, tc := range []struct {
+		key, direction string
+		documents      []string
+	}{
+		{"seed", "", []string{"a"}},
+		{"topic", "KV 缓存", []string{}},
+	} {
+		body := string(marshal(map[string]any{"kind": "expansion", "budget_mode": "fast", "dataset_id": "papers", "direction": tc.direction, "document_ids": tc.documents, "request_key": tc.key}))
+		var first map[string]string
+		for i := 0; i < 2; i++ {
+			w := httptest.NewRecorder()
+			LaunchPaperWorkflow(w, paperRequest(body))
+			var receipt map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &receipt); err != nil || w.Code != 200 || receipt["conversation_id"] == "" || receipt["expansion_id"] == "" {
+				t.Fatalf("launch %s: %d %s (%v)", tc.key, w.Code, w.Body.String(), err)
+			}
+			if i == 0 {
+				first = receipt
+			} else if receipt["conversation_id"] != first["conversation_id"] || receipt["expansion_id"] != first["expansion_id"] {
+				t.Fatalf("duplicate launch created another task: %v, %v", first, receipt)
+			}
+		}
+		var record orm.AcademicExpansion
+		if err := db.Where("id=?", first["expansion_id"]).Take(&record).Error; err != nil {
+			t.Fatal(err)
+		}
+		var prep expansionPreparation
+		var input ReviewWorkflowInput
+		if json.Unmarshal(record.PreparationJSON, &prep) != nil || json.Unmarshal(record.ResultJSON, &input) != nil ||
+			!prep.Skipped || record.Status != "pending" || len(input.SelectedDirections) != 1 || len(input.Papers) != len(tc.documents) {
+			t.Fatalf("invalid direct launch: %+v %+v", prep, input)
+		}
+		var count int64
+		db.Table("async_jobs").Where("job_type=? AND resource_id=?", ChatLaunchJobType, record.ConversationID).Count(&count)
+		if count != 1 {
+			t.Fatalf("expected one chat launch for %s, got %d", tc.key, count)
+		}
+		db.Table("async_jobs").Where("job_type=? AND resource_id=?", PreparationJobType, record.ID).Count(&count)
+		if count != 0 {
+			t.Fatalf("direct launch enqueued preparation for %s", tc.key)
+		}
+	}
+}
+
 func TestImportedIdentitySurvivesQueuedRecognitionAndManualMetadataCorrection(t *testing.T) {
 	db := paperFixture(t)
 	link := orm.AcademicWorkDocument{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "a", SourceProvider: "arxiv", SourceVersion: "v2", VersionKind: "preprint", ContentSHA256: "original-hash", CreatedAt: time.Now(), UpdatedAt: time.Now()}
@@ -830,4 +876,69 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	launch("inaccessible", 2, []string{"a", "b"}, 422)
+}
+
+func TestListExpansionPublishesCompletedRoundWithoutFetchingFullText(t *testing.T) {
+	for _, tc := range []struct{ step, slot, marker string }{
+		{"expand_and_screen", "candidate_set", "expansion_list_ready"},
+		{"screen_and_supplement", "screened_candidates", "screened_list_ready"},
+	} {
+		t.Run(tc.step, func(t *testing.T) {
+			testListExpansionPublication(t, tc.step, tc.slot, tc.marker)
+		})
+	}
+}
+
+func testListExpansionPublication(t *testing.T, stepID, resultSlot, readySlot string) {
+	db := paperFixture(t)
+	conversation, err := newAcademicConversation(db.DB, "u", "papers", "list", "expansion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.AcademicWorkDocument{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "a", SourceProvider: "openalex", SourceVersion: "publishedVersion"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	papers := []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceDocumentID: "a", SourceProvider: "openalex", SourceVersion: "publishedVersion"}, IsSeed: true}}
+	seeds, err := seedSources(db.DB, "papers", papers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"user_instruction": "Find related papers", "candidate_directions": []string{"method"},
+		"selected_directions": []string{"method"}, "papers": papers, "list_mode": "balanced", "recommendations": []any{}}
+	record := orm.AcademicExpansion{ID: "list", UserID: "u", RequestOwner: "u", RequestKey: "list", DatasetID: "papers",
+		ConversationID: conversation, Title: "Find related papers", Goal: "expansion", BudgetMode: "balanced", Status: "running",
+		ResultJSON: marshal(input), SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: marshal([]paperDiscovery{}), PreparationJSON: marshal(expansionPreparation{})}
+	session := orm.WorkflowSession{ID: "list-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
+	step := orm.WorkflowSessionStep{ID: "list-search", SessionID: session.ID, StepID: stepID, Status: "succeeded", Validity: "effective", Attempt: 1}
+	for _, row := range []any{&record, &session, &step} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	artifacts := []workflowstore.Artifact{}
+	for slot, value := range map[string]any{resultSlot: input, readySlot: map[string]string{"mode": "balanced"}} {
+		artifacts = append(artifacts, workflowstore.Artifact{ID: "list-" + slot, Slot: slot, Attempt: 1, Revision: 1,
+			ProducerAttemptID: step.ID, CreatedAt: time.Now().UTC(), Validity: "effective", Selected: true, Value: marshal(value)})
+	}
+	job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: artifacts})}
+	for i := 0; i < 2; i++ {
+		if _, err := projectAcademicResult(t.Context(), job, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Where("id=?", record.ID).Take(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	saved, err := completedExpansionInput(db.DB, record, record.Version)
+	if err != nil || record.Status != "completed" || record.Version != 1 || len(saved.Papers) != 1 {
+		t.Fatalf("completed list unavailable: %s, version %d, %+v, %v", record.Status, record.Version, saved, err)
+	}
+	var report map[string]any
+	if err := json.Unmarshal(record.ReportJSON, &report); err != nil || report["list_mode"] != "balanced" || report["narrative"] != nil {
+		t.Fatalf("expected list metadata without a research report: %s, %v", record.ReportJSON, err)
+	}
+	var fetched int64
+	if err := db.Model(&orm.AcademicPaperContent{}).Where("user_id=?", "u").Count(&fetched).Error; err != nil || fetched != 0 {
+		t.Fatalf("finishing a list must not prepare full text: %d, %v", fetched, err)
+	}
 }

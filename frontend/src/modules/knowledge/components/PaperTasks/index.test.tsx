@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); });
 const submit = async () => {
-    fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研)$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研|开始扩展)$/ }));
     await waitFor(() => expect(launchPaperTask).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/agent/chat/home/new-chat'));
 };
@@ -100,8 +100,8 @@ describe('paper task startup routes', () => {
         fireEvent.click(await screen.findByRole('button', { name: /^查看扩展成果:/ }));
         const seedRow = (await screen.findByRole('checkbox', { name: '选择 A' })).closest('tr')!;
         const expandedRow = screen.getByRole('checkbox', { name: '选择 B' }).closest('tr')!;
-        expect(within(seedRow).getByText('种子论文')).toBeVisible();
-        expect(within(expandedRow).queryByText('种子论文')).not.toBeInTheDocument();
+        expect(within(seedRow).getByText('起始论文')).toBeVisible();
+        expect(within(expandedRow).queryByText('起始论文')).not.toBeInTheDocument();
         expect(within(expandedRow).getByText('与种子论文：')).toBeVisible();
         expect(within(expandedRow).getByText('与研究方向：')).toBeVisible();
         const detailsButton = within(expandedRow).getByRole('button', { name: '查看详情：B' });
@@ -175,7 +175,7 @@ describe('paper task startup routes', () => {
         mount(['a'], '', true, { onNotification, onNotificationResolved });
         fireEvent.click(screen.getByRole('button', { name: '阅读心得' }));
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this instruction' } });
-        fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研)$/ }));
+        fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研|开始扩展)$/ }));
         await waitFor(() => expect(onNotification).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper-task-launch', message: 'launch unavailable' })));
         expect(screen.getByRole('textbox')).toHaveValue('Keep this instruction');
         expect(launchPaperTask).toHaveBeenLastCalledWith(expect.objectContaining({ user_instruction: 'Keep this instruction' }), true);
@@ -207,7 +207,21 @@ describe('paper task startup routes', () => {
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep' }), false);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
-        expect(screen.getByRole('radio', { name: /标准/ })).toBeChecked();
+        expect(screen.getByRole('radio', { name: /^标准扩展/ })).toBeChecked();
+    });
+    it('uses the same expansion action across tiers and marks manual direction selection', async () => {
+        mount(['a']);
+        fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
+        fireEvent.click(await screen.findByText('基于选中论文扩展'));
+        expect(screen.getAllByText('你来选择*')).toHaveLength(2);
+        expect(screen.getByText(/只有一个方向时自动继续/)).toBeInTheDocument();
+        for (const tier of [/^标准扩展/, /^深入分析/, /^快速扩展/]) {
+            fireEvent.click(screen.getByRole('radio', { name: tier }));
+            expect(screen.getByRole('button', { name: '开始扩展' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: '开始初步调研' })).not.toBeInTheDocument();
+        }
+        fireEvent.click(screen.getByRole('button', { name: '开始扩展' }));
+        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'fast' }), false));
     });
     it('starts direction expansion with one topic input and no papers', async () => {
         mount([]);
@@ -227,7 +241,7 @@ describe('paper task startup routes', () => {
         if (direction) fireEvent.change(screen.getByLabelText('研究主题与要求'), { target: { value: 'agents' } });
         else fireEvent.click(screen.getByRole('switch', { name: '开启论文扩展' }));
         expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
-        expect(screen.getByText('为综述准备文献时，初步调研与检索阅读始终使用此深度。')).toBeInTheDocument();
+        expect(screen.getByRole('radiogroup', { name: '综述调研深度' })).toBeInTheDocument();
         const flow = within(screen.getByRole('region', { name: '论文综述流程' }));
         await waitFor(() => {
             for (const stage of ['初步调研', '确认研究方向', '检索与全文准备', '阅读与生成综述']) expect(flow.getByText(stage)).toBeVisible();
@@ -495,7 +509,7 @@ describe('result paper title navigation', () => {
 });
 describe('result list actions', () => {
     it('keeps research details collapsed above the papers after completion', async () => {
-        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, goal: 'review', report: { narrative: '研究解读正文' } } });
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, goal: 'review', report: { narrative: '研究解读正文', reading_order: ['a'], limitations: ['旧版待查事项'] } } } as unknown as Awaited<ReturnType<typeof getExpansion>>);
         mount(undefined, '?expansion_id=r');
         await selectMultiple();
         const reading = screen.getByText('研究解读').closest('details')!;
@@ -508,6 +522,8 @@ describe('result list actions', () => {
         expect(screen.getByRole('region', { name: '论文综述流程' })).toBeVisible();
         fireEvent.click(screen.getByText('研究解读'));
         expect(screen.getByText('研究解读正文')).toBeVisible();
+        expect(screen.queryByText('旧版待查事项')).not.toBeInTheDocument();
+        expect(screen.queryByText('建议阅读顺序')).not.toBeInTheDocument();
     });
     it('freezes review confirmation inputs and uses a new key for another generation', async () => {
         vi.mocked(getExpansion).mockResolvedValue({ ...threePapers, contents: detail.contents });
@@ -526,9 +542,30 @@ describe('result list actions', () => {
         await waitFor(() => expect(launchPaperTask).toHaveBeenCalledTimes(2));
         expect(vi.mocked(launchPaperTask).mock.calls[1][0].request_key).not.toBe(vi.mocked(launchPaperTask).mock.calls[0][0].request_key);
     });
+    it('shows the standard screening step before any workflow result is published', async () => {
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status: 'running',
+            budget_mode: 'balanced', progress: {}, report: {} } });
+        mount(undefined, '?expansion_id=r');
+        const title = await screen.findByRole('heading', { name: 'agents' });
+        expect(within(title.parentElement!).getByText('标准扩展')).toBeInTheDocument();
+        const progress = within(await screen.findByRole('region', { name: '拓展进展' }));
+        fireEvent.click(progress.getByRole('button', { name: '查看过程' }));
+        expect(progress.getByText('筛选与补充')).toBeInTheDocument();
+        expect(progress.queryByText('研究报告与论文关系')).not.toBeInTheDocument();
+    });
+    it.each(['running', 'failed'])('keeps the frozen deep list visible and read-only while analysis is %s', async status => {
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status, budget_mode: 'deep', version: 0,
+            progress: { candidate_set: { ...input, screening_pending: true }, screened_candidates: { ...input, list_mode: 'deep',
+                recommendations: [{ paper_id: 'b', direction: 'tools', reason: '相关工作推荐理由' }] } },
+        } });
+        mount(undefined, '?expansion_id=r');
+        const list = await screen.findByRole('region', { name: '论文清单已就绪。' });
+        expect(within(list).getByRole('region', { name: 'tools' })).toHaveTextContent('相关工作推荐理由');
+        expect(screen.queryByRole('button', { name: /生成综述|批量入库/ })).not.toBeInTheDocument();
+    });
     it.each(['pending', 'running', 'active', 'failed', 'cancelled'])('hides intermediate papers and actions while expansion is %s', async status => {
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status, report: { narrative: '尚未完成的研究解读' },
-            progress: { expansion_plan: { input, plan: ['检索工具调用训练信号'] }, candidate_set: { input }, relation_analysis: { input }, expansion_result: { input } },
+            progress: { candidate_set: { input }, relation_analysis: { input }, expansion_result: { input } },
         } });
         mount(undefined, '?expansion_id=r');
         await screen.findByRole('region', { name: '拓展进展' });
@@ -536,12 +573,15 @@ describe('result list actions', () => {
         expect(screen.queryByRole('button', { name: '生成综述' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /批量入库|加入知识库|重试获取全文/ })).not.toBeInTheDocument();
         expect(screen.queryByText('研究解读')).not.toBeInTheDocument();
-        expect(screen.getByText('完成后统一展示扩展论文和研究解读，届时会通知你。')).toBeVisible();
+        expect(screen.getByText('拓展完成后会通知你查看结果。')).toBeVisible();
         expect(screen.getByRole('button', { name: '打开拓展会话' })).toBeEnabled();
         fireEvent.click(screen.getByRole('button', { name: '查看过程' }));
-        expect(screen.getAllByText('准备参考论文与检索计划')).toHaveLength(1);
-        fireEvent.click(screen.getByText('查看检索计划'));
-        expect(screen.getByText('检索工具调用训练信号')).toBeVisible();
+        expect(screen.getByText('检索与拓展')).toBeVisible();
+        expect(screen.getByText('筛选与补充')).toBeVisible();
+        expect(screen.getByText('研究报告与论文关系')).toBeVisible();
+        expect(screen.getByText('研究报告与论文关系').closest('li')).toHaveAttribute('data-status', ['running', 'active'].includes(status) ? 'running' : 'pending');
+        expect(screen.queryByText('准备参考论文与检索计划')).not.toBeInTheDocument();
+        expect(screen.queryByText('检索工具调用训练信号')).not.toBeInTheDocument();
         expect(previewPaperImport).not.toHaveBeenCalled();
     });
     it('keeps long research context compact while preserving every confirmed direction and its evidence', async () => {

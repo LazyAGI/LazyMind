@@ -5,7 +5,7 @@ import { Alert, Button, Checkbox, Dropdown, Input, Modal, Popover, Pagination, S
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
 import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
-import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperImportMethodName, paperLink, venueName, safePaperUrl, sourceLabel, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
+import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperLink, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
 import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, removeLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
 import { emptyLibrary } from "./libraryModel";
 import PaperDetailDrawer, { type PaperDetailTab } from "./PaperDetailDrawer";
@@ -724,7 +724,6 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                 <div className="paper-library-meta">
                   <span className="paper-library-year">{item.metadata.year || "—"}</span>
                   <span className="paper-library-venue" title={venueName(item)}>{item.metadata.venue?.trim() ? venueName(item) : "—"}</span>
-                  <span className="paper-library-source" aria-label="导入方式与来源">{paperImportMethodName(item.importMethod)} · {sourceLabel[item.source] || '未记录'}</span>
                   {item.tags.filter((tag) => tag !== "paper" && !tag.startsWith("arxiv:")).map((tag) => (<span key={tag} className="paper-library-tag">{tag}</span>))}
                   {item.incomplete && snapshotReady && <Tooltip title="论文题录信息不完整，点击补全"><button type="button" className="paper-library-state" disabled={disabled} onClick={() => {
                     openDetail(item.id);

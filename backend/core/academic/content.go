@@ -30,20 +30,22 @@ import (
 var errFulltextUnavailable = errors.New("full text is unavailable: no registered PDF candidate")
 
 type PaperRef struct {
-	CitationCount    *int64   `json:"citation_count,omitempty"`
-	SourceDocumentID string   `json:"document_id,omitempty"`
-	SourceVersion    string   `json:"source_version,omitempty"`
-	SourceProvider   string   `json:"source_provider,omitempty"`
-	PaperID          string   `json:"paper_id"`
-	Title            string   `json:"title,omitempty"`
-	Authors          []string `json:"authors,omitempty"`
-	Abstract         *string  `json:"abstract"`
-	Year             int      `json:"year,omitempty"`
-	Venue            string   `json:"venue,omitempty"`
-	DOI              string   `json:"doi,omitempty"`
-	ArxivID          string   `json:"arxiv_id,omitempty"`
-	PaperURL         string   `json:"paper_url,omitempty"`
-	PDFURL           string   `json:"pdf_url,omitempty"`
+	PublishedAt       string   `json:"published_at,omitempty"`
+	SourceVersionDate string   `json:"source_version_date,omitempty"`
+	CitationCount     *int64   `json:"citation_count,omitempty"`
+	SourceDocumentID  string   `json:"document_id,omitempty"`
+	SourceVersion     string   `json:"source_version,omitempty"`
+	SourceProvider    string   `json:"source_provider,omitempty"`
+	PaperID           string   `json:"paper_id"`
+	Title             string   `json:"title,omitempty"`
+	Authors           []string `json:"authors,omitempty"`
+	Abstract          *string  `json:"abstract"`
+	Year              int      `json:"year,omitempty"`
+	Venue             string   `json:"venue,omitempty"`
+	DOI               string   `json:"doi,omitempty"`
+	ArxivID           string   `json:"arxiv_id,omitempty"`
+	PaperURL          string   `json:"paper_url,omitempty"`
+	PDFURL            string   `json:"pdf_url,omitempty"`
 }
 type ContentPage struct {
 	Page int    `json:"page"`
@@ -53,6 +55,11 @@ type ContentPage struct {
 func paperRef(work orm.AcademicWork) PaperRef {
 	p := PaperRef{PaperID: work.ID, Title: work.CanonicalTitle, Year: work.PublicationYear, Venue: work.Venue, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase}
 	_ = json.Unmarshal(work.AuthorsJSON, &p.Authors)
+	var provenance struct {
+		PublishedAt string `json:"published_at"`
+	}
+	_ = json.Unmarshal(work.ProvenanceJSON, &provenance)
+	p.PublishedAt = provenance.PublishedAt
 	if work.Abstract != "" {
 		a := work.Abstract
 		p.Abstract = &a
@@ -327,12 +334,31 @@ func parsePaperPDF(ctx context.Context, path, expectedHash string) ([]ContentPag
 }
 
 type contentCursor struct {
-	ID          string `json:"id"`
-	Hash        string `json:"hash"`
-	Offset      int    `json:"offset"`
-	ExpansionID string `json:"expansion_id,omitempty"`
-	HandoffID   string `json:"handoff_id,omitempty"`
-	Positions   []int  `json:"positions,omitempty"`
+	View          string   `json:"view,omitempty"`
+	ReferenceKeys []string `json:"reference_keys,omitempty"`
+	Keywords      []string `json:"keywords,omitempty"`
+	MaxResults    int      `json:"max_results,omitempty"`
+	ID            string   `json:"id"`
+	Hash          string   `json:"hash"`
+	Offset        int      `json:"offset"`
+	ExpansionID   string   `json:"expansion_id,omitempty"`
+	HandoffID     string   `json:"handoff_id,omitempty"`
+	Positions     []int    `json:"positions,omitempty"`
+}
+
+type paperContentRequest struct {
+	View                string   `json:"view"`
+	ReferenceKeys       []string `json:"reference_keys"`
+	MaxResults          int      `json:"max_results"`
+	PaperID             string   `json:"paper_id"`
+	Cursor              string   `json:"cursor"`
+	ExpansionID         string   `json:"expansion_id"`
+	HandoffID           string   `json:"handoff_id"`
+	Keywords            []string `json:"keywords"`
+	PageStart           int      `json:"page_start"`
+	PageEnd             int      `json:"page_end"`
+	PreparationRevision *int64   `json:"preparation_revision"`
+	Positions           []int    `json:"positions"`
 }
 
 func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
@@ -340,19 +366,16 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
-		PaperID             string   `json:"paper_id"`
-		Cursor              string   `json:"cursor"`
-		ExpansionID         string   `json:"expansion_id"`
-		HandoffID           string   `json:"handoff_id"`
-		Keywords            []string `json:"keywords"`
-		PageStart           int      `json:"page_start"`
-		PageEnd             int      `json:"page_end"`
-		PreparationRevision *int64   `json:"preparation_revision"`
-		Positions           []int    `json:"positions"`
-	}
+	var req paperContentRequest
 	if !parseJSON(r, &req) || (req.PaperID == "") == (req.Cursor == "") || (req.ExpansionID != "" && req.HandoffID != "") {
 		replyError(w, 400, "INVALID_REQUEST", "supply paper_id with expansion_id or handoff_id, or a context-bound cursor")
+		return
+	}
+	if req.View == "content" {
+		req.View = "fulltext"
+	}
+	if (req.View != "" && req.View != "fulltext" && req.View != "references") || (req.View != "references" && (len(req.ReferenceKeys) > 0 || req.MaxResults < 0 || req.MaxResults > 5)) {
+		replyError(w, 400, "INVALID_REQUEST", "unsupported view or selector")
 		return
 	}
 	var cursor contentCursor
@@ -362,6 +385,20 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 		if err != nil || json.Unmarshal(data, &cursor) != nil || cursor.Offset < 0 || (cursor.ExpansionID == "") == (cursor.HandoffID == "") || (req.ExpansionID != "" && req.ExpansionID != cursor.ExpansionID) || (req.HandoffID != "" && req.HandoffID != cursor.HandoffID) {
 			replyError(w, 400, "INVALID_CURSOR", "invalid cursor")
 			return
+		}
+		if cursor.View == "content" {
+			cursor.View = "fulltext"
+		}
+		cursorView := cursor.View
+		if cursorView == "" {
+			cursorView = "fulltext"
+		}
+		if req.View != "" && req.View != cursorView {
+			replyError(w, 400, "INVALID_CURSOR", "cursor view mismatch")
+			return
+		}
+		if cursor.View != "" {
+			req.View, req.ReferenceKeys, req.Keywords, req.MaxResults = cursor.View, cursor.ReferenceKeys, cursor.Keywords, cursor.MaxResults
 		}
 		req.ExpansionID = cursor.ExpansionID
 		req.HandoffID = cursor.HandoffID
@@ -424,6 +461,10 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 	row = selected
 	var pages []ContentPage
 	_ = json.Unmarshal(row.PagesJSON, &pages)
+	if req.View == "references" {
+		readPaperReferences(w, r, user, req, source, row, pages, cursor.Offset)
+		return
+	}
 	positions := cursor.Positions
 	if req.Cursor == "" {
 		if req.Positions != nil {
@@ -448,9 +489,14 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	readable := usablePaperContent(row)
 	for _, index := range positions {
-		if index < 0 || index >= len(pages) {
-			replyError(w, 400, "INVALID_CURSOR", "invalid content position")
+		if index < 0 || readable && index >= len(pages) {
+			code := "INVALID_REQUEST"
+			if req.Cursor != "" {
+				code = "INVALID_CURSOR"
+			}
+			replyError(w, 400, code, fmt.Sprintf("invalid content position %d; total_blocks=%d, positions are zero-based", index, len(pages)))
 			return
 		}
 	}
@@ -459,24 +505,32 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_CURSOR", "invalid offset")
 		return
 	}
-	end := offset + 5
+	limit := req.MaxResults
+	if limit == 0 {
+		limit = 5
+	}
+	if limit < 1 || limit > 5 {
+		replyError(w, 400, "INVALID_REQUEST", "content max_results must be 1..5 blocks")
+		return
+	}
+	end := offset + limit
 	if end > len(positions) {
 		end = len(positions)
 	}
 	output := []ContentPage{}
 	delivered := []int{}
-	if usablePaperContent(row) {
+	if readable {
 		for _, index := range positions[offset:end] {
 			output = append(output, pages[index])
 			delivered = append(delivered, index)
 		}
 	}
 	next := ""
-	if end < len(positions) && usablePaperContent(row) {
-		next = base64.RawURLEncoding.EncodeToString(marshal(contentCursor{ID: row.ID, Hash: row.ContentHash, Offset: end, Positions: positions, ExpansionID: req.ExpansionID, HandoffID: req.HandoffID}))
+	if end < len(positions) && readable {
+		next = base64.RawURLEncoding.EncodeToString(marshal(contentCursor{ID: row.ID, Hash: row.ContentHash, Offset: end, Positions: positions, ExpansionID: req.ExpansionID, HandoffID: req.HandoffID, View: "fulltext", MaxResults: limit}))
 	}
 	level := "none"
-	if usablePaperContent(row) {
+	if readable {
 		level = "fulltext"
 	}
 	if err = recordPaperRead(r.Context(), user, req.ExpansionID, row, delivered, pages); err != nil {
@@ -484,6 +538,9 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	warnings := []string{}
+	if row.Status == "processing" {
+		warnings = append(warnings, "正文仍在处理中，尚无可读内容；先处理其他资料，稍后按 paper_id 重新读取，不要猜测位置或改动游标")
+	}
 	for _, page := range output {
 		if page.Page == 0 {
 			warnings = append(warnings, "原解析结果未提供可靠页码，page=0 表示位置未知")
@@ -565,6 +622,12 @@ func documentPaperRef(paper PaperRef, metadata json.RawMessage) PaperRef {
 	}
 	if _, present := fields["abstract"]; present {
 		paper.Abstract = &value.Abstract
+	}
+	if date, present := value.Provenance["published_at"].(string); present {
+		paper.PublishedAt = date
+	}
+	if date, present := value.Provenance["source_version_date"].(string); present {
+		paper.SourceVersionDate = date
 	}
 	return paper
 }

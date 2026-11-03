@@ -36,6 +36,12 @@ class SourceState {
     }).catch(() => this.emit({ inspectError: true })).finally(() => { this.inspection = undefined; });
     return this.inspection;
   };
+  recordFulltext = (rows: api.InspectedSource[]) => {
+    if (!rows.length) return;
+    const found = new Set(rows.map(row => row.paper_key));
+    this.emit({ inspections: this.snapshot.inspections.map(row =>
+      row.needs_pdf_lookup && found.has(row.paper_key) ? { ...row, needs_pdf_lookup: false } : row) });
+  };
   refresh = (): Promise<void> => {
     if (this.query) return this.query;
     this.query = api.listSourceImports(this.context).then(rows => {
@@ -90,5 +96,5 @@ export function useSourceImportState(context: api.SourceContext, opened: boolean
   }, [key]);
   const snapshot = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
   useEffect(() => opened ? entry.poll() : undefined, [entry, opened]);
-  return { ...snapshot, refresh: entry.refresh, inspect: entry.inspect };
+  return { ...snapshot, refresh: entry.refresh, inspect: entry.inspect, recordFulltext: entry.recordFulltext };
 }

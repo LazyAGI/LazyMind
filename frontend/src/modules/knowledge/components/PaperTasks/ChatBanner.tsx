@@ -37,7 +37,7 @@ export default function AcademicChatBanner({ conversation }: {
                 const next: AcademicChatSummary = res.data.data || res.data;
                 setContext(next);
                 if (next.kind === 'expansion' && !next.next_conversation_id && (
-                    !['completed', 'failed', 'canceled'].includes(next.status || '') || next.goal === 'review' && next.status === 'completed'
+                    !['completed', 'canceled'].includes(next.status || '') || next.goal === 'review' && next.status === 'completed'
                 ))
                     schedule();
             }

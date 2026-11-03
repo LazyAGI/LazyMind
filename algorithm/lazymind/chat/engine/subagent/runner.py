@@ -1012,6 +1012,9 @@ def _build_subagent_plan(
         if execution_deadline is not None and time.monotonic() >= execution_deadline:
             raise RuntimeError('WORKFLOW_STEP_TIMEOUT: execution budget exhausted')
 
+    def observe_tool_call_budget(budget):
+        ctx.tool_call_budget = budget
+
     def execution_budget_notice():
         seconds = max(0, round(execution_deadline - time.monotonic()))
         return (f'本步骤剩余执行预算约 {seconds} 秒。接近上限时停止新增调查，'
@@ -1061,6 +1064,7 @@ def _build_subagent_plan(
             model_candidates=tuple(model_fallback_candidates or ()),
             initial_model_switch=model_fallback_initial_switch,
             tool_failure_limits={**WORKFLOW_TOOL_FAILURE_LIMITS, **extension.tool_failure_limits},
+            tool_call_budget_observer=observe_tool_call_budget,
             tool_call_limits={
                 **WORKFLOW_TOOL_CALL_LIMITS, **extension.tool_call_limits,
                 **(execution_policy.calls if execution_policy else {}),
@@ -1635,6 +1639,7 @@ async def run_subagent_stream(
         workflow_control: Dict[str, str] = {}
         declared_workflow_tools = set(_coerce_str_list(ctx.params.get('legacy_tools')))
         terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
+        workflow_terminal_completed = False
         # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
         workflow_tool_in_flight = False
 
@@ -1700,6 +1705,8 @@ async def run_subagent_stream(
                             _pending_text = ''
                         durable_step = _persist_step(ctx, step_seq, item)
                         step_seq += 1
+                        if tag == 'tool_calls':
+                            workflow_terminal_completed = False
                         if tag == 'tool_results' and extension.on_tool_results is not None:
                             extension.on_tool_results(item, extension_state)
                         if effective_agent_type == 'workflow_step' and tag == 'tool_results':
@@ -1712,6 +1719,11 @@ async def run_subagent_stream(
                                 if _signal_task_cancel(task_id):
                                     clear_cancel_queue = False
                                 raise RuntimeError(terminal_error)
+                            workflow_terminal_completed = any(
+                                result.get('name') in terminal_workflow_tools
+                                for result in item.get('tool_results') or []
+                                if isinstance(result, dict)
+                            )
                             candidate_control = _workflow_control_from_tool_results(
                                 item, declared_workflow_tools,
                             )
@@ -1848,11 +1860,14 @@ async def run_subagent_stream(
             yield 'data: [DONE]\n\n'
             return
 
-        summary = _result_summary(final_result, required_output_keys)
-        # An empty output contract does not prove that a side effect completed.
-        # Review uncertain outcomes for Workflow steps too, before Core can turn
-        # success into a human-approval checkpoint or release downstream steps.
-        if not required_output_keys or _has_completion_concern(final_result):
+        summary = ('本步骤结果已保存。'
+                   if effective_agent_type == 'workflow_step'
+                   and workflow_terminal_completed and required_output_keys
+                   else _result_summary(final_result, required_output_keys))
+        # A successful terminal publisher with required outputs has already delivered.
+        # Keep main's completion review for missing output contracts or uncertain
+        # non-terminal outcomes, including side effects without artifacts.
+        if not required_output_keys or (not workflow_terminal_completed and _has_completion_concern(final_result)):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=(agent._model_fallback_state.raw_llm if agent is not None else llm),
                 objective=ctx.objective + '\n'.join(_build_intent_context_section(ctx.params)),

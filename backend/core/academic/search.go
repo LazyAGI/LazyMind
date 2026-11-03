@@ -21,6 +21,22 @@ type paperSearchResponse struct {
 	Mock     bool            `json:"mock"`
 }
 
+func searchQueryReceipts(searches []paperDiscovery) []map[string]any {
+	receipts := make([]map[string]any, 0, len(searches))
+	for _, search := range searches {
+		ids := make([]string, 0, len(search.Papers))
+		for _, paper := range search.Papers {
+			ids = append(ids, paper.PaperID)
+		}
+		id := search.CacheKey
+		if id == "" {
+			id = sourceHash(map[string]any{"query": search.Query, "mode": search.Mode, "paper_id": search.PaperID, "created_at": search.CreatedAt})
+		}
+		receipts = append(receipts, map[string]any{"id": id, "query": search.Query, "mode": search.Mode, "paper_id": search.PaperID, "created_at": search.CreatedAt, "sources": search.Sources, "paper_ids": ids})
+	}
+	return receipts
+}
+
 type sourceSearchPage struct {
 	request paperSearchRequest
 	key     string
@@ -120,7 +136,7 @@ func saveSearchPages(ctx context.Context, user string, record orm.AcademicExpans
 					if err != nil {
 						return err
 					}
-					ref := paperRef(work)
+					ref := documentPaperRef(paperRef(work), marshal(metadata.Work))
 					ref.SourceVersion, ref.SourceProvider = metadata.Version, metadata.Work.Provider
 					ref.PaperURL = metadata.PaperURL
 					if len(metadata.Candidates) > 0 {
@@ -193,6 +209,9 @@ func fetchPaperPage(ctx context.Context, record orm.AcademicExpansion, source st
 		outcome = searchOutcome{Source: source, Status: "ok", Count: len(page.Papers) + len(page.Leads), PaperCount: len(page.Papers), LeadCount: len(page.Leads), TotalCount: page.TotalCount, HasMore: page.Next != nil}
 		if outcome.Count == 0 {
 			outcome.Status = "empty"
+			if request.Mode == "references" || request.Mode == "citations" {
+				outcome.Limitation = "引用索引本次未返回记录；这不能证明没有前序或后续工作。请继续核对原文参考文献，并用精确题名、别名和命名机制补查。"
+			}
 		}
 	}
 	outcome.ElapsedMS = time.Since(start).Milliseconds()

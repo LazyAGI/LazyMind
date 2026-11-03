@@ -23,7 +23,7 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 明确指定的版本必须与返回版本一致。未指定版本时，查询最新版本并锁定官方响应中的实际版本。成功结果的 `version` 始终非空，`abs_url` 与 `pdf_url` 根据经过校验的实际编号生成，例如 `https://arxiv.org/pdf/2404.06654v3`。不采信响应中的任意下载链接，不跟随 API 重定向，不降级到第三方元数据或占位标题。
 
-返回 `Metadata` 使用 snake_case JSON：`title`、`authors`、`year`、`abstract`、可选的 `doi`、`venue`、`base_id`、`version`、`abs_url`、`pdf_url`。`venue` 为文献来源 `arXiv`；`year` 来自实际 `published` 日期。缺少 DOI 时不生成 DOI。
+返回 `Metadata` 使用 snake_case JSON：`title`、`authors`、`year`、`published_at`、可选的 `source_version_date`、`abstract`、可选的 `doi`、`venue`、`base_id`、`version`、`abs_url`、`pdf_url`。`venue` 为文献来源 `arXiv`；`year` 来自实际 `published` 日期。`published_at` 保留首次公开时间，`source_version_date` 保留 Atom `updated` 提供的当前来源版本时间，均为 RFC3339；未提供版本时间时省略该字段。缺少 DOI 时不生成 DOI。
 
 `NewClientWithOptions` 仅用于可信代码的依赖注入和本地 HTTP 测试；不能把请求中的地址传给 `APIBaseURL`。正常业务使用 `NewClient()`。
 

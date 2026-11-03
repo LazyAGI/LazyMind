@@ -347,7 +347,17 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     // Keep the selected result snapshot stable while polling live content and import status.
     const source = detail && selection?.source.record.id === detail.record.id
         ? (detail.record.version === selection.source.record.version ? { ...detail, record: selection.source.record } : selection.source) : detail;
+    const listMode = source?.record.report?.list_mode;
+    const groupedList = listMode === 'balanced' || (source?.record.goal === 'expansion'
+        && source.record.budget_mode === 'deep' && Array.isArray(source.record.report?.recommendations));
+    const recommendations = new Map(source?.record.report?.recommendations?.map(item => [item.paper_id, item]));
     const papers = source ? distinctPapers(source.record.result.papers || []) : [];
+    const paperDirections = source?.record.result.selected_directions || [];
+    if (groupedList) {
+        const directionOrder = (paper: WorkflowPaper) => paper.is_seed ? -1
+            : paperDirections.indexOf(recommendations.get(paper.paper.paper_id)?.direction || '');
+        papers.sort((a, b) => directionOrder(a) - directionOrder(b));
+    }
     const retryableContents = source ? papers.filter(item => !contentReady(source, item.paper.paper_id)
         && !source.contents.some(content => content.paper_id === item.paper.paper_id && ['pending', 'processing'].includes(content.status))) : [];
     const retryContents = async (target: ExpansionDetail, ids: string[]) => {
@@ -576,7 +586,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         description: t(selectionFailure ? 'paperTasks.materialPending' : 'paperTasks.reviewPreparing') }));
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch && ['expansion', 'review'].includes(launch.kind) ? '开始初步调研' : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
+        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' ? t('paperTasks.expansionDepth.start') : launch?.kind === 'review' ? t('paperTasks.expansionDepth.startResearch') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy} onCancel={() => !busy && !topicBusy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
@@ -606,10 +616,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <Switch checked={expansionEnabled} onChange={setExpansionEnabled} disabled={busy || topicBusy} aria-label={t('paperTasks.enableExpansion')} />
             </div>}
             {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <ResearchDepth value={budgetMode} onChange={setBudgetMode} hint={launch.kind === 'review' ? t('paperTasks.reviewFlow.depthHint') : undefined} />
-                <p className="paper-task-launch-flow-hint"><BranchesOutlined />{launch.kind === 'review' ? t('paperTasks.reviewFlow.directionsHint') : '有多个方向时请你选择；只有一个方向时自动继续拓展。'}</p>
-                {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message="可使用当前配置开始调研" description={<>
-                  {!capabilities.openalex_key && <div>OpenAlex 使用基础访问，部分检索深度与托管全文受限。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">配置 OpenAlex</Link></div>}
+                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'} />
+                {launch.kind === 'review' && <p className="paper-task-launch-flow-hint"><BranchesOutlined />{t('paperTasks.reviewFlow.directionsHint')}</p>}
+                {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message={t(capabilities.openalex_key ? 'paperTasks.expansionDepth.searchConfiguration' : 'paperTasks.expansionDepth.basicSearch')} description={<>
+                  {!capabilities.openalex_key && <div>{t('paperTasks.expansionDepth.openalexBenefits')} <Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">{t('paperTasks.expansionDepth.configureOpenalex')}</Link></div>}
                   {!capabilities.sciverse && <div>Sciverse 检索未启用。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=sciverse">配置 Sciverse</Link></div>}
                 </>} />}
             </Space>}
@@ -631,7 +641,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 extra={detail ? <Button type="text" danger disabled={busy} onClick={confirmDeleteExpansion}>{t('paperTasks.deleteResult')}</Button> : undefined}>
                 {detail && <>
                     <div className="paper-expansion-result-heading">
-                        <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
+                        <div className="paper-expansion-title-group">
+                            <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
+                            {!reviewDetail && detail.record.budget_mode && <Tag color="blue">{t(`paperTasks.expansionDepth.${detail.record.budget_mode}.label`)}</Tag>}
+                        </div>
                         {['preparing', 'awaiting_info', 'awaiting_confirmation', 'preparation_failed'].includes(detail.record.status) && <PaperTaskStatus status={detail.record.status}>{statusLabel(detail.record.status)}</PaperTaskStatus>}
                     </div>
                     {detail.chat_status !== 'available' && detail.chat_status !== 'uncreated' && <Alert type="warning" message={t(detail.chat_status === 'trashed' ? 'paperTasks.expansionTrashed' : 'paperTasks.expansionDeleted')} />}
@@ -649,7 +662,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                         <Tooltip title={reviewReason} trigger={['hover', 'focus']}><span tabIndex={reviewReason ? 0 : undefined}><Button type="primary" disabled={!!reviewReason} onClick={() => openConfirmation('review')}>{t('paperTasks.generateReview')}</Button></span></Tooltip>
                         <Tooltip title={bulkImportReason} trigger={['hover', 'focus']}><span tabIndex={bulkImportReason ? 0 : undefined}><Button disabled={!!bulkImportReason} onClick={() => openConfirmation('import')}>{t('paperTasks.bulkImport', { count: importable.length })}</Button></span></Tooltip>
                         {!!retryableContents.length && <Button loading={retryingContents} disabled={busy || !!confirmation || source.record.version !== detail.record.version}
-                            onClick={() => void retryContents(source, retryableContents.map(item => item.paper.paper_id))}>{t('paperTasks.retryMissingContents', { count: retryableContents.length })}</Button>}
+                            onClick={() => void retryContents(source, retryableContents.map(item => item.paper.paper_id))}>{t(listMode ? 'paperTasks.prepareMissingContents' : 'paperTasks.retryMissingContents', { count: retryableContents.length })}</Button>}
                         <span className="paper-expansion-result-selection" aria-live="polite">{t('paperTasks.selectedCount', { count: selection?.selected.length || 0 })}</span>
                     </div>
 
@@ -675,7 +688,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                               <h5>{t('paperTasks.paperAnalysis.keyContribution')}</h5>
                               <Typography.Paragraph>{item.key_contribution}</Typography.Paragraph>
                             </section>}
-                            {!relationFields.some(field => item[field]?.trim()) && !item.key_contribution?.trim() && <Typography.Text type="secondary">{t('paperTasks.workflowResult.noAnalysis')}</Typography.Text>}
+                            {!listMode && !relationFields.some(field => item[field]?.trim()) && !item.key_contribution?.trim() && <Typography.Text type="secondary">{t('paperTasks.workflowResult.noAnalysis')}</Typography.Text>}
                             {item.paper.abstract && <details className="paper-expansion-paper-fold">
                               <summary>{t('paperTasks.paperAnalysis.abstract')}</summary>
                               <Typography.Paragraph>{item.paper.abstract}</Typography.Paragraph>
@@ -697,8 +710,14 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                         } }}
                         rowSelection={{ selectedRowKeys: selection?.selected || [], onChange: changeSelection, getCheckboxProps: (item: WorkflowPaper) => ({ disabled: busy || !!confirmation, 'aria-label': t('paperTasks.selectPaper', { title: item.paper.title || item.paper.paper_id }) }) }}
                         columns={[
+                        ...(groupedList ? [{
+                            title: t('paperTasks.workflowResult.searchDirections'),
+                            width: 140,
+                            render: (_: unknown, item: WorkflowPaper) => recommendations.get(item.paper.paper_id)?.direction,
+                        }] : []),
                         { title: t('paperTasks.paper'), render: (_: unknown, item: WorkflowPaper) => {
                             const title = item.paper.title || item.paper.paper_id;
+                            const reason = recommendations.get(item.paper.paper_id)?.reason;
                             const expanded = expandedPaperIds.includes(item.paper.paper_id);
                             const detailsLabel = t(`paperTasks.paperAnalysis.${expanded ? 'hideDetails' : 'showDetails'}`);
                             const document = currentPaperDocument(source, item, previewItem(source, item));
@@ -720,6 +739,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                             return title;
                             })();
                             return <div className="paper-expansion-paper-title">{titleLink}
+                              {reason && <div className="paper-expansion-muted">{reason}</div>}
                               <div className="paper-expansion-paper-meta">
                                 {item.is_seed && <Tag color="purple" bordered={false} className="paper-expansion-seed-tag" icon={<BranchesOutlined />}>{t('paperTasks.paperAnalysis.seed')}</Tag>}
                                 <span>{[item.paper.year, item.paper.venue].filter(Boolean).join(' · ')}</span>

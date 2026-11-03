@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 	"lazymind/core/store"
 )
 
-const extractorVersion = "bibliography-rules-v3-source-metadata"
+const extractorVersion = "bibliography-rules-v4-author-boundaries"
 
 var numberedReferenceStartPattern = regexp.MustCompile(`(?m)^\s*(?:[-•]\s*)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])\s+`)
 var bulletReferenceStartPattern = regexp.MustCompile(`(?m)^\s*([-•])\s+`)
@@ -296,37 +297,52 @@ func splitReferences(section string) []extractedReference {
 		locs = indices
 	}
 
-	// A lone bracket-like line can occur inside an author-year citation. It is
-	// not enough to classify the whole bibliography as numbered.
-	numbered := len(locs) >= 2
+	// Bare numbers must form a citation sequence. Page ranges and wrapped URL
+	// suffixes (434., 2378.) are not evidence of a numbered bibliography.
+	numbered := len(bracketed) >= 2 || len(bracketed) == 1 && strings.TrimSpace(section[:bracketed[0][0]]) == ""
+	if !numbered && len(locs) >= 2 {
+		first, _ := strconv.Atoi(section[locs[0][4]:locs[0][5]])
+		numbered = first <= 2
+		for i := 1; i < len(locs) && numbered; i++ {
+			previous, _ := strconv.Atoi(section[locs[i-1][4]:locs[i-1][5]])
+			current, _ := strconv.Atoi(section[locs[i][4]:locs[i][5]])
+			numbered = current == previous+1
+		}
+	}
 	if !numbered {
 		locs = bulletReferenceStartPattern.FindAllStringSubmatchIndex(section, -1)
 	}
 	items := make([]extractedReference, 0, len(locs))
 	if len(locs) == 0 {
-		paragraphs := regexp.MustCompile(`\n\s*\n`).Split(section, -1)
-		// Author-year bibliographies are commonly unnumbered. pdf.js preserves
-		// visual line endings but not paragraph gaps, so use a conservative
-		// author-name boundary when blank paragraphs are unavailable.
-		if len(paragraphs) <= 1 {
-			authorStart := regexp.MustCompile(`^[A-Z][A-Za-z'’.-]+,\s+(?:[A-Z](?:\.|,)|[A-Z][a-z]+)`)
-			paragraphs = nil
-			current := ""
-			for _, line := range strings.Split(section, "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
-				}
-				if current != "" && authorStart.MatchString(line) {
-					paragraphs = append(paragraphs, current)
-					current = line
-				} else {
-					current = strings.TrimSpace(current + " " + line)
-				}
+		// A name-looking continuation is still an author list until the current
+		// citation has a year. This also preserves author lists across page breaks.
+		authorStart := regexp.MustCompile(`^(?:[A-Z][A-Za-z'’.-]+,\s+(?:[A-Z](?:\.|,)|[A-Z][a-z]+)|[A-Z]\.\s+[A-Z][\p{L}'’.-]+|[A-Z][\p{L}0-9&'’ -]+\.\s+[A-Z])`)
+		pageNumber := regexp.MustCompile(`^\d+$`)
+		continuationStart := regexp.MustCompile(`^[a-z0-9]`)
+		paragraphs := []string{}
+		current := ""
+		gap := false
+		for _, line := range strings.Split(section, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				gap = true
+				continue
 			}
-			if current != "" {
+			if pageNumber.MatchString(line) {
+				continue
+			}
+			complete := extractYear(current) != 0
+			// Blank gaps delimit entries too, except when an author/title continues
+			// on the next PDF page before its publication year appears.
+			if current != "" && complete && (authorStart.MatchString(line) || gap && !strings.HasPrefix(line, "https") && !strings.HasPrefix(line, "http") && !continuationStart.MatchString(line)) {
 				paragraphs = append(paragraphs, current)
+				current = ""
 			}
+			current = strings.TrimSpace(current + " " + line)
+			gap = false
+		}
+		if current != "" {
+			paragraphs = append(paragraphs, current)
 		}
 		for i, paragraph := range paragraphs {
 			raw := strings.Join(strings.Fields(paragraph), " ")
@@ -347,7 +363,7 @@ func splitReferences(section string) []extractedReference {
 		if len(raw) < 10 {
 			continue
 		}
-		key := ""
+		key := strconv.Itoa(i + 1)
 		if numbered {
 			for _, pair := range [][2]int{{loc[2], loc[3]}, {loc[4], loc[5]}} {
 				if pair[0] >= 0 {
@@ -440,6 +456,11 @@ func extractDocumentReferences(ctx context.Context, r *http.Request, userID, dat
 	}
 	byDOI, byArxiv, byRaw := map[string]orm.AcademicReference{}, map[string]orm.AcademicReference{}, map[string]orm.AcademicReference{}
 	for _, ref := range previous {
+		// Earlier extraction versions could combine several papers into one row.
+		// Never carry that row's resolved identity into the corrected entries.
+		if conflictingReferenceIDs(ref.RawText) {
+			continue
+		}
 		if ref.DOINormalized != "" {
 			byDOI[ref.DOINormalized] = ref
 		}
@@ -667,7 +688,7 @@ func resolveReference(ctx context.Context, tx *gorm.DB, ref *orm.AcademicReferen
 }
 
 func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.AcademicReference, allowExternal bool) (orm.AcademicWork, string, string, error) {
-	if !allowExternal && ref.ResolvedWorkID != "" {
+	if !allowExternal && ref.ResolvedWorkID != "" && !conflictingReferenceIDs(ref.RawText) {
 		var existing orm.AcademicWork
 		if err := tx.WithContext(ctx).Where("id = ?", ref.ResolvedWorkID).Take(&existing).Error; err == nil {
 			return existing, "id", ref.ResolutionStatus, nil
@@ -681,6 +702,10 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 }
 
 func referenceMetadata(ctx context.Context, ref *orm.AcademicReference, allowExternal bool) (WorkInput, error) {
+	if conflictingReferenceIDs(ref.RawText) {
+		return WorkInput{}, errConflictingPaperIdentifiers
+	}
+
 	input := WorkInput{Title: citationTitle(ref.RawText), Year: extractYear(ref.RawText), DOI: ref.DOINormalized, ArxivID: ref.ArxivIDBase}
 	_ = json.Unmarshal(ref.AuthorsJSON, &input.Authors)
 	if input.Title == "" {
@@ -1387,6 +1412,33 @@ func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, 
 		}
 	}
 	updates := map[string]any{}
+	var provenance map[string]any
+	_ = json.Unmarshal(row.ProvenanceJSON, &provenance)
+	if provenance == nil {
+		provenance = map[string]any{}
+	}
+	changed := false
+	for _, key := range []string{"published_at", "source_version_date"} {
+		date, _ := in.Provenance[key].(string)
+		if date == "" {
+			continue
+		}
+		existing, _ := provenance[key].(string)
+		if key == "published_at" && existing != "" && existing <= date {
+			continue
+		}
+		if key == "source_version_date" && provenance["pdf_version"] != nil && provenance["pdf_version"] != in.Provenance["pdf_version"] {
+			continue
+		}
+		if date != existing {
+			provenance[key] = date
+			changed = true
+		}
+	}
+	if changed {
+		row.ProvenanceJSON = marshal(provenance)
+		updates["metadata_provenance_json"] = row.ProvenanceJSON
+	}
 	if row.Abstract == "" && in.Abstract != "" {
 		row.Abstract = in.Abstract
 		updates["abstract"] = in.Abstract

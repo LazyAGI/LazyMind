@@ -95,20 +95,25 @@ function captureDownload() {
         return content;
     };
 }
-it('shows persisted paper import methods and sources by default without borrowing attachment provenance', async () => {
+it('shows paper import methods and sources only in detail', async () => {
     const data = readLibrary(datasetId);
     Object.assign(data.papers[0], { importMethod: 'bibliography', source: 'local' });
     Object.assign(data.attachments[0], { importMethod: 'upload', sourceProvider: 'upload' });
     Object.assign(data.papers[1], { importMethod: 'conversation', source: 'arxiv' });
     writeLibrary(datasetId, data);
-    const view = await renderLibrary();
-    const rows = within(screen.getByRole('table', { name: '论文列表' }));
-    expect(within(rows.getByRole('row', { name: /选择 Folder paper/ })).getByLabelText('导入方式与来源')).toHaveTextContent('题录导入 · 本地');
-    expect(within(rows.getByRole('row', { name: /选择 Other favorite/ })).getByLabelText('导入方式与来源')).toHaveTextContent('对话来源导入 · arXiv');
-    expect(within(rows.getByRole('row', { name: /选择 Unfiled paper/ })).getByLabelText('导入方式与来源')).toHaveTextContent('未记录 · 未记录');
-    view.unmount();
     await renderLibrary();
-    expect(within(screen.getByRole('row', { name: /选择 Folder paper/ })).getByLabelText('导入方式与来源')).toHaveTextContent('题录导入 · 本地');
+    const rows = within(screen.getByRole('table', { name: '论文列表' }));
+    expect(rows.queryByText(/题录导入|对话来源导入|未记录/)).not.toBeInTheDocument();
+    expect(rows.queryByText('本地')).not.toBeInTheDocument();
+    fireEvent.click(rows.getByRole('button', { name: 'Folder paper' }));
+    const detail = within(await screen.findByRole('dialog', { name: '文献详情' }));
+    expect(detail.getByLabelText('论文导入信息')).toHaveTextContent('题录导入');
+    expect(detail.getByLabelText('论文导入信息')).toHaveTextContent('本地');
+    fireEvent.click(detail.getByRole('button', { name: '关闭' }));
+    fireEvent.click(rows.getByRole('button', { name: 'Other favorite' }));
+    const imported = within(await screen.findByRole('dialog', { name: '文献详情' })).getByLabelText('论文导入信息');
+    expect(imported).toHaveTextContent('对话来源导入');
+    expect(imported).toHaveTextContent('arXiv');
 });
 function folderTitle(name: RegExp): HTMLElement {
     return browse().getByText(name, { selector: '.paper-directory-node-name' }).closest('.paper-directory-folder-title') as HTMLElement;
