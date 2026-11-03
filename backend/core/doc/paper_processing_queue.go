@@ -68,6 +68,22 @@ func runPaperProcessing(ctx context.Context, job asyncjob.Job, _ asyncjob.Report
 	if _, err := preparationRequest(ctx, p.UserID, readingPreparationPayload{DatasetID: p.DatasetID}); err != nil {
 		return asyncjob.Result{Permanent: true}, err
 	}
+	// Before bounded preparation existed, import-origin jobs queued the empty
+	// requested level and inherited the dataset default. Explicit ensure and the
+	// bounded chat-preparation worker always request ProcessingLevelParsed.
+	// Retire those legacy paper import jobs without starting paid work on upgrade.
+	if p.Level == "" {
+		var dataset orm.Dataset
+		if err := store.DB().WithContext(ctx).Where("id=? AND deleted_at IS NULL", p.DatasetID).Take(&dataset).Error; err != nil {
+			return asyncjob.Result{Permanent: true}, err
+		}
+		if dataset.Scene == "academic_papers" {
+			if _, err := SubmitOriginalTask(ctx, DatasetCatalogCaller{UserID: p.UserID}, p.DatasetID, p.TaskID); err != nil {
+				return asyncjob.Result{Permanent: true}, err
+			}
+			return asyncjob.Result{ResultJSON: mustJSON(map[string]string{"status": "not_requested", "reason": "paper import preparation is owned by the bounded reading scheduler"})}, nil
+		}
+	}
 	results, err := startParseTasksAtLevel(context.WithValue(ctx, paperProcessingWorker{}, true), p.UserID, p.DatasetID, []string{p.TaskID}, p.Level)
 	if err == nil && (len(results) != 1 || results[0].Status != "STARTED") {
 		err = fmt.Errorf("processing submission failed")

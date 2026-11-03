@@ -1428,6 +1428,9 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 	var dataset orm.Dataset
 	_ = store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error
 	storeOnly := effectiveProcessingLevel(dataset.ProcessingLevel) == ProcessingLevelStored
+	// Page uploads finish via tasks:start. Their initial parse task is import
+	// bookkeeping, not explicit paper preparation; the bounded scheduler owns it.
+	storeOriginalOnly := storeOnly || dataset.Scene == "academic_papers"
 
 	for _, rawTaskID := range taskIDs {
 		taskID := strings.TrimSpace(rawTaskID)
@@ -1455,7 +1458,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 
 		switch TaskType(strings.TrimSpace(taskRow.TaskType)) {
 		case TaskTypeParse, TaskTypeParseUploaded:
-			if !storeOnly && !systemdeps.PythonComponentActive("rag") {
+			if !storeOriginalOnly && !systemdeps.PythonComponentActive("rag") {
 				result := StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName,
 					Status: "STARTED", SubmitStatus: "ACCEPTED", Message: "native parsing and chunks saved; vector indexing deferred"}
 				if err := prepareBaseDocument(r, datasetID, taskRow); err != nil {
@@ -1464,7 +1467,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 				resultsByTaskID[taskID] = result
 				continue
 			}
-			if storeOnly {
+			if storeOriginalOnly {
 				var ext taskExt
 				_ = json.Unmarshal(taskRow.Ext, &ext)
 				ext.TaskState = string(TaskStateSucceeded)
