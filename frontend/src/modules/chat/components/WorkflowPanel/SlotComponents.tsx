@@ -5409,13 +5409,20 @@ function SlotPaperExpansion({ slot, session, slotId, revisionCount, onRefresh, r
   const { t } = useTranslation();
   const artifact = usePaperArtifactSource(slot);
   const data = useMemo(() => parsePaperExpansionArtifact(artifact.source), [artifact.source]);
+  // Older screening outputs have no saved diff. Only compare an upstream
+  // snapshot that predates this output, never a replacement from a later run.
+  const baselineSlot = slotId === 'screened_candidates' && data && !data.selection
+    ? session.slots?.find(item => item.slot === 'candidate_set' && item.selected && item.created_at <= slot.created_at)
+    : undefined;
+  const baselineArtifact = usePaperArtifactSource(baselineSlot);
+  const baseline = useMemo(() => parsePaperExpansionArtifact(baselineArtifact.source), [baselineArtifact.source]);
   if (artifact.pending) return <SlotPending type='text' />;
   if (artifact.failed) return <div className='workflow-slot workflow-slot--paper-expansion' role='alert'>
     {t('chat.slots.contentLoadFailed')} <button type='button' onClick={artifact.retry}>{t('common.retry')}</button>
   </div>;
   return <div className='workflow-slot workflow-slot--paper-expansion'>
     {data && canDisplayPaperExpansion(slotId, data)
-      ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} />
+      ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} baseline={baseline} />
       : <pre className='workflow-slot__text'>{artifact.source}</pre>}
     <div className='workflow-slot__text-meta'>
       <ArtifactSourceButton value={artifact.source} />

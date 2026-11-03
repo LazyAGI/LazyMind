@@ -554,6 +554,30 @@ def test_unchecked_fields_and_failed_forward_queries_cannot_mark_research_comple
     assert checked['coverage_gaps'][0]['reason']
 
 
+@pytest.mark.parametrize('query_paper,complete', [('a', True), ('outside-topic', False)])
+def test_topic_only_research_uses_its_investigation_papers(lineage, monkeypatch, query_paper, complete):
+    module, ctx, events, _, args = lineage
+    for paper in ctx.params['remote_inputs']['candidate_set']['papers']:
+        paper['is_seed'] = False
+    args['research_structure']['nodes'].append({
+        'paper_id': 'a', 'direction_id': 'method', 'branch_question': 'Original mechanism?',
+        'reason': 'Representative paper discovered for the topic'})
+    saved = module._read_expansion_context('exp')
+    saved['source_queries'][1]['paper_id'] = query_paper
+    monkeypatch.setattr(module, '_read_expansion_context', lambda _: saved)
+    monkeypatch.setattr(module, '_verify_claims', lambda rows, allowed, **kwargs: [_supported(row) for row in rows])
+    checked = module.academic_check_relations(**args)
+    assert checked['complete'] is complete
+    assert checked['can_submit'] is complete
+    if complete:
+        module.academic_submit_relations(check_id=checked['check_id'])
+        report = _artifact(events, 'expansion_report')
+        assert report['completion'] == {'status': 'complete', 'reason': 'verified'}
+        assert all(not row['is_seed'] for row in report['input']['papers'])
+    else:
+        assert [(gap['direction'], gap['kind']) for gap in checked['coverage_gaps']] == [('method', 'successor')]
+
+
 def test_runtime_source_changes_do_not_consume_semantic_checks_and_report_rejects_stale_content(lineage, monkeypatch):
     module, ctx, events, versions, args = lineage
     monkeypatch.setattr(module, '_verify_claims', lambda rows, allowed, **kwargs: [_supported(row) for row in rows])

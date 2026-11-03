@@ -10737,6 +10737,13 @@ const enUS = {
     },
   },
   paperTasks: {
+    researchCompletion: {
+      complete: 'Research complete',
+      incomplete: 'Research partially complete',
+      budget_exhausted: 'The research budget was exhausted. Some questions remain unresolved.',
+      technical_failure: 'Some evidence checks failed. The research is not yet complete.',
+      material_limited: 'Some required materials are unavailable. The research is not yet complete.',
+    },
     "paperListReady": "Your paper list is ready.",
     "prepareMissingContents": "Fetch unavailable full text ({{count}})",
     overview: {
@@ -10916,6 +10923,13 @@ const enUS = {
       "candidatePapers": "Candidate papers",
       "finalPapers": "Full paper list",
       "selectionChanges": "Screening and additions",
+      "screeningChanges": "Screening and additions",
+      "screeningSummary": "{{before}} candidates · {{retained}} retained · {{removed}} excluded · {{added}} added",
+      "supplementedPapers": "{{count}} papers added in this step",
+      "screenedOutPapers": "{{count}} papers excluded in this step",
+      "noRemovedPapers": "No papers excluded in this step.",
+      "reasonNotRecorded": "No exclusion reason recorded.",
+      "selectionUnavailable": "Changes for this step are currently unavailable.",
       "selectionSummary": "{{before}} before · {{retained}} retained · {{added}} added · {{removed}} removed",
       "noAddedPapers": "No papers added in this stage.",
       "removedPapers": "{{count}} removed papers",

@@ -18,7 +18,7 @@ runtime:
   - expansion_id
   completed_continue_steps:
   - expand_and_screen
-  completed_edit_routing: 同一范围继续查找回到 expand_and_screen；报告由已核验结果直接生成，不支持独立改写保存的报告。实质改变主题或方向时返回拓展记录准备并确认。
+  completed_edit_routing: 同一范围继续查找回到 expand_and_screen；报告由已核验结果直接生成，不支持独立改写保存的报告。正式执行后实质改变主题或方向时新建调研任务；仅初步调研阶段支持在原记录调整范围。
   execution_limits:
     expand_and_screen:
       rounds: 32

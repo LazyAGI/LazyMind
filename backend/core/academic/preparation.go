@@ -412,8 +412,14 @@ func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
 		if record.PreparationRevision != req.Revision {
 			return errors.New("准备内容已更新，请刷新后重试")
 		}
-		if record.Status == "preparing" || record.Status == "running" || record.Status == "pending" {
-			return errors.New("任务正在执行，请等待当前阶段结束")
+		if record.Status != "awaiting_info" && record.Status != "awaiting_confirmation" && record.Status != "preparation_failed" {
+			return errors.New("仅初步调研阶段支持调整研究范围；正式执行后如需改变主题或方向，请新建任务")
+		}
+		if req.Action == "revise" && record.Status != "awaiting_confirmation" && record.Status != "preparation_failed" {
+			return errors.New("请先回答当前待补充问题")
+		}
+		if req.Action == "retry" && record.Status != "preparation_failed" {
+			return errors.New("仅初步调研失败后支持重试")
 		}
 		if req.Action == "answer" {
 			if record.Status != "awaiting_info" {

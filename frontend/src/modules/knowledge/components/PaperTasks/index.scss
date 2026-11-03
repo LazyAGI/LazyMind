@@ -200,11 +200,6 @@
   .ant-list-item-meta-description { font-size: 12px; }
 }
 .paper-expansion-section { border-bottom: 1px solid var(--color-border-secondary, #e5eaf1); }
-.paper-expansion-published-list .paper-workflow-scroll {
-  flex: none;
-  overflow: visible;
-  scrollbar-gutter: auto;
-}
 .paper-expansion-generated, .paper-expansion-section, .paper-expansion-stage {
   > summary { display: flex; align-items: center; gap: 9px; cursor: pointer; list-style: none; }
   > summary::-webkit-details-marker { display: none; }

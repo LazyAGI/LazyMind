@@ -22,7 +22,7 @@ steps:
 
       独立标准和深入档使用同一规则。沿每个确认方向分别查方法来源、同类方法和后续工作，复用确实回答该方向及该类问题的初调回执。查到同类方法不能替代对方法来源和后续工作的查找。收集可能相关的已登记候选，为下一步保留有用线索；本步完成逐方向首轮检索即交接，薄弱方向定点补查与正式筛选留给下一步。
 
-      综述任务在本阶段交付初步候选。围绕具体机制查种子引用、被引及不同路线，关键命名来源至少实际尝试精确题名、别名、标识符或原文引用身份解析。候选能供下一阶段继续补充证据时及时发布。
+      综述任务在本阶段交付初步候选。围绕具体机制查种子（无种子时查研究方向代表论文）的引用、被引及不同路线，关键命名来源至少实际尝试精确题名、别名、标识符或原文引用身份解析。候选能供下一阶段继续补充证据时及时发布。
 
       只提交已登记论文，去重且不以篇数为目标。搜索支持 keyword/references/citations；续查只传 expansion_id 和真实 next_cursor，遵守 retry_at。原文引用用 view="references"，需要解析身份时按 reference_keys 或 keywords 每批最多5条。引用索引空或失败不能证明没有前后作。清单不宣称关系已核验。
 
@@ -53,7 +53,7 @@ steps:
 
       对缺代表作、关键命名工作身份未解、或只找到同类而缺来源或后续的方向，沿引用/被引、别名、精确题名、DOI 或 arXiv 定点补查。只补入真实登记且相关的论文。覆盖已足时无需重复搜索；补查仍无合适结果的方向可以留空。达到预算或查询重复、偏题时发布已有结果，不追求篇数，不宣称关系已核验。
 
-      调用 academic_publish_stage 发布全部保留论文的有序 ID。recommendations 覆盖每篇非种子，包含 paper_id、原样的已确认 direction 和具体的相关性理由。decisions=[]，gaps=[]。不在此阶段做关系分析或生成报告。
+      调用 academic_publish_stage 发布全部保留论文的有序 ID。recommendations 覆盖每篇非种子，包含 paper_id、原样的已确认 direction 和具体的相关性理由。removal_reasons 为本步相对 candidate_set 剔除的每篇论文提供 {paper_id,reason}，说明偏题、重复或同质冗余的具体原因；无剔除传 []，不为制造筛选记录而删除论文。补入理由复用 recommendations，工具根据绑定候选集保存真实增删。decisions=[]，gaps=[]。不在此阶段做关系分析或生成报告。
       '
     tools:
     - academic_expansion_context
@@ -120,7 +120,7 @@ steps:
 
       - investigation：从 preparation.research_questions/named_clues 与 context.source_queries 已存真实回执建立各方向前序/后续/同层问题的实际调查记录，本阶段集中完成调查矩阵及逐条命名线索处置，不要求第一阶段预先提供
       investigation。逐准备研究问题记录一条，命名线索各处置一次；备注短句说明真实状态，不重复题录或检索日志。query_ids 只引用与该问题或线索直接相关的 context.source_queries
-      真实回执，不抄全部日志；queries 固定传空数组 []，检索依据仅通过真实 query_ids 关联，不重复或改写 query 字符串；relation_ids 引用本次对应关系 id。后续必须包括种子被引实际尝试和题名/机制精确补查；conclusion是调查备注，不可绕过核验发布新科学事实。关键结论必须成为relations/claims接受检查。
+      真实回执，不抄全部日志；queries 固定传空数组 []，检索依据仅通过真实 query_ids 关联，不重复或改写 query 字符串；relation_ids 引用本次对应关系 id。后续必须包括种子被引实际尝试；无用户种子时，查询该调查 paper_ids 中实际研究对象的被引。两种情况均须进行题名/机制精确补查；conclusion是调查备注，不可绕过核验发布新科学事实。关键结论必须成为relations/claims接受检查。
 
       check 返回 check_id/analysis_version、issues、coverage_gaps、checks、relations、semantic_round、can_submit 与 completion。逐项阅读本轮完整反馈；complete
       表示核验及调查是否完整；true 时可提交，false 时按反馈和剩余科学预算补查。若 completion.reason=budget_exhausted 且 can_submit=true，读完本轮完整反馈后立即用最新 check_id 调用 academic_submit_relations，不再补查、改写结论或重新生成完整参数。

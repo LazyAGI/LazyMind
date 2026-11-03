@@ -994,7 +994,8 @@ def _model_metrics():
 
 def academic_publish_stage(paper_ids: list[str], decisions: list[str], gaps: list[str],
                            investigation: list[Investigation] | None = None,
-                           recommendations: list[PaperRecommendation] | None = None):
+                           recommendations: list[PaperRecommendation] | None = None,
+                           removal_reasons: list[SelectionReason] | None = None):
     """Publish registered expansion candidates; canonical paper metadata is server-owned."""
     from lazymind.chat.engine.subagent.context import require_context
     ctx = require_context()
@@ -1041,6 +1042,12 @@ def academic_publish_stage(paper_ids: list[str], decisions: list[str], gaps: lis
             _invalid('recommendations must cover all non-seed papers')
         body['list_mode'] = mode
         body['recommendations'] = [by_paper[identity] for identity in paper_ids if identity in by_paper]
+    if screened:
+        before = {row['paper']['paper_id']: row for row in _result_body(_bound('candidate_set'))['papers']}
+        after = {row['paper']['paper_id']: row for row in body['papers']}
+        reasons = [{'paper_id': identity, 'reason': by_paper[identity]['reason']}
+                   for identity in after if identity not in before]
+        body['selection'] = _selection_changes(before, after, reasons + (removal_reasons or []))
     slot = 'screened_candidates' if screened else 'candidate_set'
     result = _publish_once(slot, body, 'academic_publish_stage')
     if body.get('list_mode') in {'fast', 'balanced'}:
@@ -1169,19 +1176,23 @@ def _lineage_input(analyses, selection_reasons=None):
     if frozen:
         return result, contents, supplied, {'before_count': len(before), 'changes': []}
     after = {row['paper']['paper_id']: row for row in result['papers']}
+    return result, contents, supplied, _selection_changes(before, after, selection_reasons)
+
+
+def _selection_changes(before, after, selection_reasons):
     changed = set(before) ^ set(after)
     reasons = {}
     if not isinstance(selection_reasons if selection_reasons is not None else [], list):
-        _invalid('selection_reasons must be an array')
+        _invalid('selection reasons must be an array')
     for row in selection_reasons or []:
         if (not isinstance(row, dict) or set(row) != {'paper_id', 'reason'}
                 or not isinstance(row.get('paper_id'), str)
                 or row['paper_id'] not in changed or row['paper_id'] in reasons
                 or not isinstance(row.get('reason'), str) or not row['reason'].strip()):
-            _invalid('selection_reasons must give one concrete reason per added or removed paper_id')
+            _invalid('selection reasons must give one concrete reason per added or removed paper_id')
         reasons[row['paper_id']] = row['reason'].strip()
     if set(reasons) != changed:
-        _invalid('selection_reasons must cover exactly every added or removed paper_id; '
+        _invalid('selection reasons must cover exactly every added or removed paper_id; '
                  'omitted candidates cannot be silently dropped')
     changes = []
     for identity in [*before, *after]:
@@ -1192,8 +1203,7 @@ def _lineage_input(analyses, selection_reasons=None):
             'action': 'removed' if identity in before else 'added',
             'paper': {key: copy.deepcopy(row[key]) for key in ('paper', 'is_seed', 'is_important')},
             'reason': reasons[identity]})
-    selection = {'before_count': len(before), 'changes': changes}
-    return result, contents, supplied, selection
+    return {'before_count': len(before), 'changes': changes}
 
 
 def _validate_sources(refs, allowed, max_positions=5):
@@ -1633,7 +1643,9 @@ def _check_relations(ctx, state, path, context, analyses, research_structure, re
                   and not row['verification'].get('verification_error')]
         actual_queries = [query_receipts[key] for key in item.get('query_ids', [])]
         if item['kind'] == 'successor':
-            cited = [row for row in actual_queries if row['mode'] == 'citations' and row['paper_id'] in seed_ids]
+            # Topic-only research follows the papers recorded for this investigation, not user seeds.
+            subjects = seed_ids or set(item['paper_ids'])
+            cited = [row for row in actual_queries if row['mode'] == 'citations' and row['paper_id'] in subjects]
 
             def successful(row):
                 return any(source['status'] in {'ok', 'empty'} for source in row.get('sources', []))
@@ -1649,7 +1661,7 @@ def _check_relations(ctx, state, path, context, analyses, research_structure, re
         adequate = adequate and not item['gaps'] and not item['unresolved_clues']
         if not adequate:
             reason = '；'.join([*item['unresolved_clues'], *item['gaps']]) or (
-                '后续调查尚缺种子被引尝试及成功精确补查' if item['kind'] == 'successor'
+                '后续调查尚缺研究对象的被引尝试及成功精确补查' if item['kind'] == 'successor'
                 else '尚无已支持关系承载该调查结论')
             missing.append({'direction': item['direction'], 'kind': item['kind'],
                             'question_id': item['question_id'], 'reason': reason})

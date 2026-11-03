@@ -1,10 +1,11 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { CheckOutlined, DownOutlined, ReadOutlined, RightOutlined } from '@ant-design/icons';
 import { Tag, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
-import type { PaperRecommendation, PaperSelectionChanges, PaperRelation, PaperResearchStructure, WorkflowPaper } from '@/modules/knowledge/api/paperWorkflows';
+import type { PaperInvestigation, PaperRecommendation, PaperSelectionChanges, PaperRelation, PaperResearchStructure, WorkflowPaper } from '@/modules/knowledge/api/paperWorkflows';
 import MarkdownViewer from '../MarkdownViewer';
 import PaperLineageView from './PaperLineageView';
+import PaperResearchCompletion from './PaperResearchCompletion';
 import { paperReportSections, visiblePaperAnalysis } from './paperReport';
 import './PaperExpansionArtifactView.scss';
 
@@ -100,13 +101,36 @@ function PaperList({ papers, analysis = false, reading, recommendations }: {
   </details>)}</div>;
 }
 
-/** Render only the saved artifact for this stage; selection changes are bound at publication. */
-export function PaperExpansionArtifactView({ slotId, data }: {
-  slotId: string; data: RecordValue;
+function SelectionChanges({ selection, screening = false, reading }: {
+  selection: PaperSelectionChanges; screening?: boolean; reading?: unknown;
 }) {
   const { t } = useTranslation();
   const tr = (key: string) => t(`paperTasks.workflowResult.${key}`);
-  const [showAllCandidates, setShowAllCandidates] = useState(false);
+  const additions = selection.changes.filter(change => change.action === 'added');
+  const removals = selection.changes.filter(change => change.action === 'removed');
+  return <Section title={tr(screening ? 'screeningChanges' : 'selectionChanges')} aside={t(`paperTasks.workflowResult.${screening ? 'screeningSummary' : 'selectionSummary'}`, {
+    before: selection.before_count, retained: selection.before_count - removals.length, added: additions.length, removed: removals.length,
+  })}>
+    {screening && <h4>{t('paperTasks.workflowResult.supplementedPapers', { count: additions.length })}</h4>}
+    {additions.length ? <>
+      {!screening && <Tag color='blue' bordered={false}>{tr('addedPaper')}</Tag>}
+      <PaperList papers={additions.map(change => change.paper)} analysis={!screening} reading={reading}
+        recommendations={new Map(additions.map(change => [change.paper.paper.paper_id, {
+          paper_id: change.paper.paper.paper_id, reason: change.reason,
+        }]))} />
+    </> : <p className='paper-workflow-muted'>{tr('noAddedPapers')}</p>}
+    {removals.length ? <details className='paper-workflow-notes'><summary>{t(`paperTasks.workflowResult.${screening ? 'screenedOutPapers' : 'removedPapers'}`, { count: removals.length })}<DownOutlined aria-hidden /></summary>
+      {removals.map(change => <div className='paper-workflow-change' key={change.paper.paper.paper_id}><PaperTitle item={change.paper} /><p>{change.reason || tr('reasonNotRecorded')}</p></div>)}
+    </details> : screening && <p className='paper-workflow-muted'>{tr('noRemovedPapers')}</p>}
+  </Section>;
+}
+
+/** Render only the saved artifact for this stage; selection changes are bound at publication. */
+export function PaperExpansionArtifactView({ slotId, data, baseline }: {
+  slotId: string; data: RecordValue; baseline?: RecordValue | null;
+}) {
+  const { t } = useTranslation();
+  const tr = (key: string) => t(`paperTasks.workflowResult.${key}`);
   const isReport = slotId === 'expansion_report';
   const isAnalysis = slotId === 'relation_analysis';
   const input = isAnalysis || isReport ? record(data.input) : data;
@@ -120,8 +144,6 @@ export function PaperExpansionArtifactView({ slotId, data }: {
   const narrative = useMemo(() => text(data.narrative), [data.narrative]);
   const sections = useMemo(() => paperReportSections(narrative), [narrative]);
   const selection = record(data.selection) as unknown as PaperSelectionChanges | null;
-  const additions = selection?.changes.filter(change => change.action === 'added') ?? [];
-  const removals = selection?.changes.filter(change => change.action === 'removed') ?? [];
   const directions = strings(input?.selected_directions);
   const savedDirections = Array.isArray(data.directions) ? data.directions : record(data.research_structure)?.directions;
   const questions = Array.isArray(savedDirections) ? savedDirections.map(record).filter(item => item !== null) : [];
@@ -129,6 +151,20 @@ export function PaperExpansionArtifactView({ slotId, data }: {
   const listMode = (slotId === 'candidate_set' || slotId === 'screened_candidates') ? data.list_mode : undefined;
   const recommendations = new Map((Array.isArray(data.recommendations) ? data.recommendations as PaperRecommendation[] : [])
     .map(item => [item.paper_id, item]));
+  const screeningSelection = useMemo(() => {
+    if (slotId !== 'screened_candidates' || selection) return selection;
+    const previous = papersIn(baseline);
+    if (!previous) return null;
+    const before = new Map(previous.map(item => [item.paper.paper_id, item]));
+    const after = new Set(papers.map(item => item.paper.paper_id));
+    const savedReasons = new Map((data.recommendations as PaperRecommendation[] | undefined)?.map(item => [item.paper_id, item.reason]));
+    return { before_count: before.size, changes: [
+      ...papers.filter(item => !before.has(item.paper.paper_id)).map(paper => ({
+        action: 'added' as const, paper, reason: savedReasons.get(paper.paper.paper_id) ?? '',
+      })),
+      ...previous.filter(item => !after.has(item.paper.paper_id)).map(paper => ({ action: 'removed' as const, paper, reason: '' })),
+    ] };
+  }, [slotId, selection, baseline, papers, data.recommendations]);
   const grouped = directions.map(direction => {
     const group = candidates.filter(item => recommendations.get(item.paper.paper_id)?.direction === direction);
     return <Section key={direction} title={direction} aside={count(group.length)}>
@@ -141,6 +177,7 @@ export function PaperExpansionArtifactView({ slotId, data }: {
       <PaperList papers={papers} analysis reading={reading} recommendations={recommendations} />}</details>;
   return <div className='paper-workflow-result'><div className='paper-workflow-scroll'>
     {isReport ? <>
+      <PaperResearchCompletion completion={data.completion as PaperInvestigation['completion']} />
       <Section title={tr('relationGraph')}>
         <PaperLineageView papers={papers} structure={structure} relations={relations}
           renderDetail={item => <PaperDetail item={item} analysis reading={reading} />} />
@@ -148,23 +185,18 @@ export function PaperExpansionArtifactView({ slotId, data }: {
       <Section title={tr('narrative')}>{sections.length ? sections.map((section, index) => section.title ? <details className='paper-workflow-report-direction' key={section.title} open={index === 0}><summary>{section.title}<RightOutlined aria-hidden /></summary><MarkdownViewer>{section.body}</MarkdownViewer></details> : <MarkdownViewer key='preface'>{section.body}</MarkdownViewer>) : <MarkdownViewer>{narrative}</MarkdownViewer>}</Section>
       {finalList}
     </> : isAnalysis ? <>
-      {data.list_mode !== 'deep' && selection && <Section title={tr('selectionChanges')} aside={t('paperTasks.workflowResult.selectionSummary', {
-        before: selection.before_count, retained: selection.before_count - removals.length, added: additions.length, removed: removals.length,
-      })}>
-          {additions.length ? additions.map(change => <div key={change.paper.paper.paper_id} className='paper-workflow-change'>
-            <Tag color='blue' bordered={false}>{tr('addedPaper')}</Tag><p>{change.reason}</p>
-            <PaperList papers={[change.paper]} analysis reading={reading} />
-          </div>) : <p className='paper-workflow-muted'>{tr('noAddedPapers')}</p>}
-          {!!removals.length && <details className='paper-workflow-notes'><summary>{t('paperTasks.workflowResult.removedPapers', { count: removals.length })}<DownOutlined aria-hidden /></summary>
-            {removals.map(change => <div className='paper-workflow-change' key={change.paper.paper.paper_id}><PaperTitle item={change.paper} /><p>{change.reason}</p></div>)}
-          </details>}
-      </Section>}
+      {data.list_mode !== 'deep' && selection && <SelectionChanges selection={selection} reading={reading} />}
       {finalList}
     </> : listMode === 'fast' || listMode === 'balanced' || listMode === 'deep' ? <>
-      {seedList}
-      {listMode === 'fast' ? <Section title={tr('finalPapers')} aside={count(candidates.length)}>
-        <PaperList papers={candidates} recommendations={recommendations} />
-      </Section> : grouped}
+      {slotId === 'screened_candidates' && (screeningSelection
+        ? <SelectionChanges selection={screeningSelection} screening />
+        : <p className='paper-workflow-muted'>{tr('selectionUnavailable')}</p>)}
+      <details className='paper-workflow-notes' open={listMode === 'fast'}><summary>{tr('finalPapers')} · {count(papers.length)}<DownOutlined aria-hidden /></summary>
+        {seedList}
+        {listMode === 'fast' ? <Section title={tr('candidatePapers')} aside={count(candidates.length)}>
+          <PaperList papers={candidates} recommendations={recommendations} />
+        </Section> : grouped}
+      </details>
     </> : <>
       <Section title={tr('searchDirections')} aside={t('paperTasks.workflowResult.selectedDirectionCount', { count: directions.length })}><div className='paper-workflow-scope'>
         <ul className='paper-workflow-directions' aria-label={tr('confirmedDirections')}>{directions.map((direction, index) => <li key={direction} className='paper-workflow-direction'>
@@ -172,8 +204,10 @@ export function PaperExpansionArtifactView({ slotId, data }: {
           {text(questions.find(question => question.name === direction)?.question) && <Typography.Paragraph ellipsis={{ rows: 3, expandable: 'collapsible', symbol: (expanded: boolean) => t(expanded ? 'paperTasks.overview.collapse' : 'paperTasks.overview.expand') }}>{text(questions.find(question => question.name === direction)?.question)}</Typography.Paragraph>}
         </li>)}</ul>
       </div></Section>
-      {!!seeds.length && <Section title={tr('seedPapers')} aside={count(seeds.length)}><PaperList papers={seeds} /></Section>}
-      <Section title={tr('candidatePapers')} aside={count(candidates.length)}><PaperList papers={showAllCandidates ? candidates : candidates.slice(0, 6)} />{candidates.length > 6 && <button type='button' className='paper-workflow-text-button paper-workflow-more' onClick={() => setShowAllCandidates(value => !value)}>{showAllCandidates ? tr('collapsePapers') : t('paperTasks.workflowResult.morePapers', { count: candidates.length - 6 })}</button>}</Section>
+      <details className='paper-workflow-notes'><summary>{tr('finalPapers')} · {count(papers.length)}<DownOutlined aria-hidden /></summary>
+        {seedList}
+        <Section title={tr('candidatePapers')} aside={count(candidates.length)}><PaperList papers={candidates} /></Section>
+      </details>
     </>}
   </div></div>;
 }

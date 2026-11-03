@@ -4,9 +4,9 @@ import { BranchesOutlined, CheckOutlined, DownOutlined } from '@ant-design/icons
 import { useTranslation } from 'react-i18next';
 import type { ExpansionDetail } from '../../api/paperWorkflows';
 import MarkdownViewer from '../MarkdownViewer';
-import { PaperExpansionArtifactView } from '@/modules/chat/components/WorkflowPanel/PaperExpansionArtifactView';
 import PreparationPanel, { expansionProgressStages } from './PreparationPanel';
 import PaperTaskStatus from './PaperTaskStatus';
+import PaperResearchCompletion from '@/modules/chat/components/WorkflowPanel/PaperResearchCompletion';
 
 export default function ExpansionDetails({ detail, statusLabel, onRefresh, onStart, children }: {
     children?: ReactNode; detail: ExpansionDetail; statusLabel: (status: string) => string; onRefresh: () => Promise<void>; onStart: (id: string) => void;
@@ -16,8 +16,6 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
     const processId = useId();
     const { record } = detail;
     const report = record.report;
-    const candidate = record.progress?.screened_candidates ?? record.progress?.candidate_set;
-    const publishedList = record.goal === 'expansion' && candidate?.list_mode === 'deep' ? candidate : undefined;
     const completed = record.status === 'completed';
     const preparing = ['preparing', 'awaiting_info', 'awaiting_confirmation', 'preparation_failed'].includes(record.status);
     const running = ['running', 'active'].includes(record.status);
@@ -58,10 +56,10 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
                     {t(processOpen ? 'paperTasks.overview.hideProcess' : 'paperTasks.overview.showProcess')}<DownOutlined aria-hidden rotate={processOpen ? 180 : 0} />
                 </Button>
             </div>
-            <Typography.Paragraph className="paper-expansion-progress-current">{completed ? t(record.report?.list_mode ? 'paperTasks.paperListReady' : 'paperTasks.overview.completed')
+            {completed && report?.completion ? <PaperResearchCompletion completion={report.completion} /> : <Typography.Paragraph className="paper-expansion-progress-current">{completed ? t(record.report?.list_mode ? 'paperTasks.paperListReady' : 'paperTasks.overview.completed')
                 : running ? t('paperTasks.overview.working', { stage: stageTitle(expansionStages[currentStage]) })
-                    : record.status === 'pending' ? t('paperTasks.overview.waiting') : t('paperTasks.overview.interrupted')}</Typography.Paragraph>
-            {!completed && !publishedList && <Typography.Text type="secondary">{t('paperTasks.overview.resultsAfterCompletion')}</Typography.Text>}
+                    : record.status === 'pending' ? t('paperTasks.overview.waiting') : t('paperTasks.overview.interrupted')}</Typography.Paragraph>}
+            {!completed && <Typography.Text type="secondary">{t('paperTasks.overview.resultsAfterCompletion')}</Typography.Text>}
             <div id={processId} hidden={!processOpen}>
                 {children}
                 <ol className="paper-expansion-timeline">{expansionStages.map((slot, index) => {
@@ -81,10 +79,6 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
                     </li>;
                 })}</ol>
             </div>
-        </section>}
-        {!completed && publishedList && <section className="paper-expansion-section paper-expansion-published-list" aria-label={t('paperTasks.paperListReady')}>
-            <Typography.Text strong>{t('paperTasks.paperListReady')}</Typography.Text>
-            <PaperExpansionArtifactView slotId="candidate_set" data={publishedList} />
         </section>}
         {completed && report?.narrative && <details className="paper-expansion-section">
             <summary>{t('paperTasks.researchReading')}<span>{t('paperTasks.researchReadingHint')}</span></summary>

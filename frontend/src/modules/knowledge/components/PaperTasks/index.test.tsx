@@ -536,6 +536,18 @@ describe('result list actions', () => {
         expect(screen.queryByText('旧版待查事项')).not.toBeInTheDocument();
         expect(screen.queryByText('建议阅读顺序')).not.toBeInTheDocument();
     });
+    it('distinguishes partial research from a completed workflow in task details', async () => {
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, report: {
+            narrative: '已核验的研究成果', completion: { status: 'incomplete', reason: 'budget_exhausted' },
+        } as ExpansionReport } });
+        mount(undefined, '?expansion_id=r');
+        expect(await screen.findByText('研究部分完成')).toBeVisible();
+        expect(screen.getByText('本轮研究额度已用尽，部分问题尚未完成调查。')).toBeVisible();
+        expect(screen.queryByText('论文拓展与研究解读已完成')).not.toBeInTheDocument();
+        expect(screen.queryByText('调整研究范围')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText('研究解读'));
+        expect(screen.getByText('已核验的研究成果')).toBeVisible();
+    });
     it('freezes review confirmation inputs and uses a new key for another generation', async () => {
         vi.mocked(getExpansion).mockResolvedValue({ ...threePapers, contents: detail.contents });
         mount(undefined, '?expansion_id=r');
@@ -564,14 +576,16 @@ describe('result list actions', () => {
         expect(progress.getByText('筛选与补充')).toBeInTheDocument();
         expect(progress.queryByText('研究报告与论文关系')).not.toBeInTheDocument();
     });
-    it.each(['running', 'failed'])('keeps the frozen deep list visible and read-only while analysis is %s', async status => {
+    it.each(['running', 'failed'])('hides the deep paper list until analysis completes while status is %s', async status => {
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status, budget_mode: 'deep', version: 0,
             progress: { candidate_set: { ...input, screening_pending: true }, screened_candidates: { ...input, list_mode: 'deep',
                 recommendations: [{ paper_id: 'b', direction: 'tools', reason: '相关工作推荐理由' }] } },
         } });
         mount(undefined, '?expansion_id=r');
-        const list = await screen.findByRole('region', { name: '论文清单已就绪。' });
-        expect(within(list).getByRole('region', { name: 'tools' })).toHaveTextContent('相关工作推荐理由');
+        await screen.findByRole('region', { name: '拓展进展' });
+        expect(screen.queryByText('论文清单已就绪。')).not.toBeInTheDocument();
+        expect(screen.queryByText('相关工作推荐理由')).not.toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: 'tools' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /生成综述|批量入库/ })).not.toBeInTheDocument();
     });
     it.each(['pending', 'running', 'active', 'failed', 'cancelled'])('hides intermediate papers and actions while expansion is %s', async status => {

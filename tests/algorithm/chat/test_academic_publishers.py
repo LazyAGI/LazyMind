@@ -140,6 +140,7 @@ def test_standard_and_deep_publish_the_list_only_after_screening(publisher, monk
     draft = events[0]['value']['data']
     assert draft['screening_pending'] and 'list_mode' not in draft
 
+    ctx.params['remote_inputs']['candidate_set'] = draft
     ctx.params['step_id'] = 'screen_and_supplement'
     ctx.output_slots[:] = ['screened_candidates', 'screened_list_ready']
     recommendation = {'paper_id': 'b', 'reason': 'Directly studies coordination', 'direction': 'agents'}
@@ -149,10 +150,38 @@ def test_standard_and_deep_publish_the_list_only_after_screening(publisher, monk
         expected.append('screened_list_ready')
     assert [event['slot'] for event in events] == expected
     final = events[1]['value']['data']
+    assert final['selection'] == {'before_count': 2, 'changes': []}
     assert final['list_mode'] == mode
     assert final['recommendations'] == [recommendation]
     ctx.params['remote_inputs'].update(candidate_set=draft, screened_candidates=final)
     assert module._analysis_candidates() == final
+
+
+@pytest.mark.parametrize('mode', ['balanced', 'deep'])
+def test_screening_saves_actual_additions_and_requires_removal_reasons(publisher, monkeypatch, mode):
+    module, ctx, events, resolved = publisher
+    ctx.params['step_id'] = 'screen_and_supplement'
+    ctx.output_slots[:] = ['screened_candidates', 'screened_list_ready']
+    before = ctx.params['remote_inputs']['candidate_set']
+    removed = {'paper': {'paper_id': 'old', 'title': 'Unrelated'}, 'is_seed': False, 'is_important': False}
+    before['papers'].append(removed)
+    added = {'paper': {'paper_id': 'new', 'title': 'New source'}, 'is_seed': False, 'is_important': False}
+    resolved['papers'].append(added)
+    monkeypatch.setattr(module, '_read_expansion_context', lambda _: {'record': {
+        'goal': 'expansion', 'budget_mode': mode, 'result': before,
+    }})
+    recommendations = [{'paper_id': 'new', 'reason': 'Adds the missing source', 'direction': 'agents'}]
+    with pytest.raises(ToolExecutionError, match='cover exactly'):
+        module.academic_publish_stage(['a', 'new'], [], [], recommendations=recommendations)
+    assert events == []
+    module.academic_publish_stage(['a', 'new'], [], [], recommendations=recommendations,
+                                  removal_reasons=[{'paper_id': 'old', 'reason': 'Studies a different mechanism'}])
+    final = events[0]['value']['data']
+    assert final['selection'] == {'before_count': 2, 'changes': [
+        {'action': 'removed', 'paper': removed, 'reason': 'Studies a different mechanism'},
+        {'action': 'added', 'paper': added, 'reason': 'Adds the missing source'},
+    ]}
+    assert [paper['paper']['paper_id'] for paper in final['papers']] == ['a', 'new']
 
 
 def test_deep_analysis_cannot_replace_the_frozen_list(publisher):
@@ -263,7 +292,6 @@ def test_ambiguous_verification_checks_stay_uncertain_and_record_diagnostics(pub
     assert all(row['expansion_id'] == 'exp' and row['error'] == 'invalid_model_output' for row in logged)
     assert len(attempts) == 4
     assert all(item['verification_error'] == 'invalid_model_output' for item in checked)
-
 
 
 def test_verification_covers_all_analysis_fields_in_larger_paper_sets(publisher, monkeypatch):

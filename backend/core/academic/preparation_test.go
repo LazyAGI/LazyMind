@@ -601,3 +601,39 @@ func TestExpansionSessionHasPlannedStagesBeforeExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestPreparationScopeChangesStayBeforeExecution(t *testing.T) {
+	for _, status := range []string{"awaiting_confirmation", "preparation_failed", "pending", "running", "completed", "failed", "stopped"} {
+		t.Run(status, func(t *testing.T) {
+			db := paperFixture(t)
+			p := expansionPreparation{UserInstruction: "original scope"}
+			record := orm.AcademicExpansion{ID: "scope", UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: "scope", Status: status, PreparationRevision: 1, PreparationJSON: marshal(p), ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "original scope", Papers: []WorkflowPaper{}})}
+			if err := db.Create(&record).Error; err != nil {
+				t.Fatal(err)
+			}
+			response := httptest.NewRecorder()
+			SubmitPreparation(response, mux.SetURLVars(paperRequest(`{"action":"revise","revision":1,"request_key":"new-scope","user_instruction":"new topic"}`), map[string]string{"expansion_id": record.ID}))
+			var saved orm.AcademicExpansion
+			if err := db.First(&saved, "id=?", record.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if status == "awaiting_confirmation" || status == "preparation_failed" {
+				if response.Code != 200 || saved.Status != "preparing" || saved.PreparationRevision != 2 {
+					t.Fatalf("scope update failed: %d %s %+v", response.Code, response.Body.String(), saved)
+				}
+			} else {
+				if response.Code != 409 || !strings.Contains(response.Body.String(), "新建任务") {
+					t.Fatal(response.Code, response.Body.String())
+				}
+				if saved.Status != status || saved.PreparationRevision != 1 || string(saved.PreparationJSON) != string(record.PreparationJSON) {
+					t.Fatal("rejected revision changed the record")
+				}
+				var jobs int64
+				db.Model(&orm.AsyncJob{}).Count(&jobs)
+				if jobs != 0 {
+					t.Fatal("rejected revision queued work", jobs)
+				}
+			}
+		})
+	}
+}
