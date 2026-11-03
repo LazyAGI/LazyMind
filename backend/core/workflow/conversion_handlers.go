@@ -5,9 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 
 	"gorm.io/gorm"
 	"lazymind/core/common"
@@ -197,21 +203,25 @@ func preflightSkillSnapshot(snapshot workflowSourceSkillSnapshot) []skillConvers
 		})
 	}
 	seenMissing := map[string]bool{}
-	for _, match := range skillDependencyRefPattern.FindAllStringSubmatch(skillMD, -1) {
-		ref := cleanSkillDependencyRef(match[1])
-		ref = resolveSkillDependencyRef(ref, byPath)
+	for _, ref := range skillDependencyReferences(skillMD, byPath) {
 		if ref == "" || seenMissing[ref] {
 			continue
 		}
 		if _, ok := byPath[ref]; !ok {
 			seenMissing[ref] = true
-			checks = append(checks, skillConversionCheck{
+			check := skillConversionCheck{
 				Code:       "DEPENDENCY_RESOURCE_MISSING",
 				Severity:   "warning",
 				Path:       ref,
 				Message:    "SKILL.md 引用了包内不存在的依赖资源。",
 				Suggestion: "仍可先生成 Workflow 草稿；缺失资源相关内容可能被忽略，建议转换后检查并补齐。",
-			})
+			}
+			if ref == ".." || strings.HasPrefix(ref, "../") || path.IsAbs(ref) {
+				check.Code = "DEPENDENCY_OUTSIDE_PACKAGE"
+				check.Message = "SKILL.md 引用的本地依赖超出 Skill 包根目录。"
+				check.Suggestion = "请将依赖显式打包并更新相对链接；转换不会读取包外文件。"
+			}
+			checks = append(checks, check)
 		}
 	}
 	for _, match := range skillTemplateParamPattern.FindAllStringSubmatch(skillMD, -1) {
@@ -243,6 +253,39 @@ func preflightSkillSnapshot(snapshot workflowSourceSkillSnapshot) []skillConvers
 		return checks[i].Code < checks[j].Code
 	})
 	return checks
+}
+
+// Inspect only the supplied snapshot. No filesystem or network resolution occurs.
+func skillDependencyReferences(markdown string, byPath map[string]skillPackageFile) []string {
+	source := []byte(markdown)
+	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
+	prose := markdown
+	var refs []string
+	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		var destination []byte
+		switch link := node.(type) {
+		case *ast.Link:
+			destination = link.Destination
+		case *ast.Image:
+			destination = link.Destination
+		default:
+			return ast.WalkContinue, nil
+		}
+		// Do not let the legacy prose scanner reinterpret a URL or a path fragment.
+		prose = strings.ReplaceAll(prose, string(destination), "")
+		u, err := url.Parse(string(destination))
+		if err == nil && u.Scheme == "" && u.Host == "" && u.Path != "" {
+			refs = append(refs, path.Clean(u.Path))
+		}
+		return ast.WalkContinue, nil
+	})
+	for _, match := range skillDependencyRefPattern.FindAllStringSubmatch(prose, -1) {
+		refs = append(refs, resolveSkillDependencyRef(cleanSkillDependencyRef(match[1]), byPath))
+	}
+	return refs
 }
 
 func cleanSkillDependencyRef(raw string) string {
