@@ -149,3 +149,37 @@ it('handles symbol Escape without dismissing its containing study',()=>{
  expect(symbol).toHaveFocus();
  expect(outer).not.toHaveBeenCalled();
 });
+
+it('rebinds the entire root to its cached meaning and offers its explained child separately',()=>{
+ const latex=String.raw`\frac{QK^T}{\sqrt{d_k}}`;
+ const props={latex,sourceKey:'attention-root',evidence:[],onNavigate:vi.fn(),compactEvidence:true};
+ const view=render(<InteractiveFormula {...props} definitions={[]}/>);
+ const before=view.container.querySelector('.katex-html')?.textContent;
+ view.rerender(<InteractiveFormula {...props} definitions={[
+  {symbol:String.raw`\sqrt{d_k}`,meaning:'Scaling factor',evidence_ids:[],inferred:false},
+  {symbol:'d_k',meaning:'Key dimension',evidence_ids:[],inferred:false},
+ ]}/>);
+ const root=screen.getByRole('button',{name:String.raw`Symbol: \sqrt{d_k}`});
+ fireEvent.click(root.querySelector('.mord') || root);
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Scaling factor');
+ fireEvent.click(screen.getByRole('button',{name:'Inspect term: d_k'}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Key dimension');
+ expect(view.container.querySelector('.katex-html')?.textContent).toBe(before);
+ expect(view.container.querySelector('.pdf-interactive-equation [role="button"] [role="button"]')).toBeNull();
+});
+
+it('binds the complete scaling root in the real MinerU attention equation',()=>{
+ const latex="\\operatorname{Attention} (Q, K, V) = \\operatorname{softmax} (\\frac {Q K ^ {T}}{\\sqrt {d _ {k}}}) V\\tag{1}";
+ const view=render(<InteractiveFormula latex={latex} sourceKey="attention-mineru" definitions={[
+  {symbol:String.raw`\sqrt{d_k}`,meaning:'Square-root scaling factor',evidence_ids:[],inferred:true},
+  {symbol:String.raw`QK^T`,meaning:'Query-key scores',evidence_ids:[],inferred:true},
+ ]} evidence={[]} compactEvidence onNavigate={vi.fn()}/>);
+ const root=screen.getByRole('button',{name:String.raw`Symbol: \sqrt {d _ {k}}`});
+ fireEvent.click(root.querySelector('.mord')||root);
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Square-root scaling factor');
+ expect(screen.queryByRole('button',{name:'Symbol: d _ {k}'})).toBeNull();
+ fireEvent.keyDown(screen.getByRole('button',{name:'Symbol: Q K ^ {T}'}),{key:'Enter'});
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Query-key scores');
+ const expected=document.createElement('div');expected.innerHTML=katex.renderToString(latex,{displayMode:true});
+ expect(view.container.querySelector('.pdf-interactive-equation .katex-html')?.textContent).toBe(expected.querySelector('.katex-html')?.textContent);
+});

@@ -1,4 +1,4 @@
-export interface FormulaSymbolOccurrence {start:number;end:number;latex:string;definitionIndices:number[]}
+export interface FormulaSymbolOccurrence {start:number;end:number;latex:string;definitionIndices:number[];children?:FormulaSymbolOccurrence[]}
 const wrappers=new Set(['mathcal','mathbb','mathbf','mathsf','mathrm','mathit','mathfrak','boldsymbol','operatorname','text','hat','widehat','bar','overline','vec','tilde','widetilde','dot','ddot','breve','check','acute','grave','underline']);
 const structural=new Set(['frac','dfrac','tfrac','sqrt','sum','prod','int','iint','lim','left','right','big','Big','bigg','Bigg','bigl','bigr','Bigl','Bigr','limits','nolimits','displaystyle','textstyle','scriptstyle','scriptscriptstyle','quad','qquad','hspace','vspace']);
 const unsafe=/\\(?:html\w*|href|url|includegraphics|def|gdef|edef|xdef|newcommand|renewcommand|providecommand|let|global|csname)\b/;
@@ -17,13 +17,7 @@ function withinSymbolBudget(value:string):boolean {
  return depth===0;
 }
 function stripDelimiters(value:string){return value.replace(/^\s*(?:\$\$?|\\\()/,'').replace(/(?:\$\$?|\\\))\s*$/,'');}
-function looseSymbol(value:string){return stripDelimiters(value).replace(/[\s{}]/g,'');}
-// Explanations may name a familiar function without the TeX wrapper used to
-// typeset it. Keep this alias restricted to multi-letter named operators.
-function namedOperator(value:string){
- const match=value.trim().match(/^\\(?:operatorname|mathrm|mathsf|text)\s*\{\s*([A-Za-z][A-Za-z0-9]+)\s*\}$/);
- return match?.[1] || '';
-}
+
 export function normalizeFormulaSymbol(value:string){
  if(!withinSymbolBudget(value))return "";
  const input=stripDelimiters(value)
@@ -44,6 +38,16 @@ export function normalizeFormulaSymbol(value:string){
   if(input[cursor]==='\\'){
    const command=input.slice(cursor).match(/^\\([a-zA-Z]+|.)/);if(!command){cursor++;return '\\';}
    cursor+=command[0].length;
+   if(['frac','dfrac','tfrac','binom','dbinom','tbinom'].includes(command[1])){
+    const name=command[1].includes('binom')?'binom':'frac';
+    return '\\'+name+'('+argument()+')('+argument()+')';
+   }
+   if(['overset','underset','stackrel'].includes(command[1]))return command[0]+'('+argument()+')('+argument()+')';
+   if(command[1]==='sqrt'){
+    skip();let degree='';
+    if(input[cursor]==='['){cursor++;const start=cursor;while(cursor<input.length&&input[cursor]!==']')cursor++;degree=normalizeFormulaSymbol(input.slice(start,cursor));if(input[cursor]===']')cursor++;}
+    return '\\sqrt['+degree+']('+argument()+')';
+   }
    if(['mathrm','mathit','mathsf','text','operatorname'].includes(command[1]))return argument();
    if(['sin','cos','tan','log','ln','exp'].includes(command[1]))return command[1];
    return wrappers.has(command[1])?command[0]+'('+argument()+')':command[0]+';';
@@ -119,118 +123,127 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
   if(occurrences.length>=512)return empty;
   occurrences.push({start:i,end,latex:latex.slice(i,end),definitionIndices:[]});i=end;
  }
- // Match complete semantic atoms first; formatting whitespace and redundant
- // braces may differ, but accents, commands and script structure stay distinct.
+ if(!definitions.length)return {safe:true,occurrences,unmatchedDefinitions:[]};
+ // Build candidate source ranges BEFORE resolving explanations. Structural
+ // commands retain all arguments; child sequences retain their own ranges.
+ // This replaces symbol-specific call/norm/string-concatenation repair passes.
+ interface Node {start:number;end:number;children:Node[][];boundary?:boolean;baseEnd?:number}
+ const sequences:Node[][]=[];
+ let nodeCount=0,overBudget=false;
+ const arity:Record<string,number>={frac:2,dfrac:2,tfrac:2,binom:2,dbinom:2,tbinom:2,sqrt:1,overset:2,underset:2,stackrel:2};
+ const read=(offset:number,limit:number):Node=>{
+  const start=skip(offset);let end=start+1,baseEnd:number|undefined;const children:Node[][]=[];
+  if(latex[start]==='{'){
+   end=groupEnd(start);if(end<=start)end=start+1;
+   children.push(scan(start+1,end-1));
+  }else if(latex[start]==='\\'){
+   const command=latex.slice(start).match(/^\\([a-zA-Z]+|.)/);
+   if(!command)return {start,end,children};
+   const name=command[1];end=start+command[0].length;
+   if(['begin','end','tag','label'].includes(name)){
+    let next=skip(end);if(latex[next]==='*')next=skip(next+1);
+    end=groupEnd(next)||next;
+    if(name==='begin'&&latex.slice(next+1,end-1)==='array'){const format=skip(end);end=groupEnd(format)||end;}
+    return {start,end,children,boundary:true};
+   }
+   if(name==='\\')return {start,end,children,boundary:true};
+   if(/^(?:left|right|big[lrm]?|Big[lrm]?|bigg[lrm]?|Bigg[lrm]?)$/.test(name)){
+    const delimiter=skip(end);const token=latex.slice(delimiter).match(/^\\(?:[A-Za-z]+|.)|^./);
+    end=delimiter+(token?.[0].length||0);
+   }else if(arity[name]){
+    if(name==='sqrt'&&latex[skip(end)]==='['){
+     const degree=skip(end);const close=latex.indexOf(']',degree+1);
+     if(close<0||close>=limit)return {start,end,children,boundary:true};
+     children.push(scan(degree+1,close));end=close+1;
+    }
+    for(let n=0;n<arity[name];n++){
+     const arg=read(skip(end),limit);end=arg.end;
+     if(latex[arg.start]==='{')children.push(...arg.children);else children.push([arg]);
+    }
+   }else if(wrappers.has(name)){
+    // Formatting and accents belong to their identifier, not separate letters.
+    end=atomEnd(start);
+   }
+  }
+  // Scripts are attached to the complete base. Expose expression exponents,
+  // but keep label-like subscripts opaque (e.g. d_model, PE_(pos,2i)).
+  const baseSource=latex.slice(start,end);
+  if(/^(?:\\(?:left|right|big[lrm]?|Big[lrm]?|bigg[lrm]?|Bigg[lrm]?)\s*)?(?:[)\]|‖]|\\(?:\||[lr]?Vert|[lr]?vert))$/.test(baseSource)||/^\\(?:sqrt|[dt]?frac|[dt]?binom)\b/.test(baseSource))baseEnd=end;
+  while(end<limit){
+   const script=skip(end);if(latex[script]!=='_'&&latex[script]!=='^')break;
+   const argStart=skip(script+1);
+   const argEnd=latex[argStart]==='{'?groupEnd(argStart):atomEnd(argStart);
+   if(argEnd<=argStart)break;
+   if(latex[script]==='^'&&complexExponent(latex.slice(argStart,argEnd))){
+    baseEnd??=end;
+    children.push(scan(latex[argStart]==='{'?argStart+1:argStart,latex[argStart]==='{'?argEnd-1:argEnd));
+   }
+   end=argEnd;
+  }
+  return {start,end,children,baseEnd,boundary:latex[start]==='&'};
+ };
+ const scan=(from:number,to:number):Node[]=>{
+  const nodes:Node[]=[];
+  for(let i=skip(from);i<to;){
+   if(++nodeCount>2048){overBudget=true;break;}
+   const node=read(i,to);if(node.end<=i||node.end>to){overBudget=true;break;}
+   nodes.push(node);i=skip(node.end);
+  }
+  sequences.push(nodes);return nodes;
+ };
+ scan(0,latex.length);if(overBudget)return empty;
  const normalized=definitions.map(normalizeFormulaSymbol);
- occurrences.forEach(occurrence=>{const value=normalizeFormulaSymbol(occurrence.latex);const alias=namedOperator(occurrence.latex);normalized.forEach((definition,index)=>{if(value===definition || (alias && alias===definition))occurrence.definitionIndices.push(index);});});
- // Keep original source offsets while matching typography-independent names.
- let canonical='';const offsets:number[]=[];
- for(let i=0;i<latex.length;i++)if(!/[\s{}]/.test(latex[i])){canonical+=latex[i];offsets.push(i);}
- // Group a multi-letter identifier only when the supplied definition exactly
- // matches a complete contiguous source range; never merge partial subscripts.
- definitions.map(value=>withinSymbolBudget(value)?looseSymbol(value):"").forEach((definition,index)=>{
-  const indexedName=/^[A-Za-z]{2,}_/.test(definition);
-  if(!definition || (!indexedName && /[(),=+*/^-]/.test(definition)))return;
-  let from=0;
-  while(true){
-   const found=canonical.indexOf(definition,from);if(found<0)break;from=found+definition.length;
-   const start=offsets[found],lastOffset=offsets[found+definition.length-1];
-   const first=occurrences.find(o=>o.start===start);
-   const last=occurrences.find(o=>o.start<=lastOffset&&o.end>lastOffset);
-   if(!first || !last)continue;
-   if(first===last){if(normalizeFormulaSymbol(first.latex)===normalized[index]&&!first.definitionIndices.includes(index))first.definitionIndices.push(index);continue;}
-   const end=last.end;
-   if(normalizeFormulaSymbol(latex.slice(start,end))!==normalized[index])continue;
-   occurrences=occurrences.filter(o=>o.end<=start||o.start>=end);
-   occurrences.push({start,end,latex:latex.slice(start,end),definitionIndices:[index]});
-  }
- });
- // A returned call definition owns its complete source expression, including
- // arguments. Match larger calls first so nested terms cannot fragment them.
- // Never synthesize LaTeX or make independently nested click targets.
- normalized.map((value,index)=>({value,index})).filter(item=>stripDelimiters(definitions[item.index]).trim().endsWith(')'))
-  .sort((a,b)=>b.value.length-a.value.length).forEach(({value,index})=>{
-   for(const first of [...occurrences]){
-    if(!occurrences.includes(first))continue;
-    const head=normalizeFormulaSymbol(first.latex);
-    if(!head || !value.startsWith(head))continue;
-    for(let end=first.end;end<=latex.length;end++){
-     if(latex[end-1]!==')')continue;
-     const source=latex.slice(first.start,end);
-     // A group must stay inside one TeX row and be syntactically complete.
-     if(/\\\\|&|\\(?:begin|end)\b/.test(source))break;
-     const candidate=normalizeFormulaSymbol(source);
-     if(candidate!==value){
-      // Extending an already complete, equally long expression cannot make
-      // it match; avoid scanning the rest of a long equation for every atom.
-      if(candidate.length>=value.length)break;
-      continue;
-     }
-     if(occurrences.some(item=>item.start<end && item.end>end))continue;
-     const existing=occurrences.find(item=>item.start===first.start&&item.end===end);
-     if(existing){if(!existing.definitionIndices.includes(index))existing.definitionIndices.push(index);}
-     else {
-      occurrences=occurrences.filter(item=>item.end<=first.start||item.start>=end);
-      occurrences.push({start:first.start,end,latex:source,definitionIndices:[index]});
-     }
-     break;
-    }
-   }
-  });
- // Model-provided semantic terms define groups, but only after matching a
- // complete source range. Preserve original TeX and ignore typography only.
- definitions.forEach((_,definitionIndex)=>{
-  if(occurrences.some(item=>item.definitionIndices.includes(definitionIndex)))return;
-  const expected=normalized[definitionIndex];if(!expected)return;
-  const ordered=[...occurrences].sort((a,b)=>a.start-b.start);
-  for(let i=0;i<ordered.length;i++){
-   for(let j=i;j<Math.min(ordered.length,i+24);j++){
-    const start=ordered[i].start,end=ordered[j].end;
-    if(normalizeFormulaSymbol(latex.slice(start,end))!==expected)continue;
-    const existing=occurrences.find(item=>item.start===start&&item.end===end);
-    if(existing)existing.definitionIndices.push(definitionIndex);
-    else {
-     occurrences=occurrences.filter(item=>item.end<=start||item.start>=end);
-     occurrences.push({start,end,latex:latex.slice(start,end),definitionIndices:[definitionIndex]});
-    }
-    break;
+ const byKey=new Map<string,number[]>();
+ normalized.forEach((value,index)=>{if(value)byKey.set(value,[...(byKey.get(value)||[]),index]);});
+ const matchedRanges:FormulaSymbolOccurrence[]=[];
+ for(const atom of occurrences){const indices=byKey.get(normalizeFormulaSymbol(atom.latex));if(indices)matchedRanges.push({...atom,definitionIndices:indices});}
+ // Complete balanced sibling ranges cover calls, products and delimiters as
+ // well as single structural nodes. Never cross arguments or equation rows.
+ const balanced=(value:string)=>{
+  const tokens=value.match(/\\[A-Za-z]+|\\.|[()[\]|‖]/g)||[];
+  const stack:string[]=[];
+  for(const token of tokens){
+   if(token==='('||token==='[')stack.push(token);
+   else if(token===')'||token===']'){if(stack.pop()!==(token===')'?'(':'['))return false;}
+   else if(/^(?:\||‖|\\(?:\||[lr]?Vert|[lr]?vert))$/.test(token)){
+    const kind=/Vert|‖|\\\|/.test(token)?'‖':'|';
+    if(stack[stack.length-1]===kind)stack.pop();else stack.push(kind);
    }
   }
- });
- // Delimiters are not ordinary atoms. Pair them explicitly so returned norm
- // and absolute-value definitions own their complete, balanced source range.
- // Keep outer powers separate unless the model explained that full power.
- const delimiters=/(\\(?:left|right|bigl|bigr|Bigl|Bigr|biggl|biggr|Biggl|Biggr|big|Big|bigg|Bigg)\s*)?(\\(?:lVert|rVert|Vert|lvert|rvert|vert)(?![A-Za-z])|\\\||[|‖])/g;
- const open:Array<{start:number;kind:string}>=[];
- const ranges:Array<{start:number;end:number}>=[];
- for(const match of latex.matchAll(delimiters)){
-  const start=match.index!;
-  if(start>0&&latex[start-1]==='\\')continue;
-  const prefix=match[1]||'',token=match[2];
-  const kind=normalizeFormulaSymbol(token);
-  const left=/\\(?:left|bigl|Bigl|biggl|Biggl)\b/.test(prefix)||/^\\(?:lVert|lvert)$/.test(token);
-  const right=/\\(?:right|bigr|Bigr|biggr|Biggr)\b/.test(prefix)||/^\\(?:rVert|rvert)$/.test(token);
-  const previous=open[open.length-1];
-  if(!left&&previous?.kind===kind){
-   open.pop();
-   const end=start+match[0].length;
-   ranges.push({start:previous.start,end});
-   const scriptedEnd=atomEnd(start+prefix.length);
-   if(scriptedEnd>end)ranges.push({start:previous.start,end:scriptedEnd});
-  }else if(!right)open.push({start,kind});
+  return stack.length===0;
+ };
+ let comparisons=0,matchedCharacters=0;
+ for(const nodes of sequences){
+  for(let i=0;i<nodes.length;i++){
+   if(nodes[i].boundary)continue;
+   for(let j=i;j<Math.min(nodes.length,i+64);j++){
+    if(nodes[j].boundary)break;
+    if(++comparisons>32768)return empty;
+    for(const end of new Set([nodes[j].end,nodes[j].baseEnd].filter((value):value is number=>value!==undefined))){
+     const start=nodes[i].start,source=latex.slice(start,end);
+     matchedCharacters+=source.length;if(matchedCharacters>2_000_000)return empty;
+     if(end<=start||!balanced(source))continue;
+     const indices=byKey.get(normalizeFormulaSymbol(source));
+     if(indices)matchedRanges.push({start,end,latex:source,definitionIndices:indices});
+    }
+   }
+  }
  }
- ranges.sort((a,b)=>(b.end-b.start)-(a.end-a.start)).forEach(({start,end})=>{
-  const source=latex.slice(start,end);
-  if(/\\\\|&|\\(?:begin|end)\b/.test(source))return;
-  const value=normalizeFormulaSymbol(source);
-  const definitionIndices=normalized.flatMap((definition,index)=>value&&definition===value?[index]:[]);
-  if(!definitionIndices.length)return;
-  // Do not split an enclosing identifier, script, or already matched group.
-  if(occurrences.some(item=>item.start<end&&item.end>start&&(item.start<start||item.end>end)))return;
-  occurrences=occurrences.filter(item=>item.end<=start||item.start>=end);
-  occurrences.push({start,end,latex:source,definitionIndices});
- });
+ // Prefer complete explained expressions. Their explained descendants remain
+ // available in the definition card, never as competing nested DOM buttons.
+ const unique=new Map<string,FormulaSymbolOccurrence>();
+ for(const item of matchedRanges)unique.set(`${item.start}:${item.end}`,item);
+ const ordered=[...unique.values()].sort((a,b)=>(b.end-b.start)-(a.end-a.start)||a.start-b.start);
+ const selected:FormulaSymbolOccurrence[]=[];
+ for(const item of ordered){
+  if(selected.some(parent=>parent.start<item.end&&parent.end>item.start))continue;
+  item.children=ordered.filter(child=>child!==item&&child.start>=item.start&&child.end<=item.end)
+   .sort((a,b)=>a.start-b.start||b.end-a.end);
+  selected.push(item);
+ }
+ occurrences=occurrences.filter(atom=>!selected.some(item=>item.start<atom.end&&item.end>atom.start));
+ occurrences.push(...selected);
  occurrences.sort((a,b)=>a.start-b.start);
- const matched=new Set(occurrences.flatMap(o=>o.definitionIndices));
+ const matched=new Set(occurrences.flatMap(o=>[...o.definitionIndices,...(o.children||[]).flatMap(child=>child.definitionIndices)]));
  return {safe:true,occurrences,unmatchedDefinitions:definitions.map((_,index)=>index).filter(index=>!matched.has(index))};
 }

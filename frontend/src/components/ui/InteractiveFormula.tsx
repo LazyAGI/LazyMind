@@ -13,7 +13,7 @@ export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,ev
  const root=useRef<HTMLDivElement>(null);
  const card=useRef<HTMLDivElement>(null);
  const key=`${sourceKey}:${latex}:${JSON.stringify(definitions)}`;
- const [selection,setSelection]=useState<{key:string;index:number}>();
+ const [selection,setSelection]=useState<{key:string;index:number;child?:number}>();
  const [copyStatus,setCopyStatus]=useState('');
  const model=useMemo(()=>interactiveFormulaSymbols(latex,definitions.map(definition=>definition.symbol)),[latex,definitions]);
  const rendered=useMemo(()=>{
@@ -27,7 +27,8 @@ export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,ev
   catch{return undefined;}
  },[latex,model,id]);
  const active=selection?.key===key?selection.index:undefined;
- const occurrence=active===undefined?undefined:model.occurrences[active];
+ const parent=active===undefined?undefined:model.occurrences[active];
+ const occurrence=selection?.child===undefined?parent:parent?.children?.[selection.child];
  const candidates=(occurrence?.definitionIndices || []).map(index=>definitions[index]);
  const exact=candidates.filter(item=>item.symbol.trim()===occurrence?.latex.trim());
  const relevant=exact.length?exact:candidates;
@@ -78,6 +79,7 @@ export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,ev
   }} dangerouslySetInnerHTML={{__html:rendered}}/>:<pre>{latex}</pre>}
   {(!model.safe || !rendered)&&<p className="pdf-symbol-unavailable">{label('symbolUnsupported','Interactive symbols are unavailable for this formula syntax. The original LaTeX is preserved.','此公式语法暂不支持符号交互，原始 LaTeX 已保留。')}</p>}
   {occurrence&&<div ref={card} tabIndex={-1} role="region" aria-label={label('selectedSymbol','Selected symbol','所选符号')} className="pdf-symbol-definition" onKeyDown={event=>{if(event.key==="Escape"){event.stopPropagation();setSelection(undefined);root.current?.querySelector<HTMLElement>(`.pdfsym-${id}-${active}`)?.focus();}}}>
+   {!!parent?.children?.length&&<div className="pdf-symbol-parts" aria-label={zh?'表达式与内部项':'Expression and inner terms'}>{[parent,...parent.children].map((part,index)=><button key={`${part.start}:${part.end}`} type="button" aria-label={`${zh?'查看项：':'Inspect term:'} ${part.latex}`} aria-pressed={occurrence===part} onClick={()=>setSelection({key,index:active!,child:index===0?undefined:index-1})}><FormulaMathText text={part.latex} mathOnly/></button>)}</div>}
    <div className="pdf-symbol-definition-heading"><strong><FormulaMathText text={occurrence.latex} mathOnly/></strong><button aria-label={label('closeSymbol','Close symbol definition','关闭符号释义')} onClick={()=>{setSelection(undefined);root.current?.querySelector<HTMLElement>(`.pdfsym-${id}-${active}`)?.focus();}}>×</button></div>
    {definition?<><p><FormulaMathText text={definition.meaning}/></p>{!compactEvidence&&definition.symbol!==occurrence.latex&&<small>{label('matchedExpression','Matched expression:','匹配表达式：')} <FormulaMathText text={definition.symbol} mathOnly/></small>}{!compactEvidence&&<div className="pdf-symbol-evidence">{citations.map(item=><div key={item.id}><button className="pdf-study-citation" onClick={()=>onNavigate(item)}>{t('pdfFormula.sourcePage',{page:item.page+1})}</button><blockquote>{item.text}</blockquote></div>)}</div>}</>:generalMeaning?<><p>{generalMeaning}</p></>:<p>{label('symbolUnavailable','No explanation is available for this term. Regenerate to try again.','此项暂无释义，可重新生成补全。')}</p>}
   </div>}

@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {interactiveFormulaSymbols} from './interactiveFormulaSymbols';
+import {interactiveFormulaSymbols,normalizeFormulaSymbol} from './interactiveFormulaSymbols';
 const sps=String.raw`\mathcal {L} (I _ {i}, T _ {i}) = \mathcal {H} (y _ {i}, \mathcal {P} _ {i} ^ {i 2 t}) + \mathcal {H} (y _ {i}, \mathcal {P} _ {i} ^ {t 2 i}),\tag{1}`;
 const cc=String.raw`\begin{array}{c} \mathcal {L} _ {c c} = \sum_ {i = 1} ^ {l} \operatorname{ReLU} \big (C r o s s A t t n (I, T _ {N P _ {i}}) \\ - C r o s s A t t n (I, N P _ {i}) - \epsilon \big) \end{array}`;
 it.each(['x\\', 'x\\\ny'])('rejects malformed command tokens without throwing: %j',latex=>{
@@ -65,11 +65,12 @@ it('exposes semantic atoms inside complex exponents while preserving indexed var
  expect(result.occurrences.some(item=>item.latex===String.raw`r_n^{q-}`)).toBe(true);
  expect(result.occurrences.every((item,index)=>index===0||result.occurrences[index-1].end<=item.start)).toBe(true);
 });
-it('does not let a compound exponent definition swallow its inner click targets',()=>{
+it('keeps a compound exponent intact and retains its explained children',()=>{
  const latex=String.raw`e^{\frac{x_i}{\tau}}+r_n^{q-}+\mathcal{P}_i^{i2t}`;
  const result=interactiveFormulaSymbols(latex,[String.raw`e^{\frac{x_i}{\tau}}`,String.raw`\tau`,String.raw`x_i`]);
- expect(result.unmatchedDefinitions).toEqual([0]);
- expect(result.occurrences.map(item=>item.latex)).toEqual(['e','x_i',String.raw`\tau`,'r_n^{q-}',String.raw`\mathcal{P}_i^{i2t}`]);
+ expect(result.unmatchedDefinitions).toEqual([]);
+ expect(result.occurrences[0].latex).toBe(String.raw`e^{\frac{x_i}{\tau}}`);
+ expect(result.occurrences[0].children?.map(item=>item.latex)).toEqual(['x_i',String.raw`\tau`]);
 });
 
 it('aligns semantic groups despite typesetting differences',()=>{
@@ -132,4 +133,39 @@ it.each([
 it('does not confuse absolute values with norms or match a norm inside a subscript',()=>{
  expect(interactiveFormulaSymbols('|w|',[String.raw`\|w\|`]).unmatchedDefinitions).toEqual([0]);
  expect(interactiveFormulaSymbols(String.raw`x_{\|w\|}`,[String.raw`\|w\|`]).unmatchedDefinitions).toEqual([0]);
+});
+
+it.each([
+ [String.raw`\sqrt{d_k}`,String.raw`\sqrt{d_k}`],
+ [String.raw`\sqrt [3] {x+y}`,String.raw`\sqrt[3]{x+y}`],
+ [String.raw`\frac {QK^T} {\sqrt {d_k}}`,String.raw`\sqrt{d_k}`],
+ [String.raw`\dfrac{x}{y}`,String.raw`\frac{x}{y}`],
+ [String.raw`\sqrt{\frac{x}{y}}`,String.raw`\sqrt{\frac{x}{y}}`],
+])('binds a complete structural expression: %s',(latex,definition)=>{
+ const result=interactiveFormulaSymbols(latex,[definition]);
+ expect(result.unmatchedDefinitions).toEqual([]);
+ expect(result.occurrences.filter(o=>o.definitionIndices.includes(0))).toHaveLength(1);
+ expect(result.occurrences.find(o=>o.definitionIndices.includes(0))?.latex).not.toBe('d_k');
+});
+it('preserves structural scope when normalizing expressions',()=>{
+ expect(normalizeFormulaSymbol(String.raw`\sqrt{a+b}`)).not.toBe(normalizeFormulaSymbol(String.raw`\sqrt{a}+b`));
+ expect(normalizeFormulaSymbol(String.raw`\frac{ab}{c}`)).not.toBe(normalizeFormulaSymbol(String.raw`\frac{a}{bc}`));
+ expect(normalizeFormulaSymbol(String.raw`\sqrt[3]{x}`)).not.toBe(normalizeFormulaSymbol(String.raw`\sqrt{x}`));
+});
+it('retains inner definitions without splitting the complete explained root',()=>{
+ const result=interactiveFormulaSymbols(String.raw`\sqrt{d_k}+d_k`,[String.raw`\sqrt{d_k}`,'d_k']);
+ expect(result.occurrences.map(o=>o.latex)).toEqual([String.raw`\sqrt{d_k}`,'d_k']);
+ expect(result.unmatchedDefinitions).toEqual([]);
+});
+it.each([
+ [String.raw`\sqrt{a+b}`,String.raw`\sqrt{a}+b`],
+ [String.raw`\frac{ab}{c}`,String.raw`\frac{a}{bc}`],
+ [String.raw`\sqrt[3]{x}`,String.raw`\sqrt{x}`],
+])('never binds a structurally different explanation: %s',(latex,definition)=>{
+ expect(interactiveFormulaSymbols(latex,[definition]).unmatchedDefinitions).toEqual([0]);
+});
+it('binds every repeated root and retains duplicate definitions on each whole target',()=>{
+ const result=interactiveFormulaSymbols(String.raw`\sqrt{d_k}+\sqrt {d _ {k}}`,[String.raw`\sqrt{d_k}`,String.raw`\sqrt {d _ {k}}`]);
+ expect(result.occurrences).toHaveLength(2);
+ expect(result.occurrences.map(item=>item.definitionIndices)).toEqual([[0,1],[0,1]]);
 });
