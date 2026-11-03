@@ -1,9 +1,11 @@
 package agentexec
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +78,7 @@ func SetExecutableBinding(target BindingTarget, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve %s binding: %w", target, err)
 	}
+	invalidateBindingDiscovery(target)
 	bindingsMu.Lock()
 	defer bindingsMu.Unlock()
 	unlock, err := lockBindings()
@@ -123,6 +126,7 @@ func ClearExecutableBinding(target BindingTarget) error {
 	if err := validateBindingTarget(target); err != nil {
 		return err
 	}
+	invalidateBindingDiscovery(target)
 	bindingsMu.Lock()
 	defer bindingsMu.Unlock()
 	unlock, err := lockBindings()
@@ -139,6 +143,17 @@ func ClearExecutableBinding(target BindingTarget) error {
 	}
 	delete(document.Paths, target)
 	return writeBindings(document)
+}
+
+// Explicit bindings remain usable when automatic package discovery is unavailable.
+// CLI bindings do not depend on the desktop package cache at all.
+func invalidateBindingDiscovery(target BindingTarget) {
+	if isCLIBindingTarget(target) {
+		return
+	}
+	if err := InvalidateDesktopApplications(context.Background()); err != nil {
+		log.Printf("Desktop discovery cache invalidation for %s: %v", target, err)
+	}
 }
 
 func configuredExecutable(explicit, environment string, target BindingTarget) (string, error) {

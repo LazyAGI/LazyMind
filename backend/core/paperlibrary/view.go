@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"os"
+	"strings"
+	"sync"
 )
 
 type Counts struct {
@@ -22,6 +25,12 @@ type View struct {
 // Statistics never loads bibliographic text, notes, identities, or import history.
 func Statistics(ctx context.Context, db *gorm.DB, datasets []string) (map[string]Counts, error) {
 	result := map[string]Counts{}
+	for _, dataset := range datasets {
+		if err := EnsureLegacy(ctx, db, dataset); err != nil {
+			return result, err
+		}
+		result[dataset] = Counts{}
+	}
 	if len(datasets) == 0 {
 		return result, nil
 	}
@@ -42,6 +51,33 @@ func Statistics(ctx context.Context, db *gorm.DB, datasets []string) (map[string
 // Load reads only the requested entries and their children. Nil ids is an initial library read.
 func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, includeFolders bool) (View, error) {
 	view := View{Data: EmptyData()}
+	if err := EnsureLegacy(ctx, db, dataset); err != nil {
+		return view, err
+	}
+	if err := loadAuxiliary(ctx, db, dataset, &view.Data); err != nil {
+		return view, err
+	}
+	// An attachment can come from a different provider than its confirmed
+	// bibliography. Preserve that provenance before projecting typed fields.
+	var auxiliary struct {
+		Attachments []struct {
+			ID      string `json:"id"`
+			PaperID string `json:"paperId"`
+			Source  string `json:"source"`
+		} `json:"attachments"`
+	}
+	if len(view.Data.Extra) > 0 {
+		if err := json.Unmarshal(view.Data.Extra, &auxiliary); err != nil {
+			return view, err
+		}
+	}
+	attachmentSources := map[string]map[string]string{}
+	for _, attachment := range auxiliary.Attachments {
+		if attachmentSources[attachment.PaperID] == nil {
+			attachmentSources[attachment.PaperID] = map[string]string{}
+		}
+		attachmentSources[attachment.PaperID][attachment.ID] = attachment.Source
+	}
 	db = db.WithContext(ctx)
 	query := db.Where("dataset_id=? AND removed_at IS NULL", dataset)
 	if ids != nil {
@@ -132,6 +168,10 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			stateByID[s.DocumentID] = s
 		}
 	}
+	availability, err := originalAvailability(ctx, docByID)
+	if err != nil {
+		return view, err
+	}
 	origins := map[string]orm.PaperImportBatch{}
 	if len(itemIDs) > 0 {
 		var rows []struct {
@@ -157,6 +197,15 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			return view, err
 		}
 		p := Paper{ID: e.ID, AcademicWorkID: e.AcademicWorkID, Revision: e.Revision, Metadata: metadata, FolderID: Pointer(e.FolderID), Status: e.Status, Tags: []string{}, Important: marks[e.AcademicWorkID], Source: e.Source, ImportMethod: e.ImportMethod, SourceURL: e.SourceURL, ArxivVersion: e.ArxivVersion, Parse: "ready", AttachmentIDs: []string{}, NoteIDs: []string{}, Incomplete: metadata.Title == "" || len(metadata.Authors) == 0}
+		var origin struct {
+			Private bool `json:"legacy_private_identity"`
+		}
+		if err = json.Unmarshal(work.ProvenanceJSON, &origin); err != nil {
+			return view, err
+		}
+		if origin.Private {
+			p.AssociationConflict = "既有题录标识符与其他条目重合，原始题录已保留，请核对"
+		}
 		if err = json.Unmarshal(e.TagsJSON, &p.Tags); err != nil {
 			return view, err
 		}
@@ -175,8 +224,10 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			continue
 		}
 		link := linkByID[a.DocumentID]
-		_, available := docByID[a.DocumentID]
-		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: p.Source, ImportMethod: p.ImportMethod, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
+		document, available := docByID[a.DocumentID]
+		available = available && availability[document.ID]
+		source := defaultText(attachmentSources[a.PaperID][a.ID], defaultText(link.SourceProvider, p.Source))
+		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: source, ImportMethod: p.ImportMethod, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
 		if attachment.SourceURL == "" {
 			attachment.SourceURL = a.SourceURL
 		}
@@ -224,4 +275,54 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		primary.IsPrimary = true
 	}
 	return view, nil
+}
+
+// OriginalAvailable distinguishes retained bibliography/document identities from
+// a usable original. Missing, malformed, non-regular and symlink files cannot
+// satisfy import presence or enable a reader action.
+func OriginalAvailable(document orm.Document) bool {
+	var original struct {
+		StoredPath string `json:"stored_path"`
+	}
+	if document.DeletedAt != nil || json.Unmarshal(document.Ext, &original) != nil || strings.TrimSpace(original.StoredPath) == "" {
+		return false
+	}
+	info, err := os.Lstat(original.StoredPath)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// Bound filesystem probes while keeping availability request-scoped: deleted or
+// replaced originals must never remain readable through a stale process cache.
+func originalAvailability(ctx context.Context, documents map[string]orm.Document) (map[string]bool, error) {
+	result := make(map[string]bool, len(documents))
+	jobs := make(chan orm.Document)
+	var workers sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < min(4, len(documents)); i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for document := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				available := OriginalAvailable(document)
+				mu.Lock()
+				result[document.ID] = available
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, document := range documents {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case jobs <- document:
+		case <-ctx.Done():
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	return result, ctx.Err()
 }

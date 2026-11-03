@@ -127,6 +127,11 @@ DROP TABLE IF EXISTS academic_expansions;
 DROP TABLE IF EXISTS academic_user_paper_states;
 DROP TABLE IF EXISTS academic_document_states;
 
+-- +migrate Dialect postgres,sqlite
+DROP INDEX IF EXISTS uk_conversation_followups_idempotency;
+DROP INDEX IF EXISTS idx_conversation_followups_queue;
+DROP TABLE IF EXISTS conversation_followups;
+
 DROP TABLE IF EXISTS document_folder_nodes;
 DROP TABLE IF EXISTS document_folder_inventories;
 
@@ -135,6 +140,8 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS paper_library_legacy_states;
+DROP TABLE IF EXISTS paper_libraries;
 DROP TABLE IF EXISTS paper_library_attachments;
 DROP TABLE IF EXISTS paper_library_notes;
 DROP TABLE IF EXISTS paper_library_entries;

@@ -1,6 +1,7 @@
 import i18n from '@/i18n';
 
 export function documentPublicationErrorMessage(code?: string, provider?: string): string {
+  if (code && i18n.exists(`chat.publication.targetErrors.${code}`)) return String(i18n.t(`chat.publication.targetErrors.${code}`));
   const providerKey = `chat.writerIR.providers.${provider}`;
   const label = provider
     ? (i18n.exists(providerKey) ? String(i18n.t(providerKey)) : provider)

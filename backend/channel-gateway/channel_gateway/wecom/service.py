@@ -90,6 +90,10 @@ class WeComService:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
         return self.public_account_view(renamed)
 
+    def archive_account(self, owner_user_id, account_id):
+        self._store.archive_account(owner_user_id, account_id)
+        self._runtime.stop_account(account_id)
+
     def disconnect_account(self, owner_user_id, account_id):
         if not self._store.disconnect_account(
             owner_user_id,

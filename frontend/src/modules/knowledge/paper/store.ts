@@ -1,5 +1,6 @@
+import { parseLibraryBackup } from './libraryBackup';
+import { computeTextSha256 } from '../utils/fileHash';
 import type { PaperLibraryData, PaperRecord, PaperMetadata, PaperFolder } from './model';
-import { emptyLibrary } from './libraryModel';
 import { axiosInstance, BASE_URL } from '@/components/request';
 export const isPaperLibrary = (scene?: string) => scene === 'academic_papers';
 export interface PersistedPaperLibrary {
@@ -24,11 +25,34 @@ function checkData(data: PaperLibraryData): PaperLibraryData {
         throw new Error('服务器论文条目格式无效，请重试');
     return data;
 }
+export function decodePersistedLibrary(value: unknown): PersistedPaperLibrary {
+    if (!value || typeof value !== 'object' || typeof (value as { can_write?: unknown }).can_write !== 'boolean')
+        throw new Error('服务器论文库响应格式无效');
+    const data = value as { data: PaperLibraryData; can_write: boolean; paper_count: number; pdf_attachment_count: number; active: boolean };
+    return { data: checkData(data.data), canWrite: data.can_write, paperCount: data.paper_count, pdfAttachmentCount: data.pdf_attachment_count, active: data.active };
+}
 export async function loadPersistedPaperLibrary(dataset: string): Promise<PersistedPaperLibrary> {
     const { data } = await axiosInstance.get(`${core}/library`, { params: { target_dataset_id: dataset }, timeout: 30000, silentError: true } as never);
-    if (typeof data.can_write !== 'boolean')
-        throw new Error('服务器论文库权限响应无效');
-    return { data: checkData(data.data), canWrite: data.can_write, paperCount: data.paper_count, pdfAttachmentCount: data.pdf_attachment_count, active: data.active };
+    const current = decodePersistedLibrary(data);
+    let raw: string | null = null;
+    let version = 3;
+    try {
+        raw = localStorage.getItem(`lazymind.paper-library.data.v3.${dataset}`);
+        if (!raw) { raw = localStorage.getItem(`lazymind.paper-library.data.v2.${dataset}`); version = 2; }
+    } catch { return current; }
+    if (!raw) return current;
+    const migrationId = `browser-${computeTextSha256(raw)}`;
+    if (current.data.migrationSnapshots?.some(snapshot => (snapshot as { id?: string })?.id === migrationId)) return current;
+    let legacy: PaperLibraryData;
+    try {
+        const parsed = JSON.parse(raw);
+        legacy = parseLibraryBackup(version === 3 ? raw : JSON.stringify({ ...parsed, schemaVersion: 3, attachments: [], notes: [] }));
+    } catch { throw new Error('旧浏览器文献数据无法解析，原数据已保留，请先恢复数据后重试迁移'); }
+    if (!legacy.papers.length && !legacy.folders.length && !legacy.attachments.length && !legacy.notes.length && !legacy.annotations?.length) return current;
+    if (!current.canWrite) throw new Error('本浏览器有尚未迁移的文献数据，需要知识库编辑权限才能保存到服务器；原数据已保留');
+    const migration = { ...legacy, migrationSnapshots: [...(current.data.migrationSnapshots || []), { id: migrationId, createdAt: new Date().toISOString(), source: 'browser-local-v3', data: JSON.parse(raw) }] };
+    const saved = await axiosInstance.post(`${core}/zotero/import`, { data: migration, source_id: 'browser-local-v3', idempotency_key: migrationId }, { params: { target_dataset_id: dataset }, timeout: 120000, silentError: true } as never);
+    return decodePersistedLibrary(saved.data);
 }
 async function mutation(dataset: string, method: 'post' | 'patch', path: string, body: unknown): Promise<LibraryChanges> {
     const { data } = await axiosInstance.request({ method, url: `${core}/${path}`, data: body, params: { target_dataset_id: dataset }, timeout: 30000, silentError: true } as never);
@@ -57,11 +81,14 @@ export function mergeLibraryChanges(current: PaperLibraryData, change: LibraryCh
     const merge = <T extends {
         id: string;
     }>(old: T[], fresh: T[]) => { const updates = new Map(fresh.map(item => [item.id, item])); const previous = new Set(old.map(item => item.id)); return [...old.map(item => updates.get(item.id) || item), ...fresh.filter(item => !previous.has(item.id))]; };
-    const data = emptyLibrary();
+    const data: PaperLibraryData = { ...current, ...change.data };
     data.papers = merge(current.papers.filter(p => !removed.has(p.id)), change.data.papers);
     data.folders = merge(current.folders.filter(f => !change.removedFolderIds?.includes(f.id)), change.data.folders);
     data.attachments = [...current.attachments.filter(a => !removed.has(a.paperId) && !changed.has(a.paperId)), ...change.data.attachments];
     data.notes = [...current.notes.filter(n => !removed.has(n.paperId) && !changed.has(n.paperId)), ...change.data.notes];
+    data.annotations = merge((current.annotations || []).filter(item => !removed.has(item.paperId)), change.data.annotations || []);
+    data.relations = merge((current.relations || []).filter(item => !removed.has(item.fromPaperId) && !removed.has(item.toPaperId)), change.data.relations || []);
+    data.collections = merge((current.collections || []).filter(item => !change.removedFolderIds?.includes(item.id)), change.data.collections || []);
     return data;
 }
 export async function previewLibraryPapers(dataset: string, papers: PaperRecord[]): Promise<PaperRecord[]> {

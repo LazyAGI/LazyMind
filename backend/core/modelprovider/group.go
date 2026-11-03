@@ -56,6 +56,7 @@ type groupListItem struct {
 	ModelCount          int            `json:"model_count"`
 	Keys                []groupKeyItem `json:"keys"`
 	IsVerified          bool           `json:"is_verified"`
+	CredentialStatus    string         `json:"credential_status,omitempty"`
 }
 
 type groupKeyItem struct {
@@ -161,25 +162,28 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	out := make([]groupListItem, 0, len(rows))
 	for i := range rows {
 		g := rows[i]
-		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
-		if err != nil {
-			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
-			return
-		}
-		keys := groupKeyItems(g.ID, apiKey)
-		for k := range keys {
-			keys[k].Enabled = parent.ActiveKeyGroupID == g.ID && parent.ActiveKeyID == keys[k].ID
-		}
-		out = append(out, groupListItem{
+		item := groupListItem{
 			ID:                  g.ID,
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
 			BaseURL:             connectionBaseURL(parent, g.BaseURL),
 			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
 			ModelCount:          modelCounts[g.ID],
-			Keys:                keys,
+			Keys:                []groupKeyItem{},
 			IsVerified:          g.IsVerified,
-		})
+		}
+		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
+		if err != nil {
+			// Preserve unreadable saved credentials without hiding healthy groups.
+			item.CredentialStatus = "unavailable"
+			item.IsVerified = false
+		} else {
+			item.Keys = groupKeyItems(g.ID, apiKey)
+			for k := range item.Keys {
+				item.Keys[k].Enabled = parent.ActiveKeyGroupID == g.ID && parent.ActiveKeyID == item.Keys[k].ID
+			}
+		}
+		out = append(out, item)
 	}
 	common.ReplyOK(w, groupListResponse{Groups: out})
 }
@@ -335,7 +339,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   legacyModelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
-		IsVerified:          checkData != nil,
+		IsVerified:          checkData != nil || translationGroupConfigured(parent, apiKey),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -546,8 +550,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	storedAPIKey, err := apiKeyForGroup(db.WithContext(r.Context()), &row)
-	if err != nil {
-		common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+	credentialUnavailable := err != nil
+	if err != nil && apiKey == "" {
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
 
@@ -611,7 +616,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		for key, value := range encryptedUpdates {
 			updates[key] = value
 		}
-		if apiKey != storedAPIKey && !hasSharedProviderEndpoint(parent) {
+		if apiKey != storedAPIKey && (!hasSharedProviderEndpoint(parent) || credentialUnavailable) {
 			updates["is_verified"] = false
 		}
 	}
@@ -670,6 +675,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 		updates["is_verified"] = true
 	}
+	if translationGroupConfigured(parent, effectiveAPIKey) {
+		updates["is_verified"] = true
+	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
 			return err
@@ -711,6 +719,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		IsVerified:          row.IsVerified,
 		Check:               checkData,
 	})
+}
+
+func translationGroupConfigured(parent orm.UserModelProvider, apiKey string) bool {
+	return parent.Category == "translation" &&
+		(strings.TrimSpace(apiKey) != "" || parent.HasCapability("keyless_translation"))
 }
 
 type deleteGroupResponse struct {

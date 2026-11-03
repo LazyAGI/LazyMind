@@ -235,3 +235,62 @@ func TestWorkBuddyFrameRejectsInvalidFrontend(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexPresentationReadsOnlyItsExistingBinding(t *testing.T) {
+	var connector string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("presentation mutated Core: %s", r.Method)
+		}
+		switch r.URL.Path {
+		case "/api/core/workflow-sessions":
+			_, _ = w.Write([]byte(`{"sessions":[{"session_id":"codex-run","created_at":"2026-10-26T01:00:00Z"}]}`))
+		case "/api/core/workflow-sessions/codex-run/control":
+			_ = json.NewEncoder(w).Encode(map[string]any{"control": map[string]any{"binding": map[string]any{"bound": true, "provider": "codex", "connector_id": connector, "driver_session_id": "native-codex"}}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer upstream.Close()
+	home := t.TempDir()
+	server := newTestServer(t, home)
+	if err := server.store.Save(credentials.Credentials{ServerURL: upstream.URL, AccessToken: "access", RefreshToken: "refresh", SavedAt: float64(time.Now().Unix()), ExpiresIn: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	account, err := server.store.AccountScope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := workflowhost.EnsureForProvider(home, "codex", filepath.Join(home, "profile"), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector = pair.ConnectorID
+	for _, test := range []struct {
+		route, run string
+		code       int
+	}{
+		{"/v1/codex/presentation?session_id=native-codex", "codex-run", 200},
+		{"/v1/codex/presentation?session_id=unbound", "", 200},
+		{"/v1/workbuddy/presentation?session_id=native-codex", "", 403},
+	} {
+		r := httptest.NewRequest("GET", test.route, nil)
+		r.Header.Set("Authorization", "Bearer "+pair.Token)
+		r.Header.Set("X-LazyMind-Connector-Id", pair.ConnectorID)
+		w := httptest.NewRecorder()
+		server.routes().ServeHTTP(w, r)
+		if w.Code != test.code {
+			t.Fatalf("status %d: %s", w.Code, w.Body.String())
+		}
+		if w.Code == 200 {
+			var got map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["run_id"] != test.run {
+				t.Fatalf("wrong run: %v", got)
+			}
+		}
+	}
+}

@@ -4,6 +4,8 @@ import MessageArtifactLinks from './MessageArtifactLinks';
 import { ArtifactPreviewContext } from './context';
 import { useTaskCenterStore, type ConversationArtifact } from '../../store/taskCenter';
 import { useWorkflowStore, type WorkflowSession } from '../../store/workflowPanel';
+import { buildChatMessageListFromHistory } from '../../utils/message';
+import type { ChatExport } from '@/api/generated/core-client';
 
 const open = vi.fn();
 const artifact = (id: string, extra: Partial<ConversationArtifact> = {}): ConversationArtifact => ({
@@ -45,4 +47,26 @@ it('does not append a second artifact area to workflow replies', () => {
   useTaskCenterStore.setState({ deliveriesByConversation: { c1: [artifact('report')] } });
   show([{ export_id: 'report', filename: 'report.md', start: 0, end: 8 }]);
   expect(screen.queryByRole('list')).not.toBeInTheDocument();
+});
+
+it('previews the complete restored final segment using the original UTF-16 export ranges', () => {
+  const prefix = '前言😀\n';
+  const document = '# 两天旅行\n## 一、预算\n1500元\n## 二、行程\n天津\n## 三、取舍\n保留美食\n## 四、最终建议\n选择天津。\n> 票价以实时数据为准。';
+  const body = prefix + document;
+  const raw = '<tp>计算预算</tp><trp>1500</trp>' + body;
+  const exports: ChatExport[] = [{ export_id: 'trip', filename: 'trip.md', title: '旅行方案', index: 0,
+    content_type: 'text/markdown', start: prefix.length, end: body.length }];
+  const list = buildChatMessageListFromHistory([{
+    id: 'h1', query: '比较城市', result: '之前的部分回复' + raw,
+    model_output: { version: 1 } as any, assistant_remainder: raw, exports,
+    steering_messages: [{ id: 'guide', text: '只看天津', assistant_segment: '之前的部分回复' }],
+  }]);
+  const answer = list[list.length - 1];
+  expect(answer.delta).toBe(body);
+  render(<ArtifactPreviewContext.Provider value={{ open, close: vi.fn(), target: null, onVersions: undefined }}>
+    <MessageArtifactLinks conversationId='c1' historyId='h1' content={answer.delta} exports={answer.exports} />
+  </ArtifactPreviewContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: '预览 trip.md' }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ content: document }));
+  expect(answer.raw_delta).toBe(raw);
 });

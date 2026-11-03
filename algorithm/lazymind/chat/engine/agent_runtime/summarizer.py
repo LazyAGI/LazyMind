@@ -9,7 +9,7 @@ import lazyllm
 from lazymind.config import config
 
 from .budget import usage_ratio
-from .model_calls import ContextCapacityError, request_tokens
+from .model_calls import ContextCapacityError, request_tokens, configured_output_limit
 from lazyllm.module.llms.onlinemodule.base import ModelCallControl, ModelCallError, ModelFinish
 from .context_estimator import estimate_tokens
 from .message_fields import model_facing_history, estimate_message_tokens
@@ -76,7 +76,7 @@ def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
         kwargs = {'timeout': timeout} if timeout is not None else {}
         try:
             return _llm_response_text(view(
-                user_prompt, tools=[], max_retries=1, output_limit=candidate_budget.reserved_output_tokens,
+                user_prompt, tools=[], max_retries=1, output_limit=configured_output_limit(view, kwargs),
                 call_control=call_control, **kwargs))
         except ModelCallError as exc:
             if exc.terminal.kind == 'finish' and exc.terminal.finish == ModelFinish.LENGTH:

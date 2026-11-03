@@ -516,10 +516,13 @@ def _safe_session_tools(
     def patch_artifact_text(artifact_ref: str, old_text: str, new_text: str) -> Dict[str, Any]:
         """Edit one unique excerpt of a selected text/Markdown artifact without rerunning steps.
 
-        Read the artifact first. Include a unique exact section/paragraph excerpt;
-        every character outside that excerpt is preserved. Does not regenerate
-        downstream pages. For a list use the exact handle returned by list_artifacts.
+        Read the artifact first. Keep the edit scoped to a unique exact
+        section/paragraph excerpt. Does not regenerate downstream pages.
+        For a list use the exact handle returned by list_artifacts.
+        Headings contain section names; the document editor supplies their numbering.
         """
+        from lazymind.document_tools.artifacts import normalize_generated_markdown
+
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
         current = toolkit.read_artifact(artifact_id)
@@ -536,7 +539,7 @@ def _safe_session_tools(
             raise ValueError('HTML slides require their scoped page-editing tool')
         if not old_text or text.count(old_text) != 1:
             raise ValueError('old_text must match exactly once; read the current artifact and retry')
-        revised = text.replace(old_text, new_text, 1)
+        revised = normalize_generated_markdown(text.replace(old_text, new_text, 1))
         revised_value = {**value, field: revised} if field else revised
         return artifact_output(toolkit.patch_artifact(
             artifact_id, int(current.get('revision') or artifact.get('revision') or 0),

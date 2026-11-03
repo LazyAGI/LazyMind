@@ -34,6 +34,8 @@ const ownerProcessPollInterval = time.Second
 
 const maxInternalSessionBytes = 1 << 20
 
+var invalidateDesktopApplications = agentexec.InvalidateDesktopApplications
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -66,6 +68,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "codex-recovery" {
+		return runCodexRecovery(ctx, args[1:], stdout)
+	}
 	if len(args) == 2 && args[0] == "connection" && args[1] == "resolve" {
 		return resolveConnection(ctx, stdout)
 	}
@@ -95,11 +100,20 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags := flag.NewFlagSet("internal agent "+agent+" "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	agentBinary := flags.String("agent-bin", "", "external Agent CLI executable")
+	refreshInstallations := flags.Bool("refresh-installations", false, "refresh cached desktop installation discovery")
 	if err := flags.Parse(args[3:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected internal command arguments")
+	}
+	if *refreshInstallations || action == "connect" {
+		if err := invalidateDesktopApplications(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			fmt.Fprintf(stderr, "Desktop discovery cache refresh: %v\n", err)
+		}
 	}
 	store, err := credentials.NewStore("", "")
 	if err != nil {
@@ -503,8 +517,8 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		defer stopOwnerWatch()
 		if *ownerPID > 0 {
 			for _, provider := range providers {
-				if provider == "workbuddy" {
-					go assistantbridge.KeepWorkBuddyAvailable(hostCtx, credentialStore, stderr)
+				if provider == "workbuddy" || provider == "codex" {
+					go assistantbridge.KeepDesktopAgentsAvailable(hostCtx, credentialStore, stderr)
 					break
 				}
 			}

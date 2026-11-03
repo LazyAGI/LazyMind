@@ -1,6 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,9 +30,95 @@ async def _collect_streaming_response(response):
     return ''.join(chunks)
 
 
+@pytest.mark.parametrize('guidance_timing', [None, 'before_card', 'after_card'])
+def test_startup_card_preserves_accepted_steering_without_repeating_card(
+    monkeypatch, tmp_path, provider, guidance_timing,
+):
+    from lazymind.chat.engine.agent_runtime.steering import steering_registry
+    from lazymind.chat.engine.tools import temporary_retrieval_session as session
+    from lazymind.chat.engine.subagent.db import TaskQueryDB
+    from lazymind.chat.workflow import workflow_manager
+    from lazymind.config import config
+
+    monkeypatch.setattr(session, 'workspace_for_request', lambda **kwargs: str(tmp_path))
+    monkeypatch.setattr(session, 'is_model_role_available', lambda role: False)
+    monkeypatch.setattr(TaskQueryDB, '_get', lambda *a, **kw: {'tasks': []})
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda *a, **kw: chat_service.lazyllm.OnlineChatModule(
+        source='openai', model='startup-guidance', url=provider.url, api_key='offline-key', stream=False,
+    ))
+    monkeypatch.setattr(chat_service, 'load_memory_context', lambda: SimpleNamespace(
+        soul='', profile='', preference='',
+    ))
+    client = MagicMock()
+    client.get_workflow.return_value.result = {'revision_id': 'r1', 'runtime': {'clarification_fields': [{
+        'id': 'topic', 'question': '文章的主题是什么？', 'type': 'text', 'required': True,
+        'reason': '主题决定正文内容。',
+    }]}}
+    monkeypatch.setattr(workflow_manager, '_client', lambda: client)
+    entry = {'workflow_ref': 'builtin:writer', 'workflow_id': 'writer', 'revision_id': 'r1',
+             'runtime': client.get_workflow.return_value.result['runtime']}
+    provider.script['startup-guidance'] = [{'message': {'role': 'assistant', 'content': '收到补充要求'}}]
+    guides = ['主题是垃圾分类', '正文面向小学生']
+
+    def accept_guidance():
+        for index, guide in enumerate(guides):
+            assert steering_registry.accept('startup-run', 'startup-conversation', str(index), guide) == (True, '')
+
+    async def drive():
+        response = await chat_service._handle_chat_impl(ChatRequest(
+            message={'query': '帮我写一篇文章', 'history': [
+                {'role': 'user', 'content': '请用中文回答'},
+                {'role': 'assistant', 'content': '好的'},
+            ]},
+            conversation={'session_id': 'startup-session', 'conversation_id': 'startup-conversation',
+                          'run_id': 'startup-run', 'history_id': 'startup-history'},
+            runtime={'llm_config': {}},
+            personalization={'use_memory': False},
+            agent={'enable_subagent': False, 'disabled_tools': [
+                'kb', 'wikipedia', 'arxiv', 'sciverse', 'google', 'bing', 'bocha', 'url_fetch',
+                'multimodal', 'vocab_learn', 'skill_editor', 'feishu',
+            ]},
+            workflow={'enable_workflow': True, 'catalog': [entry],
+                      'activations': [{**entry, 'tool_name': 'trigger_writer_workflow'}], 'clarification': {
+                'workflow_ref': 'builtin:writer', 'revision_id': 'r1', 'startup_request_id': 'launch',
+                'original_request': '帮我写一篇文章', 'values': {},
+            }},
+        ))
+        if guidance_timing == 'before_card':
+            accept_guidance()
+        frames = []
+        async for chunk in response.body_iterator:
+            payload = json.loads(chunk)['data']
+            frames.append(payload)
+            if payload.get('ask_pending') and guidance_timing == 'after_card':
+                accept_guidance()
+        return frames
+
+    with config.temp('context_compression_enabled', False):
+        frames = asyncio.run(drive())
+    cards = [frame['ask_pending'] for frame in frames if frame.get('ask_pending')]
+    assert len(cards) == 1
+    assert cards[0]['questions'][0]['id'] == 'topic'
+    assert frames[-1]['runtime_event']['data']['status'] == 'completed'
+    client.prepare.assert_not_called()
+    if guidance_timing is None:
+        assert provider.requests == []
+    else:
+        assert len(provider.requests) == 1
+        contents = '\n'.join(str(message.get('content', ''))
+                             for message in provider.requests[0]['messages'])
+        assert '帮我写一篇文章' in contents and '请用中文回答' in contents
+        assert all(guide in contents for guide in guides)
+        applied = [item for frame in frames for item in frame.get('steering_applied', [])]
+        assert [item['text'] for item in applied] == guides
+        assert '收到补充要求' in ''.join(frame.get('text') or '' for frame in frames)
+
+
 @pytest.mark.parametrize('mcp_failure', [None, 'timeout', 'authorization', 'all_failed'])
 @pytest.mark.parametrize('directories_enabled', [None, True, False])
-def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mcp_failure, directories_enabled, tmp_path):
+def test_handle_chat_constructs_react_agent_from_runtime_context(
+    monkeypatch, mcp_failure, directories_enabled, tmp_path,
+):
     from lazymind.chat.engine.tools import temporary_retrieval_session as session
     monkeypatch.setattr(session, 'workspace_for_request', lambda **kwargs: str(tmp_path))
     monkeypatch.setattr(session, 'is_model_role_available', lambda role: False)
@@ -204,7 +291,9 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     instruction_idx = query.index('### User Instruction\n\nhello')
     assert instruction_idx >= 0
     assert query.index('Call set_session_env only after the user explicitly asks') > instruction_idx
-    assert query.index('ATTENTION — `ask_user`') > instruction_idx
+    # A ready greeting keeps normal tools and skills, but needs no clarification.
+    assert 'ask_user' not in tool_names
+    assert 'ATTENTION — `ask_user`' not in query
     assert 'answer:### Runtime Context' in body
     assert 'hello' in body
     payloads = [json.loads(chunk) for chunk in body.strip().split('\n\n')]

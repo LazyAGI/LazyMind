@@ -133,6 +133,8 @@ result = {
     "elapsed": elapsed,
     "rag_loaded": "lazyllm.tools.rag" in sys.modules,
     "sql_runtime_loaded": "lazyllm.tools.sql" in sys.modules,
+    "sqlalchemy_loaded": "sqlalchemy" in sys.modules,
+    "httpx_loaded": "httpx" in sys.modules,
     "runtime_docs_loaded": any(name.startswith("lazyllm.docs.tools") for name in sys.modules),
     "phase_seconds": {
         "runtime_loader_import": loader_elapsed,
@@ -174,7 +176,51 @@ print(json.dumps(result))
     assert result['elapsed'] < 3.0, diagnostics
     assert result['rag_loaded'] is False, diagnostics
     assert result['sql_runtime_loaded'] is False, diagnostics
+    assert result['sqlalchemy_loaded'] is False, diagnostics
+    assert result['httpx_loaded'] is False, diagnostics
     assert result['runtime_docs_loaded'] is False, diagnostics
+
+
+def test_vocabulary_database_loads_on_first_query():
+    result = _run_probe('''
+import json
+import sqlite3
+import sys
+import tempfile
+from contextlib import closing
+from pathlib import Path
+from lazymind.chat.runtime_loader import ensure_chat_runtime
+ensure_chat_runtime()
+loaded_before = "sqlalchemy" in sys.modules
+from lazymind.chat.engine.tools.infra import vocab_db
+with tempfile.TemporaryDirectory() as directory:
+    database = Path(directory) / "vocabulary.db"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("CREATE TABLE words (id TEXT, word TEXT, group_id TEXT, "
+                           "create_user_id TEXT, deleted_at TEXT, description TEXT, reference_info TEXT)")
+        connection.executemany("INSERT INTO words VALUES (?, ?, ?, ?, ?, ?, ?)", [
+            ("1", "ICOCO", "g1", "user-1", None, "conference", "source"),
+            ("2", "deleted", "g1", "user-1", "2026-01-01", "", ""),
+            ("3", "private", "g2", "user-2", None, "", ""),
+        ])
+    try:
+        groups = vocab_db.fetch_vocab_groups_for_user_id("user-1", db_url="sqlite:///" + str(database))
+    finally:
+        for engine in vocab_db._engine_cache.values():
+            engine.dispose()
+print(json.dumps({
+    "loaded_before": loaded_before,
+    "loaded_after": "sqlalchemy" in sys.modules,
+    "groups": groups,
+}))
+''')
+
+    assert result == {
+        'loaded_before': False,
+        'loaded_after': True,
+        'groups': {'g1': {'group_id': 'g1', 'description': 'conference',
+                          'words': ['ICOCO'], 'references': ['source']}},
+    }
 
 
 def test_external_database_runtime_loads_on_first_query():

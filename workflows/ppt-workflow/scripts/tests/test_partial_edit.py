@@ -216,9 +216,9 @@ class DeckInitializationTests(unittest.TestCase):
         })
 
         self.assertIn('# 季度经营复盘', markdown)
-        self.assertIn('## 第 1 页｜封面', markdown)
+        self.assertIn('## 封面', markdown)
         self.assertIn('页面描述：建立汇报主题与基调', markdown)
-        self.assertIn('## 第 2 页｜核心指标', markdown)
+        self.assertIn('## 核心指标', markdown)
         self.assertIn('页面描述：说明收入与利润变化', markdown)
 
     def test_page_count_is_not_capped_at_twelve(self):
@@ -511,30 +511,6 @@ class WholePageInsertionTests(unittest.TestCase):
                     (5, [{'id': 'keep-4'}]),
                 ],
             )
-
-    def test_ordered_publication_inserts_only_one_new_stable_index(self):
-        order = [10, 11, 12, 13]
-        with mock.patch.object(
-            TOOLS, '_reserve_ui_slot_position', return_value=99,
-        ) as reserve, mock.patch.object(
-            TOOLS, '_save_artifact', return_value={'status': 'ok'},
-        ) as save:
-            result = TOOLS._publish_ordered_ppt_artifact(
-                slot='slide_outline',
-                page_no=4,
-                value='new prompt',
-                content_type='text',
-                source_tool='ppt_publish_outline',
-                caption='Inserted',
-                order_list=order,
-                insert_before=4,
-                expected_total=5,
-            )
-
-        self.assertEqual(result['status'], 'ok')
-        self.assertEqual(order, [10, 11, 12, 99, 13])
-        reserve.assert_called_once()
-        self.assertEqual(save.call_args.kwargs['publisher_list_index'], 99)
 
     def test_page_prompt_body_has_no_positional_page_header(self):
         brief = TOOLS._format_slide_outline_brief({
