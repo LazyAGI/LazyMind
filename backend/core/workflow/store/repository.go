@@ -660,6 +660,10 @@ func (r *Repository) CreateInitializedHostSessionWithTrigger(ctx context.Context
 		workflow, workflowMode, triggerHistoryID, intentContext, bindings, control)
 }
 
+// InitializeHostSession lets an installed host seed authoritative external materials
+// in the creation transaction, before the first session snapshot is published.
+var InitializeHostSession func(context.Context, *gorm.DB, orm.WorkflowSession, WorkflowPackage) error
+
 func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, triggerHistoryID, intentContext string,
 	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
@@ -766,6 +770,11 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 		for _, binding := range bindings {
 			binding.WorkflowSessionID = created.ID
 			if err := r.bindInputTx(tx, owner, binding); err != nil {
+				return err
+			}
+		}
+		if createdNow && InitializeHostSession != nil {
+			if err := InitializeHostSession(ctx, tx, created, workflow); err != nil {
 				return err
 			}
 		}

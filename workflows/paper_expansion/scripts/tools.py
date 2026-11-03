@@ -1043,8 +1043,6 @@ def academic_publish_stage(paper_ids: list[str], decisions: list[str], gaps: lis
         body['recommendations'] = [by_paper[identity] for identity in paper_ids if identity in by_paper]
     slot = 'screened_candidates' if screened else 'candidate_set'
     result = _publish_once(slot, body, 'academic_publish_stage')
-    if not screened and not draft:
-        _publish_once('screening_not_required', {'mode': mode}, 'academic_publish_stage')
     if body.get('list_mode') in {'fast', 'balanced'}:
         marker = 'screened_list_ready' if screened else 'expansion_list_ready'
         _publish_once(marker, {'mode': mode}, 'academic_publish_stage')

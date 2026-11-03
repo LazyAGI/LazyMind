@@ -9,10 +9,12 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 	"lazymind/core/workflow/graphengine"
+	workflowstore "lazymind/core/workflow/store"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -528,5 +530,74 @@ func TestPaperUserInstructionOmitsConfirmedLaunchTemplate(t *testing.T) {
 		if got != "缓存压缩\n\n关注共享机制" {
 			t.Fatalf("launch template leaked into research scope: %q", got)
 		}
+	}
+}
+
+func TestExpansionSessionHasPlannedStagesBeforeExecution(t *testing.T) {
+	db := paperFixture(t)
+	root := filepath.Join("..", "..", "..", "workflows", "paper_expansion")
+	definition, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.ReadFile(filepath.Join(root, "scenario", "state.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := graphengine.Compile(string(definition), string(state), "", graphengine.ProfileRuntimeLoad)
+	if !compiled.Valid {
+		t.Fatal(compiled.Diagnostics)
+	}
+	pkg := workflowstore.WorkflowPackage{WorkflowID: "paper_expansion", RevisionID: "revision", CompiledGraph: marshal(compiled.Graph)}
+	for _, tc := range []struct {
+		mode, goal string
+		markers    []string
+		next       []string
+	}{
+		{"fast", "expansion", []string{"analysis_not_required", "screening_not_required"}, nil},
+		{"balanced", "expansion", []string{"analysis_not_required"}, []string{"screen_and_supplement"}},
+		{"deep", "expansion", []string{}, []string{"screen_and_supplement"}},
+		{"balanced", "review", []string{"screening_not_required"}, []string{"analyze_relations"}},
+	} {
+		t.Run(tc.goal+"_"+tc.mode, func(t *testing.T) {
+			id := tc.goal + "_" + tc.mode
+			if err := db.Create(&orm.Conversation{ID: id, BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.AcademicExpansion{ID: id, UserID: "u", ConversationID: id, DatasetID: "papers", RequestOwner: "u", RequestKey: id, Goal: tc.goal, BudgetMode: tc.mode, Status: "pending", ResultJSON: marshal(ReviewWorkflowInput{})}).Error; err != nil {
+				t.Fatal(err)
+			}
+			repo := workflowstore.New(db.DB)
+			for range 2 {
+				if _, _, err := repo.CreateHostSession(t.Context(), "u", id, id, "lazymind", id, "lazymind", pkg); err != nil {
+					t.Fatal(err)
+				}
+			}
+			slots, err := workflow.LoadDisplaySlots(t.Context(), db.DB, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			markers := []string{}
+			snapshot := graphengine.RuntimeSnapshot{Materials: []graphengine.MaterialValue{{MaterialID: "expansion_id", RevisionID: "input", Valid: true}}}
+			for _, slot := range slots {
+				markers = append(markers, slot.SlotID)
+				snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: slot.SlotID, RevisionID: slot.ID, Valid: true})
+			}
+			if !reflect.DeepEqual(markers, tc.markers) {
+				t.Fatalf("startup materials: got %v, want %v", markers, tc.markers)
+			}
+			if initial := graphengine.Project(compiled.Graph, snapshot); initial.Completed || !reflect.DeepEqual(initial.Ready, []string{"expand_and_screen"}) {
+				t.Fatalf("startup must still run search: %+v", initial)
+			}
+			snapshot.Attempts = []graphengine.AttemptFact{{StepID: "expand_and_screen", Status: "succeeded", Validity: "effective"}}
+			snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: "candidate_set", RevisionID: "candidate", Valid: true})
+			next := graphengine.Project(compiled.Graph, snapshot)
+			if len(next.Ready) != len(tc.next) || len(tc.next) > 0 && !reflect.DeepEqual(next.Ready, tc.next) {
+				t.Fatalf("after search: %+v", next)
+			}
+			if next.Completed != (tc.mode == "fast") {
+				t.Fatalf("unexpected completion: %+v", next)
+			}
+		})
 	}
 }

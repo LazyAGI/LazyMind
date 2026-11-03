@@ -63,7 +63,7 @@ def test_direction_entry_accepts_no_seeds_and_seed_entry_cannot_drop_them(publis
 def test_candidates_publish_authoritative_papers_once(publisher, monkeypatch):
     module, ctx, events, resolved = publisher
     ctx.params['step_id'] = 'expand_and_screen'
-    ctx.output_slots = ['candidate_set', 'screening_not_required', 'expansion_list_ready']
+    ctx.output_slots = ['candidate_set', 'expansion_list_ready']
     ctx.params['workflow_runtime']['publisher_owned_slots'].append('candidate_set')
     source = copy.deepcopy(ctx.params['remote_inputs']['candidate_set'])
     source['papers'] = []
@@ -83,7 +83,7 @@ def test_candidates_publish_authoritative_papers_once(publisher, monkeypatch):
     assert result['directions'] == [{'name': 'agents', 'question': 'How do agents coordinate?'}]
     assert 'research_questions' not in result
     assert module.academic_publish_stage(*args)['already_published'] is True
-    assert len(events) == 2
+    assert len(events) == 1
 
 
 def test_invalid_task_papers_reports_context_error_without_publishing(publisher, monkeypatch):
@@ -104,7 +104,7 @@ def test_paper_list_marker_is_only_published_for_lightweight_expansion(
         publisher, monkeypatch, goal, mode, ends_with_list):
     module, ctx, events, resolved = publisher
     ctx.params['step_id'] = 'expand_and_screen'
-    ctx.output_slots[:] = ['candidate_set', 'screening_not_required', 'expansion_list_ready']
+    ctx.output_slots[:] = ['candidate_set', 'expansion_list_ready']
     resolved['papers'].append({'paper': {'paper_id': 'b', 'title': 'Related'}, 'is_seed': False, 'is_important': False})
     monkeypatch.setattr(module, '_read_expansion_context', lambda _: {'record': {
         'goal': goal, 'budget_mode': mode, 'result': ctx.params['remote_inputs']['candidate_set'],
@@ -118,7 +118,7 @@ def test_paper_list_marker_is_only_published_for_lightweight_expansion(
     result = module.academic_publish_stage(
         ['a', 'b'], [], [], recommendations=[recommendation] if goal == 'expansion' else None)
     assert result['status'] == 'ok'
-    expected_slots = ['candidate_set', 'screening_not_required']
+    expected_slots = ['candidate_set']
     if ends_with_list:
         expected_slots.append('expansion_list_ready')
     assert [event['slot'] for event in events] == expected_slots
@@ -130,7 +130,7 @@ def test_paper_list_marker_is_only_published_for_lightweight_expansion(
 def test_standard_and_deep_publish_the_list_only_after_screening(publisher, monkeypatch, mode):
     module, ctx, events, resolved = publisher
     ctx.params['step_id'] = 'expand_and_screen'
-    ctx.output_slots[:] = ['candidate_set', 'screening_not_required', 'expansion_list_ready']
+    ctx.output_slots[:] = ['candidate_set', 'expansion_list_ready']
     resolved['papers'].append({'paper': {'paper_id': 'b', 'title': 'Related'}, 'is_seed': False, 'is_important': False})
     monkeypatch.setattr(module, '_read_expansion_context', lambda _: {'record': {
         'goal': 'expansion', 'budget_mode': mode, 'result': ctx.params['remote_inputs']['candidate_set'],

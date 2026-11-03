@@ -43,8 +43,6 @@ steps:
       required: true
     - material: expansion_list_ready
       required: false
-    - material: screening_not_required
-      required: false
     acceptance_criteria: 保留确认范围、全部种子和真实登记的候选；快速档交付带理由的有序清单，标准和深入交接待筛选候选。
   screen_and_supplement:
     skip_if: {material: screening_not_required}
@@ -77,7 +75,7 @@ steps:
       required: false
     acceptance_criteria: 保留全部种子与确认方向；筛选及定点补查后按方向交付真实论文及推荐理由。
   analyze_relations:
-    skip_if: {any: [{material: expansion_list_ready}, {material: screened_list_ready}]}
+    skip_if: {material: analysis_not_required}
     label: 关系分析与证据核验
     prompt: '{{runtime_instruction}}
 

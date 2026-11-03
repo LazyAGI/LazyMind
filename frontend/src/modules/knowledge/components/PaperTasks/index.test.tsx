@@ -217,6 +217,13 @@ describe('paper task startup routes', () => {
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
         expect(screen.getByRole('radio', { name: '默认全选' })).toBeChecked();
         expect(screen.getByText('调研完成后，按全部方向自动继续。')).toBeInTheDocument();
+        for (const [name, steps] of [
+            [/^标准扩展/, ['1. 检索与拓展', '2. 筛选与补充']],
+            [/^深入分析/, ['1. 检索与拓展', '2. 筛选与补充', '3. 关系分析与证据核验']],
+        ] as const) {
+            const card = screen.getByRole('radio', { name }).closest('label')!;
+            expect(within(card).getAllByRole('listitem').map(item => item.textContent)).toEqual(steps);
+        }
         for (const tier of [/^标准扩展/, /^深入分析/, /^快速扩展/]) {
             fireEvent.click(screen.getByRole('radio', { name: tier }));
             expect(screen.getByRole('button', { name: '开始扩展' })).toBeInTheDocument();

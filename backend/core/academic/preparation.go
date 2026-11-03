@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 	"lazymind/core/workflow/graphengine"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 const PreparationJobType = "academic.prepare"
@@ -158,6 +160,7 @@ type expansionPreparation struct {
 func init() {
 	asyncjob.Register(PreparationJobType, runPreparation)
 	workflow.ConfigureHostStep = configureAcademicStep
+	workflowstore.InitializeHostSession = initializeAcademicSession
 }
 func enqueuePreparation(ctx context.Context, tx *gorm.DB, record orm.AcademicExpansion) error {
 	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: PreparationJobType, ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: fmt.Sprintf("%s:%d", record.ID, record.PreparationRevision), Payload: map[string]any{"revision": record.PreparationRevision}, MaxAttempts: 3})
@@ -593,6 +596,46 @@ func ExpansionCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyJSON(w, map[string]any{"openalex_key": key != "", "sciverse": academic["sciverse"] != nil, "web_search": len(web) > 0})
+}
+
+func initializeAcademicSession(ctx context.Context, db *gorm.DB, session orm.WorkflowSession, pkg workflowstore.WorkflowPackage) error {
+	if len(pkg.CompiledGraph) == 0 {
+		return nil
+	}
+	var graph graphengine.CompiledStateGraph
+	if err := json.Unmarshal(pkg.CompiledGraph, &graph); err != nil {
+		return err
+	}
+	// Older pinned packages determine these conditions from stage outputs.
+	if !slices.Contains(graph.Runtime.HostExtensions, "academic-paper-chat-v1") ||
+		graph.MaterialProducers["analysis_not_required"].Kind != "external" {
+		return nil
+	}
+	var record orm.AcademicExpansion
+	if err := db.WithContext(ctx).Where("conversation_id=? AND user_id=? AND deleted_at IS NULL", session.ConversationID, session.CreateUserID).Take(&record).Error; err != nil {
+		return err
+	}
+	if _, ok := depthForExpansion(record); !ok {
+		return errors.New("invalid research depth")
+	}
+	markers := []string{}
+	if record.Goal != "expansion" || record.BudgetMode == "fast" {
+		markers = append(markers, "screening_not_required")
+	}
+	if record.Goal == "expansion" && record.BudgetMode != "deep" {
+		markers = append(markers, "analysis_not_required")
+	}
+	for _, slot := range markers {
+		if err := db.Create(&orm.WorkflowSlotRevision{
+			ID: "psr_" + common.GenerateID(), SessionID: session.ID, SlotID: slot, Slot: slot,
+			Revision: 1, Selected: true, StepID: "__start__", Validity: "effective", ChangeSource: "system",
+			ContentSnapshot: marshal(map[string]any{"value": map[string]string{"mode": record.BudgetMode}, "source": "external"}),
+			CreatedAt:       session.CreatedAt,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation string, params *workflow.WorkflowStepParams) error {

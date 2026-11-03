@@ -1,14 +1,13 @@
 id: paper_expansion
 name: 论文自动拓展
 description: 承接已确认的研究范围，检索并交付论文清单，深入调研进一步生成研究报告与论文关系。
-when_to_use: 仅在拓展记录已经确定方向后执行（单一方向自动确定，多方向由用户确认）；继续同一范围或调整结果表达沿用原记录。
+when_to_use: 仅在拓展记录已经确定方向后执行（按启动时所选策略全选方向或等待人工确认）；继续同一范围或调整结果表达沿用原记录。
 runtime:
   transactional_outputs: true
   publisher_owned_slots:
   - candidate_set
   - screened_candidates
   - screened_list_ready
-  - screening_not_required
   - expansion_list_ready
   - relation_analysis
   - expansion_result
@@ -88,6 +87,15 @@ slots:
   label: 跳过独立筛选
   type: json
   cardinality: single
+  external: true
+  required: false
+  exposed: false
+- id: analysis_not_required
+  label: 跳过关系分析
+  type: json
+  cardinality: single
+  external: true
+  required: false
   exposed: false
 - id: screened_candidates
   label: 筛选与补充
@@ -120,7 +128,6 @@ slots:
   cardinality: single
   exposed: true
 ui:
-  tab_visibility_ready_material: candidate_set
   slots:
     candidate_set:
       widgetType: json-block
@@ -153,16 +160,11 @@ ui:
     - id: screened_candidates
   - id: analyze_relations
     step_id: analyze_relations
-    hide_when_material: expansion_list_ready
+    hide_when_material: analysis_not_required
     label: 关系分析与证据核验
     layout: list
+    generation_process: {result_slot: expansion_report, slots: [relation_analysis]}
     slots:
     - id: relation_analysis
-  - id: report
-    step_id: analyze_relations
-    hide_when_material: expansion_list_ready
-    label: 研究报告与论文关系
-    layout: list
-    slots:
     - id: expansion_report
     - id: expansion_result

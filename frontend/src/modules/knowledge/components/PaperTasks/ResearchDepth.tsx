@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { BudgetMode, DirectionSelection } from '../../api/paperWorkflows';
+import type { BudgetMode } from '../../api/paperWorkflows';
 
 const researchDepthOptions: Array<{ value: BudgetMode; label: string; description: string[] }> = [
   { value: 'fast', label: '快速', description: ['聚焦核心问题', '代表论文与关键结论'] },
@@ -9,14 +9,14 @@ const researchDepthOptions: Array<{ value: BudgetMode; label: string; descriptio
 ];
 export const researchDepthLabels = { fast: '快速', balanced: '标准', deep: '深入' };
 
-const sharedExpansionSteps = ['research', 'chooseDirection', 'search', 'screen', 'groupedList'] as const;
+const sharedExpansionSteps = ['search', 'screen'] as const;
 const expansionSteps = {
-  fast: ['directSearch', 'prioritizedList'],
+  fast: ['search'],
   balanced: sharedExpansionSteps,
-  deep: [...sharedExpansionSteps, 'report'],
+  deep: [...sharedExpansionSteps, 'analyze'],
 } as const;
 
-export default function ResearchDepth({ value, onChange, expansion = false, directionSelection = 'all' }: { value: BudgetMode; onChange: (value: BudgetMode) => void; expansion?: boolean; directionSelection?: DirectionSelection }) {
+export default function ResearchDepth({ value, onChange, expansion = false }: { value: BudgetMode; onChange: (value: BudgetMode) => void; expansion?: boolean }) {
   const name = useId();
   const { t } = useTranslation();
   const title = t(expansion ? 'paperTasks.expansionDepth.title' : 'paperTasks.reviewFlow.depthTitle');
@@ -32,12 +32,12 @@ export default function ResearchDepth({ value, onChange, expansion = false, dire
         <span className="paper-research-depth-name"><input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} />{option.label}</span>
         <span className="paper-research-depth-description">{option.description.map(line => <span key={line}>{line}</span>)}</span>
         {expansion && <span className="paper-expansion-mode-flow" role="list">
-          {expansionSteps[option.value].map(step => <span key={step} role="listitem"
+          {expansionSteps[option.value].map((step, index) => <span key={step} role="listitem"
             className={`paper-expansion-mode-step step-${step}`}>
-            {t(`paperTasks.expansionDepth.steps.${step}`)}
-            {step === 'chooseDirection' && <span className="paper-expansion-mode-human">{t(`paperTasks.expansionDepth.${directionSelection === 'manual' ? 'yourChoice' : 'allDirections'}`)}</span>}
+            {index + 1}. {t(`paperTasks.expansionDepth.steps.${step}`)}
           </span>)}
         </span>}
+        {expansion && <span className="paper-expansion-mode-output">{t(`paperTasks.expansionDepth.outputs.${option.value}`)}</span>}
       </label>)}
     </div>
   </section>;

@@ -87,18 +87,17 @@ describe('hydrateWorkflowUI', () => {
 
 describe('filterWorkflowTabs', () => {
   it.each([
-    ['fast', ['screening_not_required', 'expansion_list_ready'], ['screen_and_supplement', 'analyze_relations', 'compose_result'], ['expand_and_screen']],
-    ['balanced', ['screened_candidates', 'screened_list_ready'], ['analyze_relations', 'compose_result'], ['expand_and_screen', 'screen_and_supplement']],
-    ['deep', ['screened_candidates'], [], ['expand_and_screen', 'screen_and_supplement', 'analyze_relations', 'compose_result']],
-  ])('shows the actual paper expansion stages for %s delivery', (_mode, materials, bypassed, expected) => {
+    ['fast', ['screening_not_required', 'analysis_not_required'], ['expand_and_screen']],
+    ['balanced', ['analysis_not_required'], ['expand_and_screen', 'screen_and_supplement']],
+    ['deep', [], ['expand_and_screen', 'screen_and_supplement', 'analyze_relations']],
+  ])('shows every planned paper expansion stage before %s starts', (_mode, materials, expected) => {
     const tabs = [
       { id: 'expand_and_screen', label: 'Search', slots: [] },
       { id: 'screen_and_supplement', label: 'Screen', slots: [], hide_when_material: 'screening_not_required' },
-      { id: 'analyze_relations', label: 'Analyze', slots: [], hide_when_material: 'expansion_list_ready' },
-      { id: 'compose_result', label: 'Report', slots: [], hide_when_material: 'expansion_list_ready' },
+      { id: 'analyze_relations', label: 'Analyze', slots: [], hide_when_material: 'analysis_not_required' },
     ];
-    const slots = ['candidate_set', ...materials].map(slot => ({ slot, selected: true })) as SlotRevision[];
-    expect(filterWorkflowTabs(tabs, slots, 'candidate_set', { projection: { bypassed } }).map(tab => tab.id)).toEqual(expected);
+    const slots = materials.map(slot => ({ slot, selected: true })) as SlotRevision[];
+    expect(filterWorkflowTabs(tabs, slots).map(tab => tab.id)).toEqual(expected);
   });
 
   it('shows a conditional stage again when a rewind clears its runtime bypass', () => {
