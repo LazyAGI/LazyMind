@@ -22,7 +22,7 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
     return () => { stale = true; };
   }, [open, reload]);
   const dependencyError = draft && readingDependencyError(draft);
-  return <Modal title={<div className="reading-preferences-title"><span className="reading-preferences-emblem"><ThunderboltOutlined /></span><div>AI 阅读准备<span>让准备节奏，适合你的阅读习惯</span></div></div>} open={open} onCancel={() => { if (!saving) onClose(); }} closable={!saving} maskClosable={!saving} keyboard={!saving} width={720} centered className="reading-preferences" footer={<Space><Button disabled={saving} onClick={onClose}>取消</Button><Button type="primary" loading={saving} disabled={!draft || loading || !!dependencyError} onClick={async () => {
+  return <Modal title={<div className="reading-preferences-title"><span className="reading-preferences-emblem"><ThunderboltOutlined /></span><div>AI 阅读准备<span>管理论文解析与 AI 研读的准备方式</span></div></div>} open={open} onCancel={() => { if (!saving) onClose(); }} closable={!saving} maskClosable={!saving} keyboard={!saving} width={720} centered className="reading-preferences" footer={<Space><Button disabled={saving} onClick={onClose}>取消</Button><Button type="primary" loading={saving} disabled={!draft || loading || !!dependencyError} onClick={async () => {
     if (!draft) return; setSaving(true); setError('');
     try { await saveReadingPreferences(draft); onClose(); } catch (err) { setError(getLocalizedErrorMessage(err)); } finally { setSaving(false); }
   }}>保存预设</Button></Space>}>
@@ -36,7 +36,7 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
         setDetailsOpen(false);
         setDraft({ ...draft, preset, modes: preset === 'custom' ? draft.modes : presetModes(preset) });
       }}>
-        {presets.map(([value, title, subtitle, description]) => <Radio key={value} value={value}><span className="reading-preset-heading"><strong>{title}</strong><CheckOutlined /></span><span className="reading-preset-subtitle">{subtitle}</span><span className="reading-preset-description">{description}</span></Radio>)}
+        {presets.map(([value, title, , description]) => <Radio key={value} value={value}><span className="reading-preset-heading"><strong>{title}</strong><CheckOutlined /></span><span className="reading-preset-description">{description}</span></Radio>)}
       </Radio.Group>
       <div className="reading-plan-summary"><span>{draft.preset === 'custom' ? `自定义 · ${Object.entries(names).filter(([id]) => draft.modes[id as ReadingCapabilityId] === 'automatic').map(([, name]) => name).join('、') || '无自动准备'}${Object.values(draft.modes).some(mode => mode === 'automatic') ? '自动准备' : ''}` : '仅对之后导入的论文自动准备，不补跑历史论文'}</span><Button type="link" size="small" disabled={saving} icon={<SlidersOutlined />} aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>{detailsOpen ? '收起设置' : '逐项调整'}</Button></div>
       {(detailsOpen) && <div className="reading-capabilities">
