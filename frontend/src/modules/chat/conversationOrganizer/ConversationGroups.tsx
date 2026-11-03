@@ -3,11 +3,13 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  EllipsisOutlined,
+  HistoryOutlined,
   HighlightOutlined,
   LoadingOutlined,
   UndoOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Drawer, Form, Modal, Select, Spin, Tooltip, message } from "antd";
+import { Alert, Button, Drawer, Dropdown, Form, Modal, Select, Spin, Tooltip, message } from "antd";
 import OrganizerSteps from "./OrganizerSteps";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -59,7 +61,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
   const [resultLoading, setResultLoading] = useState(false);
   const [resultLoadFailed, setResultLoadFailed] = useState(false);
   const [run, setRun] = useState<OrganizerRun | null>(null);
-  const [activeRun, setActiveRun] = useState<OrganizerRun | null>(null);
+  const [latestRun, setLatestRun] = useState<OrganizerRun | null>(null);
   const [freeCount, setFreeCount] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [canceling, setCanceling] = useState(false);
@@ -74,15 +76,15 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
   const pollGenerationRef = useRef(0);
   const onChangedRef = useRef(onChanged);
   useEffect(() => { onChangedRef.current = onChanged; }, [onChanged]);
-  const lockedConversationIds = new Set(activeRun && activeStatuses.has(activeRun.status)
-    ? (activeRun.items || []).map((item) => item.conversation_id) : []);
+  const lockedConversationIds = new Set(latestRun && activeStatuses.has(latestRun.status)
+    ? (latestRun.items || []).map((item) => item.conversation_id) : []);
   useEffect(() => {
-    if (correctingItemId && activeRun && activeStatuses.has(activeRun.status)
-      && activeRun.items?.some((item) => item.conversation_id === correctingItemId)) {
+    if (correctingItemId && latestRun && activeStatuses.has(latestRun.status)
+      && latestRun.items?.some((item) => item.conversation_id === correctingItemId)) {
       setCorrectingItemId("");
       message.warning(t("conversationOrganizer.deleteLocked"));
     }
-  }, [activeRun, correctingItemId, t]);
+  }, [latestRun, correctingItemId, t]);
   const subtitleKey = !run ? "" : run.status === "succeeded" ? "resultSubtitle"
     : activeStatuses.has(run.status) ? (canceling || run.stage === "canceling" ? "cancelingSubtitle" : "runningSubtitle")
     : run.status === "failed" ? "failedSubtitle" : run.status === "canceled" ? "canceledSubtitle" : "";
@@ -126,7 +128,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
     try {
       const next = await getOrganizerRun(runId);
       if (pollGenerationRef.current !== generation) return;
-      setActiveRun(next);
+      setLatestRun(next);
       setRun(current => current?.id === next.id ? next : current);
       if (activeStatuses.has(next.status)) {
         window.clearTimeout(pollRef.current);
@@ -154,7 +156,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
         if (disposed || generation !== pollGenerationRef.current) return;
         setFreeCount(latest.free_conversation_count ?? null);
         setHasRecentResult(Boolean(latest.latest_successful_run_id));
-        setActiveRun(latest.run);
+        setLatestRun(latest.run);
         setRun(current => current?.id === latest.run?.id ? latest.run : current);
         if (latest.run && activeStatuses.has(latest.run.status)) {
           const nextGeneration = ++pollGenerationRef.current;
@@ -170,7 +172,10 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
   }, [mode, refreshGroups, refreshActiveRun, isTaskConv, projectsOnly]);
 
   const isProjectEditor = editing === "new-project" || (typeof editing === "object" && editing?.kind === "project");
-  const namesLocked = !isTaskConv && !!activeRun && activeStatuses.has(activeRun.status);
+  const namesLocked = !isTaskConv && !!latestRun && activeStatuses.has(latestRun.status);
+  const canceledRestartBlocked = latestRun?.status === "canceled" && !latestRun.can_restart;
+  const startHint = freeCount === 0 ? t("conversationOrganizer.noFreeConversations")
+    : canceledRestartBlocked ? t("conversationOrganizer.blockedHint") : undefined;
 
   const showEditor = (group: ConversationGroup | "new" | "new-project") => {
     if (group === "new" && namesLocked) { message.info(t("conversationOrganizer.namesLocked")); return; }
@@ -213,9 +218,9 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
     },
   });
 
-  const beginOrganize = async (previous = activeRun, restart = false) => {
+  const beginOrganize = async (previous = latestRun, restart = false) => {
     if (previous?.status === "failed" && (restart ? !previous.can_restart : !previous.can_retry && !previous.can_restart)) return;
-    if (startingRef.current || (activeRun && activeStatuses.has(activeRun.status))) return;
+    if (startingRef.current || (latestRun && activeStatuses.has(latestRun.status))) return;
     startingRef.current = true;
     const generation = ++pollGenerationRef.current;
     window.clearTimeout(pollRef.current);
@@ -225,7 +230,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
         ? await runAction(previous.id, "retry")
         : await startOrganizerRun();
       if (generation !== pollGenerationRef.current) return;
-      setActiveRun(next);
+      setLatestRun(next);
       setRun(next);
       setDrawerOpen(true);
       if (next.status === "succeeded") setHasRecentResult(true);
@@ -251,6 +256,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
   };
 
   const closeResult = () => setDrawerOpen(false);
+  const openRecentRun = () => { setRun(latestRun); setDrawerOpen(true); };
   const confirmResultAction = (action: "confirm" | "undo") => {
     Modal.confirm({
       title: t(`conversationOrganizer.${action}Title`),
@@ -279,10 +285,13 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
     if (action === "cancel") setCanceling(true);
     let next: OrganizerRun;
     try { next = await runAction(run.id, action); } finally { setCanceling(false); }
+    const generation = ++pollGenerationRef.current;
+    window.clearTimeout(pollRef.current);
+    setLatestRun(next);
     setRun(next);
     if (action === "undo" && next.skipped_count > 0) { message.warning(t("conversationOrganizer.undoPartial", { count: next.skipped_count }), 8); }
-    if (action === "undo" || action === "confirm") { setDrawerOpen(false); setHasRecentResult(false); setActiveRun(null); emitConversationGroupsChanged(); }
-    if (activeStatuses.has(next.status)) { setActiveRun(next); const generation = ++pollGenerationRef.current; void refreshActiveRun(next.id, generation); }
+    if (action === "undo" || action === "confirm") { setDrawerOpen(false); setHasRecentResult(false); emitConversationGroupsChanged(); }
+    if (activeStatuses.has(next.status)) { void refreshActiveRun(next.id, generation); }
     else { await refreshGroups(); onChanged?.(); }
   };
 
@@ -312,12 +321,13 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
     {mode !== "organizer" && <SidebarGroups assistants={assistants} projectsOnly={projectsOnly} isTaskConv={isTaskConv} includeProjects={includeProjects} showTypeHeading={showTypeHeading} batchSelection={batchSelection} namesLocked={namesLocked} groups={groups} searchText={searchText} currentConversationId={currentConversationId} onNew={id => onNewChatInGroup?.(id, Boolean(groups.find(g => g.id === id)?.is_task_conv))} onEdit={showEditor} onRemove={removeGroup} />}
     {mode !== "groups" && !isTaskConv &&
     <div className="conversation-organizer-entry">
-      {activeRun && activeStatuses.has(activeRun.status) ? <Button className="conversation-organizer-active" type="text" onClick={() => { setRun(activeRun); setDrawerOpen(true); }}>{progressLabel(activeRun)}</Button>
+      {latestRun && activeStatuses.has(latestRun.status) ? <Button className="conversation-organizer-active" type="text" onClick={openRecentRun}>{progressLabel(latestRun)}</Button>
         : hasRecentResult ? <Button className="conversation-organizer-start" type="text" icon={<CheckCircleOutlined />} onClick={() => void openLatest()}>{t("conversationOrganizer.viewResult")}<span className="organizer-unread-dot" /></Button>
-        : activeRun?.status === "failed" ? <Button className="conversation-organizer-start" type="text" icon={<CloseCircleOutlined />} onClick={() => { setRun(activeRun); setDrawerOpen(true); }}>{t("conversationOrganizer.failedEntry")}</Button>
-        : activeRun?.status === "canceled" ? <Button className="conversation-organizer-start" type="text" icon={<CloseCircleOutlined />} onClick={() => { setRun(activeRun); setDrawerOpen(true); }}>{t("conversationOrganizer.canceledEntry")}</Button>
-        : <Tooltip title={freeCount === 0 ? t("conversationOrganizer.noFreeConversations") : undefined}><Button className="conversation-organizer-start" type="text" loading={starting} disabled={starting || freeCount === 0} icon={<HighlightOutlined />} onClick={() => void beginOrganize()}>{t(starting ? "conversationOrganizer.starting" : "conversationOrganizer.organize")}</Button></Tooltip>}
-
+        : latestRun?.status === "failed" ? <Button className="conversation-organizer-start" type="text" icon={<CloseCircleOutlined />} onClick={openRecentRun}>{t("conversationOrganizer.failedEntry")}</Button>
+        : <Tooltip title={startHint}><Button className="conversation-organizer-start" type="text" loading={starting} disabled={starting || freeCount === 0 || canceledRestartBlocked} icon={<HighlightOutlined />} onClick={() => void beginOrganize(latestRun, true)}>{t(starting ? "conversationOrganizer.starting" : "conversationOrganizer.organize")}</Button></Tooltip>}
+      {latestRun && <Dropdown trigger={["click"]} placement="bottomRight" menu={{ items: [
+        { key: "recent", icon: <HistoryOutlined />, label: t("conversationOrganizer.recentResult"), onClick: openRecentRun },
+      ] }}><Button className="conversation-organizer-more" type="text" size="small" icon={<EllipsisOutlined />} aria-label={t("conversationOrganizer.more")} /></Dropdown>}
     </div>}
 
     <Modal open={editing !== null} title={t(isProjectEditor ? (editing === "new-project" ? "conversationProject.new" : "conversationProject.edit") : editing === "new" ? "conversationOrganizer.newGroup" : "conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} confirmLoading={loading} okButtonProps={{ disabled: editing === "new-project" && !workspaceId }} onOk={() => void saveGroup()} onCancel={() => setEditing(null)} destroyOnClose>
@@ -335,7 +345,7 @@ export default function ConversationGroups({ assistants, onChanged, onNewChatInG
         <p>{t("conversationOrganizer.progressHint")}</p>
         {run.can_cancel && <Button loading={canceling} disabled={canceling} onClick={() => confirmCancel(() => act("cancel"))}>{t("conversationOrganizer.cancelRun")}</Button>}
       </div> : run.status === "failed" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.failed")}</h3><p>{run.error?.code ? t(`conversationOrganizer.callError.${run.error.code}`, { defaultValue: t("conversationOrganizer.failedHint") }) : t("conversationOrganizer.failedHint")}</p><p>{t(run.can_retry ? "conversationOrganizer.retryHint" : run.can_restart ? "conversationOrganizer.restartHint" : "conversationOrganizer.blockedHint", { current: run.progress?.current ?? 0, total: run.progress?.total ?? 0 })}</p><small>{t("conversationOrganizer.failureReference", { code: run.error?.code || "unknown", id: run.id })}</small>{run.can_retry ? <Button type="primary" loading={starting} disabled={starting} onClick={() => void beginOrganize(run)}>{t("conversationOrganizer.retry")}</Button> : run.can_restart ? <Button type="primary" loading={starting} disabled={starting || freeCount === 0} onClick={() => void beginOrganize(run, true)}>{t("conversationOrganizer.restart")}</Button> : null}</div> : run.status === "canceled" ? <div className="organizer-state"><CloseCircleOutlined /><h3>{t("conversationOrganizer.canceled")}</h3><p>{t("conversationOrganizer.canceledHint")}</p>{run.can_restart ? <Button loading={starting} disabled={starting || freeCount === 0} onClick={() => void beginOrganize(run, true)}>{t("conversationOrganizer.restart")}</Button> : <p>{t("conversationOrganizer.blockedHint")}</p>}</div> : <>
-        <div className="organizer-result-notice">{t("conversationOrganizer.resultNotice")}</div>
+        {run.status === "succeeded" && <div className="organizer-result-notice">{t("conversationOrganizer.resultNotice")}</div>}
         <div className="organizer-result-summary" aria-label={t("conversationOrganizer.resultSummaryLabel")}>
           <div><strong>{resultItems.length}</strong><span>{t("conversationOrganizer.resultStats.included")}</span></div>
           <div><strong>{groupedResultCount}</strong><span>{t("conversationOrganizer.resultStats.assigned")}</span></div>

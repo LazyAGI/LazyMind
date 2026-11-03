@@ -22,6 +22,7 @@ import ChatInput, {
   SKILL_DEPOSIT_MIN_USER_TURNS,
   type SkillDepositStats,
 } from "../ChatInput";
+import FollowUpQueue from "../ChatInput/FollowUpQueue";
 import "./index.scss";
 import MessageList from "./components/MessageList";
 import ChatMessageContent from "./components/ChatMessageContent";
@@ -33,6 +34,7 @@ import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
 import { useUserMessageEdit } from "./hooks/useUserMessageEdit";
+import { useConversationFollowUps } from "./hooks/useConversationFollowUps";
 import type { ChatContainerProps, ChatImperativeProps } from "./types";
 import { useConversationTrail } from "./hooks/useConversationTrail";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
@@ -61,6 +63,7 @@ const SKILL_DEPOSIT_PROMPT_PREFIXES = ["zh-CN", "en-US"].map((language) =>
 );
 
 function getSkillDepositStats(messageList: any[]): SkillDepositStats {
+  const toolTurnsByHistory = new Map<string, number>();
   return messageList.reduce<SkillDepositStats>(
     (stats, item) => {
       if (item?.role === RoleTypes.USER && !item?.is_resumed) {
@@ -70,10 +73,15 @@ function getSkillDepositStats(messageList: any[]): SkillDepositStats {
           stats.userTurns += 1;
         }
       }
-      if (item?.role === RoleTypes.ASSISTANT) {
+      if (item?.role === RoleTypes.ASSISTANT && !item?.archived_failure) {
         const toolCallTurns = Number(item.tool_call_turns ?? 0);
         if (Number.isFinite(toolCallTurns) && toolCallTurns > 0) {
-          stats.toolCallTurns += toolCallTurns;
+          // Steering splits one history into several displayed replies, but
+          // their tool counts are cumulative observations of the same run.
+          const historyId = item.original_history_id || item.history_id;
+          const previous = historyId ? toolTurnsByHistory.get(historyId) ?? 0 : 0;
+          stats.toolCallTurns += Math.max(0, toolCallTurns - previous);
+          if (historyId) toolTurnsByHistory.set(historyId, Math.max(previous, toolCallTurns));
         }
       }
       return stats;
@@ -174,6 +182,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     }, []);
     const workspacePermissionSavingRef = useRef(false);
     const [workspacePermissionSaving, setWorkspacePermissionSaving] = useState(false);
+    const [steeringSuspended, setSteeringSuspended] = useState(false);
     const handleWorkspacePermissionSavingChange = useCallback((saving: boolean) => {
       workspacePermissionSavingRef.current = saving;
       setWorkspacePermissionSaving(saving);
@@ -258,8 +267,19 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onStreamingChange?.(conversation.isStreaming);
       if (conversation.isStreaming) {
         onRequestPendingChange?.(false);
+      } else {
+        setSteeringSuspended(false);
       }
     }, [conversation.isStreaming, onRequestPendingChange, onStreamingChange]);
+
+    const stopGeneration = useCallback(() => {
+      // Stop is asynchronous, but guidance accepted after this point would be
+      // canceled before the runtime can consume it. Hide/disable steering as
+      // soon as the user requests stop while keeping queue auto-dispatch tied
+      // to the authoritative terminal stream event.
+      setSteeringSuspended(true);
+      conversation.stopGeneration();
+    }, [conversation.stopGeneration]);
 
     const unreadConversationId = conversation.currentConversationIdRef.current || sessionId;
     useEffect(() => {
@@ -398,7 +418,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       scrollToEnd: conversation.scroll.scrollToEnd,
     });
 
-    const sendMessage = useCallback(
+    const sendNow = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
         if (modelSelectionSavingRef.current || workspacePermissionSavingRef.current) {
           return Promise.resolve(false);
@@ -407,6 +427,36 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         return conversation.sendMessage(params);
       },
       [collapseAllThinking, conversation.sendMessage],
+    );
+
+    const followUps = useConversationFollowUps({
+      conversationId: sessionId,
+      isStreaming: conversation.isStreaming,
+      sendNow,
+      onSteerAccepted: conversation.showAcceptedSteering,
+    });
+
+    const sendMessage = useCallback(
+      (params: Parameters<typeof conversation.sendMessage>[0]) => {
+        const activeConversationId =
+          conversation.currentConversationIdRef.current || sessionId;
+        if (
+          (conversation.isStreaming || conversation.activeStreamRef.current) &&
+          activeConversationId &&
+          !activeConversationId.startsWith("temp_")
+        ) {
+          return followUps.enqueue(params, activeConversationId);
+        }
+        return sendNow(params);
+      },
+      [
+        conversation.activeStreamRef,
+        conversation.currentConversationIdRef,
+        conversation.isStreaming,
+        followUps.enqueue,
+        sendNow,
+        sessionId,
+      ],
     );
 
     userEditRef.current = userEdit;
@@ -641,6 +691,17 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               value={conversation.content}
               onChange={conversation.setContent}
               onSend={sendMessage}
+              followUpQueue={(
+                <FollowUpQueue
+                  items={followUps.items}
+                  isStreaming={conversation.isStreaming && !steeringSuspended && followUps.supportsSteering}
+                  onSteer={(item) => void followUps.steer(item)}
+                  onRetry={(item) => void followUps.retry(item)}
+                  onRemove={(item) => void followUps.remove(item)}
+                  onUpdate={(item, text) => void followUps.update(item, text)}
+                  onReorder={(orderedIds) => void followUps.reorder(orderedIds)}
+                />
+              )}
               openHistory={
                 setShowHistoryList ? () => setShowHistoryList(true) : undefined
               }
@@ -664,7 +725,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               sessionId={sessionId}
               isStreaming={conversation.isStreaming}
               canStopGeneration={conversation.canStopGeneration}
-              onStopGeneration={conversation.stopGeneration}
+              onStopGeneration={stopGeneration}
               disabled={!canChat || conversation.runtimeWaiting}
               disabledReason={canChat ? undefined : disabledReason}
               disabledDescription={canChat ? undefined : disabledDescription}

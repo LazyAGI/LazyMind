@@ -3325,6 +3325,35 @@ CREATE TABLE task_attempt_timings (
 );
 CREATE INDEX idx_task_attempt_execution ON task_attempt_timings(execution_id);
 
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE conversation_followups (
+    id VARCHAR(36) PRIMARY KEY,
+    conversation_id VARCHAR(36) NOT NULL,
+    content JSON NOT NULL,
+    text TEXT NOT NULL,
+    mode VARCHAR(16) NOT NULL DEFAULT 'queued',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    sort_order BIGINT NOT NULL DEFAULT 0,
+    revision BIGINT NOT NULL DEFAULT 1,
+    target_run_id VARCHAR(64) NOT NULL DEFAULT '',
+    target_history_id VARCHAR(36) NOT NULL DEFAULT '',
+    steer_id VARCHAR(64) NOT NULL DEFAULT '',
+    idempotency_key VARCHAR(64) NOT NULL,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    accepted_at TIMESTAMP,
+    create_user_id VARCHAR(255) NOT NULL,
+    create_user_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP
+);
+
+CREATE INDEX idx_conversation_followups_queue
+    ON conversation_followups(conversation_id, status, sort_order);
+CREATE UNIQUE INDEX uk_conversation_followups_idempotency
+    ON conversation_followups(create_user_id, conversation_id, idempotency_key);
+
 -- +migrate Dialect *
 CREATE TABLE academic_document_states (
  metadata_json JSON NOT NULL DEFAULT '{}',
@@ -3443,6 +3472,14 @@ CREATE TABLE academic_paper_contents (
 CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version, source_key);
 -- Complete editable paper-library state and optimistic concurrency revision.
 -- +migrate Dialect postgres,sqlite
+-- Immutable pre-normalization paper graph archive.
+CREATE TABLE paper_libraries (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ data_json JSON NOT NULL,
+ revision BIGINT NOT NULL DEFAULT 0 CHECK(revision >= 0),
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE paper_library_folders (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, parent_id VARCHAR(255) NOT NULL DEFAULT '',
  name VARCHAR(255) NOT NULL, name_key VARCHAR(255) NOT NULL, revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0),
@@ -3480,6 +3517,22 @@ CREATE TABLE paper_library_attachments (
 CREATE INDEX idx_library_attachment_paper ON paper_library_attachments(dataset_id,paper_id);
 CREATE INDEX idx_library_attachment_document ON paper_library_attachments(dataset_id,document_id);
 CREATE UNIQUE INDEX uk_library_active_document ON paper_library_attachments(dataset_id,document_id) WHERE document_id<>'' AND detached_at IS NULL;
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE paper_library_legacy_states (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ extras_json JSON NOT NULL,
+ migrated_at TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL
+);
+
+-- +migrate Dialect postgres
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND ext->>'library_kind'='paper';
+
+-- +migrate Dialect sqlite
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND CASE WHEN json_valid(ext) THEN json_extract(ext,'$.library_kind') ELSE NULL END='paper';
 
 -- Promote the oldest active connection endpoint once. Keep rollback metadata
 -- without storing API keys; connection/model IDs and ciphertext stay intact.

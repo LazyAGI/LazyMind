@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/paperlibrary"
@@ -248,7 +249,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 			}
 		}
 		now := time.Now().UTC()
-		batch = orm.PaperImportBatch{ID: uuid.NewString(), TargetDatasetID: input.TargetDatasetID, CreatedBy: user, IdempotencyKey: input.IdempotencyKey, EntryType: input.EntryType, Status: "succeeded", SourceContextJSON: marshal(map[string]string{"format": input.Format, "file_name": input.FileName}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{"request_hash": requestHash}), CreatedAt: now, UpdatedAt: now}
+		batch = orm.PaperImportBatch{ID: uuid.NewString(), TargetDatasetID: input.TargetDatasetID, CreatedBy: user, IdempotencyKey: input.IdempotencyKey, EntryType: input.EntryType, Status: "succeeded", SourceContextJSON: marshal(map[string]string{"format": input.Format, "file_name": input.FileName}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{"request_hash": requestHash, "background_enrichment": input.EntryType == "paper_link", "folder_id": input.FolderID}), CreatedAt: now, UpdatedAt: now}
 		items := []orm.PaperImportItem{}
 		for _, selected := range input.Items {
 			draft := selected.Paper
@@ -331,14 +332,49 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 					}
 				}
 			}
-			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: "done", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+			stage := "done"
+			enrich := isMetadataEnrichmentBatch(batch)
+			if enrich && existing > 0 {
+				enrich, e = needsLibraryPDFAcquisition(tx, input.TargetDatasetID, row.ID)
+				if e != nil {
+					return e
+				}
+				for _, queued := range items {
+					if queued.LibraryPaperID == row.ID && queued.Status == "pending" {
+						enrich = false
+						break
+					}
+				}
+			}
+			if enrich {
+				status, stage = "pending", "metadata"
+				kind = "enrichment"
+				if existing > 0 {
+					batch.SkippedItems--
+				} else {
+					batch.CompletedItems--
+				}
+				batch.Status = "pending"
+			}
+			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: stage, ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
 			ids = append(ids, row.ID)
 		}
 		batch.TotalItems = len(items)
 		if e = tx.Create(&batch).Error; e != nil {
 			return e
 		}
-		return tx.Create(&items).Error
+		if e = tx.Create(&items).Error; e != nil {
+			return e
+		}
+		if batch.Status == "pending" {
+			queued, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import:" + batch.ID, Payload: paperImportPayload{BatchID: batch.ID, UserID: user, UserName: store.UserName(r)}, CreateUserID: user, CreateUserName: store.UserName(r)})
+			if err != nil {
+				return err
+			}
+			batch.AsyncJobID = queued.ID
+			return tx.Model(&batch).Update("async_job_id", queued.ID).Error
+		}
+		return nil
 	})
 	if err != nil {
 		replyLibraryError(w, err)
@@ -361,7 +397,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		libraryChanges
 		BatchID string `json:"batch_id"`
 		Status  string `json:"status"`
-	}{out, batch.ID, "succeeded"})
+	}{out, batch.ID, batch.Status})
 }
 func libraryImportDataset(r *http.Request, dataset string) (orm.Dataset, error) {
 	var row orm.Dataset
@@ -508,4 +544,26 @@ func confirmLibraryUpload(ctx context.Context, tx *gorm.DB, user string, batch o
 	}
 	err = tx.Model(&batch).Updates(map[string]any{"status": "succeeded", "completed_items": 1, "needs_action_items": 0, "policy_snapshot_json": marshal(map[string]any{"confirmation_paper_id": selected.Paper.ID}), "updated_at": time.Now().UTC()}).Error
 	return entry.ID, err
+}
+
+// The caller holds the dataset lock, so reimports cannot schedule overlapping
+// acquisitions for the same library entry. A previous failure is retryable.
+func needsLibraryPDFAcquisition(tx *gorm.DB, dataset, paper string) (bool, error) {
+	var pending int64
+	if err := tx.Table("paper_import_items i").Joins("JOIN paper_import_batches b ON b.id=i.batch_id").Where("b.target_dataset_id=? AND i.library_paper_id=? AND b.status IN ? AND i.status IN ?", dataset, paper, []string{"pending", "running"}, []string{"pending", "running"}).Count(&pending).Error; err != nil {
+		return false, err
+	}
+	if pending > 0 {
+		return false, nil
+	}
+	var documents []orm.Document
+	if err := activeSourceDocuments(tx, dataset).Select("d.*").Joins("JOIN paper_library_attachments a ON a.dataset_id=d.dataset_id AND a.document_id=d.id").Where("a.paper_id=? AND a.kind='pdf' AND a.detached_at IS NULL", paper).Find(&documents).Error; err != nil {
+		return false, err
+	}
+	for _, document := range documents {
+		if paperlibrary.OriginalAvailable(document) {
+			return false, nil
+		}
+	}
+	return true, nil
 }

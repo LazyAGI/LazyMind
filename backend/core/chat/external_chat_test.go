@@ -28,7 +28,7 @@ import (
 func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *gorm.DB) {
 	t.Helper()
 	database := orm.MigrateTestDB(t,
-		&orm.AgentInvocation{}, &orm.ChatHistory{}, &orm.Conversation{},
+		&orm.AgentInvocation{}, &orm.ChatHistory{}, &orm.Conversation{}, &orm.ConversationFollowUp{},
 		&orm.ConversationArtifact{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{},
 		&orm.ConversationOpening{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{},
 		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.ExternalChatHost{},

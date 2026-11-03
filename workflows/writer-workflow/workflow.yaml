@@ -130,11 +130,6 @@ slots:
     label: Visual Plan
     type: file
     cardinality: single
-  - id: resource_profiles
-    user_visible: false
-    label: Resource Profiles
-    type: file
-    cardinality: single
   - id: writing_context
     user_visible: false
     label: Writing Context
@@ -318,7 +313,6 @@ i18n:
       media_assets: {label: 可用图片素材}
       resolved_media_assets: {label: 已解析图片素材}
       visual_plan: {label: 视觉规划}
-      resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
       source_document: {label: 资源文档}
       target_document: {label: 云文档目标}

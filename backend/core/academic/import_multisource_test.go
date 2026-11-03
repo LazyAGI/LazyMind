@@ -288,7 +288,20 @@ func TestDOIPreviewDistinguishesFulltextFailureFromAbsence(t *testing.T) {
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
 			w := httptest.NewRecorder()
-			PreviewImport(w, paperRequest(`{"identifier":"10.1234/example","target_dataset_id":"papers"}`))
+			req := paperRequest(`{"identifier":"10.1234/example","target_dataset_id":"papers"}`)
+			client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+				switch r.URL.Host {
+				case "api.openalex.org":
+					return 200, `{"results":[]}`
+				case "api.unpaywall.org":
+					return status, `{"best_oa_location":{"url_for_pdf":"https://publisher.example/paper.pdf","version":"publishedVersion"}}`
+				case "publisher.example":
+					return 206, "%PDF-1.7 test"
+				default:
+					return 404, ""
+				}
+			})
+			PreviewImport(w, req.WithContext(context.WithValue(req.Context(), paperPDFClientKey{}, client)))
 			var response struct {
 				Items []PreviewItem `json:"items"`
 			}

@@ -179,19 +179,11 @@ describe("Model Provider service list", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("places the read-only LazyMind Cloud card in the existing Provider service list", async () => {
+  it("does not expose the removed cloud-service footer button", async () => {
     render(<ModelProviderPage />);
-
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "modelProvider.workspace.cloud",
-      }),
-    );
-    expect(
-      await screen.findByTestId("cloud-system-provider-card"),
-    ).toBeInTheDocument();
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    expect(screen.getByText("LazyMind Cloud")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "modelProvider.workspace.cloud" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cloud-system-provider-card")).not.toBeInTheDocument();
   });
 
   it.each(["business failure", "upstream error"])(

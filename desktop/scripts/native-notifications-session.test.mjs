@@ -14,6 +14,11 @@ function fixture() {
   const gate = new Promise((resolve) => { finish = resolve; });
   const context = {
     isQuitting: false, notificationSessionRevision: 0, sessionWrites: Promise.resolve(),
+    recoverySessionIdentity: undefined,
+    agentRecovery: {
+      start: () => calls.push("start-recovery"),
+      stop: async () => { calls.push("stop-recovery"); },
+    },
     notificationSession: createNotificationSession(),
     mainWindow: {}, notificationFrontendOrigin: () => "http://127.0.0.1:50124",
     isTrustedNotificationSender: (event) => event.trusted,
@@ -88,12 +93,15 @@ test("actual session IPC serializes credentials and a pending login cannot resta
   await Promise.resolve();
   await Promise.resolve();
   const logout = h.handlers.get("lazymind:assistantSessionClear")({ trusted: true });
+  assert.ok(h.calls.includes("stop-recovery"));
+  await new Promise(setImmediate);
   assert.equal(h.calls.filter((item) => item === "suspend-notifications").length, 1);
   assert.equal(h.calls.filter((item) => item === "clear-notifications").length, 1);
   h.finish();
   await Promise.all([login, logout]);
   assert.deepEqual(h.calls.filter((item) => ["set", "clear"].includes(item)), ["set", "clear"]);
   assert.ok(!h.calls.includes("start-notifications"));
+  assert.ok(!h.calls.includes("start-recovery"));
 });
 
 test("actual session IPC rejects untrusted calls before credential or notification effects", async () => {
@@ -111,6 +119,7 @@ test("actual pending login cannot start a notification poll after the applicatio
   h.finish();
   await login;
   assert.ok(!h.calls.includes("start-notifications"));
+  assert.ok(!h.calls.includes("start-recovery"));
 });
 
 test("preload restoration is exact-session and trusted-frame only", () => {

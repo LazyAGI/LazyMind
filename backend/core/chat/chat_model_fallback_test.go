@@ -718,9 +718,9 @@ func TestChatFallbackAutoDeletedStickyKeepsPrivateBootstrap(t *testing.T) {
 		})
 	}
 }
-func TestChatFallbackEmptyCredentialIsSkippedBeforeClientConstruction(t *testing.T) {
+func TestChatFallbackBrokenCredentialIsSkippedBeforeClientConstruction(t *testing.T) {
 	db, conversation, _ := fallbackTestBody(t, "fixed")
-	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Update("api_key", " \n ").Error; err != nil {
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Update("api_key_ciphertext", "fixture-invalid-envelope").Error; err != nil {
 		t.Fatal(err)
 	}
 	body := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1"}
@@ -729,7 +729,7 @@ func TestChatFallbackEmptyCredentialIsSkippedBeforeClientConstruction(t *testing
 	}
 	request := buildLazyChatRequest(body)
 	if request.Runtime.ModelFallbackCurrentID != "own:model-b" || len(request.Runtime.ModelFallbackCandidates) != 1 || request.Runtime.LLMConfig["llm"].(map[string]any)["model"] != "gpt-b" {
-		t.Fatal("empty credential remained the client constructed before fallback")
+		t.Fatal("broken credential remained the client constructed before fallback")
 	}
 	if state := body[chatModelFallbackBodyKey].(*chatFallbackState); len(state.records) != 0 || state.initialSwitch == nil {
 		t.Fatal("missing safe preparation replacement")
@@ -741,6 +741,7 @@ func TestChatFallbackCandidateCredentialHeaderSafety(t *testing.T) {
 		name, key, current, want string
 		replacement              bool
 	}{
+		{name: "keyless endpoint", key: " \n ", current: "own:model-a", want: ""},
 		{name: "encrypted outer whitespace", key: " \r\nfixture-single\t ", current: "own:model-a", want: "fixture-single"},
 		{name: "access secret pair", key: "fixture-access:fixture-secret", current: "own:model-a", want: "fixture-access:fixture-secret"},
 		{name: "embedded LF", key: "fixture-first\nfixture-second", current: "own:model-b", want: "fixture-b", replacement: true},
@@ -766,12 +767,18 @@ func TestChatFallbackCandidateCredentialHeaderSafety(t *testing.T) {
 			if request.Runtime.ModelFallbackCurrentID != test.current || request.Runtime.LLMConfig["llm"].(map[string]any)["api_key"] != test.want {
 				t.Fatal("dynamic current model retained an unusable credential")
 			}
+			if test.want == "" && request.Runtime.LLMConfig["llm"].(map[string]any)["skip_auth"] != true {
+				t.Fatal("keyless current model lost skip_auth")
+			}
 			found := false
 			for _, candidate := range request.Runtime.ModelFallbackCandidates {
 				if candidate.CandidateID == test.current {
 					found = true
 					if candidate.LLMConfig["llm"].(map[string]any)["api_key"] != test.want {
 						t.Fatal("static candidate and dynamic current credentials differ")
+					}
+					if test.want == "" && candidate.LLMConfig["llm"].(map[string]any)["skip_auth"] != true {
+						t.Fatal("keyless fallback candidate lost skip_auth")
 					}
 				}
 				if test.replacement && candidate.ProviderGroupID == "group-a" {

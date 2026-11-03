@@ -11,10 +11,31 @@ import (
 	"testing"
 	"time"
 
+	sqlitedriver "github.com/glebarez/go-sqlite"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	sqlite3 "modernc.org/sqlite/lib"
 )
+
+func assertArxivImportWaitTimedOut(t *testing.T, ctx context.Context, err error) {
+	t.Helper()
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("import lock waiter returned before its deadline: context=%v, error=%v", ctx.Err(), err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	// The SQLite driver interrupts an in-flight statement when its context
+	// expires. Depending on timing, cancellation surfaces as SQLITE_INTERRUPT
+	// rather than the context error. Require both the expired deadline and the
+	// specific driver code; unrelated errors must still fail this assertion.
+	var sqliteErr *sqlitedriver.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_INTERRUPT {
+		return
+	}
+	t.Fatalf("import lock waiter did not report deadline cancellation: %v", err)
+}
 
 func TestArxivImportLockCancellationAndMainDatabaseWrites(t *testing.T) {
 	db := orm.OpenTestDB(t).DB
@@ -38,10 +59,9 @@ func TestArxivImportLockCancellationAndMainDatabaseWrites(t *testing.T) {
 		stop()
 		if unlock != nil {
 			unlock.release()
+			t.Fatal("cancelled waiter acquired the active import lock")
 		}
-		if !errors.Is(waitErr, context.DeadlineExceeded) {
-			t.Fatalf("cancelled waiter bypassed/released the active import lock: %v", waitErr)
-		}
+		assertArxivImportWaitTimedOut(t, waiting, waitErr)
 	}
 	release.release()
 	next, err := lockArxivImport(ctx, db, "2404.06654")
@@ -114,10 +134,9 @@ func TestSQLiteArxivImportLockUsesProxyDatabaseFilesystem(t *testing.T) {
 	unexpected, err := lockArxivImport(ctx, direct.DB, "2404.06654")
 	if unexpected != nil {
 		unexpected.release()
+		t.Fatal("proxy and direct connections did not share the database lock")
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("proxy and direct connections did not share the database lock: %v", err)
-	}
+	assertArxivImportWaitTimedOut(t, ctx, err)
 	t.Setenv("LAZYMIND_SQLITE_SERVER_URL", "https://remote-sqlite.example")
 	if unlock, err := lockArxivImport(t.Context(), proxy.DB, "another-paper"); unlock != nil || err == nil {
 		t.Fatalf("remote proxy silently used a host-local lock: %v", err)

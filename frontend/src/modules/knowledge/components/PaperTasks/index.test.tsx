@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfigProvider, Modal } from 'antd';
+import { ConfigProvider } from 'antd';
+import { setupAntdStaticCleanup } from '@/test/antdStatic';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import zhCN from '@/i18n/locales/zh-CN';
@@ -11,6 +12,7 @@ import PaperTasks from './index';
 import PaperImportanceButton from './PaperImportanceButton';
 import { confirmExpansion, deleteExpansion, getExpansion, launchPaperTask, listResearchRecords, resolvePaperSelection, retryPaperContent, setPaperImportance, type ExpansionDetail, type ExpansionReport, type PaperTask } from '../../api/paperWorkflows';
 import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem } from '../../api/academicReferences';
+setupAntdStaticCleanup();
 vi.mock('../../api/paperWorkflows', () => ({ launchPaperTask: vi.fn(), getExpansion: vi.fn(), listResearchRecords: vi.fn(), resolvePaperSelection: vi.fn(), retryPaperContent: vi.fn(), deleteExpansion: vi.fn(), setPaperImportance: vi.fn(), getExpansionCapabilities: vi.fn().mockResolvedValue({ openalex_key: true, sciverse: true, web_search: true }), submitPreparation: vi.fn(), confirmExpansion: vi.fn() }));
 vi.mock('../../api/academicReferences', () => ({ previewPaperImport: vi.fn(), startReferenceImport: vi.fn(), getPaperImportStatus: vi.fn(), isImportPreviewExpired: () => false }));
 const importsChanged = vi.fn();
@@ -42,7 +44,7 @@ beforeEach(() => {
     vi.mocked(previewPaperImport).mockResolvedValue([preview('a'), preview('b')]);
     vi.mocked(startReferenceImport).mockResolvedValue({ batch_id: 'batch' } as Awaited<ReturnType<typeof startReferenceImport>>);
 });
-afterEach(() => { Modal.destroyAll(); cleanup(); vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); });
 const submit = async () => {
     fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研)$/ }));
     await waitFor(() => expect(launchPaperTask).toHaveBeenCalled());
@@ -845,19 +847,19 @@ describe('personal importance', () => {
             return <PaperImportanceButton important={important} onToggle={async value => {await setPaperImportance("papers","a",value);setImportant(value)}} />;
         }
         render(<I18nextProvider i18n={i18n}><Mark /></I18nextProvider>);
-        fireEvent.click(screen.getByRole('button', { name: '标为重点' }));
-        expect(screen.getByRole('button', { name: '标为重点' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: '收藏' }));
+        expect(screen.getByRole('button', { name: '收藏' })).toBeDisabled();
         expect(setPaperImportance).toHaveBeenCalledWith('papers', 'a', true);
         await act(async () => { finish(); });
-        expect(screen.getByRole('button', { name: '取消重点' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: '取消收藏' })).toHaveAttribute('aria-pressed', 'true');
     });
     it('keeps the original star state when saving fails', async () => {
         vi.mocked(setPaperImportance).mockRejectedValueOnce(new Error('offline'));
         const changed = vi.fn();
         render(<I18nextProvider i18n={i18n}><PaperImportanceButton important={false} onToggle={async value=>{await setPaperImportance("papers","a",value);changed();}} /></I18nextProvider>);
-        fireEvent.click(screen.getByRole('button', { name: '标为重点' }));
-        await screen.findByText('重点标记更新失败，请重试');
-        expect(screen.getByRole('button', { name: '标为重点' })).toHaveAttribute('aria-pressed', 'false');
+        fireEvent.click(screen.getByRole('button', { name: '收藏' }));
+        await screen.findByText('收藏状态更新失败，请重试');
+        expect(screen.getByRole('button', { name: '收藏' })).toHaveAttribute('aria-pressed', 'false');
         expect(changed).not.toHaveBeenCalled();
     });
 

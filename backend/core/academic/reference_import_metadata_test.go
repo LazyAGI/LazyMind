@@ -166,8 +166,12 @@ func TestReferenceMetadataVerifiedSnapshotVisibleAfterImport(t *testing.T) {
 				t.Fatal(e)
 			}
 			if mode == "existing_pdf" || mode == "resume_committed" {
-				d := orm.Document{ID: "existing", DatasetID: b.TargetDatasetID, DisplayName: "already stored.pdf", BaseModel: orm.BaseModel{CreateUserID: "alice"}}
-				task := orm.Task{ID: "existing-task", DatasetID: b.TargetDatasetID, DocID: d.ID}
+				path := filepath.Join(t.TempDir(), "already stored.pdf")
+				if err := os.WriteFile(path, []byte("%PDF-1.7 fixture"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				d := orm.Document{Ext: marshal(map[string]string{"stored_path": path}), ID: "existing", DatasetID: b.TargetDatasetID, DisplayName: "already stored.pdf", BaseModel: orm.BaseModel{CreateUserID: "alice"}}
+				task := orm.Task{ID: "existing-task", DatasetID: b.TargetDatasetID, DocID: d.ID, Ext: marshal(map[string]string{"task_state": "UPLOADED"})}
 				link := orm.AcademicWorkDocument{AcademicWorkID: "work", DatasetID: b.TargetDatasetID, DocumentID: d.ID, SourceProvider: "arxiv", SourceVersion: "v1"}
 				for _, v := range []any{&d, &task, &link} {
 					if e := db.Create(v).Error; e != nil {

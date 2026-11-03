@@ -1,6 +1,6 @@
 import { createRef } from "react";
 import type { AnchorHTMLAttributes } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { within, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
@@ -58,13 +58,6 @@ vi.mock("@/modules/memory/toolApi", () => ({
   notifyToolAvailabilityChanged: vi.fn(),
 }));
 
-vi.mock("@/modules/modelProvider/pages/ExternalServicesPage", () => ({
-  default: () => <div>
-    <button type="button">配置 MinerU</button>
-    <button type="button">配置 PaddleOCR</button>
-  </div>,
-}));
-
 describe("KnowledgeDataSettings", () => {
   beforeEach(() => {
     mocks.navigate.mockReset();
@@ -82,21 +75,18 @@ describe("KnowledgeDataSettings", () => {
     });
   });
 
-  it("opens multimodal recognition in the Models & Services settings section", async () => {
+  it("opens multimodal recognition in default model settings", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
       documentDirectoriesEnabled={true}
       documentDirectoriesSaving={false}
       onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled={false}
-      documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
-      onDocumentParsingChange={vi.fn()}
     />);
 
     fireEvent.click(await screen.findByRole("link", { name: "打开多模态识别配置" }));
 
-    expect(mocks.navigate).toHaveBeenCalledWith("/settings?section=models");
+    expect(mocks.navigate).toHaveBeenCalledWith("/settings?section=model_defaults");
   });
 
   it("keeps the nested switch independent from row navigation", async () => {
@@ -105,10 +95,7 @@ describe("KnowledgeDataSettings", () => {
       documentDirectoriesEnabled={true}
       documentDirectoriesSaving={false}
       onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled={false}
-      documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
-      onDocumentParsingChange={vi.fn()}
     />);
 
     const switches = await screen.findAllByRole("switch", { name: "settingsPage.knowledge.enableAria" });
@@ -120,16 +107,13 @@ describe("KnowledgeDataSettings", () => {
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
-  it("keeps knowledge, data and file rows in settings while search retains configuration links", async () => {
+  it("keeps knowledge, data and file rows in settings while search links to default models", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
       documentDirectoriesEnabled={true}
       documentDirectoriesSaving={false}
       onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled={false}
-      documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
-      onDocumentParsingChange={vi.fn()}
     />);
 
     fireEvent.click(await screen.findByText("知识库"));
@@ -138,7 +122,10 @@ describe("KnowledgeDataSettings", () => {
       const row = document.querySelector(`.settings-knowledge-group.is-${group}`)!;
       expect(row.querySelector("a")).toBeNull();
     }
-    expect(document.querySelector('a[href="/settings?section=knowledge&tool=web-search"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/settings?section=model_defaults&service=search"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/settings?section=model_defaults&service=academic"]')).not.toBeNull();
+    expect(document.querySelector(".settings-knowledge-group.is-translation")).toBeNull();
+    expect(document.querySelector(".settings-knowledge-group.is-parser")).toBeNull();
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
@@ -158,75 +145,13 @@ describe("KnowledgeDataSettings", () => {
       documentDirectoriesEnabled={true}
       documentDirectoriesSaving={false}
       onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled={false}
-      documentParsingSaving={false}
       headingRef={createRef<HTMLHeadingElement>()}
-      onDocumentParsingChange={vi.fn()}
     />);
 
     expect(await screen.findByText(
       "知识库广场、知识库中查找文档、统计信息和相关片段，用于基于资料回答问题。",
     )).toBeInTheDocument();
     expect(screen.queryByText("后端旧描述")).not.toBeInTheDocument();
-  });
-
-  it("shows parsing providers inline and keeps the parsing switch in the group header", async () => {
-    const onDocumentParsingChange = vi.fn();
-    render(<KnowledgeDataSettings
-      controlsDisabled={false}
-      documentDirectoriesEnabled={true}
-      documentDirectoriesSaving={false}
-      onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled={false}
-      documentParsingSaving={false}
-      headingRef={createRef<HTMLHeadingElement>()}
-      onDocumentParsingChange={onDocumentParsingChange}
-    />);
-
-    const parsingSwitch = await screen.findByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
-    expect(parsingSwitch.closest<HTMLElement>(".settings-knowledge-group-head")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "配置 MinerU" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "配置 PaddleOCR" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "settingsPage.knowledge.openParsingAria" })).not.toBeInTheDocument();
-
-    fireEvent.click(parsingSwitch);
-    expect(onDocumentParsingChange).toHaveBeenCalledWith(true, expect.anything());
-  });
-
-  it("describes the document parsing master switch as a status instead of a provider count", async () => {
-    const props = {
-      controlsDisabled: false,
-      documentParsingSaving: false,
-      headingRef: createRef<HTMLHeadingElement>(),
-      onDocumentParsingChange: vi.fn(),
-    };
-    const { rerender } = render(<KnowledgeDataSettings
-      {...props}
-      documentDirectoriesEnabled={true}
-      documentDirectoriesSaving={false}
-      onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled={false}
-    />);
-
-    let parsingSwitch = await screen.findByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
-    let parsingHeader = parsingSwitch.closest<HTMLElement>(".settings-knowledge-group-head");
-    expect(parsingHeader).not.toBeNull();
-    expect(within(parsingHeader!).getByText("已停用")).toBeInTheDocument();
-    expect(within(parsingHeader!).queryByText(/0\s*\/\s*1/)).not.toBeInTheDocument();
-
-    rerender(<KnowledgeDataSettings
-      {...props}
-      documentDirectoriesEnabled={true}
-      documentDirectoriesSaving={false}
-      onDocumentDirectoriesChange={vi.fn()}
-      documentParsingEnabled
-    />);
-
-    parsingSwitch = screen.getByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
-    parsingHeader = parsingSwitch.closest<HTMLElement>(".settings-knowledge-group-head");
-    expect(parsingHeader).not.toBeNull();
-    expect(within(parsingHeader!).getByText("已启用")).toBeInTheDocument();
-    expect(within(parsingHeader!).queryByText(/1\s*\/\s*1/)).not.toBeInTheDocument();
   });
 
   it("groups directory organization with knowledge tools and forwards changes independently", async () => {

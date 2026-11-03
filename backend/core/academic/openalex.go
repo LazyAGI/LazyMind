@@ -20,14 +20,6 @@ type openAlexResponse struct {
 	} `json:"results"`
 }
 
-type unpaywallResponse struct {
-	BestOALocation *struct {
-		URLForPDF string `json:"url_for_pdf"`
-		License   string `json:"license"`
-		Version   string `json:"version"`
-	} `json:"best_oa_location"`
-}
-
 func resolveDOIOpenAccess(ctx context.Context, doi string) (string, string, string, error) {
 	if NormalizeDOI(doi) == "" {
 		return "", "", "", nil
@@ -53,10 +45,11 @@ func resolveDOIOpenAccess(ctx context.Context, doi string) (string, string, stri
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", "", "", fmt.Errorf("Unpaywall response is invalid: %w", err)
 	}
-	if result.BestOALocation == nil {
+	candidates := unpaywallCandidates(result)
+	if len(candidates) == 0 {
 		return "", "", "", nil
 	}
-	return strings.TrimSpace(result.BestOALocation.URLForPDF), result.BestOALocation.License, result.BestOALocation.Version, nil
+	return candidates[0].URL, candidates[0].License, candidates[0].Version, nil
 }
 
 // resolveWithOpenAlex resolves metadata from an independent paper index.

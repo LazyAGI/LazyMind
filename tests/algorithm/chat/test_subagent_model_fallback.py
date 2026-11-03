@@ -59,13 +59,13 @@ def candidate(provider, model):
 
 
 async def execute(provider, tmp_path, *, marker='once', models=('model-a', 'model-b', 'model-c'),
-                  execution='execution-1'):
+                  execution='execution-1', params=None):
     app = FastAPI()
     app.include_router(router)
     task = {'id': 'task-' + execution, 'execution_id': execution,
             'conversation_id': 'conversation-' + execution, 'create_user_id': 'owner-' + execution,
             'agent_type': 'research', 'objective': 'Analyze ' + marker,
-            'params': {}, 'workspace_path': str(tmp_path / execution),
+            'params': params or {}, 'workspace_path': str(tmp_path / execution),
             'input_slots': [], 'output_slots': [], 'mode': 'auto'}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         response = await client.post('/api/subagent/run', json={
@@ -151,6 +151,22 @@ def test_ordinary_fallback_uses_committed_raw_for_evaluation_without_replaying_t
     for _phase, request in calls:
         body = json.dumps(request['messages'])
         assert 'model_fallback_candidates' not in body and 'fake-fallback-key' not in body
+
+
+def test_fallback_completion_preserves_runtime_requirements(ordinary_runtime, tmp_path):
+    provider, _stores = ordinary_runtime
+    calls = scenario(provider)
+    events, _task = asyncio.run(execute(provider, tmp_path, params={
+        'launch_user_input': 'Write 30-45 Chinese characters using sea breeze, shells and lighthouse.',
+        'runtime_instruction': 'Preserve the requested length after approval.',
+    }))
+    assert [event['status'] for event in events if event['type'] in {'done', 'error'}] == ['succeeded']
+    reviews = [request for phase, request in calls if phase == 'evaluation']
+    assert len(reviews) == 1 and reviews[0]['model'] == 'model-b'
+    objective = json.dumps(reviews[0]['messages'])
+    assert '30-45 Chinese characters' in objective
+    assert 'Preserve the requested length after approval.' in objective
+    assert EFFECT_RECEIPTS == ['once']
 
 
 def test_ordinary_partial_failure_retracts_only_failed_call(ordinary_runtime, tmp_path):

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -108,7 +109,7 @@ func Verify(home, id, token, accountScope string) (Pairing, error) {
 		return Pairing{}, errors.New("workflow host is not paired")
 	}
 	var pair Pairing
-	if json.Unmarshal(body, &pair) != nil || !normalizeProvider(&pair) || pair.ConnectorID != id || !pair.Enabled || pair.AccountScope != accountScope || token == "" ||
+	if json.Unmarshal(body, &pair) != nil || !normalizeProvider(&pair) || pair.ConnectorID != id || !pair.Enabled || pair.AccountScope != accountScope || !integrationstate.Allowed(home, pair.Provider) || token == "" ||
 		subtle.ConstantTimeCompare([]byte(token), []byte(pair.Token)) != 1 {
 		return Pairing{}, errors.New("workflow host pairing is invalid; reconnect for the current account")
 	}
@@ -126,7 +127,7 @@ func Configured(home, id, accountScope string) bool {
 		return false
 	}
 	var pair Pairing
-	return json.Unmarshal(body, &pair) == nil && normalizeProvider(&pair) && pair.ConnectorID == id && pair.Enabled && pair.AccountScope == accountScope && len(pair.Token) == 64
+	return json.Unmarshal(body, &pair) == nil && normalizeProvider(&pair) && pair.ConnectorID == id && pair.Enabled && pair.AccountScope == accountScope && integrationstate.Allowed(home, pair.Provider) && len(pair.Token) == 64
 }
 
 // Only pre-existing dsh identities may omit provider. Never infer a new host's

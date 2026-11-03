@@ -79,7 +79,7 @@ def test_management_rejects_other_owners(gateway, account, feishu, action):
     assert gateway.store.get_account('owner', row['id'])['label'] == row['label']
 
 
-@pytest.mark.parametrize('provider,action', [('wechat', 'rename'), ('wechat', 'archive'), ('wecom', 'archive')])
+@pytest.mark.parametrize('provider,action', [('wechat', 'rename')])
 def test_management_does_not_change_other_providers(gateway, account, provider, action):
     row = account(provider)
     response = rename(gateway, row, 'new') if action == 'rename' else lifecycle(gateway, row, 'archive')
@@ -87,13 +87,40 @@ def test_management_does_not_change_other_providers(gateway, account, provider, 
     assert gateway.store.get_account('owner', row['id'])['credentials_ciphertext'] == row['credentials_ciphertext']
 
 
-@pytest.mark.parametrize('pause', [False, True])
-def test_only_unbound_records_can_be_removed(gateway, account, feishu, pause):
-    row = account('feishu')
-    if pause:
-        assert lifecycle(gateway, row, 'pause').status_code == 204
-    assert_error(lifecycle(gateway, row, 'archive'), 409, 'ACCOUNT_UNBIND_REQUIRED')
-    assert len(listed(gateway)) == 1
+@pytest.mark.parametrize('provider', ['feishu', 'wecom', 'wechat'])
+@pytest.mark.parametrize('disconnected', [False, True])
+def test_remove_robot_revokes_delivery_across_all_configuration_views(
+        gateway, account, queued_reply, feishu, provider, disconnected):
+    row = account(provider)
+    other = account(provider)
+    reply = queued_reply(row)
+    if disconnected:
+        assert gateway.client.delete(f'{PREFIX}/channel-accounts/{row["id"]}').status_code == 204
+    for _ in range(2):
+        assert lifecycle(gateway, row, 'archive').status_code == 204
+    items = gateway.client.get(f'{PREFIX}/channel-accounts', params={'provider': provider}).json()['items']
+    assert [item['id'] for item in items] == [other['id']]
+    assert gateway.store.get_account('owner', row['id']) is None
+    retained = gateway.store.get_account_internal(row['id'])
+    assert retained['status'] == 'disconnected'
+    assert retained['runtime_status'] == 'stopped'
+    assert retained['credentials_ciphertext'] == ''
+    assert retained['archived_at'] is not None
+    assert_error(lifecycle(gateway, row, 'resume'), 404, 'ACCOUNT_NOT_FOUND')
+    with gateway.store._connect() as connection:
+        assert connection.execute('SELECT id FROM channel_inbox WHERE id = %s', (reply['inbox_id'],)).fetchone()
+        outbox = connection.execute('SELECT status FROM channel_outbox WHERE id = %s', (reply['id'],)).fetchone()
+        assert outbox['status'] == 'dead'
+    assert gateway.store.claim_next_outbound('after-removal', lease_seconds=20) is None
+
+
+@pytest.mark.parametrize('provider', ['feishu', 'wecom', 'wechat'])
+def test_remove_robot_checks_owner_even_after_archival(gateway, account, feishu, provider):
+    row = account(provider)
+    assert_error(lifecycle(gateway, row, 'archive', 'other'), 404, 'ACCOUNT_NOT_FOUND')
+    assert gateway.store.get_account('owner', row['id']) is not None
+    assert lifecycle(gateway, row, 'archive').status_code == 204
+    assert_error(lifecycle(gateway, row, 'archive', 'other'), 404, 'ACCOUNT_NOT_FOUND')
 
 
 def test_archive_preserves_notification_and_chat_history_and_blocks_reuse(gateway, account, queued_reply, feishu):

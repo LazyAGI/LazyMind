@@ -1595,6 +1595,16 @@ func parseSubmissionKey(datasetID string, tasks []orm.Task) string {
 }
 
 func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
+	if ctx.Value(paperProcessingWorker{}) != true {
+		var ds orm.Dataset
+		if err := store.DB().WithContext(ctx).Select("id,scene,processing_level").Where("id=? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
+			return nil, err
+		}
+		if ds.Scene == "academic_papers" && effectiveProcessingLevel(ds.ProcessingLevel) != ProcessingLevelStored {
+			return queuePaperProcessing(ctx, store.DB(), userID, datasetID, taskIDs, requestedLevel)
+		}
+	}
+
 	if !systemdeps.PythonComponentActive("rag") {
 		return nil, fmt.Errorf("请先安装本地知识库组件，并重启本地服务。")
 	}

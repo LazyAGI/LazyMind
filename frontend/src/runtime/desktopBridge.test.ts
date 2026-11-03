@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   user: vi.fn(),
@@ -11,6 +11,7 @@ vi.mock("@/components/auth", () => ({
 
 import {
   restartRuntime,
+  openNotificationSettings,
   agentExecutableBindings,
   authorizeLocalWorkspace,
   agentIntegrationStatuses,
@@ -267,6 +268,22 @@ describe("browser Assistant Bridge session synchronization", () => {
     expect(JSON.parse(String(init.body))).toEqual({ path: "D:\\Agents\\cursor-agent.exe" });
   });
 
+});
+
+describe("native notification settings bridge", () => {
+  afterEach(() => { Reflect.deleteProperty(window, "lazymindDesktop"); });
+
+  it("supports existing clients without the new command and reports launch failures", async () => {
+    Object.defineProperty(window, "lazymindDesktop", { configurable: true, value: {} });
+    expect(await openNotificationSettings()).toEqual({ ok: false, reason: "unavailable" });
+    const open = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "lazymindDesktop", { configurable: true, value: { openNotificationSettings: open } });
+    expect(await openNotificationSettings()).toEqual({ ok: true });
+    expect(open).toHaveBeenCalledWith();
+    const error = new Error("OS launch failed");
+    open.mockRejectedValueOnce(error);
+    expect(await openNotificationSettings()).toEqual({ ok: false, reason: "failed", error });
+  });
 });
 
  it("preserves the page during component activation and returns the real restart error", async () => {

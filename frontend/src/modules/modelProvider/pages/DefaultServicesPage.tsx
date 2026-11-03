@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Modal, Switch } from "antd";
+import { useTranslation } from "react-i18next";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import DefaultModelConfigPanel, {
   type CloudServiceSlotKey,
   type ModelCapability,
   type SetupAvailabilityState,
 } from "../components/DefaultModelConfigPanel";
+import ExternalServicesPage from "./ExternalServicesPage";
+import "./DefaultServicesPage.scss";
+
+type ServiceCategory = "parsing" | "search" | "academic" | "translation";
 
 interface DefaultServicesPageProps {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
@@ -12,6 +18,11 @@ interface DefaultServicesPageProps {
   onModelSelectionChanged: () => void | Promise<void>;
   highlightTarget?: ModelCapability;
   onHighlightResolved?: () => void;
+  focusServiceCategory?: ServiceCategory;
+  documentParsingEnabled: boolean;
+  documentParsingSaving: boolean;
+  controlsDisabled: boolean;
+  onDocumentParsingChange: (enabled: boolean) => void;
 }
 
 interface SetupAvailability {
@@ -74,14 +85,23 @@ export default function DefaultServicesPage({
   onModelSelectionChanged,
   highlightTarget,
   onHighlightResolved,
+  focusServiceCategory,
+  documentParsingEnabled,
+  documentParsingSaving,
+  controlsDisabled,
+  onDocumentParsingChange,
 }: DefaultServicesPageProps) {
+  const { t } = useTranslation();
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
+  const [selectionVersion, setSelectionVersion] = useState(0);
+  const [activeFocusCategory, setActiveFocusCategory] = useState(focusServiceCategory);
+  const [toolServiceSummaries, setToolServiceSummaries] = useState<Partial<Record<ServiceCategory, string>>>({});
   const latestRequest = useRef(0);
 
   const checkSetupAvailability = useCallback(async () => {
     const requestId = ++latestRequest.current;
     setSetupAvailability(loadingSetupAvailability);
-    const [modelResult, parsingResult, searchResult] = await Promise.allSettled([
+    const [modelResult, parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
       listAvailableModels(),
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
         { category: "ocr" },
@@ -91,6 +111,8 @@ export default function DefaultServicesPage({
         { category: "search" },
         silentSetupCheckOptions,
       ),
+      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "datasource" }, silentSetupCheckOptions),
+      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "translation" }, silentSetupCheckOptions),
     ]);
     if (requestId !== latestRequest.current) return;
 
@@ -105,6 +127,15 @@ export default function DefaultServicesPage({
       : "error";
 
     setSetupAvailability({ cloudParsing, modelProvider, searchEngine });
+    const summaries: Partial<Record<ServiceCategory, string>> = {};
+    for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
+      if (result.status !== "fulfilled") continue;
+      const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
+      if (groups.length) summaries[category] = category === "translation"
+        ? `已配置 ${groups.length} 个翻译源`
+        : groups.map((group) => group.name || group.provider_name).filter(Boolean).join("、") || `已配置 ${groups.length} 个服务`;
+    }
+    setToolServiceSummaries(summaries);
   }, []);
 
   useEffect(() => {
@@ -114,21 +145,79 @@ export default function DefaultServicesPage({
     };
   }, [checkSetupAvailability]);
 
+  useEffect(() => {
+    setActiveFocusCategory(focusServiceCategory);
+  }, [focusServiceCategory]);
+
+  const handleConfigureCloudService = (service: CloudServiceSlotKey) => {
+    onConfigureCloudService(service);
+    setActiveFocusCategory(service === "cloudParsing" ? "parsing" : "search");
+  };
+
+  const handleServiceConfigurationChanged = () => {
+    setSelectionVersion((current) => current + 1);
+    void checkSetupAvailability();
+    void onModelSelectionChanged();
+  };
+
+  const parsingControl = (
+    <div className="default-services-parsing-control">
+      <div className="default-services-parsing-copy">
+        <strong>{t("settingsPage.knowledge.documentParsing")}</strong>
+        <p>{t("settingsPage.knowledge.documentParsingGroupDesc")}</p>
+      </div>
+      <div className="default-services-parsing-action">
+        <span>{t(documentParsingEnabled ? "settingsPage.enabled" : "settingsPage.disabled")}</span>
+        <Switch
+          aria-label={t("settingsPage.knowledge.documentParsingAria")}
+          checked={documentParsingEnabled}
+          disabled={controlsDisabled}
+          loading={documentParsingSaving}
+          onChange={onDocumentParsingChange}
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="model-provider-service-page">
+    <div className="model-provider-service-page default-services-page">
       <DefaultModelConfigPanel
+        key={selectionVersion}
         cloudServiceSetupStates={{
           cloudParsing: setupAvailability.cloudParsing,
           searchEngine: setupAvailability.searchEngine,
         }}
         modelProviderSetupState={setupAvailability.modelProvider}
-        onConfigureCloudService={onConfigureCloudService}
+        onConfigureCloudService={handleConfigureCloudService}
+        onConfigureToolService={setActiveFocusCategory}
+        toolServiceSummaries={toolServiceSummaries}
         onConfigureProviders={onConfigureProviders}
         onModelSelectionChanged={onModelSelectionChanged}
         onRetrySetup={() => void checkSetupAvailability()}
         highlightTarget={highlightTarget}
         onHighlightResolved={onHighlightResolved}
       />
+      <Modal
+        open={Boolean(activeFocusCategory)}
+        title={activeFocusCategory ? ({ search: "搜索引擎", academic: "学术搜索引擎", parsing: "文档解析（OCR）", translation: "机器翻译" }[activeFocusCategory]) : ""}
+        width={1000}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => setActiveFocusCategory(undefined)}
+        className="default-services-modal"
+      >
+        {activeFocusCategory ? <ExternalServicesPage
+          key={activeFocusCategory}
+          variant="default-models"
+          includeMcp={false}
+          includeDependencies={false}
+          includeBuiltinTools={false}
+          visibleCategories={[activeFocusCategory]}
+          focusCategory={activeFocusCategory}
+          parsingControl={activeFocusCategory === "parsing" ? parsingControl : undefined}
+          onConfigurationChanged={handleServiceConfigurationChanged}
+        /> : null}
+      </Modal>
     </div>
   );
 }

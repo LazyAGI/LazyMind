@@ -45,7 +45,7 @@ vi.mock("@/modules/chat/components/newChatContainer", async () => {
 beforeEach(() => {
   requests.options.length = 0;
   chatActions.createNewChat.mockClear();
-  chatActions.sendMessage.mockClear();
+  chatActions.sendMessage.mockReset().mockResolvedValue(true);
   chatActions.prepareMessage.mockClear();
   ensureDocumentParsed.mockClear();
   retryDocumentParsed.mockClear();
@@ -146,6 +146,9 @@ describe("document question context", () => {
   });
 
   it("starts a new temporary chat and sends a concise contextual translation request", async () => {
+    vi.useFakeTimers();
+    let accept!: (sent: boolean) => void;
+    chatActions.sendMessage.mockImplementationOnce(() => new Promise<boolean>(resolve => { accept = resolve; }));
     const selection = {
       source: "pdf" as const,
       text: "Workloads",
@@ -161,12 +164,89 @@ describe("document question context", () => {
       onClose={() => {}}
     />);
 
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 10)); });
+    // Finish selection preparation while translation acceptance is still pending.
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(chatActions.createNewChat).toHaveBeenCalledOnce();
+    expect(chatActions.sendMessage).toHaveBeenCalledOnce();
     expect(chatActions.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       citeMessage: "Workloads",
       text: expect.stringContaining("当前语境下最合适的中文释义"),
     }));
+    await act(async () => accept(true));
     expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessages: [] });
+  });
+
+  it("keeps citations cleared when translation succeeds before selection preparation", async () => {
+    vi.useFakeTimers();
+    chatActions.sendMessage.mockResolvedValueOnce(true);
+    const selection = { source: "pdf" as const, text: "Workloads", page: 3 };
+    const props = {
+      datasetId: "dataset-a", documentId: "document-pdf", fileName: "source.pdf",
+      selection, translationRequest: { id: 1, selection }, onClose: vi.fn(),
+    };
+    const { rerender } = render(<PdfTemporaryChat {...props} />);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(chatActions.sendMessage).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessages: [] });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessages: [] });
+
+    rerender(<PdfTemporaryChat {...props} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(chatActions.sendMessage).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
+
+    // A fresh selection action can quote the same text after translation.
+    rerender(<PdfTemporaryChat {...props} selection={{ ...selection }} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(chatActions.prepareMessage).toHaveBeenCalledTimes(2);
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
+  });
+
+  it("keeps the selection available when translation is not sent", async () => {
+    vi.useFakeTimers();
+    chatActions.sendMessage.mockResolvedValueOnce(false);
+    const selection = { source: "pdf" as const, text: "Workloads", page: 3 };
+    render(<PdfTemporaryChat
+      datasetId="dataset-a"
+      documentId="document-pdf"
+      fileName="source.pdf"
+      selection={selection}
+      translationRequest={{ id: 1, selection }}
+      onClose={() => {}}
+    />);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(chatActions.sendMessage).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
+  });
+
+  it("does not consume the new chat selection when an earlier translation finishes", async () => {
+    vi.useFakeTimers();
+    let accept!: (sent: boolean) => void;
+    chatActions.sendMessage.mockImplementationOnce(() => new Promise<boolean>(resolve => { accept = resolve; }));
+    const selection = { source: "pdf" as const, text: "Workloads", page: 3 };
+    render(<PdfTemporaryChat
+      datasetId="dataset-a"
+      documentId="document-pdf"
+      fileName="source.pdf"
+      selection={selection}
+      translationRequest={{ id: 1, selection }}
+      onClose={() => {}}
+    />);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole("button", { name: /knowledge.pdfChatNew/ }));
+    await act(async () => accept(true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+
+    expect(chatActions.sendMessage).toHaveBeenCalledOnce();
+    expect(chatActions.createNewChat).toHaveBeenCalledTimes(2);
+    expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
   });
 });

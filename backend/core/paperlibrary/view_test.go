@@ -1,6 +1,7 @@
 package paperlibrary
 
 import (
+	"context"
 	"encoding/json"
 	"lazymind/core/common/orm"
 	"testing"
@@ -87,5 +88,14 @@ func TestAttachmentImportUsesItsOwnReceiptAndLeavesMissingOriginsUnknown(t *test
 		if view.Data.Papers[0].ImportMethod != "bibliography" || view.Data.Papers[0].SourceURL != "https://publisher.example/record" {
 			t.Fatal("attachment replaced the first paper import", view.Data.Papers[0])
 		}
+	}
+}
+
+func TestOriginalAvailabilityHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := originalAvailability(ctx, map[string]orm.Document{"test": {ID: "test"}})
+	if err != context.Canceled {
+		t.Fatalf("expected cancellation, got %v", err)
 	}
 }

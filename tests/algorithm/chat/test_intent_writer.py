@@ -5,11 +5,24 @@ import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.intent_writer import (
+    append_intentwrite_guidance,
     build_intentwrite_tool,
     enable_workflow_intent_scopes,
     normalize_intent_document,
     render_intent_section,
 )
+
+
+def test_consecutive_guidance_extends_user_evidence_without_trusting_model_output():
+    tool = build_intentwrite_tool(conversation_id='conv-1', current_query='比较周末旅行')
+    append_intentwrite_guidance(tool, ['只比较天津和济南'])
+    append_intentwrite_guidance(tool, ['两人预算1500以内'])
+    with patch('lazymind.chat.engine.tools.intent_writer._write_agent_data') as write:
+        for evidence in ['比较周末旅行', '只比较天津和济南', '两人预算1500以内']:
+            tool('conversation', [_operation(value=evidence, evidence=evidence)])
+        assert write.call_count == 3
+        with pytest.raises(ToolExecutionError, match='evidence'):
+            tool('conversation', [_operation(evidence='模型推测的需求')])
 
 
 def _operation(**overrides):

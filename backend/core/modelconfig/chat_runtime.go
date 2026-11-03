@@ -277,6 +277,8 @@ func (result *ChatRuntimeConfig) PrepareCandidate(ctx context.Context, model Ava
 			return nil
 		}
 		row.APIKey = key
+		// Match the regular runtime path for endpoints that do not require a key.
+		row.SkipAuth = strings.TrimSpace(key) == "" && strings.TrimSpace(row.BaseURL) != ""
 	}
 	for _, line := range strings.Split(row.APIKey, "\n") {
 		if strings.TrimSpace(line) != "" {

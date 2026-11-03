@@ -470,25 +470,29 @@ class GatewayStore:
 
     def disconnect_account(self, owner_user_id: str, account_id: str, *, retain_credentials: bool = False,
                            expected_revision: int | None = None,
-                           runtime_fence: RuntimeFence | None = None) -> bool:
+                           runtime_fence: RuntimeFence | None = None,
+                           archive: bool = False) -> bool:
         """Revoke delivery while retaining the identity and all historical rows."""
         with self._connect() as connection:
             if runtime_fence is not None:
                 self._lock_runtime_fence(connection, runtime_fence)
             account = connection.execute('''
-                SELECT id, provider, credential_revision FROM channel_accounts
+                SELECT id, provider, credential_revision, archived_at FROM channel_accounts
                 WHERE id = %s AND owner_user_id = %s FOR UPDATE
             ''', (account_id, owner_user_id)).fetchone()
             if not account:
                 return False
+            if account.get('archived_at'):
+                return archive
             if expected_revision is not None and account['credential_revision'] != expected_revision:
                 return False
             connection.execute('''
                 UPDATE channel_accounts SET status = 'disconnected', runtime_status = 'stopped',
                     credentials_ciphertext = CASE WHEN %s THEN credentials_ciphertext ELSE '' END,
                     credential_revision = credential_revision + 1,
+                    archived_at = CASE WHEN %s THEN CURRENT_TIMESTAMP ELSE archived_at END,
                     updated_at = CURRENT_TIMESTAMP WHERE id = %s
-            ''', (retain_credentials, account_id))
+            ''', (retain_credentials and not archive, archive, account_id))
             connection.execute('''
                 UPDATE channel_connection_sessions SET status = 'canceled', provider_state_ciphertext = NULL,
                     revision = revision + 1, message = '账号已断开', updated_at = CURRENT_TIMESTAMP
@@ -607,29 +611,9 @@ class GatewayStore:
             ''', (label, account_id, owner, expected_label)).fetchone()
 
     def archive_account(self, owner: str, account_id: str) -> None:
-        """Remove only an unbound record from active use; never delete its message history."""
-        with self._connect() as connection:
-            row = connection.execute('''
-                SELECT * FROM channel_accounts WHERE id = %s AND owner_user_id = %s FOR UPDATE
-            ''', (account_id, owner)).fetchone()
-            if not row:
-                raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
-            if row['provider'] != 'feishu':
-                raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', '此操作仅支持飞书')
-            if row.get('archived_at'):
-                return
-            if row['status'] != 'disconnected' or row['credentials_ciphertext']:
-                raise GatewayError(409, 'ACCOUNT_UNBIND_REQUIRED', '请先解除绑定，再删除记录')
-            connection.execute('''
-                UPDATE channel_accounts SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            ''', (account_id,))
-            connection.execute('''
-                UPDATE channel_connection_sessions SET status = 'canceled', provider_state_ciphertext = NULL,
-                    revision = revision + 1, message = '账号记录已删除', updated_at = CURRENT_TIMESTAMP
-                WHERE owner_user_id = %s AND requested_account_id = %s
-                    AND status IN ('preparing','waiting_scan','scanned','verification_required','confirming')
-            ''', (owner, account_id))
+        """Atomically revoke delivery and hide a robot, retaining all historical rows."""
+        if not self.disconnect_account(owner, account_id, archive=True):
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
 
     def ping(self) -> None:
         with self._connect() as connection:
@@ -673,6 +657,17 @@ class GatewayStore:
                         label = EXCLUDED.label, kind = 'group', updated_at = CURRENT_TIMESTAMP
                 """, (account_id, group['recipient_id'], group['label']))
 
+    def mark_wecom_authorization_required(self, owner, account_id, credential_revision, error_code):
+        if error_code not in {'WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED'}:
+            raise ValueError('Unsupported WeCom authorization error')
+        with self._connect() as connection:
+            connection.execute('''
+                UPDATE channel_accounts SET connection_error_code = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND owner_user_id = %s AND provider = 'wecom'
+                    AND status = 'connected' AND archived_at IS NULL AND credential_revision = %s
+                    AND connection_error_code <> %s
+            ''', (error_code, account_id, owner, credential_revision, error_code))
+
     def cache_wecom_notification_sessions(self, owner, account_id, credential_revision, sessions):
         with self._connect() as connection:
             account = connection.execute("""
@@ -681,6 +676,13 @@ class GatewayStore:
             """, (account_id, owner, credential_revision)).fetchone()
             if not account:
                 raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '账号状态已经变化，请刷新后重试')
+            # Only a successful permission check for this credential revision
+            # clears the persisted authorization requirement.
+            connection.execute('''
+                UPDATE channel_accounts SET connection_error_code = '', updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND connection_error_code IN (
+                    'WECOM_CAPABILITY_REAUTH_REQUIRED', 'WECOM_REAUTHORIZATION_REQUIRED')
+            ''', (account_id,))
             context = self._payload_cipher.encrypt(owner, {'transport': 'cli'})
             # The API returns the complete currently-sendable set (at most 20).
             # Replace stale targets so a removed bot/group cannot remain selectable.

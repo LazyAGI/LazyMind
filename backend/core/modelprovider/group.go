@@ -56,6 +56,7 @@ type groupListItem struct {
 	ModelCount          int            `json:"model_count"`
 	Keys                []groupKeyItem `json:"keys"`
 	IsVerified          bool           `json:"is_verified"`
+	CredentialStatus    string         `json:"credential_status,omitempty"`
 }
 
 type groupKeyItem struct {
@@ -161,25 +162,28 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	out := make([]groupListItem, 0, len(rows))
 	for i := range rows {
 		g := rows[i]
-		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
-		if err != nil {
-			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
-			return
-		}
-		keys := groupKeyItems(g.ID, apiKey)
-		for k := range keys {
-			keys[k].Enabled = parent.ActiveKeyGroupID == g.ID && parent.ActiveKeyID == keys[k].ID
-		}
-		out = append(out, groupListItem{
+		item := groupListItem{
 			ID:                  g.ID,
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
 			BaseURL:             connectionBaseURL(parent, g.BaseURL),
 			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
 			ModelCount:          modelCounts[g.ID],
-			Keys:                keys,
+			Keys:                []groupKeyItem{},
 			IsVerified:          g.IsVerified,
-		})
+		}
+		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
+		if err != nil {
+			// Preserve unreadable saved credentials without hiding healthy groups.
+			item.CredentialStatus = "unavailable"
+			item.IsVerified = false
+		} else {
+			item.Keys = groupKeyItems(g.ID, apiKey)
+			for k := range item.Keys {
+				item.Keys[k].Enabled = parent.ActiveKeyGroupID == g.ID && parent.ActiveKeyID == item.Keys[k].ID
+			}
+		}
+		out = append(out, item)
 	}
 	common.ReplyOK(w, groupListResponse{Groups: out})
 }
@@ -335,7 +339,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   legacyModelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
-		IsVerified:          checkData != nil,
+		IsVerified:          checkData != nil || translationGroupConfigured(parent, apiKey),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -546,8 +550,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	storedAPIKey, err := apiKeyForGroup(db.WithContext(r.Context()), &row)
-	if err != nil {
-		common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+	credentialUnavailable := err != nil
+	if err != nil && apiKey == "" {
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
 
@@ -611,7 +616,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		for key, value := range encryptedUpdates {
 			updates[key] = value
 		}
-		if apiKey != storedAPIKey && !hasSharedProviderEndpoint(parent) {
+		if apiKey != storedAPIKey && (!hasSharedProviderEndpoint(parent) || credentialUnavailable) {
 			updates["is_verified"] = false
 		}
 	}
@@ -670,6 +675,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 		updates["is_verified"] = true
 	}
+	if translationGroupConfigured(parent, effectiveAPIKey) {
+		updates["is_verified"] = true
+	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
 			return err
@@ -711,6 +719,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		IsVerified:          row.IsVerified,
 		Check:               checkData,
 	})
+}
+
+func translationGroupConfigured(parent orm.UserModelProvider, apiKey string) bool {
+	return parent.Category == "translation" &&
+		(strings.TrimSpace(apiKey) != "" || parent.HasCapability("keyless_translation"))
 }
 
 type deleteGroupResponse struct {
@@ -768,32 +781,7 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch models before deletion to check for embed_image types and
-	// collect IDs for user_selected_models cleanup.
-	var groupModels []orm.UserModelProviderGroupModel
-	if err := db.WithContext(r.Context()).
-		Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, userID).
-		Find(&groupModels).Error; err != nil {
-		common.ReplyErr(w, "query group models failed", http.StatusInternalServerError)
-		return
-	}
-
 	hasMultimodal := false
-	hasTextEmbedding := false
-	modelIDs := make([]string, 0, len(groupModels))
-	for i := range groupModels {
-		modelIDs = append(modelIDs, groupModels[i].ID)
-		if isMultimodalEmbeddingModelType(groupModels[i].ModelType) {
-			hasMultimodal = true
-		}
-		if isTextEmbeddingModelType(groupModels[i].ModelType) {
-			hasTextEmbedding = true
-		}
-	}
-	if hasTextEmbedding && !indexedDowngradeConfirmed(r) {
-		common.ReplyErr(w, "removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked", http.StatusConflict)
-		return
-	}
 
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
@@ -803,13 +791,23 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if hasTextEmbedding {
-			count, err := downgradeIndexedDatasets(tx, userID, now)
-			if err != nil {
-				return err
-			}
-			downgradedKnowledgeBases = count
+		// Re-read model types under the supplier lock, so concurrent edits
+		// cannot turn this route into a bypass of individual-model protection.
+		var groupModels []orm.UserModelProviderGroupModel
+		if err := tx.Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, userID).Find(&groupModels).Error; err != nil {
+			return err
 		}
+		modelIDs := make([]string, 0, len(groupModels))
+		for _, model := range groupModels {
+			modelIDs = append(modelIDs, model.ID)
+			hasMultimodal = hasMultimodal || isMultimodalEmbeddingModelType(model.ModelType)
+			if isTextEmbeddingModelType(model.ModelType) {
+				if err := guardEmbeddingRemoval(tx, userID); err != nil {
+					return err
+				}
+			}
+		}
+
 		if len(modelIDs) > 0 {
 			if err := tx.Where("user_model_provider_group_model_id IN ?", modelIDs).
 				Delete(&orm.UserSelectedModel{}).Error; err != nil {
@@ -838,6 +836,10 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return reconcileProviderActiveKey(tx, &parent)
 	})
 	if err != nil {
+		if errors.Is(err, errEmbeddingInUse) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "delete group failed", http.StatusInternalServerError)
 		return
 	}

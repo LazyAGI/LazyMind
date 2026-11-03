@@ -11,6 +11,7 @@ export interface PaperFolder {
     id: string;
     name: string;
     parentId?: string | null;
+    zoteroSources?: string[];
 }
 export interface PaperMetadata {
     title: string;
@@ -21,7 +22,10 @@ export interface PaperMetadata {
     identifiers: {
         doi?: string;
         arxiv?: string;
+        pmid?: string;
+        isbn?: string;
     };
+    confidence?: Partial<Record<'title' | 'authors' | 'venue' | 'year' | 'abstract', number>>;
     citationCount?: number;
 }
 export interface PaperRecord {
@@ -43,6 +47,10 @@ export interface PaperRecord {
     associationConflict?: string;
     attachmentIds: string[];
     noteIds: string[];
+    collectionIds?: string[];
+    annotationIds?: string[];
+    relatedPaperIds?: string[];
+    zoteroSources?: string[];
 }
 export function parseAuthorInput(value: string | string[]): string[] {
     const authors = Array.isArray(value) ? value : value.split(/[、;；\n]+/);
@@ -88,6 +96,14 @@ export interface PaperLibraryData {
     papers: PaperRecord[];
     attachments: import('./libraryModel').Attachment[];
     notes: import('./libraryModel').Note[];
+    collections?: import('./libraryModel').Collection[];
+    annotations?: import('./libraryModel').Annotation[];
+    relations?: import('./libraryModel').PaperRelation[];
+    mergeSnapshots?: unknown[];
+    migrationSnapshots?: unknown[];
+    hiddenArxivPapers?: PaperRecord[];
+    legacy?: unknown;
+    backupDatasetId?: string;
 }
 export interface ImportPlan {
     fresh: PaperRecord[];
@@ -136,7 +152,11 @@ export const citationLabel: Record<CitationStyle, string> = {
 export function papersInView(data: PaperLibraryData, folderId: string | null) {
     if (!folderId)
         return data.papers;
-    return data.papers.filter((item) => item.folderId === folderId);
+    const ids = descendantFolderIds(data.folders, folderId);
+    return data.papers.filter(item => paperBelongsToFolders(item, ids));
+}
+export function paperBelongsToFolders(paper: PaperRecord, ids: Set<string>): boolean {
+    return (!!paper.folderId && ids.has(paper.folderId)) || !!paper.collectionIds?.some(id => ids.has(id));
 }
 export function filterLibraryView(items: PaperRecord[], view: LibraryView) {
     if (view === "important")
@@ -262,7 +282,7 @@ export function applyPaperEdits(item: PaperRecord, edits: PaperEdits): PaperReco
             authors: parseAuthorInput(edits.authors.trim() || "佚名"),
             venue: edits.venue.trim() || "未标注",
             year: Number.isFinite(edits.year) && edits.year > 0 ? Math.trunc(edits.year) : item.metadata.year,
-            identifiers: { doi: doi || undefined, arxiv: arxiv || undefined }
+            identifiers: { ...item.metadata.identifiers, doi: doi || undefined, arxiv: arxiv || undefined }
         }
     };
 }
@@ -581,7 +601,6 @@ export function parseCSV(text: string, source: ImportSource = "local"): {
     return { papers, folderNames };
 }
 export function toCSV(items: PaperRecord[], folders: PaperFolder[]) {
-    const names = new Map(folders.map((folder) => [folder.id, folder.name]));
     const rows = items.map((item) => [
         item.metadata.title,
         item.metadata.authors.join("; "),
@@ -590,7 +609,7 @@ export function toCSV(items: PaperRecord[], folders: PaperFolder[]) {
         item.metadata.identifiers.doi || "",
         item.metadata.identifiers.arxiv || "",
         item.tags.join(";"),
-        item.folderId ? names.get(item.folderId) || "" : "",
+        paperFolderPath(folders, item.folderId),
     ].map(csvCell).join(","));
     return [csvHeaders.join(","), ...rows].join("\n");
 }
@@ -600,12 +619,16 @@ export function assignFolders(data: PaperLibraryData, papers: PaperRecord[], fol
         const name = folderNames[index]?.trim();
         if (!name)
             return { ...item, folderId: item.folderId ?? fallbackFolderId };
-        let folder = folders.find((entry) => entry.name === name && !entry.parentId);
-        if (!folder) {
-            folder = { id: `folder-${name}-${folders.length}`, name };
-            folders.push(folder);
+        let parentId = fallbackFolderId;
+        for (const segment of name.split(/\s+\/\s+/).map(part => part.trim()).filter(Boolean)) {
+            let folder = folders.find(entry => entry.name === segment && (entry.parentId || null) === parentId);
+            if (!folder) {
+                folder = { id: uuidv4(), name: segment, parentId };
+                folders.push(folder);
+            }
+            parentId = folder.id;
         }
-        return { ...item, folderId: folder.id };
+        return { ...item, folderId: parentId };
     });
     return { folders, papers: next };
 }

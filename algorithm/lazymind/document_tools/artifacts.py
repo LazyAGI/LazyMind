@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -12,6 +13,7 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
     SectionInstruction,
     WriterDocument,
+    WritingContext,
 )
 from lazyllm.tools.writer.numbering import (
     apply_numbering_update_ir,
@@ -140,6 +142,8 @@ def persist_artifact_json(
     extra_meta: dict[str, Any] | None = None,
 ) -> str:
     """Persist an LMD/JSON envelope through the shared Writer artifact format."""
+    if schema_name == writer_schema('context.WritingContext'):
+        data = WritingContext.model_validate(data).model_dump()
     return save_artifact_json(
         data,
         path,
@@ -225,6 +229,17 @@ def _read_artifact_data(path: str) -> Any:
     return raw
 
 
+def cleanup_writer_temporary(root: Path) -> None:
+    """Release a call-owned directory after its result has been handed off."""
+    from lazyllm import LOG
+    try:
+        shutil.rmtree(root)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        LOG.warning(f'[Writer] Temporary cleanup failed: {type(exc).__name__}')
+
+
 def _temp_root() -> Path:
     from lazymind.chat.engine.tools.workspace_context import (
         get_tool_resolution_context,
@@ -249,7 +264,7 @@ def _temp_root() -> Path:
 def _write_input_artifact(
     root: Path, filename: str, data: Any, schema_name: str
 ) -> str:
-    return save_artifact_json(
+    return persist_artifact_json(
         data,
         str(root / filename),
         schema_name=schema_name,

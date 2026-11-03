@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
@@ -382,7 +383,63 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	retrySourceImport(w, r, batch)
+	if !isMetadataEnrichmentBatch(batch) {
+		retrySourceImport(w, r, batch)
+		return
+	}
+	var failed int64
+	var jobID string
+	noFailed := errors.New("there are no failed items to retry")
+	activeBatch := errors.New("batch is already processing")
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND created_by = ?", batch.ID, userID).Take(&batch).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batch.ID).Count(&failed).Error; err != nil {
+			return err
+		}
+		if failed == 0 {
+			return noFailed
+		}
+		var active int64
+		if err := tx.Model(&orm.AsyncJob{}).Where("id = ? AND status IN ?", batch.AsyncJobID, []string{"pending", "running"}).Count(&active).Error; err != nil {
+			return err
+		}
+		if active > 0 {
+			return activeBatch
+		}
+		if isMetadataEnrichmentBatch(batch) {
+			// Refresh failed/expired source URLs, but never discard an already
+			// committed document receipt or retry by creating a second document.
+			if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id=? AND status='failed' AND COALESCE(document_id,'')=''", batch.ID).Updates(map[string]any{"selected_candidate_json": json.RawMessage("{}"), "stage": "metadata"}).Error; err != nil {
+				return err
+			}
+		}
+		queued, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID,
+			IdempotencyKey: "paper-import-retry:" + batch.ID + ":" + uuid.NewString(), Payload: paperImportPayload{BatchID: batch.ID, UserID: userID, UserName: store.UserName(r)},
+			CreateUserID: userID, CreateUserName: store.UserName(r)})
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batch.ID).Updates(map[string]any{"status": "pending", "error_details_json": json.RawMessage("{}"), "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+		jobID = queued.ID
+		return tx.Model(&batch).Updates(map[string]any{"status": "pending", "async_job_id": jobID, "updated_at": time.Now().UTC()}).Error
+	})
+	if errors.Is(err, noFailed) || errors.Is(err, activeBatch) {
+		code := "NO_FAILED_ITEMS"
+		if errors.Is(err, activeBatch) {
+			code = "IMPORT_ALREADY_PROCESSING"
+		}
+		replyError(w, http.StatusConflict, code, err.Error())
+		return
+	}
+	if err != nil {
+		replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": jobID, "status": "pending", "retry_items": failed})
 }
 
 func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
@@ -416,18 +473,18 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, ve
 	if source.NormalizedTitle != "" {
 		conditions, args = append(conditions, "(aw.normalized_title = ? AND aw.publication_year = ?)"), append(args, source.NormalizedTitle, source.PublicationYear)
 	}
-	var row struct {
+	var rows []struct {
 		WorkID     string
 		DocumentID string
+		Ext        json.RawMessage
 	}
 	query := activeSourceDocuments(store.DB().WithContext(ctx), datasetID).
-		Select("aw.id AS work_id, awd.document_id").
+		Select("aw.id AS work_id, awd.document_id, d.ext").
 		Joins("JOIN academic_work_documents awd ON awd.document_id = d.id AND awd.dataset_id = d.dataset_id").
 		Joins("JOIN academic_works aw ON aw.id = awd.academic_work_id").
 		Where("awd.dataset_id = ?", datasetID).
 		Where("("+strings.Join(conditions, " OR ")+")", args...).
-		Order("CASE WHEN aw.id = '" + strings.ReplaceAll(source.ID, "'", "''") + "' THEN 0 ELSE 1 END, awd.is_preferred_version DESC, awd.updated_at DESC").
-		Limit(1)
+		Order("CASE WHEN aw.id = '" + strings.ReplaceAll(source.ID, "'", "''") + "' THEN 0 ELSE 1 END, awd.is_preferred_version DESC, awd.updated_at DESC")
 	if len(version) > 0 && version[0] != "" {
 		query = query.Where("awd.source_version = ?", version[0])
 		if len(version) > 1 && version[1] != "" {
@@ -437,19 +494,26 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, ve
 			query = query.Where("aw.arxiv_id_base=?", source.ArxivIDBase)
 		}
 	}
-	query = query.Scan(&row)
+	query = query.Scan(&rows)
 	if query.Error != nil {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, query.Error
 	}
-	if row.WorkID == "" || row.DocumentID == "" {
+	var workIDFound, documentIDFound string
+	for _, row := range rows {
+		if paperlibrary.OriginalAvailable(orm.Document{Ext: row.Ext}) {
+			workIDFound, documentIDFound = row.WorkID, row.DocumentID
+			break
+		}
+	}
+	if workIDFound == "" || documentIDFound == "" {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, gorm.ErrRecordNotFound
 	}
 	var work orm.AcademicWork
 	var document orm.AcademicWorkDocument
-	if err := store.DB().WithContext(ctx).Where("id = ?", row.WorkID).Take(&work).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("id = ?", workIDFound).Take(&work).Error; err != nil {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
-	if err := store.DB().WithContext(ctx).Where("academic_work_id = ? AND dataset_id = ? AND document_id = ?", row.WorkID, datasetID, row.DocumentID).Take(&document).Error; err != nil {
+	if err := store.DB().WithContext(ctx).Where("academic_work_id = ? AND dataset_id = ? AND document_id = ?", workIDFound, datasetID, documentIDFound).Take(&document).Error; err != nil {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, err
 	}
 	return work, document, nil

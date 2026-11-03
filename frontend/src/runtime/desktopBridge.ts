@@ -99,6 +99,7 @@ export interface DesktopAgentAction {
 }
 
 export interface DesktopAgentConnectionStatus {
+  runtime_state?: "waiting" | "connection_required" | "connected" | "unavailable";
   mcp_trusted?: boolean;
   mcp_enabled?: boolean;
   mcp_configured: boolean;
@@ -108,8 +109,9 @@ export interface DesktopAgentConnectionStatus {
 }
 
 export interface DesktopAgentIntegrationStatus {
+  enabled?: boolean;
   login?: { state: "running" | "succeeded" | "failed" | "cancelled"; message?: string };
-  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable"; path?: string };
+  issue?: { code: "unsupported_version" | "dependency_environment" | "operation_failed" | "version_unreadable" | "capability_unavailable" | "host_unavailable" | "startup_unavailable" | "installation_unavailable" | "cdp_unavailable"; path?: string };
 	can_connect?: boolean;
 	can_disconnect?: boolean;
 	retry_action?: "connect" | "disconnect";
@@ -198,6 +200,7 @@ export type DesktopAgentExecutableBindingResult =
 
 type DesktopBridgeCommand =
   | "openLogsDir"
+  | "openNotificationSettings"
   | "openDataDir"
   | "openBrowserExtensionDir"
   | "restartRuntime"
@@ -207,6 +210,7 @@ interface LazyMindDesktopBridge {
   platform?: string;
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
+  openNotificationSettings?: () => Promise<void> | void;
   openBrowserExtensionDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
   agentIntegrationStatuses?: () => Promise<unknown> | unknown;
@@ -297,6 +301,10 @@ export function openLogsDir(): Promise<DesktopBridgeResult> {
 
 export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
+}
+
+export function openNotificationSettings(): Promise<DesktopBridgeResult> {
+  return callDesktopBridge("openNotificationSettings");
 }
 
 export async function openCloudRegister(url?: string): Promise<DesktopBridgeResult> {

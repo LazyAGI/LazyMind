@@ -152,6 +152,11 @@ func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		// Other dataset tests initialize ACL, which resolves group membership
+		// before applying the scan source filter.
+		if r.Method == http.MethodGet && r.URL.Path == "/api/authservice/user/user-1/groups/internal" {
+			return testJSONResponse(http.StatusOK, `{"code":200,"data":[]}`), nil
+		}
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
