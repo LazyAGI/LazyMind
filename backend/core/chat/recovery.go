@@ -46,6 +46,7 @@ type conversationArchiveRequest struct {
 
 type archiveFolderRequest struct {
 	Name string `json:"name"`
+	Kind string `json:"kind"`
 }
 
 func recoveryUserID(r *http.Request) string {
@@ -80,14 +81,14 @@ func isArchiveFolderNameConflict(err error) bool {
 	return strings.Contains(message, "unique") || strings.Contains(message, "duplicate")
 }
 
-func resolveArchiveFolderID(db *gorm.DB, userID string, raw *string) (*string, error) {
+func resolveArchiveFolderID(db *gorm.DB, userID string, raw *string, isTask bool) (*string, error) {
 	if raw == nil || strings.TrimSpace(*raw) == "" || strings.EqualFold(strings.TrimSpace(*raw), archiveFolderUnfiled) {
 		return nil, nil
 	}
 	folderID := strings.TrimSpace(*raw)
 	var count int64
 	if err := db.Model(&orm.ConversationArchiveFolder{}).
-		Where("id = ? AND user_id = ?", folderID, userID).
+		Where("id = ? AND user_id = ? AND is_task_conv = ?", folderID, userID, isTask).
 		Count(&count).Error; err != nil {
 		return nil, err
 	}
@@ -244,21 +245,16 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	db := store.DB()
 	userID := recoveryUserID(r)
-	folderID, err := resolveArchiveFolderID(db, userID, body.FolderID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ReplyErr(w, "archive folder not found", http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		common.ReplyErr(w, "query archive folder failed", http.StatusInternalServerError)
-		return
-	}
 	now := time.Now().UTC()
 	var conversation orm.Conversation
 	newlyArchived := false
 	archivedConversationIDs := []string{}
-	err = conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).First(&conversation).Error; err != nil {
+			return err
+		}
+		folderID, err := resolveArchiveFolderID(tx, userID, body.FolderID, conversation.IsTaskConv)
+		if err != nil {
 			return err
 		}
 		if conversation.ParentConversationID != nil {
@@ -683,8 +679,17 @@ func EmptyConversationTrash(w http.ResponseWriter, r *http.Request) {
 func ListConversationArchiveFolders(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	userID := recoveryUserID(r)
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	if kind != "" && kind != "dialog" && kind != "task" {
+		common.ReplyErr(w, "invalid archive folder kind", http.StatusBadRequest)
+		return
+	}
+	query := db.WithContext(r.Context()).Where("user_id = ?", userID)
+	if kind != "" {
+		query = query.Where("is_task_conv = ?", kind == "task")
+	}
 	var folders []orm.ConversationArchiveFolder
-	if err := db.Where("user_id = ?", userID).Order("created_at ASC").Find(&folders).Error; err != nil {
+	if err := query.Order("created_at ASC").Find(&folders).Error; err != nil {
 		common.ReplyErr(w, "query archive folders failed", http.StatusInternalServerError)
 		return
 	}
@@ -737,6 +742,10 @@ func CreateConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if body.Kind != "" && body.Kind != "dialog" && body.Kind != "task" {
+		common.ReplyErr(w, "invalid archive folder kind", http.StatusBadRequest)
+		return
+	}
 	name, normalized, err := normalizedArchiveFolderName(body.Name)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -744,7 +753,7 @@ func CreateConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	folder := orm.ConversationArchiveFolder{
-		ID: uuid.NewString(), UserID: recoveryUserID(r), Name: name, NormalizedName: normalized,
+		ID: uuid.NewString(), UserID: recoveryUserID(r), Name: name, NormalizedName: normalized, IsTaskConv: body.Kind == "task",
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.DB().Create(&folder).Error; err != nil {
@@ -822,7 +831,7 @@ func DeleteConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 			if moveTarget == folderID {
 				return errArchiveFolderMoveSelf
 			}
-			targetID, err := resolveArchiveFolderID(tx, userID, &moveTarget)
+			targetID, err := resolveArchiveFolderID(tx, userID, &moveTarget, folder.IsTaskConv)
 			if err != nil {
 				return err
 			}

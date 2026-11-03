@@ -2875,8 +2875,17 @@ export interface ConversationArchiveFolderListResponse {
     'unfiled_total_count': number;
 }
 export interface ConversationArchiveFolderRequest {
+    'kind'?: ConversationArchiveFolderRequestKindEnum;
     'name': string;
 }
+
+export const ConversationArchiveFolderRequestKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+
+export type ConversationArchiveFolderRequestKindEnum = typeof ConversationArchiveFolderRequestKindEnum[keyof typeof ConversationArchiveFolderRequestKindEnum];
+
 export interface ConversationArchiveRequest {
     'folder_id'?: string | null;
     'only_if_active'?: boolean;
@@ -20726,10 +20735,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          *
          * @summary List conversation archive folders
+         * @param {ApiCoreConversationArchiveFoldersGetKindEnum} [kind]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationArchiveFoldersGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationArchiveFoldersGet: async (kind?: ApiCoreConversationArchiveFoldersGetKindEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversation-archive-folders`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -20741,6 +20751,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (kind !== undefined) {
+                localVarQueryParameter['kind'] = kind;
+            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -34522,11 +34536,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary List conversation archive folders
+         * @param {ApiCoreConversationArchiveFoldersGetKindEnum} [kind]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersGet(options);
+        async apiCoreConversationArchiveFoldersGet(kind?: ApiCoreConversationArchiveFoldersGetKindEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersGet(kind, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationArchiveFoldersGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -40034,11 +40049,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         /**
          *
          * @summary List conversation archive folders
+         * @param {DefaultApiApiCoreConversationArchiveFoldersGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderListResponse> {
-            return localVarFp.apiCoreConversationArchiveFoldersGet(options).then((request) => request(axios, basePath));
+        apiCoreConversationArchiveFoldersGet(requestParameters: DefaultApiApiCoreConversationArchiveFoldersGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderListResponse> {
+            return localVarFp.apiCoreConversationArchiveFoldersGet(requestParameters.kind, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -43929,6 +43945,13 @@ export interface DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest
 }
 
 /**
+ * Request parameters for apiCoreConversationArchiveFoldersGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationArchiveFoldersGetRequest {
+    readonly kind?: ApiCoreConversationArchiveFoldersGetKindEnum
+}
+
+/**
  * Request parameters for apiCoreConversationArchiveFoldersPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationArchiveFoldersPostRequest {
@@ -46656,11 +46679,12 @@ export class DefaultApi extends BaseAPI {
     /**
      *
      * @summary List conversation archive folders
+     * @param {DefaultApiApiCoreConversationArchiveFoldersGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersGet(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreConversationArchiveFoldersGet(requestParameters: DefaultApiApiCoreConversationArchiveFoldersGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersGet(requestParameters.kind, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -50776,6 +50800,11 @@ export class DefaultApi extends BaseAPI {
     }
 }
 
+export const ApiCoreConversationArchiveFoldersGetKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+export type ApiCoreConversationArchiveFoldersGetKindEnum = typeof ApiCoreConversationArchiveFoldersGetKindEnum[keyof typeof ApiCoreConversationArchiveFoldersGetKindEnum];
 export const ApiCoreConversationsArchivedGetKindEnum = {
     Dialog: 'dialog',
     Task: 'task'
