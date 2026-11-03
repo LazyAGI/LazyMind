@@ -342,6 +342,7 @@
 .paper-research-depth h3 { margin: 0 0 10px; font-size: 14px; font-weight: 500; }
 .paper-research-depth-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .paper-research-depth-option { display: grid; align-content: start; gap: 9px; padding: 15px 13px; border: 1px solid var(--color-border-secondary, #e5eaf1); border-radius: 8px; cursor: pointer; }
+.paper-research-depth-options.has-flow .paper-research-depth-option { align-content: center; }
 .paper-research-depth-option.is-selected { border-color: var(--color-primary, #2858b8); background: color-mix(in srgb, var(--color-primary, #2858b8) 6%, var(--color-bg-container, #fff)); }
 .paper-research-depth-name { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .paper-research-depth-name input { width: 15px; height: 15px; margin: 0; accent-color: var(--color-primary, #2858b8); }
