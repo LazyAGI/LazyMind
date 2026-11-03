@@ -48,3 +48,14 @@ it('returns a missing selection to inherited default without changing the preset
   fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
   await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: '', study_model_ref: '', preset: 'demand' })));
 });
+it('reveals per-feature controls on demand and keeps limits when choosing a plan', async () => {
+  render(<ReadingPreferencesModal open onClose={() => {}} />);
+  await screen.findByRole('radio', { name: /按需准备/ });
+  expect(screen.queryByRole('combobox', { name: '公式研读' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /逐项调整/ }));
+  expect(screen.getByRole('combobox', { name: '公式研读' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('radio', { name: /提前准备/ }));
+  expect(screen.queryByRole('combobox', { name: '公式研读' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
+  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ preset: 'advance', limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 } })));
+});
