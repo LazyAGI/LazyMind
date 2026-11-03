@@ -2630,19 +2630,34 @@ ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   }
   return result;
 });
-ipcMain.handle("lazymind:assistantSessionClear", async (event) => {
+ipcMain.handle("lazymind:assistantSessionClear", async (event, request) => {
   if (isQuitting || !isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");
   }
-  notificationSessionRevision += 1;
-  await agentRecovery.stop();
-  recoverySessionIdentity = undefined;
-  notificationRenewalCandidate = undefined;
-  notificationSession.clear();
-  desktopNotifications.clearSession();
-  return (sessionWrites = sessionWrites.catch(() => {}).then(() =>
-    runConnectorJSON(["internal", "session", "clear"], agentConnectorActionTimeoutMs)));
+  if (!request?.expected_session?.server_url || !request.expected_session.access_token || !request.expected_session.refresh_token) {
+    throw new Error("DESKTOP_SESSION_INVALID");
+  }
+  const expected = request.expected_session;
+  const remembered = notificationSession.restore(expected);
+  const matches = remembered && (request.allow_renewed || remembered.access_token === expected.access_token && remembered.refresh_token === expected.refresh_token);
+  const revision = matches ? ++notificationSessionRevision : notificationSessionRevision;
+  const stopping = matches ? agentRecovery.stop() : Promise.resolve();
+  const result = await (sessionWrites = sessionWrites.catch(() => {}).then(() =>
+    runConnectorJSON(["internal", "session", "clear-if-current"], agentConnectorActionTimeoutMs, request)));
+  await stopping;
+  // Disk cleanup is conditional and idempotent. A parallel clear may already
+  // have removed the file; this matching memory session still needs to expire.
+  if (matches && revision === notificationSessionRevision) {
+    notificationSessionRevision += 1;
+    recoverySessionIdentity = undefined;
+    notificationRenewalCandidate = undefined;
+    notificationSession.clear();
+    desktopNotifications.clearSession();
+    await agentRecovery.stop();
+  }
+  return result;
 });
+
 ipcMain.on("lazymind:notificationSessionRestore", (event, value) => {
   // Synchronous, memory-only lookup runs in preload before application code.
   // It never waits for disk/network or exposes credentials to a different frame.

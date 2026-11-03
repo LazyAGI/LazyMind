@@ -31,5 +31,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (message) lastError = message
   })
   ctx.effect(() => stop)
-  try { await stop.ready } catch (error) { await stop(); throw error }
+  // Login and the local runtime may recover after DSH has booted. Keep the
+  // resolver alive rather than making an optional connection fatal to DSH.
+  await stop.ready.catch(() => {})
 }
