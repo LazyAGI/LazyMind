@@ -1,3 +1,4 @@
+import {PdfStudyActivation,StudySparkle} from "./PdfStudyActivation";
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
 import {PdfPaperOverview} from "./PdfPaperOverview";
 import {PdfVisualStudy} from "./PdfVisualStudy";
@@ -173,6 +174,8 @@ export default function RenderPdf({
   const currentSource = useRef(fileData);
   currentSource.current = fileData;
   const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
+  const readerFrame=useRef<HTMLDivElement>(null);
+  const [studyPulse,setStudyPulse]=useState(0);
   const [visualPreview,setVisualPreview]=useState<string>();
   const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
@@ -1011,7 +1014,7 @@ export default function RenderPdf({
         {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
         {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
         </div></details>
-        {formulaDocument && studyBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}>{t("pdfFormula.openCatalog")}</button>}
+        {formulaDocument && studyBlocks.length > 0 && <button type="button" className="pdf-study-ai-button" onClick={() => {setStudyPulse(value=>value+1);setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}><StudySparkle/><span>{t("pdfFormula.openCatalog")}</span></button>}
         {tableBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
         {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
 
@@ -1036,8 +1039,9 @@ export default function RenderPdf({
 
   if (error && errorSource.current === fileData) {
     return (
-      <div className="pdf-reader-workspace" style={{height:style?.height || "100%",width:"100%"}}>
-        {readerHeader}
+      <div ref={readerFrame} className="pdf-reader-workspace" style={{height:style?.height || "100%",width:"100%"}}>
+        {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
+    {readerHeader}
         {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
       </div>
     );
@@ -1059,7 +1063,8 @@ export default function RenderPdf({
     writePdfNoteHighlights(noteHighlightKey,next);
   };
   return (
-    <div className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    <div ref={readerFrame} className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div className="pdf-reader-stage">
     {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
