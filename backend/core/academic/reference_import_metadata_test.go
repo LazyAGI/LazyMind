@@ -523,3 +523,73 @@ func TestReferenceMetadataWrappedYearsAreNotReferenceNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestConversationVersionedArxivImportLooksUpBibliography(t *testing.T) {
+	db, _, _, svc := importPipelineFixture(t)
+	prepareReferenceLibrary(t, db, "target")
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []any{
+		&orm.Conversation{ID: "source-chat", BaseModel: orm.BaseModel{CreateUserID: "alice"}},
+		&orm.ChatHistory{ID: "source-answer", ConversationID: "source-chat", RetrievalResult: json.RawMessage(`{"sources":[{"citation_id":"1","url":"https://arxiv.org/abs/1902.00751v1","title":"Unverified citation title"}]}`)},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := http.DefaultTransport
+	lookups := 0
+	http.DefaultTransport = sourceTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Hostname() != "export.arxiv.org" {
+			return old.RoundTrip(r)
+		}
+		lookups++
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(houlsbyAtom("1902.00751", "v1"))), Request: r}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = old })
+	request := httptest.NewRequest("POST", "/academic/imports", strings.NewReader(`{"source_context":{"conversation_id":"source-chat","history_id":"source-answer"},"source_ids":["1"],"target_dataset_id":"target","idempotency_key":"versioned-source"}`))
+	request.Header.Set("X-User-Id", "alice")
+	response := httptest.NewRecorder()
+	CreateImport(response, request)
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var result struct {
+		BatchID string `json:"batch_id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	var batch orm.PaperImportBatch
+	var item orm.PaperImportItem
+	if err := db.First(&batch, "id=?", result.BatchID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&item, "batch_id=?", batch.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if lookups != 0 {
+		t.Fatal("offline inspection queried external metadata")
+	}
+	if err := db.Model(&orm.AsyncJob{}).Where("id=?", batch.AsyncJobID).Updates(map[string]any{"status": "running", "attempt_count": 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	ref := houlsbyPaper()
+	ref.PaperID = item.AcademicWorkID
+	seedReferencePDFCache(t, db, ref)
+	if err := processImportItem(t.Context(), asyncjob.Job{ID: batch.AsyncJobID, AttemptCount: 1}, batch, item, sourceImportCaller(batch), svc); err != nil {
+		t.Fatal(err)
+	}
+	if lookups != 1 {
+		t.Fatalf("official bibliography lookups=%d", lookups)
+	}
+	view, err := paperlibrary.Load(t.Context(), db, "target", "alice", nil, false)
+	if err != nil || len(view.Data.Papers) != 1 {
+		t.Fatalf("view=%+v err=%v", view, err)
+	}
+	checkHoulsbyMetadata(t, view.Data.Papers[0].Metadata)
+	if view.Data.Papers[0].Incomplete {
+		t.Fatal("verified bibliography remained incomplete")
+	}
+}

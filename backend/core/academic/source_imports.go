@@ -167,9 +167,14 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 			}
 			var candidate savedImportCandidate
 			if s.Candidate.URL != "" {
-				ref := paperRef(work)
-				ref.SourceProvider, ref.SourceVersion, ref.PDFURL = s.Candidate.SourceProvider, s.Candidate.Version, s.Candidate.URL
-				candidate = savedImportCandidate{FulltextCandidate: s.Candidate, VerifiedPaper: &ref}
+				candidate = savedImportCandidate{FulltextCandidate: s.Candidate}
+				// arXiv inspection is offline, even when the URL names a version.
+				// Other accepted PDF sources already belong to a trusted saved work.
+				if s.Candidate.SourceProvider != "arxiv" {
+					ref := paperRef(work)
+					ref.SourceProvider, ref.SourceVersion, ref.PDFURL = s.Candidate.SourceProvider, s.Candidate.Version, s.Candidate.URL
+					candidate.VerifiedPaper = &ref
+				}
 			}
 			refs, _ := json.Marshal([]string{s.SourceID})
 			presence, _ := json.Marshal(map[string]string{"paper_key": key})
