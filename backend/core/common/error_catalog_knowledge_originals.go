@@ -22,7 +22,7 @@ func init() {
 	}
 	registerAdditionalErrorAlias("original exceeds size limit", "file exceeds max size", http.StatusRequestEntityTooLarge, 2001380)
 	for _, source := range []string{
-		"original host has no addresses", "too many original redirects",
+		"original host has no addresses", "too many original redirects", "authenticated original download failed",
 	} {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}

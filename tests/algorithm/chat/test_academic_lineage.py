@@ -12,7 +12,7 @@ from lazymind.workflow_toolkit import load_workflow_package_tools
 
 def _artifact(events, slot='relation_analysis'):
     value = next(event['value'] for event in reversed(events) if event.get('slot') == slot)
-    return json.loads(Path(value['path']).read_text()) if 'path' in value else value['data']
+    return json.loads(Path(value['path']).read_text(encoding='utf-8')) if 'path' in value else value['data']
 
 
 @pytest.fixture
@@ -923,8 +923,8 @@ async def test_large_frozen_inputs_use_existing_path_transport_through_context_c
         row['paper']['published_at'] = '2026-01-02T00:00:00Z'
     payloads = {'expansion_id': 'exp', 'candidate_set': candidate}
     package = Path(__file__).resolve().parents[3] / 'workflows' / 'paper_expansion'
-    workflow = yaml.safe_load((package / 'workflow.yaml').read_text())
-    state = yaml.safe_load((package / 'scenario/state.yml').read_text())
+    workflow = yaml.safe_load((package / 'workflow.yaml').read_text(encoding='utf-8'))
+    state = yaml.safe_load((package / 'scenario/state.yml').read_text(encoding='utf-8'))
     slot_types = {row['id']: row['type'] for row in workflow['slots']}
 
     class Runtime:
