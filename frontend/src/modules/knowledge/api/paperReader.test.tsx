@@ -1,11 +1,12 @@
 import {act,renderHook,waitFor} from '@testing-library/react';
 import {beforeEach,expect,it,vi} from 'vitest';
+import {AUTH_LOGOUT_EVENT} from '@/components/auth';
 import {usePaperReaderResource} from './paperReader';
 const mocks=vi.hoisted(()=>({post:vi.fn()}));
 vi.mock('@/components/request',()=>({axiosInstance:mocks,BASE_URL:''}));
 const old={source_sha256:'source',summary:'Existing explanation'};
 const useResource=(resource='blocks/figure/explanation',source='source')=>usePaperReaderResource<typeof old>({dataset:'d',document:'doc'},source,source,resource,'en',true);
-beforeEach(()=>mocks.post.mockReset());
+beforeEach(()=>{mocks.post.mockReset();window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));});
 it('keeps the same-source explanation during updates, failure and cancellation and replaces it on success',async()=>{
  mocks.post.mockResolvedValueOnce({data:{data:old}});
  const {result}=renderHook(()=>useResource());
@@ -41,4 +42,26 @@ it('does not retain old content across resource/source changes or explicit sourc
  mocks.post.mockResolvedValueOnce({data:{data:old}});
  await act(()=>result.current.load(true));
  expect(result.current.sourceMismatch).toBe(true);expect(result.current.data).toBeUndefined();
+});
+
+it('reuses a same-source explanation on reopening without another request, but explicit regeneration bypasses it',async()=>{
+ mocks.post.mockResolvedValue({data:{data:old}});
+ const first=renderHook(()=>useResource());
+ await waitFor(()=>expect(first.result.current.data).toEqual(old));
+ first.unmount();
+ const second=renderHook(()=>useResource());
+ await waitFor(()=>expect(second.result.current.data).toEqual(old));
+ expect(mocks.post).toHaveBeenCalledTimes(1);
+ await act(()=>second.result.current.load(true));
+ expect(mocks.post).toHaveBeenCalledTimes(2);
+});
+it('clears saved browser explanations on logout',async()=>{
+ mocks.post.mockResolvedValue({data:{data:old}});
+ const first=renderHook(()=>useResource());
+ await waitFor(()=>expect(first.result.current.data).toEqual(old));
+ first.unmount();
+ act(()=>window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT)));
+ const second=renderHook(()=>useResource());
+ await waitFor(()=>expect(second.result.current.data).toEqual(old));
+ expect(mocks.post).toHaveBeenCalledTimes(2);
 });

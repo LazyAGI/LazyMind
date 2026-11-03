@@ -88,25 +88,40 @@ func paperVisualContext(d pdfir.Document, id string) (pdfir.Block, []formulaEvid
 			chosen = append(chosen, b)
 		}
 	}
-	for delta := 1; delta <= 3; delta++ {
-		for _, i := range []int{index - delta, index + delta} {
-			if i >= 0 && i < len(d.Blocks) && d.Blocks[i].Page == target.Page && d.Blocks[i].Type != "image" && d.Blocks[i].Type != "table" {
-				chosen = append(chosen, d.Blocks[i])
+	// Captions are sometimes projected after the source reading order. Skip
+	// these and headings when selecting nearby prose, and allow a page break.
+	for _, direction := range []struct{ step, limit int }{{-1, 2}, {1, 3}} {
+		count := 0
+		for i := index + direction.step; i >= 0 && i < len(d.Blocks) && count < direction.limit; i += direction.step {
+			b := d.Blocks[i]
+			if b.Page < target.Page-1 || b.Page > target.Page+1 {
+				continue
+			}
+			switch b.Type {
+			case "text", "paragraph", "abstract":
+				if strings.TrimSpace(b.Text) != "" {
+					chosen = append(chosen, b)
+					count++
+				}
 			}
 		}
 	}
 	ev := []formulaEvidence{}
 	seen := map[string]bool{}
-	budget := 24000
+	budget := 12000
 	for _, b := range chosen {
 		if seen[b.ID] || b.ID == "" || b.Page < 0 || strings.TrimSpace(paperBlockText(b)) == "" {
 			continue
 		}
 		seen[b.ID] = true
-		if len(ev) >= 32 || budget <= 0 {
+		if len(ev) >= 8 || budget <= 0 {
 			break
 		}
-		e := paperEvidence(b, min(6000, budget))
+		limit := 1500
+		if b.ID == target.ID {
+			limit = 6000
+		}
+		e := paperEvidence(b, min(limit, budget))
 		budget -= len([]rune(e.Text))
 		ev = append(ev, e)
 	}

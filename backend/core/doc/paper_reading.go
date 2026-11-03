@@ -33,7 +33,7 @@ type paperTranslation struct {
 func servePaperReading(kind string, w http.ResponseWriter, r *http.Request) {
 	paperReadingHandler{kind: kind, model: formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, config map[string]any) (string, error) {
 		if kind == "visual" {
-			return generateStructuredPaperResult(ctx, content, algo.VisualExplanationTask, algo.VisualExplanationTaskVersion, config)
+			return generateStructuredPaperResult(ctx, content, algo.VisualExplanationTask, algo.VisualExplanationTaskVersion, formulaExplanationGenerationConfig(config))
 		}
 		return algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: content, UserInstruct: instruction, LLMConfig: config})
 	}}}.ServeHTTP(w, r)
@@ -148,14 +148,22 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	instruction = strings.ReplaceAll(instruction, "LANGUAGE", language)
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	config, modelID, modelName, err := h.model.loadModel(ctx, store.UserID(r))
-	if err != nil {
-		formulaExplanationError(w, 422, "Select an available chat model in model settings before using the paper reader.")
-		return
+	var config map[string]any
+	var modelID, modelName string
+	if h.kind != "visual" {
+		config, modelID, modelName, err = h.model.loadModel(ctx, store.UserID(r))
+		if err != nil {
+			formulaExplanationError(w, 422, "Select an available chat model in model settings before using the paper reader.")
+			return
+		}
 	}
-	// Retain the nil related-block slot so existing visual/translation caches remain valid.
-	keyData, _ := json.Marshal([]any{paperReadingPromptVersion, h.kind, blockID, d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, modelID, request.Language, evidence, []pdfir.Block(nil)})
-	key := pdfir.Digest(string(keyData))
+	// Visual explanations describe the source, not a model selection. Translation
+	// retains its existing model-specific identity.
+	cacheKey := func(model string) string {
+		keyData, _ := json.Marshal([]any{paperReadingPromptVersion, h.kind, blockID, d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, model, request.Language, evidence, []pdfir.Block(nil)})
+		return pdfir.Digest(string(keyData))
+	}
+	key := cacheKey(modelID)
 	dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "paper-reading", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	path := filepath.Join(dir, key+".json")
 	validate := func(raw string) (any, error) {
@@ -180,18 +188,56 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return result, nil
 		}
 	}
+	readCache := func(cachePath string) (any, bool) {
+		f, e := os.Open(cachePath)
+		if e != nil {
+			return nil, false
+		}
+		defer f.Close()
+		raw, e := io.ReadAll(io.LimitReader(f, paperReadingMaxBytes+1))
+		if e != nil {
+			return nil, false
+		}
+		result, e := validate(string(raw))
+		if e != nil {
+			return nil, false
+		}
+		if visual, ok := result.(paperVisualExplanation); ok {
+			// Only server-owned cache metadata may supply the original generation model.
+			var saved struct {
+				Model string `json:"model"`
+			}
+			if json.Unmarshal(raw, &saved) == nil {
+				visual.Model = saved.Model
+			}
+			result = visual
+		}
+		return result, true
+	}
 	if !request.Force {
-		if f, e := os.Open(path); e == nil {
-			raw, e := io.ReadAll(io.LimitReader(f, paperReadingMaxBytes+1))
-			f.Close()
-			if e == nil {
-				if result, e := validate(string(raw)); e == nil {
-					common.ReplyOK(w, result)
-					return
-				}
+		if result, ok := readCache(path); ok {
+			w.Header().Set("X-Paper-Cache", "hit")
+			common.ReplyOK(w, result)
+			return
+		}
+	}
+	if h.kind == "visual" {
+		config, modelID, modelName, err = h.model.loadModel(ctx, store.UserID(r))
+		if err != nil {
+			formulaExplanationError(w, 422, "Select an available chat model in model settings before using the paper reader.")
+			return
+		}
+		// Migrate an existing model-specific result without paying for generation.
+		if !request.Force {
+			if result, ok := readCache(filepath.Join(dir, cacheKey(modelID)+".json")); ok {
+				_ = savePaperReading(dir, path, result)
+				w.Header().Set("X-Paper-Cache", "hit")
+				common.ReplyOK(w, result)
+				return
 			}
 		}
 	}
+	w.Header().Set("X-Paper-Cache", "miss")
 	content, _ := json.Marshal(input)
 	raw := ""
 	if len(evidence) == 0 {

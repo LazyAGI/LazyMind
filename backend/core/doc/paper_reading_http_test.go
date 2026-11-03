@@ -3,6 +3,7 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
@@ -35,8 +36,12 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 			change := false
 			revoke := false
 			model := "one"
+			modelUnavailable := false
 			h := paperReadingHandler{kind: kind, model: formulaExplanationHandler{loadModel: func(context.Context, string) (map[string]any, string, string, error) {
 				modelLoads++
+				if modelUnavailable {
+					return nil, "", "", errors.New("unavailable")
+				}
 				return map[string]any{"llm": "selected"}, model, "selected", nil
 			}, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 				calls++
@@ -144,6 +149,17 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 				if authoritative.Data.SourceSHA256 != hash {
 					t.Fatal("cached source hash trusted")
 				}
+				if !strings.Contains(w.Body.String(), `"model":"selected"`) {
+					t.Fatal("cached generation model lost")
+				}
+			}
+			if kind == "visual" {
+				modelUnavailable = true
+				loads := modelLoads
+				if w := call("owner", `{}`); w.Code != 200 || modelLoads != loads {
+					t.Fatal("cached visual requires a live model")
+				}
+				modelUnavailable = false
 			}
 			beforeLoads := modelLoads
 			if w := call("owner", mismatch); w.Code != 409 || calls != 1 || modelLoads != beforeLoads {
@@ -157,8 +173,12 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 				t.Fatal("language cache reused")
 			}
 			model = "two"
-			if w := call("owner", `{}`); w.Code != 200 || calls != 4 {
-				t.Fatal("model cache reused")
+			expectedCalls := 4
+			if kind == "visual" {
+				expectedCalls = 3
+			}
+			if w := call("owner", `{}`); w.Code != 200 || calls != expectedCalls {
+				t.Fatal("incorrect model cache policy")
 			}
 			{
 				original := block
@@ -167,7 +187,7 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 				} else {
 					block = "v2"
 				}
-				if w := call("owner", `{}`); w.Code != 200 || calls != 5 {
+				if w := call("owner", `{}`); w.Code != 200 || calls != expectedCalls+1 {
 					t.Fatalf("block-specific cache reused: %d %s", w.Code, w.Body)
 				}
 				block = original
