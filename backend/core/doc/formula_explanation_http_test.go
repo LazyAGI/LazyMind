@@ -182,6 +182,21 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 || w.Header().Get("X-LazyMind-Formula-Cache") != "hit" {
 		t.Fatal("cache miss")
 	}
+	// Deleted explicit selection must not hide saved results or fall back on a miss.
+	savedLoader := handler.loadModel
+	handler.loadModel = loadFormulaExplanationModel
+	deletedPolicy := readingpolicy.Defaults()
+	deletedPolicy.StudyModelRef = "own:deleted"
+	if _, err := readingpolicy.Save(t.Context(), db.DB, "owner", deletedPolicy); err != nil {
+		t.Fatal(err)
+	}
+	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 {
+		t.Fatal("deleted study model hid stable cache")
+	}
+	if w := call("owner", "f", `{"force":true}`); w.Code != 422 || calls != 1 {
+		t.Fatal("deleted study model allowed generation")
+	}
+	handler.loadModel = savedLoader
 	// Emulate an unmigrated model-keyed result, then prohibit generation.
 	state, err := pdfIRStatus(context.Background(), orm.Document{ID: "doc", DatasetID: "ds"}, hash)
 	if err != nil {

@@ -44,13 +44,25 @@ func ReadingPreferences(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "只能提交一份准备设置", 400)
 			return
 		}
+		if input.ParserRef != "" && input.ParserRef != p.ParserRef {
+			if _, err := modelconfig.ResolveReadingParser(r.Context(), store.DB(), user, input.ParserRef); err != nil {
+				common.ReplyErr(w, "文档解析服务不可用", 400)
+				return
+			}
+		}
+		if input.StudyModelRef != "" && input.StudyModelRef != p.StudyModelRef {
+			if _, err := modelconfig.ResolveReadingStudyModel(r.Context(), store.DB(), user, input.StudyModelRef); err != nil {
+				common.ReplyErr(w, "研读模型不可用", 400)
+				return
+			}
+		}
 		p, err = readingpolicy.Save(r.Context(), store.DB(), user, input)
 		if err != nil {
 			common.ReplyErr(w, err.Error(), 400)
 			return
 		}
 	}
-	cfg, parseErr := modelconfig.LoadOCRConfig(r.Context(), store.DB(), user)
+	cfg, parseErr := loadReadingParser(r.Context(), user)
 	if parseErr == nil {
 		_, parseErr = pdfir.FromConfig(cfg)
 	}
@@ -89,6 +101,7 @@ func ReadingPreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, struct {
 		readingpolicy.Policy
-		Capabilities []readingCapability `json:"capabilities"`
-	}{p, caps})
+		Capabilities       []readingCapability         `json:"capabilities"`
+		ProviderSelections map[string]readingSelection `json:"provider_selections"`
+	}{p, caps, readingSelectionMetadata(r.Context(), user, p, parseErr, modelErr)})
 }

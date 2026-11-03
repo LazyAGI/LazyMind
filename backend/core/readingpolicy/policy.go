@@ -33,6 +33,8 @@ type Limits struct {
 	AutomaticConcurrency  int `json:"automatic_concurrency"`
 }
 type Policy struct {
+	ParserRef              string            `json:"parser_ref"`
+	StudyModelRef          string            `json:"study_model_ref"`
 	Preset                 string            `json:"preset"`
 	Modes                  map[string]string `json:"modes"`
 	Limits                 Limits            `json:"limits"`

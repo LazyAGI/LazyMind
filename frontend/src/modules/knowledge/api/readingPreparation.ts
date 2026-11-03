@@ -4,6 +4,8 @@ export type ReadingCapabilityId = ReadingScope | 'chat_prepare';
 export type ReadingMode = 'on_demand' | 'automatic' | 'disabled';
 export type ReadingPreset = 'demand' | 'advance' | 'full' | 'custom';
 export interface ReadingPolicy {
+  parser_ref?: string;
+  study_model_ref?: string;
   preset: ReadingPreset;
   modes: Record<ReadingCapabilityId, ReadingMode>;
   limits: { daily_documents: number; study_items_per_document: number; automatic_concurrency: number };
@@ -12,7 +14,8 @@ export interface ReadingCapability {
   id: ReadingCapabilityId | 'overview'; name: string; available: boolean; unavailable_reason?: string;
   supported_modes: ReadingMode[]; effective_mode: string; dependencies: string[];
 }
-export interface ReadingPreferences extends ReadingPolicy { capabilities: ReadingCapability[]; automatic_eligible_after?: string }
+export interface ReadingProviderSelection { options: { id: string; label: string }[]; default_label?: string; effective_label?: string; unavailable_reason?: string }
+export interface ReadingPreferences extends ReadingPolicy { provider_selections?: { parser: ReadingProviderSelection; study: ReadingProviderSelection }; capabilities: ReadingCapability[]; automatic_eligible_after?: string }
 export interface ReadingPreparation {
   job_id?: string; status: 'not_requested' | 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled';
   progress_current?: number; progress_total?: number; model_requests?: number; scopes?: ReadingScope[]; error_message?: string;
@@ -23,8 +26,8 @@ export async function getReadingPreferences(): Promise<ReadingPreferences> {
   return (await axiosInstance.get(`${base}/user/reading-preferences`)).data.data;
 }
 export async function saveReadingPreferences(policy: ReadingPolicy): Promise<ReadingPreferences> {
-  const { preset, modes, limits } = policy;
-  return (await axiosInstance.put(`${base}/user/reading-preferences`, { preset, modes, limits })).data.data;
+  const { preset, modes, limits, parser_ref, study_model_ref } = policy;
+  return (await axiosInstance.put(`${base}/user/reading-preferences`, { preset, modes, limits, ...(parser_ref !== undefined ? { parser_ref } : {}), ...(study_model_ref !== undefined ? { study_model_ref } : {}) })).data.data;
 }
 export async function getReadingPreparation(dataset: string, document: string): Promise<ReadingPreparation> {
   return (await axiosInstance.get(`${documentPath(dataset, document)}/reading-preparation`)).data.data;

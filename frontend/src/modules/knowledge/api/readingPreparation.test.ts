@@ -22,3 +22,10 @@ it('saves only editable policy fields and keeps chat independent from full prese
   expect(readingDependencyError(policy)).toBeUndefined();
   expect(readingDependencyError({ ...policy, modes: { ...policy.modes, pdf_parse: 'disabled' } })).toContain('结构解析');
 });
+it('persists source-scoped provider references and clears them to inherit', async () => {
+  const policy = { preset: 'demand' as const, modes: presetModes('demand'), limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 }, parser_ref: 'own:parser', study_model_ref: 'shared:study' };
+  await saveReadingPreferences(policy);
+  expect(http.put).toHaveBeenLastCalledWith('/api/core/user/reading-preferences', policy);
+  await saveReadingPreferences({ ...policy, parser_ref: '', study_model_ref: '' });
+  expect(http.put).toHaveBeenLastCalledWith('/api/core/user/reading-preferences', { ...policy, parser_ref: '', study_model_ref: '' });
+});

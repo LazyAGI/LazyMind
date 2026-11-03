@@ -28,3 +28,23 @@ it('explains invalid automatic study dependency and blocks save before submissio
   expect(screen.getByRole('button', { name: /保存预设/ })).toBeDisabled();
   expect(api.save).not.toHaveBeenCalled();
 });
+it('keeps independent provider selections across presets and exposes real configuration destinations', async () => {
+  api.get.mockResolvedValueOnce({ preset: 'demand', parser_ref: 'own:parser', study_model_ref: 'shared:missing', modes: presetModes('demand'), limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 }, capabilities: [], provider_selections: { parser: { options: [{ id: 'own:parser', label: 'MinerU / local' }], default_label: 'MinerU' }, study: { options: [], unavailable_reason: '所选服务不可用，请重新选择或配置' } } });
+  render(<ReadingPreferencesModal open onClose={() => {}} />);
+  await screen.findByText('文档解析服务');
+  expect(screen.getByRole('link', { name: '配置文档解析服务' })).toHaveAttribute('href', '/settings?section=model_defaults&service=parsing');
+  expect(screen.getByRole('link', { name: '配置研读模型' })).toHaveAttribute('href', '/settings?section=models');
+  expect(screen.getByText('所选服务不可用，请重新选择或配置')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('radio', { name: /充分准备/ }));
+  fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
+  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: 'own:parser', study_model_ref: 'shared:missing', preset: 'full' })));
+});
+it('returns a missing selection to inherited default without changing the preset', async () => {
+  api.get.mockResolvedValueOnce({ preset: 'demand', parser_ref: 'own:gone', study_model_ref: '', modes: presetModes('demand'), limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 }, capabilities: [], provider_selections: { parser: { options: [], default_label: 'MinerU' }, study: { options: [], default_label: 'Chat' } } });
+  render(<ReadingPreferencesModal open onClose={() => {}} />);
+  const parser = await screen.findByRole('combobox', { name: '文档解析服务' });
+  fireEvent.mouseDown(parser);
+  fireEvent.click(await screen.findByText('跟随默认（MinerU）'));
+  fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
+  await waitFor(() => expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ parser_ref: '', study_model_ref: '', preset: 'demand' })));
+});

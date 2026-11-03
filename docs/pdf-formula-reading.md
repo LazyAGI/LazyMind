@@ -121,3 +121,9 @@ Figure and table explanations use the same light study dialog as formulas. The o
 The browser retains up to 64 source/account/language-scoped results for five minutes, clearing them on account changes and logout. Reopening a cached study needs no network request. Server responses expose `X-Paper-Cache: hit|miss`. Visual context prioritizes the target and explicit references, with at most eight blocks and 12,000 characters total; the target receives up to 6,000 characters and other blocks up to 1,500 each. Supported DeepSeek routes use the formula reader's request-local low-latency setting without changing saved chat settings. There is one model attempt per visual request, without speculative parallel billing.
 
 Opening figure or table study preserves the current PDF scroll position. An offscreen figure selected from the catalog is rendered for its preview without navigating the reading pane; only an explicit source-location action moves the PDF. Table dialogs expand to a responsive 1,120-pixel maximum and show dense rows without a separate short vertical viewport. Copy-table exports tab-separated cells, quoting embedded tabs/newlines and preserving merged-cell positions as empty slots; selected cells can also be copied independently.
+
+### 阅读专用服务选择
+
+「AI 阅读准备」可独立选择「文档解析服务」（当前结构解析支持 MinerU）和「研读模型」。空选项跟随全局默认；显式选项来自可访问的已配置服务或可用云模型，不改变聊天模型或全局默认。预设切换保留这两个选择。解析选择同时用于论文结构与论文对话准备；研读选择用于手动及自动公式、图片、表格生成。
+
+切换服务不会重新生成已有结果；已删除或撤销共享的选择会显示不可用，已有缓存仍可阅读，新的生成须重新选择。可继续保存其他准备设置，或改回「跟随默认」。服务配置入口分别为 `/settings?section=model_defaults&service=parsing` 与 `/settings?section=models`。接口 `parser_ref`、`study_model_ref` 只接受服务端发出的来源限定引用，空字符串表示继承；`provider_selections` 仅提供候选 ID、显示名称及可用性说明，不返回密钥或连接配置。

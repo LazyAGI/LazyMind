@@ -10,7 +10,6 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/modelconfig"
 	"lazymind/core/pdfir"
 	"lazymind/core/readingpolicy"
 	"lazymind/core/store"
@@ -172,7 +171,7 @@ func CreatePDFIR(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 403)
 		return
 	}
-	cfg, e := modelconfig.LoadOCRConfig(r.Context(), store.DB(), store.UserID(r))
+	cfg, e := loadReadingParser(r.Context(), store.UserID(r))
 	if e != nil {
 		common.ReplyOK(w, pdfIRResponse{Status: "unavailable", SourceSHA256: hash, ErrorMessage: "MinerU configuration unavailable"})
 		return
@@ -232,7 +231,7 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 	if err := readingpolicy.Check(ctx, store.DB(), job.CreateUserID, readingpolicy.PDFParse); err != nil {
 		return asyncjob.Result{Permanent: true}, err
 	}
-	cfg, e := modelconfig.LoadOCRConfig(ctx, store.DB(), job.CreateUserID)
+	cfg, e := loadReadingParser(ctx, job.CreateUserID)
 	if e != nil {
 		return fail(errors.New("MinerU configuration unavailable"))
 	}

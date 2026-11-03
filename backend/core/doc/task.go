@@ -1634,6 +1634,20 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, store.DB(), userID)
+	if dataset.Scene == "academic_papers" {
+		policy, policyErr := readingpolicy.Load(ctx, store.DB(), userID)
+		if policyErr != nil {
+			return nil, policyErr
+		}
+		// Inherited parsing retains the existing optional OCR fallback. An
+		// explicit reading override must never silently use that fallback.
+		if policy.ParserRef != "" {
+			ocrConfig, err = modelconfig.ResolveReadingParser(ctx, store.DB(), userID, policy.ParserRef)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
 		ocrConfig = nil
@@ -2923,6 +2937,20 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 	}
 	llmConfig = normalizeParsingLLMConfig(llmConfig)
 	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	if dataset.Scene == "academic_papers" {
+		policy, policyErr := readingpolicy.Load(r.Context(), store.DB(), userID)
+		if policyErr != nil {
+			return nil, policyErr
+		}
+		// Inherited parsing retains the existing optional OCR fallback. An
+		// explicit reading override must never silently use that fallback.
+		if policy.ParserRef != "" {
+			ocrConfig, err = modelconfig.ResolveReadingParser(r.Context(), store.DB(), userID, policy.ParserRef)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
 		ocrConfig = nil

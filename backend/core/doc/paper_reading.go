@@ -160,7 +160,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 	if h.kind != "visual" {
 		config, modelID, modelName, err = h.model.loadModel(ctx, store.UserID(r))
 		if err != nil {
-			return nil, "", formulaExplanationFailure{422, "Select an available chat model in model settings before using the paper reader."}
+			return nil, "", formulaExplanationFailure{422, "Select an available study model in AI reading preferences before using the paper reader."}
 		}
 	}
 	// Visual explanations describe the source, not a model selection. Translation
@@ -243,7 +243,7 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 		}
 		config, modelID, modelName, err = h.model.loadModel(ctx, store.UserID(r))
 		if err != nil {
-			return nil, "", formulaExplanationFailure{422, "Select an available chat model in model settings before using the paper reader."}
+			return nil, "", formulaExplanationFailure{422, "Select an available study model in AI reading preferences before using the paper reader."}
 		}
 		// Migrate an existing model-specific result without paying for generation.
 		if !request.Force {

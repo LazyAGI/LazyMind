@@ -99,15 +99,11 @@ func ExplainPDFFormula(w http.ResponseWriter, r *http.Request) {
 func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]any, string, string, error) {
 	// LoadChatRuntimeConfig/LoadLLMConfig also resolve non-chat roles. This path
 	// deliberately resolves only the selected/default chat candidate.
-	models, err := modelconfig.LoadAvailableChatModels(ctx, store.DB(), user)
-	if err != nil {
-		return nil, "", "", err
-	}
-	selected, err := modelconfig.ResolveDefaultChatModel(ctx, store.DB(), user, models)
+	selected, err := loadReadingStudyModel(ctx, user)
 	if err != nil || selected == nil {
-		return nil, "", "", errors.New("selected model unavailable")
+		return nil, "", "", errors.New("所选研读模型不可用，请在 AI 阅读准备中重新选择")
 	}
-	runtime := &modelconfig.ChatRuntimeConfig{Models: models}
+	runtime := &modelconfig.ChatRuntimeConfig{Models: []modelconfig.AvailableChatModel{*selected}}
 	candidate := runtime.PrepareCandidate(ctx, *selected)
 	if candidate == nil {
 		return nil, "", "", errors.New("selected model credential unavailable")
@@ -120,13 +116,9 @@ func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]a
 // Cache migration needs only selection metadata. It must not prepare credentials,
 // resolve a cloud runtime session, or construct a runnable model configuration.
 func loadFormulaCacheIdentity(ctx context.Context, user string) (string, error) {
-	models, err := modelconfig.LoadAvailableChatModels(ctx, store.DB(), user)
-	if err != nil {
-		return "", err
-	}
-	selected, err := modelconfig.ResolveDefaultChatModel(ctx, store.DB(), user, models)
+	selected, err := loadReadingStudyModel(ctx, user)
 	if err != nil || selected == nil {
-		return "", errors.New("selected model unavailable")
+		return "", errors.New("所选研读模型不可用，请在 AI 阅读准备中重新选择")
 	}
 	identity, _ := json.Marshal([]any{modelconfig.ChatCandidateID(selected.Source, selected.ID), selected.CredentialRevision, selected.ModelName, selected.BaseURL, selected.ModelSettings})
 	return pdfir.Digest(string(identity)), nil
@@ -273,7 +265,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	}
 	config, modelID, modelName, err := h.loadModel(ctx, store.UserID(r))
 	if err != nil {
-		return formulaExplanation{}, "", formulaExplanationFailure{422, "Select an available chat model in model settings before explaining formulas."}
+		return formulaExplanation{}, "", formulaExplanationFailure{422, "所选研读模型不可用，请在 AI 阅读准备中重新选择或配置。"}
 	}
 	cachePaths = append(cachePaths, legacyCachePath(modelID))
 	if !request.Force {

@@ -8,6 +8,7 @@ const presets = [ ['demand', '按需准备', '点击后才准备，避免自动�
 export default function ReadingPreferencesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { token } = theme.useToken();
   const [draft, setDraft] = useState<ReadingPreferences>();
+  const [loadedRefs, setLoadedRefs] = useState({ parser_ref: '', study_model_ref: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -15,7 +16,7 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
   useEffect(() => {
     if (!open) return;
     let stale = false; setLoading(true); setError(''); setDraft(undefined);
-    getReadingPreferences().then(value => { if (!stale) setDraft(value); }).catch(err => { if (!stale) setError(getLocalizedErrorMessage(err)); }).finally(() => { if (!stale) setLoading(false); });
+    getReadingPreferences().then(value => { if (!stale) { setDraft(value); setLoadedRefs({ parser_ref: value.parser_ref || '', study_model_ref: value.study_model_ref || '' }); } }).catch(err => { if (!stale) setError(getLocalizedErrorMessage(err)); }).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
   }, [open, reload]);
   const dependencyError = draft && readingDependencyError(draft);
@@ -27,6 +28,22 @@ export default function ReadingPreferencesModal({ open, onClose }: { open: boole
     {error && <Alert type="error" showIcon message={error} action={!draft ? <Button onClick={() => setReload(v => v + 1)}>重试</Button> : undefined} />}
     {loading && <Spin />}
     {draft && <div style={{ '--reading-border': token.colorBorderSecondary, '--reading-muted': token.colorTextSecondary } as React.CSSProperties}>
+      <div className="reading-provider-selections">
+        {([['parser', 'parser_ref', '文档解析服务', '/settings?section=model_defaults&service=parsing'], ['study', 'study_model_ref', '研读模型', '/settings?section=models']] as const).map(([kind, field, label, href]) => {
+          const metadata = draft.provider_selections?.[kind];
+          const selected = draft[field] || '';
+          const missing = selected && !metadata?.options.some(option => option.id === selected);
+          return <div className="reading-capability" key={kind}><div><strong>{label}</strong> <a href={href} aria-label={`配置${label}`}>去配置</a>
+            {metadata?.unavailable_reason && selected === loadedRefs[field] && <p><Typography.Text type="warning">{metadata.unavailable_reason}</Typography.Text></p>}</div>
+            <Select aria-label={label} disabled={saving} value={selected} onChange={value => setDraft({ ...draft, [field]: value })} options={[
+              { value: '', label: `跟随默认${metadata?.default_label ? `（${metadata.default_label}）` : ''}` },
+              ...(metadata?.options || []).map(option => ({ value: option.id, label: option.label })),
+              ...(missing ? [{ value: selected, label: '已选服务不可用', disabled: true }] : []),
+            ]} />
+          </div>;
+        })}
+        <Typography.Paragraph type="secondary">仅用于论文阅读，与聊天模型及全局默认独立。结构解析支持 MinerU；切换后保留并优先复用已有结果，不会自动重新生成。</Typography.Paragraph>
+      </div>
       <Radio.Group aria-label="准备预设" className="reading-preset-options" disabled={saving} value={draft.preset} onChange={event => {
         const preset = event.target.value as ReadingPreset;
         setDraft({ ...draft, preset, modes: preset === 'custom' ? draft.modes : presetModes(preset) });
