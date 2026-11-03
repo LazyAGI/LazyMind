@@ -68,7 +68,7 @@ function Reading({ value }: { value: unknown }) {
     {typeof reading?.total_blocks === 'number' && <span> · {t('paperTasks.workflowResult.readCount', { count: numbers(reading.positions).length, total: reading.total_blocks })}</span>}
   </div>;
 }
-function PaperDetail({ item, analysis, reading }: { item: WorkflowPaper; analysis: boolean; reading?: unknown }) {
+export function PaperDetail({ item, analysis, reading }: { item: WorkflowPaper; analysis: boolean; reading?: unknown }) {
   const { t } = useTranslation();
   const fields = ['key_contribution', 'direction_relation', 'seed_relation'] as const;
   const visible = fields.filter(field => visiblePaperAnalysis(item[field]));
@@ -178,6 +178,9 @@ export function PaperExpansionArtifactView({ slotId, data, baseline }: {
   return <div className='paper-workflow-result'><div className='paper-workflow-scroll'>
     {isReport ? <>
       <PaperResearchCompletion completion={data.completion as PaperInvestigation['completion']} />
+      {Array.isArray(data.relations) && <PaperLineageView papers={papers} relations={data.relations as PaperRelation[]}
+        structure={data.research_structure as PaperResearchStructure | undefined}
+        renderDetail={item => <PaperDetail item={item} analysis reading={reading} />} />}
       <article className='paper-workflow-report' aria-label={tr('narrative')}>
         <MarkdownViewer>{narrative}</MarkdownViewer>
       </article>

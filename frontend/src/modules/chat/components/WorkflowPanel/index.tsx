@@ -1594,6 +1594,7 @@ function TabSlotGrid({
   const paperResultReady = isPaperReportTab
     && getTabSlotRevisions(session, tab, 'expansion_result').some(revision => revision.selected);
   const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session))
+    .filter(slot => !isPaperReportTab || slot.id !== 'relation_analysis')
     .filter(slot => slot.id !== 'expansion_result' || !isPaperReportTab || (!paperReportReady && paperResultReady));
   const documents = visibleSlots.flatMap(slotDef => getTabSlotRevisions(session, tab, slotDef.id)
     .filter(revision => revision.document)

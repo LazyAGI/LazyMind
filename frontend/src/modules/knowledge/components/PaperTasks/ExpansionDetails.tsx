@@ -7,6 +7,8 @@ import MarkdownViewer from '../MarkdownViewer';
 import PreparationPanel, { expansionProgressStages } from './PreparationPanel';
 import PaperTaskStatus from './PaperTaskStatus';
 import PaperResearchCompletion from '@/modules/chat/components/WorkflowPanel/PaperResearchCompletion';
+import PaperLineageView from '@/modules/chat/components/WorkflowPanel/PaperLineageView';
+import { PaperDetail } from '@/modules/chat/components/WorkflowPanel/PaperExpansionArtifactView';
 
 export default function ExpansionDetails({ detail, statusLabel, onRefresh, onStart, children }: {
     children?: ReactNode; detail: ExpansionDetail; statusLabel: (status: string) => string; onRefresh: () => Promise<void>; onStart: (id: string) => void;
@@ -80,11 +82,13 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
                 })}</ol>
             </div>
         </section>}
-        {completed && report?.narrative && <details className="paper-expansion-section">
+        {completed && report?.narrative && <details className="paper-expansion-section" open>
             <summary>{t('paperTasks.researchReading')}<span>{t('paperTasks.researchReadingHint')}</span></summary>
             <section className="paper-expansion-reading" aria-label={t('paperTasks.researchReadingHint')}>
+                {report.relations && <PaperLineageView papers={report.input?.papers || record.result.papers}
+                    relations={report.relations} structure={report.research_structure}
+                    renderDetail={item => <PaperDetail item={item} analysis reading={report.reading} />} />}
                 <MarkdownViewer>{report.narrative}</MarkdownViewer>
-
             </section>
         </details>}
     </>;

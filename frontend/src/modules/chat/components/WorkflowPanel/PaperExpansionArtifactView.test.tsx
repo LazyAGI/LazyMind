@@ -76,17 +76,21 @@ it('uses saved selection changes rather than the currently selected upstream lis
 });
 
 
-it('renders a continuous research report and exposes only its prose as source', async () => {
+it('shows the relationship graph above the research report and exposes its prose as source', async () => {
   const report = slot('expansion_report', { input,
     narrative: '## 研究概述\n\n工具选择依赖训练信号。[1]\n\n## 方法比较\n\n两种方法的训练数据和选择机制不同。',
-    analysis_version: 'v2', relations: [{ id: 'relation', statement: 'internal relation statement' }],
+    analysis_version: 'v2', relations: [{ id: 'relation', source_paper_id: 'paper-a', target_paper_id: 'paper-b',
+      relation_type: 'mechanism_comparison', statement: '两种工具选择机制不同', conditions: '', evidence: [] }],
     investigation: [{ conclusion: 'internal investigation log' }] });
   show(report);
   const article = await screen.findByRole('article');
   expect(within(article).getByRole('heading', { name: '研究概述' })).toBeVisible();
   expect(within(article).getByRole('heading', { name: '方法比较' })).toBeVisible();
-  expect(screen.queryByLabelText('关系图')).not.toBeInTheDocument();
-  expect(screen.queryByText('internal relation statement')).not.toBeInTheDocument();
+  const graph = screen.getByLabelText('关系图');
+  expect(graph).toBeVisible();
+  expect(graph.compareDocumentPosition(article) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(within(graph).getByRole('button', { name: '查看关系依据' }));
+  expect(screen.getByText('两种工具选择机制不同')).toBeVisible();
   expect(screen.queryByText('internal investigation log')).not.toBeInTheDocument();
   expect(screen.queryByText(/完整论文清单/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByText('展示源码'));

@@ -519,19 +519,18 @@ describe('result paper title navigation', () => {
     });
 });
 describe('result list actions', () => {
-    it('keeps research details collapsed above the papers after completion', async () => {
+    it('shows research details above the papers after completion while keeping the process collapsed', async () => {
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, goal: 'review', report: { narrative: '研究解读正文', reading_order: ['a'], limitations: ['旧版待查事项'] } } } as unknown as Awaited<ReturnType<typeof getExpansion>>);
         mount(undefined, '?expansion_id=r');
         await selectMultiple();
         const reading = screen.getByText('研究解读').closest('details')!;
         const process = screen.getByRole('button', { name: '查看过程' });
-        expect(reading).not.toHaveAttribute('open');
+        expect(reading).toHaveAttribute('open');
         expect(process).toHaveAttribute('aria-expanded', 'false');
         expect(process.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(screen.getByRole('region', { name: '论文综述流程', hidden: true })).not.toBeVisible();
         fireEvent.click(process);
         expect(screen.getByRole('region', { name: '论文综述流程' })).toBeVisible();
-        fireEvent.click(screen.getByText('研究解读'));
         expect(screen.getByText('研究解读正文')).toBeVisible();
         expect(screen.queryByText('旧版待查事项')).not.toBeInTheDocument();
         expect(screen.queryByText('建议阅读顺序')).not.toBeInTheDocument();
@@ -545,7 +544,6 @@ describe('result list actions', () => {
         expect(screen.getByText('本轮研究额度已用尽，部分问题尚未完成调查。')).toBeVisible();
         expect(screen.queryByText('论文拓展与研究解读已完成')).not.toBeInTheDocument();
         expect(screen.queryByText('调整研究范围')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByText('研究解读'));
         expect(screen.getByText('已核验的研究成果')).toBeVisible();
     });
     it('freezes review confirmation inputs and uses a new key for another generation', async () => {
@@ -642,7 +640,6 @@ describe('result list actions', () => {
         expect(reviewButton()).toBeEnabled();
         await waitFor(() => expect(screen.getByRole('button', { name: '批量入库（2 篇）' })).toBeEnabled());
         expect(previewPaperImport).toHaveBeenCalled();
-        fireEvent.click(screen.getByText('研究解读'));
         expect(screen.getByText('研究解读正文')).toBeVisible();
         fireEvent.click(reviewButton());
         expect(screen.getByRole('button', { name: '确认使用 2 篇生成' })).toBeEnabled();
