@@ -91,6 +91,7 @@ export interface PdfTextSelection {
   text: string;
   page: number;
   context?: string;
+  contextTranslation?: string;
   bbox?: [number, number, number, number];
   referenceId?: string;
 }
@@ -1044,7 +1045,7 @@ export default function RenderPdf({
       <div ref={readerFrame} className="pdf-reader-workspace" data-reader-mode={readerMode} style={{height:style?.height || "100%",width:"100%"}}>
         {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
-        {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
+        {readerMode === "overview" && pdfIRTarget ? <div className="pdf-reader-overview-scroll"><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={()=>setReaderMode("original")}/></div> : <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>}
       </div>
     );
   }
@@ -1069,7 +1070,7 @@ export default function RenderPdf({
     {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div className="pdf-reader-stage">
-    {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
+    {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
     <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" aria-hidden={readerMode!=="original"} style={{height:"100%",width:"100%",display:"flex",visibility:readerMode==="original"?"visible":"hidden"}}>
     <div
       className={className}

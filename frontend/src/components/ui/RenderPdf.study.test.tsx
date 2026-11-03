@@ -411,3 +411,36 @@ it('opens a figure from the catalog without moving the PDF viewport',async()=>{
  expect(scroll).not.toHaveBeenCalled();
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1);
 });
+
+it('collects vocabulary from the original PDF selection with its page and sentence',async()=>{
+ const add=vi.fn();
+ render(<RenderPdf fileData="vocabulary.pdf" onAddVocabularySelection={add}/>);
+ await act(async()=>{});
+ const page=screen.getAllByTestId('rendered-pdf-page')[0];
+ const text=window.document.createElement('span');text.textContent='A resilient approach improves accuracy.';page.append(text);
+ Object.defineProperty(page.closest('[data-pdf-page-index]'),'innerText',{value:text.textContent});
+ const range=window.document.createRange();range.setStart(text.firstChild!,2);range.setEnd(text.firstChild!,11);
+ Object.defineProperty(range,'getBoundingClientRect',{value:()=>({left:100,top:200,right:200,bottom:220,width:100,height:20})});
+ Object.defineProperty(range,'getClientRects',{value:()=>[]});
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+ fireEvent.mouseUp(text);
+ fireEvent.click(screen.getByRole('button',{name:'加入生词'}));
+ expect(add).toHaveBeenCalledWith(expect.objectContaining({text:'resilient',context:'A resilient approach improves accuracy.',page:1}));
+ expect(screen.queryByRole('dialog',{name:'选中文本操作'})).toBeNull();
+ window.getSelection()?.removeAllRanges();
+});
+
+it('connects vocabulary collection in the mounted overview to the paper reader action',async()=>{
+ state.document={...document(),blocks:[{id:'abstract',type:'abstract',page:0,text:'Abstract: A resilient approach improves accuracy.'}]};
+ const add=vi.fn();
+ render(<RenderPdf fileData="overview-vocabulary.pdf" pdfIRTarget={target} pdfSourceHash="hash" onAddVocabularySelection={add}/>);
+ await act(async()=>{});
+ fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+ const text=screen.getByText('A resilient approach improves accuracy.');
+ const range=window.document.createRange();range.selectNodeContents(text);
+ window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+ fireEvent.mouseUp(text);
+ fireEvent.click(screen.getByRole('button',{name:'加入生词'}));
+ expect(add).toHaveBeenCalledWith({text:'A resilient approach improves accuracy.',context:'A resilient approach improves accuracy.',page:1});
+ window.getSelection()?.removeAllRanges();
+});

@@ -154,3 +154,34 @@ it.each([false,true])('gates paper information vocabulary by the existing featur
   }else expect(screen.queryByTestId('document-vocabulary')).not.toBeInTheDocument();
   expect(container.querySelectorAll('.paper-workspace-dock button')).toHaveLength(4);
 });
+
+it('opens vocabulary from the paper reader with the selected word and source evidence',async()=>{
+  surfaces.vocabularyEnabled=true;
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'academic_papers'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
+    : new Promise(()=>{});
+  renderDocument();
+  await screen.findByRole('button',{name:/Document details|文档详情/});
+  const selection={text:'resilient',context:'A resilient approach improves accuracy.',contextTranslation:'一种有韧性的方法提高了准确性。',page:3};
+  act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
+  expect(surfaces.vocabularyModal).toEqual(expect.objectContaining({selection,datasetId:'library',documentId:'paper',context:selection.context}));
+  act(()=>{(surfaces.vocabularyModal.onClose as ()=>void)();});
+  expect(surfaces.vocabularyModal.selection).toBeNull();
+});
+
+it('lets the paper reader choose a word from a phrase while retaining source context',async()=>{
+  surfaces.vocabularyEnabled=true;
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'academic_papers'} as Dataset);
+  axiosInstance.defaults.adapter=config=>config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
+    : new Promise(()=>{});
+  renderDocument();
+  await screen.findByRole('button',{name:/Document details|文档详情/});
+  const selection={text:'resilient approach',context:'A resilient approach improves accuracy.',page:3};
+  act(()=>{(surfaces.viewer.onAddVocabularySelection as (value:typeof selection)=>void)(selection);});
+  expect(surfaces.vocabularyModal.selection).toBeNull();
+  fireEvent.click(await screen.findByRole('button',{name:'加入生词'}));
+  await waitFor(()=>expect(surfaces.vocabularyModal.selection).toEqual({...selection,text:'resilient'}));
+  expect(surfaces.vocabularyModal).toEqual(expect.objectContaining({datasetId:'library',documentId:'paper',context:selection.context}));
+});

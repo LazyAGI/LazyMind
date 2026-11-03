@@ -28,6 +28,17 @@ describe("AddVocabularyModal", () => {
     fireEvent.click(screen.getByRole("button",{name:/OK|确 定|确定/}));
     await waitFor(()=>expect(addVocabularyWord).toHaveBeenCalledWith(expect.objectContaining({provider:"local",wordbook_ids:["local-book"],document_id:"document-1"})));
   });
+  it("preserves the reader's translated source context when saving a word", async () => {
+    const sentence = "Diverse workloads require flexible compute.";
+    vi.mocked(resolveVocabularySelection).mockResolvedValueOnce({term:"workloads",sentence,provider:"local",dictionary:[],wordbooks:[{id:"book",name:"Local",description:"",capability_key:"",question_types:[]}]});
+    vi.mocked(addVocabularyWord).mockResolvedValueOnce({queued:false,word:{} as never});
+    const translationCalls = vi.mocked(translateText).mock.calls.length;
+    render(<AddVocabularyModal selection={{text:"workloads",context:sentence,contextTranslation:"不同工作负载需要灵活计算。",page:7}} datasetId="paper-dataset" documentId="paper-document" onClose={vi.fn()} onAdded={vi.fn()}/>);
+    expect(await screen.findByDisplayValue("不同工作负载需要灵活计算。")).toBeTruthy();
+    expect(vi.mocked(translateText).mock.calls.length).toBe(translationCalls);
+    fireEvent.click(screen.getByRole("button",{name:/OK|确 定|确定/}));
+    await waitFor(()=>expect(addVocabularyWord).toHaveBeenLastCalledWith(expect.objectContaining({dataset_id:"paper-dataset",document_id:"paper-document",page:7,sentence,translation:"不同工作负载需要灵活计算。"})));
+  });
   it("handles a selection when dictionary and wordbooks are absent", async () => {
     render(<AddVocabularyModal
       selection={{ text: "workloads", context: "Diverse workloads require flexible compute.", page: 1 }}

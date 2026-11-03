@@ -8789,6 +8789,315 @@ components:
                 - title
                 - workflow_step_id
             type: object
+        PDFBlockTranslation:
+            properties:
+                block_id:
+                    type: string
+                language:
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                model:
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                translated_text:
+                    type: string
+            required:
+                - block_id
+                - translated_text
+                - language
+                - model
+                - source_sha256
+            type: object
+        PDFBlockTranslationEnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFBlockTranslation'
+            required:
+                - data
+            type: object
+        PDFFormulaEvidence:
+            properties:
+                bbox:
+                    items:
+                        maximum: 1
+                        minimum: 0
+                        type: number
+                    maxItems: 4
+                    minItems: 4
+                    type: array
+                id:
+                    type: string
+                page:
+                    minimum: 0
+                    type: integer
+                text:
+                    type: string
+            required:
+                - id
+                - text
+                - page
+            type: object
+        PDFFormulaExplanation:
+            properties:
+                display_latex:
+                    type: string
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/PDFFormulaEvidence'
+                    type: array
+                model:
+                    type: string
+                repair_note:
+                    type: string
+                steps:
+                    items:
+                        properties:
+                            evidence_ids:
+                                items:
+                                    type: string
+                                type: array
+                            inferred:
+                                type: boolean
+                            text:
+                                type: string
+                        required:
+                            - text
+                            - evidence_ids
+                            - inferred
+                        type: object
+                    type: array
+                summary:
+                    type: string
+                symbols:
+                    items:
+                        properties:
+                            evidence_ids:
+                                items:
+                                    type: string
+                                type: array
+                            inferred:
+                                type: boolean
+                            meaning:
+                                type: string
+                            symbol:
+                                type: string
+                        required:
+                            - symbol
+                            - meaning
+                            - evidence_ids
+                            - inferred
+                        type: object
+                    type: array
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - summary
+                - symbols
+                - steps
+                - evidence
+                - warnings
+            type: object
+        PDFFormulaExplanationEnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFFormulaExplanation'
+            required:
+                - data
+            type: object
+        PDFFormulaExplanationRequest:
+            properties:
+                focus_symbol:
+                    description: Optional nonblank exact substring of the target formula LaTeX; requests a focused symbol definition with a separate cache entry.
+                    maxLength: 500
+                    minLength: 1
+                    type: string
+                force:
+                    type: boolean
+                language:
+                    enum:
+                        - zh
+                        - en
+                    type: string
+            type: object
+        PDFIRBlock:
+            properties:
+                bbox:
+                    description: '[left, top, right, bottom], normalized to the original visible page with intrinsic rotation'
+                    items:
+                        maximum: 1
+                        minimum: 0
+                        type: number
+                    maxItems: 4
+                    minItems: 4
+                    type: array
+                id:
+                    type: string
+                latex:
+                    type: string
+                page:
+                    minimum: 0
+                    type: integer
+                text:
+                    type: string
+                type:
+                    type: string
+            required:
+                - id
+                - type
+                - page
+            type: object
+        PDFIRDocument:
+            properties:
+                blocks:
+                    items:
+                        $ref: '#/components/schemas/PDFIRBlock'
+                    type: array
+                coordinate_space:
+                    enum:
+                        - normalized_top_left
+                    type: string
+                pages:
+                    items:
+                        properties:
+                            height:
+                                type: number
+                            index:
+                                type: integer
+                            width:
+                                type: number
+                        required:
+                            - index
+                        type: object
+                    type: array
+                parser:
+                    properties:
+                        model:
+                            type: string
+                        name:
+                            type: string
+                    required:
+                        - name
+                        - model
+                    type: object
+                source_sha256:
+                    type: string
+                version:
+                    type: integer
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - version
+                - source_sha256
+                - parser
+                - coordinate_space
+                - pages
+                - blocks
+            type: object
+        PDFIREnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFIRState'
+            required:
+                - data
+            type: object
+        PDFIRRequest:
+            properties:
+                force:
+                    type: boolean
+            type: object
+        PDFIRState:
+            properties:
+                document:
+                    $ref: '#/components/schemas/PDFIRDocument'
+                error_message:
+                    type: string
+                source_sha256:
+                    type: string
+                status:
+                    enum:
+                        - not_requested
+                        - queued
+                        - running
+                        - ready
+                        - failed
+                        - unavailable
+                    type: string
+            required:
+                - status
+            type: object
+        PDFPaperReadingRequest:
+            properties:
+                force:
+                    type: boolean
+                language:
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+            type: object
+        PDFVisualExplanation:
+            properties:
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/PDFFormulaEvidence'
+                    type: array
+                model:
+                    type: string
+                observations:
+                    items:
+                        properties:
+                            evidence_ids:
+                                items:
+                                    type: string
+                                type: array
+                            inferred:
+                                type: boolean
+                            text:
+                                type: string
+                        required:
+                            - text
+                            - evidence_ids
+                            - inferred
+                        type: object
+                    type: array
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                summary:
+                    type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - summary
+                - observations
+                - evidence
+                - model
+                - warnings
+                - source_sha256
+            type: object
+        PDFVisualExplanationEnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFVisualExplanation'
+            required:
+                - data
+            type: object
         Pages:
             properties:
                 knowledge_operations:
@@ -9839,6 +10148,123 @@ components:
                     items:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
+            type: object
+        ReadingPreparationPolicy:
+            properties:
+                automatic_eligible_after:
+                    type: string
+                limits:
+                    properties:
+                        automatic_concurrency:
+                            enum:
+                                - 1
+                            type: integer
+                        daily_documents:
+                            maximum: 100
+                            minimum: 1
+                            type: integer
+                        study_items_per_document:
+                            maximum: 100
+                            minimum: 1
+                            type: integer
+                    required:
+                        - daily_documents
+                        - study_items_per_document
+                        - automatic_concurrency
+                    type: object
+                modes:
+                    additionalProperties:
+                        enum:
+                            - on_demand
+                            - automatic
+                            - disabled
+                        type: string
+                    type: object
+                parser_ref:
+                    type: string
+                preset:
+                    enum:
+                        - demand
+                        - advance
+                        - full
+                        - custom
+                    type: string
+                provider_selections:
+                    properties:
+                        parser:
+                            $ref: '#/components/schemas/ReadingProviderSelection'
+                        study:
+                            $ref: '#/components/schemas/ReadingProviderSelection'
+                    type: object
+                study_model_ref:
+                    type: string
+            required:
+                - preset
+                - modes
+                - limits
+            type: object
+        ReadingPreparationRequest:
+            properties:
+                scopes:
+                    items:
+                        enum:
+                            - pdf_parse
+                            - formula
+                            - figure
+                            - table
+                        type: string
+                    type: array
+            required:
+                - scopes
+            type: object
+        ReadingPreparationStatus:
+            properties:
+                error_message:
+                    type: string
+                job_id:
+                    type: string
+                model_requests:
+                    type: integer
+                progress_current:
+                    type: integer
+                progress_total:
+                    type: integer
+                scopes:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    enum:
+                        - not_requested
+                        - pending
+                        - running
+                        - succeeded
+                        - failed
+                        - canceled
+                    type: string
+            required:
+                - status
+            type: object
+        ReadingProviderSelection:
+            properties:
+                default_label:
+                    type: string
+                effective_label:
+                    type: string
+                options:
+                    items:
+                        properties:
+                            id:
+                                type: string
+                            label:
+                                type: string
+                        required:
+                            - id
+                            - label
+                        type: object
+                    type: array
+                unavailable_reason:
+                    type: string
             type: object
         RecoveryDeleteCountResponse:
             properties:
@@ -24233,6 +24659,47 @@ paths:
             summary: Update document
             tags:
                 - documents
+    /api/core/datasets/{dataset}/documents/{document}/parse-status:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    status:
+                                        enum:
+                                            - not_requested
+                                            - parsed
+                                            - parsing
+                                            - failed
+                                            - unknown
+                                        type: string
+                                    task_id:
+                                        type: string
+                                type: object
+                    description: Observed parse state
+                "202":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    status:
+                                        type: string
+                                type: object
+                    description: Existing parsing in progress
+            summary: Observe chat parsing without submitting new work
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
         delete:
             parameters:
@@ -24399,6 +24866,279 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFIREnvelope'
+                    description: Current PDF reading structure state
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Document missing or forbidden
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF IR storage unavailable
+            summary: Read PDF structure without triggering parsing or retrieval
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFIRRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFIREnvelope'
+                    description: Current PDF reading structure state
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Document missing or forbidden
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF IR storage unavailable
+            summary: Parse the original PDF using the selected MinerU service independently of retrieval
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation:
+        post:
+            description: 'Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.'
+            parameters:
+                - in: path
+                  name: block
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFPaperReadingRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFVisualExplanationEnvelope'
+                    description: Source-grounded reading result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing or forbidden document/block
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF structure missing or source changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable or source block too large
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model request failed or response invalid
+            summary: Explain a figure or table using extracted text and cells
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation:
+        post:
+            description: 'Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.'
+            parameters:
+                - in: path
+                  name: block
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFPaperReadingRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFBlockTranslationEnvelope'
+                    description: Source-grounded reading result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing or forbidden document/block
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF structure missing or source changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable or source block too large
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model request failed or response invalid
+            summary: Translate an authoritative original PDF paragraph
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation:
+        post:
+            description: Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+            parameters:
+                - description: Formula block id from the current PDF IR
+                  in: path
+                  name: block
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFFormulaExplanationRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFFormulaExplanationEnvelope'
+                    description: Formula explanation with source evidence
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Document or formula missing or forbidden
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Parse or refresh the original PDF first
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Selected chat model unavailable or formula too large
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model generation failed or invalid output
+            summary: Explain a formula from original PDF evidence using the selected chat model without retrieval
     /api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:
         patch:
             parameters:
@@ -24476,6 +25216,42 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/{dataset}/documents/{document}/pdf-translations
+    /api/core/datasets/{dataset}/documents/{document}/reading-preparation:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationStatus'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Read durable preparation progress and accounted model requests
     /api/core/datasets/{dataset}/documents/{document}/segments:
         get:
             parameters:
@@ -24593,6 +25369,48 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/{dataset}/documents/{document}:ensure-parsed
+    /api/core/datasets/{dataset}/documents/{document}:prepare-reading:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReadingPreparationRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationStatus'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Explicitly prepare this document; scopes only; preserves existing outputs
     /api/core/datasets/{dataset}/documents/{document}:read:
         get:
             parameters:
@@ -33865,6 +34683,61 @@ paths:
             summary: Compare revision; closing requires the exact current affected run IDs
             tags:
                 - TaskNotifications
+    /api/core/user/reading-preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationPolicy'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Read personal AI reading preferences and capability registry
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReadingPreparationPolicy'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationPolicy'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Replace personal preferences; never process historical documents
     /api/core/user/ui-preferences:
         get:
             responses:

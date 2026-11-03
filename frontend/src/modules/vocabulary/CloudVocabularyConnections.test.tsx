@@ -51,6 +51,20 @@ describe("cloud vocabulary connections",()=>{
     fireEvent.click(within(card).getByRole("switch"));
     expect(await within(card).findByText("savedPaused")).toBeInTheDocument();expect(within(card).getByRole("switch")).not.toBeChecked();
   });
+  it.each([{books:[]}, {books:[{id:"replacement",name:"Replacement book"}]}])("pauses a missing saved target while retaining destination drafts ($books)",async({books})=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,enabled:true}]);
+    vi.mocked(api.testCloudConnection).mockResolvedValue(books);
+    render(<CloudVocabularyConnections/>);const card=await open();
+    await waitFor(()=>expect(within(card).getByRole("switch")).toBeEnabled());
+    fireEvent.change(within(card).getByLabelText("newTarget"),{target:{value:"Draft book name"}});
+    fireEvent.click(within(card).getByRole("switch"));
+    await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("maimemo",{enabled:false,target_id:"target",target_name:"My book",add_to_study:false}));
+    expect(await within(card).findByText("savedPaused")).toBeInTheDocument();
+    expect(within(card).getByRole("switch")).not.toBeChecked();
+    expect(within(card).getByLabelText("newTarget")).toHaveValue("Draft book name");
+    if(books.length)expect(within(card).getByText("Replacement book")).toBeInTheDocument();
+    else expect(within(card).getByRole("button",{name:"save"})).toBeDisabled();
+  });
   it("does not persist token drafts through the sync switch",async()=>{
     render(<CloudVocabularyConnections/>);const card=await open();await waitFor(()=>expect(within(card).getByRole("switch")).toBeEnabled());
     fireEvent.click(within(card).getByRole("switch"));

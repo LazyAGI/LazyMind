@@ -150,6 +150,9 @@ export default function AddVocabularyModal({
         const first = normalized.dictionary[0];
         setSelectedDictionary(first?.id || "");
         const sentence = cleanText(normalized.sentence);
+        const sourceTranslation = sentence === cleanText(selection.context)
+          ? cleanText(selection.contextTranslation)
+          : "";
         setInitialSentence(sentence);
         form.setFieldsValue({
           term: normalized.term,
@@ -157,12 +160,13 @@ export default function AddVocabularyModal({
             ? [normalized.wordbooks[0].id]
             : [],
           sentence,
+          translation: sourceTranslation,
           tags: [],
           example_tags: [],
         });
         applyDictionary(first);
         try {
-          if (sentence && (await getTranslationStatus()))
+          if (!sourceTranslation && sentence && (await getTranslationStatus()))
             await translate(sentence, true);
         } catch {
           /* Translation is an optional capability. */

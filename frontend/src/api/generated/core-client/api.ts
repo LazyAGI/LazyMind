@@ -1052,6 +1052,24 @@ export interface ApiCoreConversationsNameTitlePatchRequest {
     'display_name': string;
     'title_revision': number;
 }
+export interface ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response {
+    'status'?: ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum;
+    'task_id'?: string;
+}
+
+export const ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = {
+    NotRequested: 'not_requested',
+    Parsed: 'parsed',
+    Parsing: 'parsing',
+    Failed: 'failed',
+    Unknown: 'unknown'
+} as const;
+
+export type ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum];
+
+export interface ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response {
+    'data'?: ReadingPreparationStatus;
+}
 export interface ApiCoreKbGrantPrincipalsGet200Response {
     'code'?: number;
     'data'?: ListGrantPrincipalsResponse;
@@ -1153,6 +1171,9 @@ export interface ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response {
 export interface ApiCoreUserNotificationPreferencesGet200Response {
     'code'?: number;
     'data'?: NotificationPreferences;
+}
+export interface ApiCoreUserReadingPreferencesGet200Response {
+    'data'?: ReadingPreparationPolicy;
 }
 export interface ApiCoreUserWechatNotificationTargetsGet200Response {
     'code'?: number;
@@ -6062,6 +6083,163 @@ export interface OrdinaryWorkflowResponse {
     'data': OrdinaryWorkflowData;
     'message': string;
 }
+export interface PDFBlockTranslation {
+    'block_id': string;
+    'language': PDFBlockTranslationLanguageEnum;
+    'model': string;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256': string;
+    'translated_text': string;
+}
+
+export const PDFBlockTranslationLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFBlockTranslationLanguageEnum = typeof PDFBlockTranslationLanguageEnum[keyof typeof PDFBlockTranslationLanguageEnum];
+
+export interface PDFBlockTranslationEnvelope {
+    'data': PDFBlockTranslation;
+}
+export interface PDFFormulaEvidence {
+    'bbox'?: Array<number>;
+    'id': string;
+    'page': number;
+    'text': string;
+}
+export interface PDFFormulaExplanation {
+    'display_latex'?: string;
+    'evidence': Array<PDFFormulaEvidence>;
+    'model'?: string;
+    'repair_note'?: string;
+    'steps': Array<PDFFormulaExplanationStepsInner>;
+    'summary': string;
+    'symbols': Array<PDFFormulaExplanationSymbolsInner>;
+    'warnings': Array<string>;
+}
+export interface PDFFormulaExplanationEnvelope {
+    'data': PDFFormulaExplanation;
+}
+export interface PDFFormulaExplanationRequest {
+    /**
+     * Optional nonblank exact substring of the target formula LaTeX; requests a focused symbol definition with a separate cache entry.
+     */
+    'focus_symbol'?: string;
+    'force'?: boolean;
+    'language'?: PDFFormulaExplanationRequestLanguageEnum;
+}
+
+export const PDFFormulaExplanationRequestLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFFormulaExplanationRequestLanguageEnum = typeof PDFFormulaExplanationRequestLanguageEnum[keyof typeof PDFFormulaExplanationRequestLanguageEnum];
+
+export interface PDFFormulaExplanationStepsInner {
+    'evidence_ids': Array<string>;
+    'inferred': boolean;
+    'text': string;
+}
+export interface PDFFormulaExplanationSymbolsInner {
+    'evidence_ids': Array<string>;
+    'inferred': boolean;
+    'meaning': string;
+    'symbol': string;
+}
+export interface PDFIRBlock {
+    /**
+     * [left, top, right, bottom], normalized to the original visible page with intrinsic rotation
+     */
+    'bbox'?: Array<number>;
+    'id': string;
+    'latex'?: string;
+    'page': number;
+    'text'?: string;
+    'type': string;
+}
+export interface PDFIRDocument {
+    'blocks': Array<PDFIRBlock>;
+    'coordinate_space': PDFIRDocumentCoordinateSpaceEnum;
+    'pages': Array<PDFIRDocumentPagesInner>;
+    'parser': PDFIRDocumentParser;
+    'source_sha256': string;
+    'version': number;
+    'warnings'?: Array<string>;
+}
+
+export const PDFIRDocumentCoordinateSpaceEnum = {
+    NormalizedTopLeft: 'normalized_top_left'
+} as const;
+
+export type PDFIRDocumentCoordinateSpaceEnum = typeof PDFIRDocumentCoordinateSpaceEnum[keyof typeof PDFIRDocumentCoordinateSpaceEnum];
+
+export interface PDFIRDocumentPagesInner {
+    'height'?: number;
+    'index': number;
+    'width'?: number;
+}
+export interface PDFIRDocumentParser {
+    'model': string;
+    'name': string;
+}
+export interface PDFIREnvelope {
+    'data': PDFIRState;
+}
+export interface PDFIRRequest {
+    'force'?: boolean;
+}
+export interface PDFIRState {
+    'document'?: PDFIRDocument;
+    'error_message'?: string;
+    'source_sha256'?: string;
+    'status': PDFIRStateStatusEnum;
+}
+
+export const PDFIRStateStatusEnum = {
+    NotRequested: 'not_requested',
+    Queued: 'queued',
+    Running: 'running',
+    Ready: 'ready',
+    Failed: 'failed',
+    Unavailable: 'unavailable'
+} as const;
+
+export type PDFIRStateStatusEnum = typeof PDFIRStateStatusEnum[keyof typeof PDFIRStateStatusEnum];
+
+export interface PDFPaperReadingRequest {
+    'force'?: boolean;
+    'language'?: PDFPaperReadingRequestLanguageEnum;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256'?: string;
+}
+
+export const PDFPaperReadingRequestLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFPaperReadingRequestLanguageEnum = typeof PDFPaperReadingRequestLanguageEnum[keyof typeof PDFPaperReadingRequestLanguageEnum];
+
+export interface PDFVisualExplanation {
+    'evidence': Array<PDFFormulaEvidence>;
+    'model': string;
+    'observations': Array<PDFFormulaExplanationStepsInner>;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256': string;
+    'summary': string;
+    'warnings': Array<string>;
+}
+export interface PDFVisualExplanationEnvelope {
+    'data': PDFVisualExplanation;
+}
 export interface Pages {
     'knowledge_operations': CollectionPage;
     'process_steps': CollectionPage;
@@ -6665,6 +6843,92 @@ export interface QuestionTypeOption {
 }
 export interface QuestionTypeOptionsResponse {
     'items'?: Array<QuestionTypeOption>;
+}
+export interface ReadingPreparationPolicy {
+    'automatic_eligible_after'?: string;
+    'limits': ReadingPreparationPolicyLimits;
+    'modes': { [key: string]: ReadingPreparationPolicyModesEnum; };
+    'parser_ref'?: string;
+    'preset': ReadingPreparationPolicyPresetEnum;
+    'provider_selections'?: ReadingPreparationPolicyProviderSelections;
+    'study_model_ref'?: string;
+}
+
+export const ReadingPreparationPolicyModesEnum = {
+    OnDemand: 'on_demand',
+    Automatic: 'automatic',
+    Disabled: 'disabled'
+} as const;
+
+export type ReadingPreparationPolicyModesEnum = typeof ReadingPreparationPolicyModesEnum[keyof typeof ReadingPreparationPolicyModesEnum];
+export const ReadingPreparationPolicyPresetEnum = {
+    Demand: 'demand',
+    Advance: 'advance',
+    Full: 'full',
+    Custom: 'custom'
+} as const;
+
+export type ReadingPreparationPolicyPresetEnum = typeof ReadingPreparationPolicyPresetEnum[keyof typeof ReadingPreparationPolicyPresetEnum];
+
+export interface ReadingPreparationPolicyLimits {
+    'automatic_concurrency': ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum;
+    'daily_documents': number;
+    'study_items_per_document': number;
+}
+
+export const ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum[keyof typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum];
+
+export interface ReadingPreparationPolicyProviderSelections {
+    'parser'?: ReadingProviderSelection;
+    'study'?: ReadingProviderSelection;
+}
+export interface ReadingPreparationRequest {
+    'scopes': Array<ReadingPreparationRequestScopesEnum>;
+}
+
+export const ReadingPreparationRequestScopesEnum = {
+    PdfParse: 'pdf_parse',
+    Formula: 'formula',
+    Figure: 'figure',
+    Table: 'table'
+} as const;
+
+export type ReadingPreparationRequestScopesEnum = typeof ReadingPreparationRequestScopesEnum[keyof typeof ReadingPreparationRequestScopesEnum];
+
+export interface ReadingPreparationStatus {
+    'error_message'?: string;
+    'job_id'?: string;
+    'model_requests'?: number;
+    'progress_current'?: number;
+    'progress_total'?: number;
+    'scopes'?: Array<string>;
+    'status': ReadingPreparationStatusStatusEnum;
+}
+
+export const ReadingPreparationStatusStatusEnum = {
+    NotRequested: 'not_requested',
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ReadingPreparationStatusStatusEnum = typeof ReadingPreparationStatusStatusEnum[keyof typeof ReadingPreparationStatusStatusEnum];
+
+export interface ReadingProviderSelection {
+    'default_label'?: string;
+    'effective_label'?: string;
+    'options'?: Array<ReadingProviderSelectionOptionsInner>;
+    'unavailable_reason'?: string;
+}
+export interface ReadingProviderSelectionOptionsInner {
+    'id': string;
+    'label': string;
 }
 export interface RecoveryDeleteCountResponse {
     'deleted_count'?: number;
@@ -21911,6 +22175,44 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/parse-status`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {string} dataset
          * @param {string} document
@@ -22230,6 +22532,220 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost: async (block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFPaperReadingRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Translate an authoritative original PDF paragraph
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost: async (block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFPaperReadingRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {string} block Formula block id from the current PDF IR
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFFormulaExplanationRequest} [pDFFormulaExplanationRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost: async (block: string, dataset: string, document: string, pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFFormulaExplanationRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFIRRequest} [pDFIRRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost: async (dataset: string, document: string, pDFIRRequest?: PDFIRRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFIRRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {string} dataset
@@ -22387,6 +22903,49 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ReadingPreparationRequest} readingPreparationRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost: async (dataset: string, document: string, readingPreparationRequest: ReadingPreparationRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'document', document)
+            // verify required parameter 'readingPreparationRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'readingPreparationRequest', readingPreparationRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:prepare-reading`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(readingPreparationRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {string} dataset
          * @param {string} document
@@ -22412,6 +22971,44 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/reading-preparation`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -28264,6 +28861,71 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/reading-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {ReadingPreparationPolicy} readingPreparationPolicy
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesPut: async (readingPreparationPolicy: ReadingPreparationPolicy, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'readingPreparationPolicy' is not null or undefined
+            assertParamExists('apiCoreUserReadingPreferencesPut', 'readingPreparationPolicy', readingPreparationPolicy)
+            const localVarPath = `/api/core/user/reading-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(readingPreparationPolicy, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {string} authConnectionId
          * @param {*} [options] Override http request option.
@@ -33836,6 +34498,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {string} dataset
          * @param {string} document
@@ -33953,6 +34629,83 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFVisualExplanationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(block, dataset, document, pDFPaperReadingRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Translate an authoritative original PDF paragraph
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFBlockTranslationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(block, dataset, document, pDFPaperReadingRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {string} block Formula block id from the current PDF IR
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFFormulaExplanationRequest} [pDFFormulaExplanationRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(block: string, dataset: string, document: string, pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFFormulaExplanationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(block, dataset, document, pDFFormulaExplanationRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFIREnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFIRRequest} [pDFIRRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(dataset: string, document: string, pDFIRRequest?: PDFIRRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFIREnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(dataset, document, pDFIRRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {string} dataset
@@ -34012,6 +34765,21 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ReadingPreparationRequest} readingPreparationRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(dataset: string, document: string, readingPreparationRequest: ReadingPreparationRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(dataset, document, readingPreparationRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {string} dataset
          * @param {string} document
@@ -34022,6 +34790,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadGet(dataset, document, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -36251,6 +37033,31 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserReadingPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserReadingPreferencesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserReadingPreferencesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {ReadingPreparationPolicy} readingPreparationPolicy
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserReadingPreferencesPut(readingPreparationPolicy: ReadingPreparationPolicy, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserReadingPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserReadingPreferencesPut(readingPreparationPolicy, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserReadingPreferencesPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -38985,6 +39792,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -39064,6 +39881,56 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFVisualExplanationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Translate an authoritative original PDF paragraph
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFBlockTranslationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFFormulaExplanationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFFormulaExplanationRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFIREnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFIREnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters.dataset, requestParameters.document, requestParameters.pDFIRRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
@@ -39105,6 +39972,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters.dataset, requestParameters.document, requestParameters.readingPreparationRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -39112,6 +39989,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -40761,6 +41648,25 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreUserEnvVarsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserReadingPreferencesGet200Response> {
+            return localVarFp.apiCoreUserReadingPreferencesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {DefaultApiApiCoreUserReadingPreferencesPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesPut(requestParameters: DefaultApiApiCoreUserReadingPreferencesPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserReadingPreferencesGet200Response> {
+            return localVarFp.apiCoreUserReadingPreferencesPut(requestParameters.readingPreparationPolicy, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -42588,6 +43494,15 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentEnsureParsedPo
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest {
@@ -42672,6 +43587,68 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitie
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest {
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFPaperReadingRequest?: PDFPaperReadingRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest {
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFPaperReadingRequest?: PDFPaperReadingRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest {
+    /**
+     * Formula block id from the current PDF IR
+     */
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFIRRequest?: PDFIRRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest {
@@ -42712,9 +43689,29 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslation
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly readingPreparationRequest: ReadingPreparationRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest {
     readonly dataset: string
 
     readonly document: string
@@ -43622,6 +44619,13 @@ export interface DefaultApiApiCoreUserEnvVarsIdDeleteRequest {
  */
 export interface DefaultApiApiCoreUserEnvVarsIdPatchRequest {
     readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreUserReadingPreferencesPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreUserReadingPreferencesPutRequest {
+    readonly readingPreparationPolicy: ReadingPreparationPolicy
 }
 
 /**
@@ -45510,6 +46514,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Observe chat parsing without submitting new work
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -45597,6 +46612,61 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+     * @summary Explain a figure or table using extracted text and cells
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+     * @summary Translate an authoritative original PDF paragraph
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockTranslationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+     * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFFormulaExplanationRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read PDF structure without triggering parsing or retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters.dataset, requestParameters.document, requestParameters.pDFIRRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      *
      * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
@@ -45642,6 +46712,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters.dataset, requestParameters.document, requestParameters.readingPreparationRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}:read
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -45649,6 +46730,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read durable preparation progress and accounted model requests
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -47469,6 +48561,27 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreUserEnvVarsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read personal AI reading preferences and capability registry
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserReadingPreferencesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Replace personal preferences; never process historical documents
+     * @param {DefaultApiApiCoreUserReadingPreferencesPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserReadingPreferencesPut(requestParameters: DefaultApiApiCoreUserReadingPreferencesPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserReadingPreferencesPut(requestParameters.readingPreparationPolicy, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

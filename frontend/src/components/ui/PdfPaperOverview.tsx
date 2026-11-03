@@ -1,3 +1,6 @@
+import { useState } from "react";
+import type { PdfTextSelection } from "./RenderPdf";
+import { normalizePdfSelectionText } from "./pdfSelectionText";
 import type { PdfIRBlock, PdfIRDocument } from "@/modules/knowledge/api/pdfIR";
 import { readablePaperText } from "@/modules/knowledge/api/paperReader";
 import { FormulaMathText } from "./FormulaMathText";
@@ -8,6 +11,7 @@ interface Props {
   document?: PdfIRDocument;
   paperTitle?: string;
   onOpenSource: (blockId?: string) => void;
+  onAddVocabularySelection?: (selection: PdfTextSelection) => void;
 }
 
 function paperMetadata(document?: PdfIRDocument, paperTitle?: string) {
@@ -36,7 +40,7 @@ function paperMetadata(document?: PdfIRDocument, paperTitle?: string) {
   };
 }
 
-export function PdfPaperOverview({ document, paperTitle, onOpenSource }: Props) {
+export function PdfPaperOverview({ document, paperTitle, onOpenSource, onAddVocabularySelection }: Props) {
   const { language, label } = usePaperReaderLabels();
   const copy = language === "zh" ? {
     abstract: "原文摘要", missing: document ? "未从原文识别出摘要，请查看论文。" : "文档解析完成后，这里会显示原文摘要。",
@@ -48,6 +52,8 @@ export function PdfPaperOverview({ document, paperTitle, onOpenSource }: Props) 
     source: "View source", paper: "Read paper",
   };
   const metadata = paperMetadata(document, paperTitle);
+  const [vocabulary, setVocabulary] = useState<{source: string; selection: PdfTextSelection} | null>(null);
+  const sourceKey = `${document?.source_sha256}:${metadata.abstract}`;
   return <article className="pdf-paper-overview" aria-label={label("insight")}>
     <header className="pdf-paper-overview__header">
       <span>{label("insight")}</span>
@@ -55,7 +61,22 @@ export function PdfPaperOverview({ document, paperTitle, onOpenSource }: Props) 
     </header>
     <section className="pdf-paper-overview__abstract">
       <div className="pdf-paper-overview__section-heading"><h2>{copy.abstract}</h2>{metadata.abstractId && <button type="button" onClick={() => onOpenSource(metadata.abstractId)}>{copy.source} ↗</button>}</div>
-      {metadata.abstract ? <p><FormulaMathText text={metadata.abstract}/></p> : <p className="pdf-paper-overview__muted">{copy.missing}</p>}
+      {metadata.abstract ? <p onMouseUp={event => {
+        if (!onAddVocabularySelection) return;
+        const selected = window.getSelection();
+        const text = normalizePdfSelectionText(selected?.toString() || "");
+        if (!selected || selected.isCollapsed || !selected.rangeCount || !/[A-Za-z]/.test(text)
+          || !event.currentTarget.contains(selected.getRangeAt(0).commonAncestorContainer)) {
+          setVocabulary(null);
+          return;
+        }
+        // paperMetadata only exposes original abstract blocks from zero-based page 0.
+        setVocabulary({source: sourceKey, selection: {text, context: metadata.abstract, page: 1}});
+      }}><FormulaMathText text={metadata.abstract}/></p> : <p className="pdf-paper-overview__muted">{copy.missing}</p>}
+      {onAddVocabularySelection && vocabulary?.source === sourceKey && <button type="button" className="pdf-reader-source-link" onMouseDown={event => event.preventDefault()} onClick={() => {
+        onAddVocabularySelection(vocabulary.selection);
+        setVocabulary(null);
+      }}>{language === "zh" ? "加入生词" : "Add vocabulary"}</button>}
     </section>
     <section className="pdf-paper-overview__quick-read" aria-label={copy.quickRead}>
       <h2>{copy.quickRead}</h2>

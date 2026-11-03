@@ -74,10 +74,13 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
     return()=>{cancelled=true;requestSequence.current+=1;};
   },[loadBooks]);
   const persist=(nextEnabled:boolean,nextStudy=study,usePersisted=false)=>run(async()=>{
-    if(configSignature(connection)!==configSignature(baseline.current) || !target || !verified)return;
-    const saved=await saveCloudConnection(connection.provider,{...(!usePersisted && token.trim()?{token:token.trim()}:{}),enabled:nextEnabled,target_id:usePersisted ? connection.target_id : target.id,target_name:usePersisted ? connection.target_name : target.name,add_to_study:connection.provider==="maimemo" && nextStudy});
+    const pausing=usePersisted && !nextEnabled;
+    if(configSignature(connection)!==configSignature(baseline.current) || (!pausing && (!target || !verified)))return;
+    const saved=await saveCloudConnection(connection.provider,{...(!usePersisted && token.trim()?{token:token.trim()}:{}),enabled:nextEnabled,target_id:usePersisted ? connection.target_id : target!.id,target_name:usePersisted ? connection.target_name : target!.name,add_to_study:connection.provider==="maimemo" && nextStudy});
     if(!mounted.current)return;
-    resetDraft(saved);onSaved(saved);setNotice(label(saved.enabled ? "savedEnabled" : "savedPaused"));
+    // Pausing uses persisted settings and must not discard unsaved destination drafts.
+    if(pausing)baseline.current=saved;else resetDraft(saved);
+    onSaved(saved);setNotice(label(saved.enabled ? "savedEnabled" : "savedPaused"));
   });
   const tokenForm=<>
     <Typography.Paragraph type="secondary">{connection.provider==="eudic" ? <a href="https://my.eudic.net/OpenAPI/Authorization" target="_blank" rel="noopener noreferrer">{label("eudicTokenLink")}</a> : <>{label("maimemoTokenHelp")} <a href="https://open.maimemo.com/" target="_blank" rel="noopener noreferrer">{label("maimemoDocs")}</a></>}</Typography.Paragraph>
@@ -98,7 +101,7 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
         <Form.Item label={<Space>{label("target")}{connection.configured && <Button aria-label={label("refreshBooks")} type="link" size="small" disabled={busy || conflict || dirty} onClick={()=>void run(()=>loadBooks(connection.provider,"",target?.id || connection.target_id))}>{label("refreshBooks")}</Button>}</Space>} help={connection.provider==="eudic" ? label("eudicEnglishHelp") : undefined}>
           <Select showSearch optionFilterProp="label" aria-label={label("target")} value={target?.id} placeholder={label("selectTarget")} options={books.map(item=>({value:item.id,label:item.name}))} onChange={id=>setTarget(books.find(item=>item.id===id)||null)}/>
         </Form.Item>
-        {connected && <Form.Item style={{marginTop:16}}><Space><Switch aria-label={label("autoSync")} checked={connection.enabled} disabled={busy || conflict || dirty || !target || !verified} onChange={value=>void persist(value,connection.add_to_study,true)}/><span>{label("autoSync")}</span></Space></Form.Item>}
+        {connected && <Form.Item style={{marginTop:16}}><Space><Switch aria-label={label("autoSync")} checked={connection.enabled} disabled={busy || conflict || (!connection.enabled && (dirty || !target || !verified))} onChange={value=>void persist(value,connection.add_to_study,true)}/><span>{label("autoSync")}</span></Space></Form.Item>}
         {booksLoaded && !books.length && !busy && <Typography.Paragraph type="secondary">{label("noBooks")}</Typography.Paragraph>}
         <details className="vocabulary-cloud-details" open={createOpen} onToggle={event=>setCreateOpen(event.currentTarget.open)}><summary>{label("createTarget")}</summary>
           <Space.Compact style={{width:"100%"}}><Input aria-label={label("newTarget")} value={name} onChange={e=>setName(e.target.value)}/><Button disabled={busy || conflict || !name.trim()} onClick={()=>void run(async()=>{
