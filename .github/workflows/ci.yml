@@ -310,10 +310,11 @@ jobs:
         with:
           node-version: '20'
       - uses: actions/setup-go@v5
-        if: runner.os == 'Windows'
         with:
           go-version: '1.25.11'
-          cache-dependency-path: local/lazymind-cli/go.sum
+          cache-dependency-path: |
+            local/lazymind-cli/go.sum
+            local/local-runtime-manager/go.sum
       - name: Build native Bridge for lifecycle regression
         if: runner.os == 'Windows'
         shell: powershell
@@ -325,6 +326,11 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: '10.0.0'
+      - name: Prepare update-helper test dependencies
+        shell: bash
+        working-directory: local/local-runtime-manager
+        run: go list -mod=readonly -deps ./cmd/update-helper > /dev/null
+
       - name: Install Desktop test dependencies
         working-directory: desktop/electron
         run: pnpm install --frozen-lockfile

@@ -261,6 +261,11 @@ jobs:
           fi
           xcrun notarytool --version
 
+      - name: Prepare update-helper test dependencies
+        shell: bash
+        working-directory: local/local-runtime-manager
+        run: go list -mod=readonly -deps ./cmd/update-helper > /dev/null
+
       - name: Install Desktop test dependencies
         working-directory: desktop/electron
         run: pnpm install --frozen-lockfile
