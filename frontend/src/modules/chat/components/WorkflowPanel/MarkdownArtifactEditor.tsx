@@ -1093,6 +1093,7 @@ export function MarkdownArtifactEditor({
       dismissSelectionToolbar();
     };
     const dismissOnScroll = (event: Event) => {
+      if (event.target instanceof Node && isMarkdownToolbarInteractionTarget(event.target)) return;
       const root = rootRef.current;
       const surface = root?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
       if (event.target === surface || !root || !(event.target instanceof Node) || !root.contains(event.target)) {
