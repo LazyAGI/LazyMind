@@ -26,8 +26,9 @@ import (
 )
 
 type formulaExplanationHandler struct {
-	loadModel func(context.Context, string) (map[string]any, string, string, error)
-	generate  func(context.Context, string, string, map[string]any) (string, error)
+	loadCacheIdentity func(context.Context, string) (string, error)
+	loadModel         func(context.Context, string) (map[string]any, string, string, error)
+	generate          func(context.Context, string, string, map[string]any) (string, error)
 }
 
 var formulaExplanationFlights = formulaExplanationFlightGroup{active: make(map[string]*formulaExplanationFlight)}
@@ -114,6 +115,21 @@ func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]a
 	// No key, endpoint, or user path is ever returned in the public result.
 	identity, _ := json.Marshal([]any{candidate.CandidateID, candidate.CredentialRevision, selected.ModelName, selected.BaseURL, selected.ModelSettings})
 	return candidate.LLMConfig, pdfir.Digest(string(identity)), selected.ModelName, nil
+}
+
+// Cache migration needs only selection metadata. It must not prepare credentials,
+// resolve a cloud runtime session, or construct a runnable model configuration.
+func loadFormulaCacheIdentity(ctx context.Context, user string) (string, error) {
+	models, err := modelconfig.LoadAvailableChatModels(ctx, store.DB(), user)
+	if err != nil {
+		return "", err
+	}
+	selected, err := modelconfig.ResolveDefaultChatModel(ctx, store.DB(), user, models)
+	if err != nil || selected == nil {
+		return "", errors.New("selected model unavailable")
+	}
+	identity, _ := json.Marshal([]any{modelconfig.ChatCandidateID(selected.Source, selected.ID), selected.CredentialRevision, selected.ModelName, selected.BaseURL, selected.ModelSettings})
+	return pdfir.Digest(string(identity)), nil
 }
 func formulaExplanationError(w http.ResponseWriter, status int, message string) {
 	kind := "Internal server error"
@@ -236,6 +252,22 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 			return cached, "hit", nil
 		}
 	}
+	legacyCachePath := func(modelID string) string {
+		legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
+		if request.FocusSymbol != nil {
+			focused, _ := json.Marshal([]string{legacyKey, *request.FocusSymbol})
+			legacyKey = pdfir.Digest(string(focused))
+		}
+		return filepath.Join(cacheDir, legacyKey+".json")
+	}
+	if !request.Force && h.loadCacheIdentity != nil {
+		if identity, err := h.loadCacheIdentity(ctx, store.UserID(r)); err == nil {
+			cachePaths = append(cachePaths, legacyCachePath(identity))
+			if cached, ok := readCache(); ok {
+				return cached, "hit", nil
+			}
+		}
+	}
 	if err := readingpolicy.Check(ctx, store.DB(), store.UserID(r), readingpolicy.Formula); err != nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{403, err.Error()}
 	}
@@ -243,12 +275,7 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 	if err != nil {
 		return formulaExplanation{}, "", formulaExplanationFailure{422, "Select an available chat model in model settings before explaining formulas."}
 	}
-	legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
-	if request.FocusSymbol != nil {
-		legacyFocus, _ := json.Marshal([]string{legacyKey, *request.FocusSymbol})
-		legacyKey = pdfir.Digest(string(legacyFocus))
-	}
-	cachePaths = append(cachePaths, filepath.Join(cacheDir, legacyKey+".json"))
+	cachePaths = append(cachePaths, legacyCachePath(modelID))
 	if !request.Force {
 		if cached, ok := readCache(); ok {
 			return cached, "hit", nil

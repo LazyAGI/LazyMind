@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
+	"lazymind/core/readingpolicy"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 			revoke := false
 			model := "one"
 			modelUnavailable := false
-			h := paperReadingHandler{kind: kind, model: formulaExplanationHandler{loadModel: func(context.Context, string) (map[string]any, string, string, error) {
+			h := paperReadingHandler{kind: kind, model: formulaExplanationHandler{loadCacheIdentity: func(context.Context, string) (string, error) { return model, nil }, loadModel: func(context.Context, string) (map[string]any, string, string, error) {
 				modelLoads++
 				if modelUnavailable {
 					return nil, "", "", errors.New("unavailable")
@@ -154,12 +155,51 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 				}
 			}
 			if kind == "visual" {
+				state, err := pdfIRStatus(context.Background(), orm.Document{ID: "doc", DatasetID: "ds"}, hash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, evidence, err := paperVisualContext(*state.Document, "v")
+				if err != nil {
+					t.Fatal(err)
+				}
+				key := func(identity string) string {
+					d := *state.Document
+					raw, _ := json.Marshal([]any{paperReadingPromptVersion, "visual", "v", d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, identity, "zh", evidence, []pdfir.Block(nil)})
+					return pdfir.Digest(string(raw))
+				}
+				dir := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "paper-reading", pdfIRResource("ds", "doc"), pdfir.Digest("owner"))
+				stablePath := filepath.Join(dir, key("")+".json")
+				legacyPath := filepath.Join(dir, key(model)+".json")
+				if err := os.Rename(stablePath, legacyPath); err != nil {
+					t.Fatal(err)
+				}
+				policy := readingpolicy.Defaults()
+				policy.Preset = "custom"
+				policy.Modes[readingpolicy.Figure] = readingpolicy.Disabled
+				if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
+					t.Fatal(err)
+				}
+				loadsBeforeLegacy := modelLoads
+				if w := call("owner", `{}`); w.Code != 200 || calls != 1 || modelLoads != loadsBeforeLegacy {
+					t.Fatalf("disabled legacy visual cache unavailable: %d %s", w.Code, w.Body)
+				}
+				if _, err := os.Stat(stablePath); err != nil {
+					t.Fatal("legacy visual was not migrated")
+				}
+				if w := call("owner", `{"force":true}`); w.Code != 403 || calls != 1 {
+					t.Fatal("disabled visual force reached generation")
+				}
 				modelUnavailable = true
 				loads := modelLoads
 				if w := call("owner", `{}`); w.Code != 200 || modelLoads != loads {
 					t.Fatal("cached visual requires a live model")
 				}
 				modelUnavailable = false
+				policy.Preset = "demand"
+				if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
+					t.Fatal(err)
+				}
 			}
 			beforeLoads := modelLoads
 			if w := call("owner", mismatch); w.Code != 409 || calls != 1 || modelLoads != beforeLoads {

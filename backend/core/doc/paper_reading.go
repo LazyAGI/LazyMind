@@ -230,6 +230,14 @@ func (h paperReadingHandler) read(r *http.Request, request paperReadingRequest) 
 		if target.Type == "table" {
 			key = readingpolicy.Table
 		}
+		if !request.Force && h.model.loadCacheIdentity != nil {
+			if identity, err := h.model.loadCacheIdentity(ctx, store.UserID(r)); err == nil {
+				if cached, ok := readCache(filepath.Join(dir, cacheKey(identity)+".json")); ok {
+					_ = savePaperReading(dir, path, cached)
+					return cached, "hit", nil
+				}
+			}
+		}
 		if err := readingpolicy.Check(ctx, store.DB(), store.UserID(r), key); err != nil {
 			return nil, "", formulaExplanationFailure{403, err.Error()}
 		}

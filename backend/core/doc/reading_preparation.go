@@ -442,7 +442,7 @@ func runReadingPreparation(ctx context.Context, job asyncjob.Job, reporter async
 	return result, nil
 }
 func defaultFormulaHandler() formulaExplanationHandler {
-	return formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
+	return formulaExplanationHandler{loadCacheIdentity: loadFormulaCacheIdentity, loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 		if err := recordReadingModelCall(ctx); err != nil {
 			return "", err
 		}
@@ -450,7 +450,7 @@ func defaultFormulaHandler() formulaExplanationHandler {
 	}}
 }
 func defaultVisualHandler() paperReadingHandler {
-	return paperReadingHandler{kind: "visual", model: formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
+	return paperReadingHandler{kind: "visual", model: formulaExplanationHandler{loadCacheIdentity: loadFormulaCacheIdentity, loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 		if err := recordReadingModelCall(ctx); err != nil {
 			return "", err
 		}

@@ -98,12 +98,15 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	os.WriteFile(irpath, mustJSON(ir), 0600)
 	db.Create(&orm.AsyncJob{ID: "job", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("ds", "doc"), Status: "succeeded", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, DatasetID: "ds", DocumentID: "doc", SourceSHA256: hash}), ResultJSON: mustJSON(pdfIRResult{IRPath: irpath}), CreatedAt: time.Now()})
 	calls := 0
+	modelLoads := 0
 	changeSource := false
 	modelKey := "one"
 	failModel := false
 	focusedMode := ""
 	handler := formulaExplanationHandler{
+		loadCacheIdentity: func(context.Context, string) (string, error) { return modelKey, nil },
 		loadModel: func(context.Context, string) (map[string]any, string, string, error) {
+			modelLoads++
 			if failModel {
 				return nil, "", "", errors.New("secret api key")
 			}
@@ -179,11 +182,33 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 || w.Header().Get("X-LazyMind-Formula-Cache") != "hit" {
 		t.Fatal("cache miss")
 	}
+	// Emulate an unmigrated model-keyed result, then prohibit generation.
+	state, err := pdfIRStatus(context.Background(), orm.Document{ID: "doc", DatasetID: "ds"}, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	formula, evidence, err := formulaExplanationContext(*state.Document, "f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(filepath.Dir(source), ".lazymind-artifacts", "formula-explanations", pdfIRResource("ds", "doc"), pdfir.Digest("owner"))
+	stablePath := filepath.Join(dir, formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, "saved-explanation:zh", evidence)+".json")
+	legacyPath := filepath.Join(dir, formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelKey+":zh", evidence)+".json")
+	if err := os.Rename(stablePath, legacyPath); err != nil {
+		t.Fatal(err)
+	}
 	policy := readingpolicy.Defaults()
 	policy.Preset = "custom"
 	policy.Modes[readingpolicy.Formula] = readingpolicy.Disabled
 	if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
 		t.Fatal(err)
+	}
+	loadsBeforeLegacy := modelLoads
+	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 || modelLoads != loadsBeforeLegacy {
+		t.Fatalf("disabled legacy formula cache unavailable: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(stablePath); err != nil {
+		t.Fatal("legacy formula was not migrated")
 	}
 	failModel = true
 	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 {
@@ -301,6 +326,17 @@ func TestFormulaExplanationLoadsOnlySelectedChatModel(t *testing.T) {
 	}
 	if model != "selected-chat" || key == "" || len(cfg) != 1 || cfg["llm"] == nil {
 		t.Fatalf("wrong model/role: model=%s roles=%d", model, len(cfg))
+	}
+	cacheIdentity, err := loadFormulaCacheIdentity(t.Context(), "owner")
+	if err != nil || cacheIdentity != key {
+		t.Fatalf("metadata-only legacy identity differs: %q %q %v", cacheIdentity, key, err)
+	}
+	// Corrupt runtime credentials: metadata identity remains readable without preparing a candidate.
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id=?", "group").Updates(map[string]any{"api_key": "", "api_key_ciphertext": "invalid encrypted credential"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if identity, err := loadFormulaCacheIdentity(t.Context(), "owner"); err != nil || identity != key {
+		t.Fatalf("cache identity depends on executable credentials: %q %v", identity, err)
 	}
 	if _, _, _, err := loadFormulaExplanationModel(t.Context(), "stranger"); err == nil {
 		t.Fatal("private model used by another user")
