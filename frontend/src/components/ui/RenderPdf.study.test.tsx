@@ -2,9 +2,9 @@ import {act,fireEvent,render as renderView,screen,waitFor} from '@testing-librar
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {useEffect,type ReactNode} from 'react';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
-const state=vi.hoisted(()=>({pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
+const state=vi.hoisted(()=>({nativeClick:undefined as undefined|((item:{pageNumber:number;dest?:unknown[]})=>void),pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
-vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file}:{file:unknown;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
+vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
 import RenderPdf from './RenderPdf';
@@ -374,4 +374,25 @@ it('scales zoom monotonically around the fitted reading baseline',async()=>{
  expect(page).toHaveStyle({width:'858px'});
  view.unmount();width.mockRestore();height.mockRestore();
  await act(async()=>{});
+});
+
+it('follows native PDF destinations without requiring a rendered target or parsed document',async()=>{
+ state.document=undefined;
+ const position=vi.fn();
+ render(<RenderPdf fileData="native-links.pdf" onViewPositionChange={position}/>);
+ await act(async()=>{});
+ expect(state.nativeClick).toBeTypeOf('function');
+ await act(async()=>{state.nativeClick?.({pageNumber:3,dest:[2,{name:'XYZ'},0,400,null]});});
+ await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3));
+ expect(position).toHaveBeenLastCalledWith({page:3,progress:.5});
+});
+
+it('keeps native link navigation working through the callback retained by react-pdf after a source change',async()=>{
+ const position=vi.fn();
+ const view=render(<RenderPdf fileData="first.pdf" onViewPositionChange={position}/>);
+ const retainedClick=state.nativeClick;
+ view.rerender(<RenderPdf fileData="second.pdf" onViewPositionChange={position}/>);
+ await act(async()=>{retainedClick?.({pageNumber:2,dest:[1,{name:'Fit'}]});});
+ await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2));
+ expect(position).toHaveBeenLastCalledWith({page:2,progress:0});
 });

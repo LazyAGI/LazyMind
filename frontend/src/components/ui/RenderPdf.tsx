@@ -274,7 +274,7 @@ export default function RenderPdf({
   };
 
   const zoomPosition = useRef<PdfViewPosition>();
-  const pdfDocument = useRef<{source: RenderPdfProps["fileData"]; document: {numPages:number;getPage:(page:number)=>Promise<{getTextContent:()=>Promise<{items:unknown[]}>}>}}>();
+  const pdfDocument = useRef<{source: RenderPdfProps["fileData"]; document: {numPages:number;getPage:(page:number)=>Promise<{getViewport:(options:{scale:number})=>{width:number;height:number;convertToViewportPoint:(x:number,y:number)=>number[]};getTextContent:()=>Promise<{items:unknown[]}>}>}}>();
   const lastPageNavigation = useRef("");
   useEffect(() => {
     lastPageNavigation.current = "";
@@ -523,6 +523,33 @@ export default function RenderPdf({
     return arr;
   }, [pageHeightsPx, numPages]);
 
+  const [nativeDestination,setNativeDestination] = useState<{source:RenderPdfProps["fileData"];pageNumber:number;dest?:unknown[]}>();
+  const [resolvedDestination,setResolvedDestination] = useState<{source:RenderPdfProps["fileData"];page:number;progress:number}>();
+  useEffect(()=>{
+    const request=nativeDestination;
+    const loaded=pdfDocument.current;
+    if(!request || request.source!==fileData || loaded?.source!==fileData || !pdfLoaded) return;
+    const page=request.pageNumber;
+    if(!Number.isInteger(page)||page<1||page>numPages)return;
+    let cancelled=false;
+    void loaded.document.getPage(page).then(pdfPage=>{
+      if(cancelled || currentSource.current!==request.source)return;
+      const viewport=pdfPage.getViewport({scale:1});
+      const dest=request.dest;
+      const kind=(dest?.[1] as {name?:string}|undefined)?.name;
+      const y=kind==='XYZ'?dest?.[3]:kind==='FitH'||kind==='FitBH'?dest?.[2]:kind==='FitR'?dest?.[5]:undefined;
+      const x=kind==='XYZ'||kind==='FitR'?dest?.[2]:0;
+      const point=typeof y==='number'&&Number.isFinite(y)?viewport.convertToViewportPoint(typeof x==='number'?x:0,y):[0,0];
+      const progress=Math.max(0,Math.min(.999,point[1]/viewport.height));
+      setPageSizesMap(previous=>({...previous,[page-1]:{width:viewport.width,height:viewport.height}}));
+      setResolvedDestination({source:request.source,page,progress});
+    }).catch(()=>{
+      if(!cancelled && currentSource.current===request.source)setResolvedDestination({source:request.source,page,progress:0});
+    });
+    return()=>{cancelled=true;};
+  },[nativeDestination,fileData,pdfLoaded,numPages]);
+
+
   const currentPage = Math.max(1, pageTops.reduce((page, top, index) => top <= scrollTop + 1 ? index + 1 : page, 1));
   const jumpPage = (value: number) => {
     if (!pdfLoaded || !Number.isFinite(value)) return;
@@ -556,6 +583,18 @@ export default function RenderPdf({
     containerRef.current?.scrollTo({top,behavior:"auto"});
     setScrollTop(top);
   }, [pageWidthPx,pageTops,pageHeightsPx]);
+  useLayoutEffect(()=>{
+    if(!resolvedDestination || resolvedDestination.source!==fileData)return;
+    const {page,progress}=resolvedDestination;
+    const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*progress;
+    containerRef.current?.scrollTo({top,behavior:"auto"});
+    setScrollTop(top);
+    setReaderMode("original");
+    setSelectionAction(null);
+    onViewPositionChange?.({page,progress});
+    setResolvedDestination(undefined);
+    setNativeDestination(undefined);
+  },[resolvedDestination,fileData,pageTops,pageHeightsPx,onViewPositionChange]);
   useEffect(() => {
     if (!viewPosition || !pdfLoaded || !containerRef.current || !pageTops.length) return;
     const page = Math.min(Math.max(viewPosition.page, 1), numPages) - 1;
@@ -1090,6 +1129,8 @@ export default function RenderPdf({
         </div>
       ) : null}
       <Document
+        // react-pdf retains this handler from mount; read the active source from a ref.
+        onItemClick={({pageNumber,dest})=>setNativeDestination({source:currentSource.current,pageNumber,dest:Array.isArray(dest)?dest:undefined})}
         file={pdfFile}
         renderMode={renderMode}
         loading={renderNoDataFn()}
