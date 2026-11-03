@@ -1,0 +1,26 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import ReadingPreparationAction from './ReadingPreparationAction';
+const api = vi.hoisted(() => ({ get: vi.fn(), prepare: vi.fn() }));
+vi.mock('../api/readingPreparation', () => ({ getReadingPreparation: api.get, prepareReading: api.prepare }));
+vi.mock('@/components/request', () => ({ getLocalizedErrorMessage: (e: Error) => e.message }));
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+it('opens without paid work, explicitly submits chosen scopes, and polls to terminal failure', async () => {
+  vi.useFakeTimers();
+  api.get.mockResolvedValueOnce({ status: 'not_requested' }).mockResolvedValueOnce({ status: 'running', progress_current: 1, progress_total: 2 }).mockResolvedValueOnce({ status: 'failed', error_message: '服务暂时不可用', model_requests: 1 });
+  api.prepare.mockResolvedValueOnce({ status: 'pending' });
+  render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc', canWrite: true }} />);
+  fireEvent.click(screen.getByRole('button', { name: '准备当前论文' }));
+  await act(async () => { await Promise.resolve(); });
+  expect(api.prepare).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox', { name: '公式研读' }));
+  fireEvent.click(screen.getByRole('button', { name: /开始准备/ }));
+  await act(async () => { await Promise.resolve(); });
+  expect(api.prepare).toHaveBeenCalledWith('ds', 'doc', ['pdf_parse', 'formula']);
+  expect(screen.getByRole('button', { name: /开始准备/ })).toBeDisabled();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+  expect(screen.getByText('服务暂时不可用')).toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(api.get).toHaveBeenCalledTimes(3);
+  expect(api.prepare).toHaveBeenCalledOnce();
+});

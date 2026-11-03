@@ -1,0 +1,11 @@
+.reading-preferences .ant-modal-body { max-height: 72vh; overflow-y: auto; }
+.reading-preset-options { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 20px; }
+.reading-preset-options > .ant-radio-wrapper { flex: 1 1 190px; align-items: flex-start; margin: 0; }
+.reading-preset-options > .ant-radio-wrapper:last-child { flex-basis: 100%; }
+.reading-preset-options strong, .reading-preset-options span span { display: block; }
+.reading-preset-options strong { margin-bottom: 4px; }
+.reading-capability { display: grid; grid-template-columns: minmax(0, 1fr) 124px; gap: 16px; align-items: center; padding: 12px 0; border-top: 1px solid var(--reading-border); }
+.reading-capability p { margin: 3px 0 0; color: var(--reading-muted); font-size: 13px; line-height: 1.6; }
+.reading-limits { display: flex; flex-direction: column; gap: 12px; }
+.reading-limits label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 480px) { .reading-capability { grid-template-columns: minmax(0, 1fr) 108px; gap: 8px; } .reading-preferences .ant-modal-body { max-height: 68vh; } }

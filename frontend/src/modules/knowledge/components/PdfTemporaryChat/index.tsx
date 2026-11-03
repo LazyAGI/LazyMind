@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Alert, Button, message } from "antd";
+import { Alert, Button, Space, message } from "antd";
 import { CloseOutlined, MessageOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { ChatConversationsRequestActionEnum, type Query } from "@/api/generated/chatbot-client";
@@ -21,7 +21,7 @@ import type { DocumentChatSelection } from "./types";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import type { DocumentTranslationRequest } from "./types";
 import { touchCachedPdfChat } from "./cache";
-import { ensureDocumentParsed, retryDocumentParsed, type DocumentParseResult } from "@/modules/knowledge/api/pdfArtifacts";
+import { getDocumentParseStatus, ensureDocumentParsed, retryDocumentParsed, type DocumentParseResult } from "@/modules/knowledge/api/pdfArtifacts";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
@@ -106,17 +106,14 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
-    // Opening document chat is the first concrete signal that the stored file
-    // needs readable text. Parsing is idempotent, so eagerly start it while the
-    // user is composing the first question instead of waiting for retrieval to
-    // discover that no chunks exist.
+    // Observation never creates paid parsing work.
     let cancelled = false;
     setParseState("loading");
     setParseError("");
     let timer: number | undefined;
     const poll = async () => {
       try {
-        const result = await ensureDocumentParsed(datasetId, documentId);
+        const result = await getDocumentParseStatus(datasetId, documentId);
         if (cancelled) return;
         setParseState(result.status);
         setParseError(result.error?.message || (result.status === "failed" ? t("knowledge.pdfChatParseReasonUnknown") : ""));
@@ -392,7 +389,12 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           showIcon
           message={t(parseState === "loading" ? "knowledge.pdfChatChecking" : parseState === "not_requested" ? "knowledge.pdfChatNotParsed" : "knowledge.pdfChatUnknown")}
           description={parseErrorDescription}
-          action={parseState !== "loading" ? <Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button> : undefined}
+          action={parseState !== "loading" ? <Space><Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button><Button size="small" loading={retrying} onClick={async () => {
+            setRetrying(true);
+            try { await ensureDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
+            catch (error) { setParseError(getLocalizedErrorMessage(error)); }
+            finally { setRetrying(false); }
+          }}>{i18n.language.startsWith("zh") ? '准备文档' : 'Prepare document'}</Button></Space> : undefined}
         />}
         <ChatContainerComponent
           ref={chatRef}

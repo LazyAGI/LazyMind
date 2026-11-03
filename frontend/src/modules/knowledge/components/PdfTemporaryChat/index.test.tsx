@@ -13,9 +13,10 @@ vi.mock("@/components/request", () => ({
   axiosInstance: { post: vi.fn() },
   getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : "request failed",
 }));
+const getDocumentParseStatus = vi.hoisted(() => vi.fn().mockResolvedValue({ status: "parsing" }));
 const ensureDocumentParsed = vi.hoisted(() => vi.fn().mockResolvedValue({ status: "parsing" }));
 const retryDocumentParsed = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("@/modules/knowledge/api/pdfArtifacts", () => ({ ensureDocumentParsed, retryDocumentParsed }));
+vi.mock("@/modules/knowledge/api/pdfArtifacts", () => ({ getDocumentParseStatus, ensureDocumentParsed, retryDocumentParsed }));
 vi.mock("@/modules/chat/utils/request", () => ({
   CHAT_STREAM_URL: "/chat", CHAT_RESUME_STREAM_URL: "/resume", ChatServiceApi: vi.fn(),
 }));
@@ -55,6 +56,7 @@ beforeEach(() => {
   chatActions.createNewChat.mockClear();
   chatActions.sendMessage.mockReset().mockResolvedValue(true);
   chatActions.prepareMessage.mockClear();
+  getDocumentParseStatus.mockClear();
   ensureDocumentParsed.mockClear();
   retryDocumentParsed.mockClear();
 });
@@ -66,7 +68,7 @@ afterEach(() => {
 describe("document question context", () => {
   it("prepares the same text again for a new selection action without duplicating unchanged selections", async () => {
     vi.useFakeTimers();
-    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "parsed" });
     const selection = { source: "pdf" as const, text: "capabilities", page: 1 };
     const props = { datasetId: "dataset-a", documentId: "document-md", fileName: "source.md", onClose: vi.fn() };
     const { rerender } = render(<PdfTemporaryChat {...props} selection={selection} />);
@@ -83,20 +85,32 @@ describe("document question context", () => {
     expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ citeMessage: "capabilities", appendCitations: true });
   });
 
-  it("starts on-demand parsing when document chat is first opened", async () => {
+  it("observes existing parsing without creating work when chat opens", async () => {
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
-    expect(ensureDocumentParsed).toHaveBeenCalledWith("dataset-a", "document-pdf");
+    expect(getDocumentParseStatus).toHaveBeenCalledWith("dataset-a", "document-pdf");
+    expect(ensureDocumentParsed).not.toHaveBeenCalled();
+    expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
+  });
+
+  it("prepares only after an explicit action and then observes progress", async () => {
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "not_requested" });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="document-pdf" fileName="source.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(ensureDocumentParsed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Prepare document" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(ensureDocumentParsed).toHaveBeenCalledTimes(1);
     expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
   });
 
   it("shows a failed status with its reason without implicitly retrying", async () => {
-    ensureDocumentParsed.mockResolvedValueOnce({ status: "failed", error: { message: "Reader could not decode the PDF" } });
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "failed", error: { message: "Reader could not decode the PDF" } });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="broken-pdf" fileName="broken.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("knowledge.pdfChatParseFailed")).toBeInTheDocument();
     expect(screen.getByText("Reader could not decode the PDF")).toBeInTheDocument();
-    expect(ensureDocumentParsed).toHaveBeenCalledTimes(1);
+    expect(getDocumentParseStatus).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "knowledge.pdfChatRetryParse" })).toBeInTheDocument();
     expect(retryDocumentParsed).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRetryParse" }));
@@ -107,7 +121,7 @@ describe("document question context", () => {
   });
 
   it("explains how to configure a missing parser without showing internal configuration text", async () => {
-    ensureDocumentParsed.mockResolvedValueOnce({status:"failed",error:{message:'dynamic_ocr_auth["mineru"] is not set in globals.config'}});
+    getDocumentParseStatus.mockResolvedValueOnce({status:"failed",error:{message:'dynamic_ocr_auth["mineru"] is not set in globals.config'}});
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="parser-missing" fileName="manual.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText('knowledge.pdfChatParserRequired')).toBeInTheDocument();
@@ -116,7 +130,7 @@ describe("document question context", () => {
   });
 
   it("distinguishes chat text readiness from formula parsing", async () => {
-    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "parsed" });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="ready-pdf" fileName="ready.pdf" paperMode onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("status")).toHaveTextContent("Paper ready");
@@ -125,7 +139,7 @@ describe("document question context", () => {
 
   it("replaces a running indicator with the terminal parser failure and stops polling", async () => {
     vi.useFakeTimers();
-    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsing" }).mockResolvedValueOnce({ status: "failed", error: { message: "Root storage unavailable" } });
+    getDocumentParseStatus.mockResolvedValueOnce({ status: "parsing" }).mockResolvedValueOnce({ status: "failed", error: { message: "Root storage unavailable" } });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="stalled-pdf" fileName="stalled.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("knowledge.pdfChatParsingHint")).toBeInTheDocument();
@@ -133,12 +147,12 @@ describe("document question context", () => {
     expect(screen.getByText("Root storage unavailable")).toBeInTheDocument();
     expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
-    expect(ensureDocumentParsed).toHaveBeenCalledTimes(2);
+    expect(getDocumentParseStatus).toHaveBeenCalledTimes(2);
     expect(retryDocumentParsed).not.toHaveBeenCalled();
   });
 
   it("refreshes an unknown status without requesting a new parse attempt", async () => {
-    ensureDocumentParsed.mockRejectedValueOnce(new Error("Status service unavailable")).mockResolvedValueOnce({ status: "parsed" });
+    getDocumentParseStatus.mockRejectedValueOnce(new Error("Status service unavailable")).mockResolvedValueOnce({ status: "parsed" });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" paperMode onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRefreshStatus" }));
@@ -149,7 +163,7 @@ describe("document question context", () => {
   });
 
   it("does not turn a failed status lookup into parsing", async () => {
-    ensureDocumentParsed.mockRejectedValueOnce(new Error("unavailable"));
+    getDocumentParseStatus.mockRejectedValueOnce(new Error("unavailable"));
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("knowledge.pdfChatUnknown")).toBeInTheDocument();
@@ -391,7 +405,7 @@ describe("paper assistant workspace", () => {
 
 it("localizes paper assistant and suggested questions in Chinese", async () => {
   locale.language = "zh-CN";
-  ensureDocumentParsed.mockResolvedValueOnce({status:"parsed"});
+  getDocumentParseStatus.mockResolvedValueOnce({status:"parsed"});
   render(<PdfTemporaryChat datasetId="d" documentId="p" fileName="p.pdf" paperMode onClose={vi.fn()} />);
   await screen.findByText("论文已就绪");
   expect(screen.getByText("论文助手")).toBeInTheDocument();

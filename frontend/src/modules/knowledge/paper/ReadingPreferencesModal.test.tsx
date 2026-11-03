@@ -1,0 +1,30 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import ReadingPreferencesModal from './ReadingPreferencesModal';
+import { presetModes } from '../api/readingPreparation';
+const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn() }));
+vi.mock('../api/readingPreparation', async importOriginal => ({ ...await importOriginal<typeof import('../api/readingPreparation')>(), getReadingPreferences: api.get, saveReadingPreferences: api.save }));
+vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: {}, getLocalizedErrorMessage: (e: Error) => e.message }));
+afterEach(cleanup);
+beforeEach(() => { api.get.mockReset().mockResolvedValue({ preset: 'demand', modes: presetModes('demand'), limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 }, capabilities: [{ id: 'pdf_parse', available: false, unavailable_reason: '请配置可用的 MinerU 解析服务' }] }); api.save.mockReset(); });
+it('loads personal defaults, explains missing configuration, and preserves edits after failed save', async () => {
+  const close = vi.fn(); api.save.mockRejectedValueOnce(new Error('保存失败，请重试'));
+  render(<ReadingPreferencesModal open onClose={close} />);
+  await screen.findByText('请配置可用的 MinerU 解析服务');
+  fireEvent.click(screen.getByRole('radio', { name: /充分准备/ }));
+  fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
+  await screen.findByText('保存失败，请重试');
+  expect(close).not.toHaveBeenCalled();
+  expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ preset: 'full', modes: presetModes('full') }));
+  expect(screen.getByRole('radio', { name: /充分准备/ })).toBeChecked();
+  api.save.mockResolvedValueOnce({});
+  fireEvent.click(screen.getByRole('button', { name: /保存预设/ }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+});
+it('explains invalid automatic study dependency and blocks save before submission', async () => {
+  api.get.mockResolvedValueOnce({ preset: 'custom', modes: { ...presetModes('demand'), formula: 'automatic' }, limits: { daily_documents: 5, study_items_per_document: 10, automatic_concurrency: 1 }, capabilities: [] });
+  render(<ReadingPreferencesModal open onClose={() => {}} />);
+  await screen.findByText('自动研读公式、图片或表格需要先将「结构解析」设为自动。');
+  expect(screen.getByRole('button', { name: /保存预设/ })).toBeDisabled();
+  expect(api.save).not.toHaveBeenCalled();
+});

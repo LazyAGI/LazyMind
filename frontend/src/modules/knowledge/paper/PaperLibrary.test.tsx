@@ -428,7 +428,8 @@ describe('paper library behavior', () => {
     it("groups search, filter, export and import notifications in the document toolbar", async () => {
         await renderLibrary();
         const tools = libraryTools();
-        expect(tools.getAllByRole("button")).toHaveLength(4);
+        expect(tools.getAllByRole("button")).toHaveLength(5);
+        expect(tools.getAllByRole("button")[3]).toHaveAccessibleName("预设 / AI 阅读准备");
         for (const name of ["搜索", "筛选", "导出"])
             expect(tools.getByRole("button", { name })).toBeInTheDocument();
         expect(tools.getByRole("button", { name: /通知/ })).toHaveAttribute("aria-expanded", "false");

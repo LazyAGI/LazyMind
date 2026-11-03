@@ -1,3 +1,4 @@
+import ReadingPreferencesModal from "./ReadingPreferencesModal";
 import { AgentAppsAuth } from "@/components/auth";
 import { readLibraryViewCache, writeLibraryViewCache } from "./libraryViewCache";
 import PaperAuthors from './PaperAuthors';
@@ -5,7 +6,7 @@ import { usePaperImports, PaperImportDialog } from './usePaperImports';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
 import { Alert, Button, Dropdown, Input, Modal, Popover, Pagination, Select, Spin, Tooltip, message } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
-import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, SettingOutlined, HolderOutlined, EllipsisOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperLink, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
 import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, removeLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
@@ -69,6 +70,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         datasetScopeRef.current = { datasetId, active: true };
     const datasetScope = datasetScopeRef.current;
     const isCurrentScope = () => datasetScopeRef.current === datasetScope && datasetScope.active;
+    const [readingPreferencesOpen, setReadingPreferencesOpen] = useState(false);
     const { notifications, notify, resolve } = usePaperNotifications(datasetId);
     const [dataState, setData] = useState<PaperLibraryData>(() => cachedView?.data || emptyLibrary());
     const [snapshotReady, setSnapshotReady] = useState(!!cachedView);
@@ -575,6 +577,8 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 }, { type: 'divider' }, { key: 'backup', label: '完整数据备份（JSON，不含 PDF 文件）', onClick: () => downloadLibraryJson(data, title, true, datasetId) }] }}>
             <Button type="text" className="paper-library-tool" icon={<ExportOutlined />} aria-label="导出" title="导出题录或包含笔记、批注与附件引用的数据备份" disabled={!snapshotReady}>导出</Button>
           </Dropdown>
+          <Tooltip title="预设 / AI 阅读准备"><Button type="text" className="paper-library-tool" icon={<SettingOutlined />} aria-label="预设 / AI 阅读准备" onClick={() => { setActiveTool(null); setReadingPreferencesOpen(true); }}>预设</Button></Tooltip>
+          <ReadingPreferencesModal open={readingPreferencesOpen} onClose={() => setReadingPreferencesOpen(false)} />
           <PaperImportStatus key={datasetId} datasetId={datasetId} page={importPage} notifications={libraryNotices} syncError={syncError} refreshing={loading} onRefresh={() => { void reload(); }} canWrite={canWrite} onOpenPaper={id => openDetail(id)} onResumeAssociation={resumeAssociation} open={activeTool === "imports"} onOpenChange={open => setActiveTool(current => open ? "imports" : current === "imports" ? null : current)} onRetry={async (batch) => { await retryAcademicImport(batch, true); setSyncRevision(value => value + 1); }}/>
         </div>
       </header>
