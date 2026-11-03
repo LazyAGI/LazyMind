@@ -137,6 +137,9 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 		payload, _ := json.Marshal(map[string]any{"status": status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
+	if err == nil {
+		NotifyWorkflowRuntimeUpdated(ctx, db, req.SessionID, "", req.Kind)
+	}
 	return version, err
 }
 
