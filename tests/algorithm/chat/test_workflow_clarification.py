@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[3] / 'workflows'
 
 
 def policy(name):
-    return yaml.safe_load((ROOT / name / 'workflow.yaml').read_text())['runtime']
+    return yaml.safe_load((ROOT / name / 'workflow.yaml').read_text(encoding='utf-8'))['runtime']
 
 
 def test_multiple_one_and_other_are_preserved():
