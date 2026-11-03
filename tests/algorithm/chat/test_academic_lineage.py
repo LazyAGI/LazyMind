@@ -130,6 +130,97 @@ def test_deep_report_uses_frozen_candidates(lineage, monkeypatch):
     assert len(report['research_structure']['nodes']) == 2
 
 
+def test_named_clue_submission_reports_all_errors_then_publishes_source_mechanism(lineage, monkeypatch):
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
+    module, ctx, events, _, args = lineage
+    snapshot = module._read_expansion_context('exp')
+    snapshot['record']['preparation'] = {'named_clues': [
+        {'source_paper_id': 'a', 'name': name, 'question_ids': ['predecessor']}
+        for name in ['CSA2', 'Zero SWA Caching']]}
+    monkeypatch.setattr(module, '_read_expansion_context', lambda _: snapshot)
+    clues = [
+        {'source_paper_id': 'a', 'name': 'CSA2', 'status': 'resolved', 'paper_id': 'CSA2',
+         'reason': 'The source paper introduces this attention mechanism.', 'query_ids': ['exact']},
+        {'source_paper_id': 'a', 'name': 'Zero SWA Caching', 'status': 'blocked', 'paper_id': 'unknown-paper',
+         'reason': 'The cited report is unavailable from the recorded retrieval.', 'query_ids': ['invented']},
+    ]
+    args['investigation'][0]['clue_resolutions'] = clues
+    ensure_lazyllm_tool_docs([module.academic_submit_relations])
+    tool = ToolManager([module.academic_submit_relations]).all_tools[0]
+    with pytest.raises(ToolExecutionError) as exc:
+        module.academic_submit_relations(**tool._validate_input(args))
+    error = str(exc.value)
+    assert 'clue_resolutions[0]' in error and 'CSA2' in error and 'source_paper_id' in error
+    assert 'clue_resolutions[1]' in error and 'unknown-paper' in error and 'must omit paper_id' in error
+    assert 'invented' in error and 'query receipt' in error
+    assert not ctx.report_requests and not any(event.get('slot') for event in events)
+
+    clues[0]['paper_id'] = 'a'
+    clues[1].pop('paper_id')
+    clues[1]['query_ids'] = ['exact']
+    module.academic_submit_relations(**tool._validate_input(args))
+    report = _artifact(events, 'expansion_report')
+    published_clues = report['investigation'][0]['clue_resolutions']
+    assert published_clues[0]['status'] == 'resolved' and published_clues[0]['paper_id'] == 'a'
+    assert published_clues[1]['status'] == 'blocked' and 'paper_id' not in published_clues[1]
+    assert report['completion'] == {'status': 'incomplete', 'reason': 'material_limited'}
+    assert not any(gap.get('clue_name') == 'CSA2' for gap in report['coverage_gaps'])
+    assert any(gap.get('clue_name') == 'Zero SWA Caching' for gap in report['coverage_gaps'])
+    assert len(ctx.report_requests) == 1
+
+
+def test_submission_reports_receipt_and_each_papers_citation_errors_together(lineage, monkeypatch):
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
+    module, ctx, events, versions, args = lineage
+    snapshot = module._read_expansion_context('exp')
+    receipt_id = '6c1d3fe2' + 'a' * 56
+    snapshot['source_queries'][0]['id'] = receipt_id
+    snapshot['record']['reading']['a']['positions'] = [0, 1, 8]
+    snapshot['record']['reading']['c']['content_hash'] = 'older-body'
+    monkeypatch.setattr(module, '_read_expansion_context', lambda _: snapshot)
+    for item in args['investigation']:
+        item['query_ids'] = [receipt_id[:8], 'forward']
+    args['claims'][1]['positions'] = [0, 8]
+    ensure_lazyllm_tool_docs([module.academic_submit_relations])
+    tool = ToolManager([module.academic_submit_relations]).all_tools[0]
+    args['analyses'][0]['claims'] = []
+    with pytest.raises(ValueError, match='claims'):
+        tool._validate_input(args)
+    args['analyses'][0].pop('claims')
+    with pytest.raises(ToolExecutionError) as exc:
+        module.academic_submit_relations(**tool._validate_input(args))
+    error = str(exc.value)
+    assert receipt_id[:8] in error and 'without abbreviation' in error
+    assert "claims[1], paper_id='b': unread positions=[8]; recorded positions=[0, 1]" in error
+    assert "claims[2], paper_id='c': source version changed" in error
+    assert "relations[0], paper_id='c': source version changed" in error
+    assert not ctx.report_requests and not any(event.get('slot') for event in events)
+
+    for item in args['investigation']:
+        item['query_ids'] = [receipt_id, 'forward']
+    args['claims'][1]['positions'] = [0]
+    args['claims'][1]['evidence'] = [{'paper_id': 'b', 'positions': [0]}, {'paper_id': 'a', 'positions': [8]}]
+    snapshot['record']['reading']['c']['content_hash'] = versions['c']['content_hash']
+    module.academic_submit_relations(**tool._validate_input(args))
+    report = _artifact(events, 'expansion_report')
+    claim = next(row for row in report['claims'] if row['paper_id'] == 'b')
+    assert [(ref['paper_id'], ref['positions']) for ref in claim['evidence']] == [('b', [0]), ('a', [8])]
+    assert report['completion']['status'] == 'complete'
+    assert len(ctx.report_requests) == 1
+
+
+def test_unavailable_paper_cannot_publish_fabricated_read_positions(lineage):
+    module, ctx, events, versions, args = lineage
+    versions['c']['status'] = 'needs_review'
+    with pytest.raises(ToolExecutionError, match="content status='needs_review'; there is no ready source"):
+        module.academic_submit_relations(**args)
+    assert not ctx.report_requests and not any(event.get('slot') for event in events)
+
+
 @pytest.mark.parametrize('fault', ['endpoint', 'unread', 'version', 'query', 'seed', 'structure'])
 def test_invalid_research_does_not_generate_or_publish(lineage, fault):
     module, ctx, events, versions, args = lineage
@@ -223,7 +314,8 @@ def test_report_call_obeys_remaining_execution_time(lineage):
 
 
 @pytest.mark.asyncio
-async def test_large_frozen_inputs_use_existing_path_transport_through_context_submission_and_report(lineage, monkeypatch):
+async def test_large_frozen_inputs_use_existing_path_transport_through_context_submission_and_report(
+        lineage, monkeypatch):
     import base64
     import json
     import lazyllm
@@ -282,7 +374,7 @@ async def test_large_frozen_inputs_use_existing_path_transport_through_context_s
         return inputs[material]
 
     candidate_path = await bind('candidate_set')
-    visible = module.academic_expansion_context('exp')
+    visible = module.academic_expansion_context()
     assert visible['record']['result'] == seed_record
     assert 'full_context_resource' in visible
     assert {row['paper_id']: row['status'] for row in visible['contents']} == {

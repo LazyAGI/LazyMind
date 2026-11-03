@@ -231,7 +231,7 @@ def test_large_history_keeps_all_current_papers_visible_and_preserves_full_snaps
                 'sources': [{'source': 'arxiv', 'status': 'rate_limited', 'retry_at': '2026-11-03',
                              'count': 1, 'has_more': True, 'next_cursor': 'exact-source-cursor', 'elapsed_ms': 123}]}]}
     monkeypatch.setattr(module, '_read_expansion_context', lambda _: copy.deepcopy(full))
-    visible = module.academic_expansion_context('exp')
+    visible = module.academic_expansion_context()
     assert [row['paper']['paper_id'] for row in visible['record']['result']['papers']] == [
         f'paper-{index}' for index in range(33)]
     assert visible['record']['reading'] == full['record']['reading']
@@ -270,7 +270,7 @@ def test_core_argument_errors_preserve_actionable_code_and_message(publisher, mo
     monkeypatch.setattr(module, '_client', lambda: SimpleNamespace(
         transport=transport, base_url='http://core', _headers=lambda: {}))
     with pytest.raises(ToolExecutionError, match='INVALID_SELECTION: ' + message):
-        module.academic_read_paper('exp', paper_id='not-registered')
+        module.academic_read_paper(paper_id='not-registered')
     with pytest.raises(ToolExecutionError, match='INVALID_SELECTION: ' + message):
         module._call('POST', '/expansions/exp/papers:resolve', {'paper_ids': ['not-registered']})
 
@@ -285,5 +285,5 @@ def test_core_service_failure_keeps_original_http_error(publisher, monkeypatch):
         transport=SimpleNamespace(request=lambda *args, **kwargs: response),
         base_url='http://core', _headers=lambda: {}))
     with pytest.raises(httpx.HTTPStatusError) as error:
-        module.academic_read_paper('exp', paper_id='a')
+        module.academic_read_paper(paper_id='a')
     assert error.value.response is response

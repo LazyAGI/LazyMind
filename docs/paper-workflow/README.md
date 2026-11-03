@@ -109,7 +109,7 @@ page = academic_read_paper(paper_id=paper_id)
 page = academic_read_paper(cursor=page["next_cursor"])  # 有下一批时继续
 ```
 
-工具自动取得当前 Chat 的任务身份与鉴权。保留现有隐藏输入 `task_context`（`text`，内容为任务定位信息 JSON），沿用 Workflow 材料绑定；论文、用户要求和笔记按需通过 `academic_handoff_context()` 取得，不需要模型重抄材料或用户手填内部 ID。拓展 Workflow 使用自己的 `academic_read_paper(expansion_id, paper_id=..., cursor=...)`，见 [拓展工具](../../workflows/paper_expansion/scripts/tools.py)。
+工具自动取得当前 Chat 的任务身份与鉴权。保留现有隐藏输入 `task_context`（`text`，内容为任务定位信息 JSON），沿用 Workflow 材料绑定；论文、用户要求和笔记按需通过 `academic_handoff_context()` 取得，不需要模型重抄材料或用户手填内部 ID。拓展 Workflow 的学术工具同样自动读取当前工作流绑定的任务 ID，不接收 `expansion_id` 参数；读取论文使用 `academic_read_paper(paper_id=...)`，续读仅传 `cursor`，见 [拓展工具](../../workflows/paper_expansion/scripts/tools.py)。
 
 `academic_handoff_context()` 返回当前交接的 `handoff_id`、任务类型、导航信息及冻结的 `input`，不返回内部来源快照。提交和正文读取工具使用摘要取得当前 Chat 的交接身份；全文续读仍携带当前交接 ID 校验游标，不能混入其他任务的正文。
 

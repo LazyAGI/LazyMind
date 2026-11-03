@@ -8,6 +8,14 @@ from fastapi import HTTPException
 from lazymind.chat.api import academic_routes as ar
 
 
+@pytest.fixture
+def expansion_context(monkeypatch):
+    from lazymind.chat.engine.subagent import context
+    ctx = SimpleNamespace(params={'remote_inputs': {'expansion_id': 'owned-expansion'}})
+    monkeypatch.setattr(context, 'require_context', lambda: ctx)
+    return ctx
+
+
 def test_router_serves_authenticated_academic_bridge(monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
@@ -84,10 +92,11 @@ def test_expansion_result_contract_rejects_nested_relation_metadata(tmp_path, mo
     assert module.academic_validate_result({'type': 'json', 'path': str(carrier)})['status'] == 'valid'
 
 
-def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeypatch):
+def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeypatch, expansion_context):
     import importlib.util
     import httpx
-    from lazyllm.tools.agent import ToolExecutionError
+    from lazyllm.tools.agent import ToolExecutionError, ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
     path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
     spec = importlib.util.spec_from_file_location('paper_expansion_transport', path)
     module = importlib.util.module_from_spec(spec)
@@ -115,13 +124,20 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
 
     monkeypatch.setattr(module, '_client', lambda: SimpleNamespace(base_url='http://core',
                         transport=SimpleNamespace(request=request), _headers=lambda: {'X-User-Id': 'owner'}))
-    assert module.academic_search_papers('owned-expansion', 'all:agents') == {'papers': []}
+    functions = [module.academic_expansion_context, module.academic_search_papers, module.academic_read_paper]
+    ensure_lazyllm_tool_docs(functions)
+    exposed = {tool.name: tool for tool in ToolManager(functions).all_tools}
+    for tool in exposed.values():
+        with pytest.raises(ValueError, match='expansion_id'):
+            tool._validate_input({'expansion_id': 'another-task'})
+    args = exposed['academic_search_papers']._validate_input({'query': 'all:agents'})
+    assert module.academic_search_papers(**args) == {'papers': []}
     assert requests[-1][1] == 'http://core/academic/papers:search'
     assert requests[-1][2]['json'] == {
         'expansion_id': 'owned-expansion', 'query': 'all:agents', 'max_results': 10,
         'sources': [], 'mode': 'keyword', 'paper_id': '',
     }
-    observation = module.academic_read_paper('owned-expansion', 'discovered-paper')
+    observation = module.academic_read_paper('discovered-paper')
     assert observation['pages'][0]['text'] == 'Verbatim method and comparison evidence.'
     assert observation['positions'] == [0] and observation['content_hash'] == 'checked-body'
     assert observation['paper']['published_at'] == '2025-01-01T00:00:00Z'
@@ -132,31 +148,31 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
         'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper',
         'view': 'content', 'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5,
     }
-    module.academic_read_paper('owned-expansion', cursor='bound-cursor')
+    module.academic_read_paper(cursor='bound-cursor')
     assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'cursor': 'bound-cursor'}
     assert requests[-1][2]['headers'] == {'X-User-Id': 'owner'}
-    module.academic_read_paper('owned-expansion', 'discovered-paper', positions=[0, 3])
+    module.academic_read_paper('discovered-paper', positions=[0, 3])
     assert requests[-1][2]['json']['positions'] == [0, 3]
-    module.academic_read_paper('owned-expansion', 'discovered-paper', positions=[], page_start=3, page_end=4)
+    module.academic_read_paper('discovered-paper', positions=[], page_start=3, page_end=4)
     assert 'positions' not in requests[-1][2]['json'] and requests[-1][2]['json']['page_start'] == 3
     before = len(requests)
     with pytest.raises(ToolExecutionError, match='only its cursor'):
-        module.academic_read_paper('owned-expansion', 'different-paper', cursor='bound-cursor', positions=[1])
+        module.academic_read_paper('different-paper', cursor='bound-cursor', positions=[1])
     with pytest.raises(ToolExecutionError, match='max_results must be 1..5'):
-        module.academic_read_paper('owned-expansion', 'discovered-paper', max_results=20)
+        module.academic_read_paper('discovered-paper', max_results=20)
     assert len(requests) == before
     with pytest.raises(ToolExecutionError, match='INVALID_CURSOR: invalid cursor'):
-        module.academic_read_paper('owned-expansion', cursor='bad-cursor')
-    module.academic_read_paper('owned-expansion', 'discovered-paper', view='references', reference_keys=['7'])
+        module.academic_read_paper(cursor='bad-cursor')
+    module.academic_read_paper('discovered-paper', view='references', reference_keys=['7'])
     assert requests[-1][2]['json'] == {
         'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper', 'view': 'references',
         'keywords': [], 'reference_keys': ['7'], 'max_results': 5,
     }
     monkeypatch.setattr(module, '_call', lambda *args, **kwargs: {'status': 'stage_timeout'})
-    assert module.academic_read_paper('owned-expansion', 'discovered-paper') == {'status': 'stage_timeout'}
+    assert module.academic_read_paper('discovered-paper') == {'status': 'stage_timeout'}
 
 
-def test_search_tool_validates_search_contract_before_sending_requests(monkeypatch):
+def test_search_tool_validates_search_contract_before_sending_requests(monkeypatch, expansion_context):
     import importlib.util
     from lazyllm.tools.agent import ToolExecutionError, ToolManager
     from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
@@ -170,21 +186,21 @@ def test_search_tool_validates_search_contract_before_sending_requests(monkeypat
     ensure_lazyllm_tool_docs([module.academic_search_papers])
     tool = ToolManager([module.academic_search_papers]).all_tools[0]
     for mode in ['keyword', 'references', 'citations']:
-        args = tool._validate_input({'expansion_id': 'exp', 'query': 'agents', 'mode': mode})
+        args = tool._validate_input({'query': 'agents', 'mode': mode})
         assert module.academic_search_papers(**args) == {'papers': []}
         assert requests[-1]['mode'] == mode
     with pytest.raises(ValueError, match='keyword|references|citations'):
-        tool._validate_input({'expansion_id': 'exp', 'query': 'agents', 'mode': 'search'})
+        tool._validate_input({'query': 'agents', 'mode': 'search'})
     assert len(requests) == 3
-    args = tool._validate_input({'expansion_id': 'exp', 'mode': 'citations', 'paper_id': 'paper', 'max_results': 25})
+    args = tool._validate_input({'mode': 'citations', 'paper_id': 'paper', 'max_results': 25})
     with pytest.raises(ToolExecutionError, match='max_results must be 1..20'):
         module.academic_search_papers(**args)
     assert len(requests) == 3
-    args = tool._validate_input({'expansion_id': 'exp', 'mode': 'citations', 'paper_id': 'paper', 'max_results': 20})
+    args = tool._validate_input({'mode': 'citations', 'paper_id': 'paper', 'max_results': 20})
     module.academic_search_papers(**args)
     assert requests[-1]['max_results'] == 20 and requests[-1]['paper_id'] == 'paper'
-    module.academic_search_papers('exp', cursor='saved-source-cursor')
-    assert requests[-1] == {'expansion_id': 'exp', 'cursor': 'saved-source-cursor'}
+    module.academic_search_papers(cursor='saved-source-cursor')
+    assert requests[-1] == {'expansion_id': 'owned-expansion', 'cursor': 'saved-source-cursor'}
 
 
 @pytest.mark.parametrize('package,slot,kind', [
@@ -221,7 +237,8 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
         data = ({'handoff_id': 'owned-handoff', 'input': frozen['input']}
                 if method == 'GET' else frozen)
         if url.endswith('/paper-contents:read'):
-            data = {'paper': paper, 'status': 'ready', 'positions': [0], 'pages': [{'page': 1, 'text': 'Original evidence'}]}
+            data = {'paper': paper, 'status': 'ready', 'positions': [0],
+                    'pages': [{'page': 1, 'text': 'Original evidence'}]}
         if method == 'GET' and kwargs['params'].get('view') == 'summary':
             data = {'handoff_id': 'owned-handoff'}
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: data)
@@ -254,7 +271,9 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
     assert requests[1][1] == 'http://core/academic/mock-handoffs/owned-handoff:submit'
     assert requests[1][2]['json'] == {} and requests[1][2]['timeout'] == 30
     functions['academic_read_paper']('original-paper')
-    assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'paper_id': 'original-paper', 'view': 'content', 'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5}
+    assert requests[-1][2]['json'] == {
+        'handoff_id': 'owned-handoff', 'paper_id': 'original-paper', 'view': 'content',
+        'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5}
     functions['academic_read_paper'](cursor='saved-cursor')
     assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'cursor': 'saved-cursor'}
     assert requests[-2][2]['params'] == {'conversation_id': 'owned-chat', 'view': 'summary'}

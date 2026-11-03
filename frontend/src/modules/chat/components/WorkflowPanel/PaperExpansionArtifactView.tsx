@@ -39,9 +39,13 @@ export function canDisplayPaperExpansion(slotId: string, value: unknown): boolea
   const input = slotId === 'relation_analysis' ? record(data.input) : data;
   return isPaperExpansionSlot(slotId) && typeof input?.user_instruction === 'string' && papersIn(input) !== null;
 }
-function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: string }) {
+function Section({ title, children, aside, centered = false }: {
+  title: string; children: ReactNode; aside?: string; centered?: boolean;
+}) {
   return <section className='paper-workflow-section' aria-label={title}>
-    <div className='paper-workflow-heading'><h3>{title}</h3>{aside && <span>{aside}</span>}</div>{children}
+    <div className={`paper-workflow-heading${centered ? ' paper-workflow-heading--centered' : ''}`}>
+      <h3>{title}</h3>{aside && <span>{aside}</span>}
+    </div>{children}
   </section>;
 }
 function PaperTitle({ item, compact = false }: { item: WorkflowPaper; compact?: boolean }) {
@@ -108,10 +112,10 @@ function SelectionChanges({ selection, screening = false, reading }: {
   const tr = (key: string) => t(`paperTasks.workflowResult.${key}`);
   const additions = selection.changes.filter(change => change.action === 'added');
   const removals = selection.changes.filter(change => change.action === 'removed');
-  return <Section title={tr(screening ? 'screeningChanges' : 'selectionChanges')} aside={t(`paperTasks.workflowResult.${screening ? 'screeningSummary' : 'selectionSummary'}`, {
+  const summary = t(`paperTasks.workflowResult.${screening ? 'screeningSummary' : 'selectionSummary'}`, {
     before: selection.before_count, retained: selection.before_count - removals.length, added: additions.length, removed: removals.length,
-  })}>
-    {screening && <h4>{t('paperTasks.workflowResult.supplementedPapers', { count: additions.length })}</h4>}
+  });
+  return <Section title={screening ? summary : tr('selectionChanges')} aside={screening ? undefined : summary} centered={screening}>
     {additions.length ? <>
       {!screening && <Tag color='blue' bordered={false}>{tr('addedPaper')}</Tag>}
       <PaperList papers={additions.map(change => change.paper)} analysis={!screening} reading={reading}

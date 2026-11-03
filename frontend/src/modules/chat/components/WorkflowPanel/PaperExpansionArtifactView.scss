@@ -48,6 +48,10 @@
   h3 { font-size: 14px; font-weight: 500; margin: 0; }
   > span { font-size: 12px; color: var(--color-text-secondary); }
 }
+.paper-workflow-heading--centered {
+  justify-content: center; text-align: center; padding: 8px 0; margin-bottom: 20px;
+  h3 { font-size: 18px; font-weight: 600; line-height: 1.6; }
+}
 .paper-workflow-muted, .paper-workflow-number { color: var(--color-text-secondary); font-size: 12px; }
 .paper-workflow-paper { border-bottom: 1px solid var(--color-border-secondary); scroll-margin-top: 8px; }
 .paper-workflow-paper-row {

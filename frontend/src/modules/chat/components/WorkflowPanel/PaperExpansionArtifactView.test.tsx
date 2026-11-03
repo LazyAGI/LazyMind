@@ -131,8 +131,11 @@ it.each(['fast', 'balanced', 'deep'])('shows saved screening changes for %s with
     ] },
   });
   show(screened, [screened, slot('candidate_set', { ...input, papers: [] })]);
-  const changes = await screen.findByRole('region', { name: '本步筛选与补充' });
+  const changes = await screen.findByRole('region', { name: /^候选 .* 篇 · 保留/ });
   expect(changes).toHaveTextContent('候选 2 篇 · 保留 1 篇 · 剔除 1 篇 · 补入 1 篇');
+  expect(within(changes).getByRole('heading', { name: '候选 2 篇 · 保留 1 篇 · 剔除 1 篇 · 补入 1 篇' })).toBeVisible();
+  expect(within(changes).queryByText('本步筛选与补充')).not.toBeInTheDocument();
+  expect(within(changes).queryByText('本步补入 1 篇')).not.toBeInTheDocument();
   expect(changes).toHaveTextContent('New source');
   expect(within(changes).getByText('补齐方法来源')).toBeVisible();
   fireEvent.click(within(changes).getByText('本步剔除 1 篇'));
@@ -152,7 +155,7 @@ it('derives historical screening changes from the earlier candidate snapshot wit
     recommendations: [{ paper_id: 'new', direction: '训练', reason: '已有推荐理由' }],
   });
   show(screened, [screened, slot('candidate_set', input)]);
-  const changes = await screen.findByRole('region', { name: '本步筛选与补充' });
+  const changes = await screen.findByRole('region', { name: /^候选 .* 篇 · 保留/ });
   expect(changes).toHaveTextContent('候选 2 篇 · 保留 1 篇 · 剔除 1 篇 · 补入 1 篇');
   expect(changes).toHaveTextContent('已有推荐理由');
   fireEvent.click(within(changes).getByText('本步剔除 1 篇'));
@@ -164,7 +167,7 @@ it('does not compare an old screening result with candidates from a later run', 
   const later = { ...slot('candidate_set', { ...input, papers: [] }), created_at: '2026-11-03T11:00:00Z' };
   show(screened, [screened, later]);
   expect(await screen.findByText('暂无法获取本步增删明细。')).toBeVisible();
-  expect(screen.queryByRole('region', { name: '本步筛选与补充' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: /^候选 .* 篇 · 保留/ })).not.toBeInTheDocument();
 });
 
 it('keeps the relationship graph in analysis with paper details and citations, without verification controls', async () => {

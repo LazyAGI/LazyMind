@@ -4,8 +4,9 @@ import json
 import re
 import threading
 import time
-from typing import Literal
+from typing import Annotated, Literal
 
+from pydantic import Field
 from typing_extensions import NotRequired, TypedDict
 from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.workflow.workflow_manager import _client
@@ -13,7 +14,7 @@ from lazymind.chat.service.academic_reading import academic_request, paper_read_
 
 
 class PaperAnalysis(TypedDict):
-    """Analysis authored by the model; identity and state come from the server."""
+    """Only paper_id and analysis text. Evidence belongs in the submit tool's top-level claims array."""
 
     paper_id: str
     seed_relation: NotRequired[str]
@@ -34,8 +35,11 @@ class PaperRecommendation(TypedDict):
 
 
 class SourceEvidence(TypedDict):
-    paper_id: str
-    positions: list[int]
+    paper_id: Annotated[str, Field(description='Full ID of the paper whose content is cited by these positions.')]
+    positions: Annotated[list[int], Field(description=(
+        '1..5 zero-based blocks actually read from this paper in its current source version. '
+        'Copy from academic_read_paper.positions or record.reading[paper_id].positions. '
+        'Never use another paper\'s blocks, PDF page numbers or guessed positions for unavailable text.'))]
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source, handler):
@@ -45,12 +49,16 @@ class SourceEvidence(TypedDict):
 
 
 class ClaimEvidence(TypedDict):
-    """Source positions supporting an entire published analysis field."""
+    """One entry in top-level claims, alongside analyses; never nest claims inside a PaperAnalysis."""
 
     paper_id: str
     field: Literal['seed_relation', 'direction_relation', 'key_contribution']
-    positions: list[int]
-    evidence: NotRequired[list[SourceEvidence]]
+    positions: Annotated[list[int], Field(description=(
+        'Read blocks from this claim\'s paper_id only. For cross-paper support, use evidence with each '
+        'source\'s own paper_id and positions; put [] here if only other papers are cited.'))]
+    evidence: NotRequired[Annotated[list[SourceEvidence], Field(description=(
+        'Cross-paper support: separate sources by paper_id, each with its own actual read positions. '
+        'When supplied, this list is the complete set of evidence for the claim.'))]]
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source, handler):
@@ -113,12 +121,22 @@ class ResearchStructure(TypedDict):
 
 
 class ClueResolution(TypedDict):
-    source_paper_id: str
-    name: str
-    status: Literal['resolved', 'excluded', 'blocked', 'open']
-    paper_id: NotRequired[str]
+    """Resolve a named clue to a paper, including a mechanism introduced by its source paper."""
+
+    source_paper_id: Annotated[str, Field(description='Copy the full source_paper_id of the prepared named clue.')]
+    name: Annotated[str, Field(description='Copy the prepared clue name exactly; a mechanism name is not a paper ID.')]
+    status: Annotated[Literal['resolved', 'excluded', 'blocked', 'open'], Field(description=(
+        'resolved requires paper_id from the final paper set. For open, blocked or excluded, omit paper_id '
+        'and describe the unresolved identity, material obstacle or exclusion in reason.'))]
+    paper_id: NotRequired[Annotated[str, Field(description=(
+        'Required only for resolved clues; copy a full paper_id from bound_inputs.candidate_set.papers. '
+        'For the source paper\'s own mechanism (for example CSA2), use source_paper_id and cite its '
+        'key_contribution through claims. Do not invent an ID, add a separate paper or exclude an own mechanism. '
+        'Omit this field entirely for open, blocked and excluded clues.'))]]
     reason: str
-    query_ids: list[str]
+    query_ids: Annotated[list[str], Field(description=(
+        'Copy full source_queries[].id strings from academic_expansion_context verbatim; '
+        'never abbreviate to an eight-character prefix or invent receipt IDs.'))]
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source, handler):
@@ -136,7 +154,8 @@ class Investigation(TypedDict):
     conclusion: str
     paper_ids: list[str]
     queries: list[str]
-    query_ids: NotRequired[list[str]]
+    query_ids: NotRequired[Annotated[list[str], Field(description=(
+        'Full source_queries[].id strings copied verbatim from academic_expansion_context; no shortened IDs.'))]]
     relation_ids: NotRequired[list[str]]
     unresolved_clues: list[str]
     gaps: list[str]
@@ -223,16 +242,16 @@ def _read_expansion_context(expansion_id):
     return _call('GET', '/expansions/' + quote(expansion_id, safe=''))
 
 
-def academic_expansion_context(expansion_id: str):
+def academic_expansion_context():
     """Read current papers, frozen binding catalogs and reading coverage; full history remains a workspace resource.
 
+    The current expansion is supplied by the Workflow binding; do not pass expansion_id to academic tools.
     Large-history query summaries preserve receipt IDs, identities, statuses and dates; full_context_resource
     retains exact pagination cursors and full receipts when source continuation needs them.
     """
     from lazymind.chat.engine.subagent.context import require_context
     from lazymind.common.token_estimation import estimate_tokens
-    _check_expansion(expansion_id)
-    full = _read_expansion_context(expansion_id)
+    full = _read_expansion_context(_expansion_id())
     ctx = require_context()
     bound_inputs = {}
     bound_paper_ids = set()
@@ -289,15 +308,16 @@ def academic_expansion_context(expansion_id: str):
     }
 
 
-def academic_search_papers(expansion_id: str, query: str = '', max_results: int = 10,
+def academic_search_papers(query: str = '', max_results: int = 10,
                            sources: list[str] | None = None,
                            mode: Literal['keyword', 'references', 'citations'] = 'keyword', paper_id: str = '',
                            cursor: str = ''):
     """Search openalex/arxiv/sciverse/web, or an OpenAlex citation graph; 1..20 results per source.
 
-    Continue a source using only expansion_id and that source's returned next_cursor.
+    The current expansion comes from the Workflow binding. Continue a source using only cursor,
+    set to that source's returned next_cursor. Do not pass expansion_id.
     """
-    _check_expansion(expansion_id)
+    expansion_id = _expansion_id()
     if cursor:
         return _call('POST', '/papers:search', {'expansion_id': expansion_id, 'cursor': cursor})
     if not 1 <= max_results <= 20:
@@ -307,7 +327,7 @@ def academic_search_papers(expansion_id: str, query: str = '', max_results: int 
     return _call('POST', '/papers:search', payload)
 
 
-def academic_read_paper(expansion_id: str, paper_id: str = '', cursor: str = '',
+def academic_read_paper(paper_id: str = '', cursor: str = '',
                         keywords: list[str] | None = None, page_start: int = 0, page_end: int = 0,
                         positions: list[int] | None = None,
                         view: Literal['content', 'references'] = 'content',
@@ -315,21 +335,16 @@ def academic_read_paper(expansion_id: str, paper_id: str = '', cursor: str = '',
     """Read real content or original bibliography clues without importing a library entry.
 
     references without selectors lists raw clues only. Select reference_keys or keywords (up to five per request)
-    to resolve identities and register selected references. Continue with only expansion_id and cursor.
+    to resolve identities and register selected references. Continue with only cursor.
+    The current expansion comes from the Workflow binding; do not pass expansion_id.
     positions are zero-based block positions, not PDF page numbers. References do not count as full-text reading.
     max_results bounds each response (content 1..5, default 5; references 1..20, default 5).
     """
-    _check_expansion(expansion_id)
+    expansion_id = _expansion_id()
     payload = paper_read_payload(
         paper_id, cursor, view=view, keywords=keywords, page_start=page_start, page_end=page_end,
         positions=positions, reference_keys=reference_keys, max_results=max_results)
     return reading_observation(_call('POST', '/paper-contents:read', {**payload, 'expansion_id': expansion_id}))
-
-
-def _check_expansion(expansion_id):
-    from lazymind.chat.engine.subagent.context import get_context
-    if get_context() is not None and expansion_id != _expansion_id():
-        _invalid('expansion_id must match the current Workflow task')
 
 
 def _result_body(result):
@@ -537,9 +552,10 @@ def academic_publish_stage(paper_ids: list[str], decisions: list[str], gaps: lis
     body, _ = _canonical_input(body)
     _validate_stage_seeds(body, context)
     if investigation is not None:
-        _validate_investigation(investigation, body)
-        _validate_clue_resolutions(investigation, context['record'].get('preparation', {}),
-                                   {row['id']: row for row in context.get('source_queries', [])})
+        _, errors = _validate_investigation(investigation, body, context['record'].get('preparation', {}),
+                                            {row['id']: row for row in context.get('source_queries', [])})
+        if errors:
+            _invalid('Correct all investigation fields before resubmitting:\n' + '\n'.join(errors))
         body['investigation'] = investigation
     body.update(decisions=decisions, gaps=gaps, metrics=_model_metrics(),
                 directions=[{'name': row['name'], 'question': row['question']}
@@ -695,12 +711,16 @@ def _validate_structure(structure, result):
         seen.add(node['paper_id'])
 
 
-def _validate_investigation(investigation, result):
+def _validate_investigation(investigation, result, preparation, query_receipts):
     if not isinstance(investigation, list):
         _invalid('investigation must be an array')
     allowed = {row['paper']['paper_id'] for row in result['papers']}
+    prepared = {(clue['source_paper_id'], clue['name']): clue
+                for clue in preparation.get('named_clues', [])}
+    errors = []
+    recorded_queries = {row['query'] for row in query_receipts.values()}
     seen = set()
-    for item in investigation:
+    for item_index, item in enumerate(investigation):
         if (not isinstance(item, dict) or item.get('kind') not in {'predecessor', 'successor', 'peer'}
                 or item.get('status') not in {'resolved', 'excluded', 'blocked', 'open'}
                 or item.get('direction') not in result['selected_directions']
@@ -713,42 +733,51 @@ def _validate_investigation(investigation, result):
                 _invalid('investigation.' + key + ' must be a string array')
         if not set(item['paper_ids']).issubset(allowed):
             _invalid('investigation paper_ids must belong to the final paper set')
+        unknown_queries = [key for key in item.get('query_ids', []) if key not in query_receipts]
+        if unknown_queries:
+            errors.append(f'investigation[{item_index}].query_ids: {unknown_queries!r} are not actual task query '
+                          'receipt IDs; copy full source_queries[].id strings without abbreviation')
+        if any(query not in recorded_queries for query in item['queries']):
+            errors.append(f'investigation[{item_index}].queries must use actual recorded queries; '
+                          'use query_ids for citation queries')
         resolutions = item.get('clue_resolutions', [])
         if not isinstance(resolutions, list):
             _invalid('investigation.clue_resolutions must be an array')
-        for resolution in resolutions:
+        for clue_index, resolution in enumerate(resolutions):
+            path = f'investigation[{item_index}].clue_resolutions[{clue_index}]'
             if (not isinstance(resolution, dict)
                     or not all(isinstance(resolution.get(key), str) and resolution[key].strip()
                                for key in ('source_paper_id', 'name', 'reason'))
                     or resolution.get('status') not in {'resolved', 'excluded', 'open', 'blocked'}
                     or not isinstance(resolution.get('query_ids'), list)
                     or any(not isinstance(key, str) for key in resolution['query_ids'])):
-                _invalid('clue_resolutions require an original source, name, status, reason and query_ids')
+                errors.append(f'{path}: requires an original source_paper_id, name, status, reason and query_ids')
+                continue
+            label = f"{path} ({resolution['name']!r})"
+            if (resolution['source_paper_id'], resolution['name']) not in prepared:
+                errors.append(f'{label}: source_paper_id={resolution["source_paper_id"]!r} and name must '
+                              'exactly identify a prepared named clue')
+            unknown_queries = [key for key in resolution['query_ids'] if key not in query_receipts]
+            if unknown_queries:
+                errors.append(f'{label}.query_ids: {unknown_queries!r} are not actual task query receipt IDs; '
+                              'copy full source_queries[].id strings without abbreviation')
             if resolution['status'] == 'resolved':
                 if resolution.get('paper_id') not in allowed:
-                    _invalid(f"clue {resolution['name']!r}: resolved clues require a paper_id in the final paper set")
-            elif resolution.get('paper_id'):
-                _invalid(f"clue {resolution['name']!r}: only resolved clues may carry paper_id; "
-                         'omit paper_id for this status and describe exclusions or obstacles in reason')
+                    errors.append(f'{label}.paper_id={resolution.get("paper_id")!r}: resolved clues require '
+                                  'a full paper_id from the final paper set. For the source paper\'s own '
+                                  'mechanism, use its source_paper_id and key_contribution claim; '
+                                  'do not create a separate paper or change the status to bypass this check')
+            elif 'paper_id' in resolution:
+                errors.append(f'{label}.paper_id={resolution["paper_id"]!r}: status={resolution["status"]!r} '
+                              'must omit paper_id; describe the unresolved identity, exclusion or obstacle in reason')
         if any(not value.strip() for key in ('gaps', 'unresolved_clues') for value in item[key]):
             _invalid('investigation gaps and unresolved clues must identify concrete remaining work')
         if item['status'] in {'open', 'blocked'} and not (
                 item['gaps'] or item['unresolved_clues']
-                or any(row['status'] in {'open', 'blocked'} for row in resolutions)):
+                or any(isinstance(row, dict) and row.get('status') in {'open', 'blocked'} for row in resolutions)):
             _invalid('unfinished investigation requires specific gaps or unresolved clues')
         seen.add(item['question_id'])
-
-
-def _validate_clue_resolutions(investigation, preparation, query_receipts):
-    prepared = {(clue['source_paper_id'], clue['name']): clue
-                for clue in preparation.get('named_clues', [])}
-    for item in investigation:
-        for resolution in item.get('clue_resolutions', []):
-            if (resolution['source_paper_id'], resolution['name']) not in prepared:
-                _invalid('clue_resolutions must identify a prepared named clue by its source_paper_id and name')
-            if any(key not in query_receipts for key in resolution['query_ids']):
-                _invalid('clue_resolutions.query_ids must use actual task query receipts')
-    return prepared
+    return prepared, errors
 
 
 def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[PaperRelation],
@@ -762,6 +791,16 @@ def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[Pap
     semantic verification step. Deep expansion uses the frozen paper IDs and directions; omit
     research_structure and selection_reasons. Other paths supply both. Never drop papers for missing full text.
     Unfinished investigations must describe actual material limitations or exhausted research resources.
+    The expansion is supplied by the Workflow binding; do not pass expansion_id.
+    For each clue_resolution, resolved requires a full paper_id in the final set; all other statuses omit it.
+    A source paper's own mechanism resolves to source_paper_id, supported by its key_contribution claim.
+
+    Args:
+        analyses: Paper IDs and analysis text only. Do not put claims or evidence inside these objects.
+        claims: Top-level evidence array alongside analyses. Each entry identifies paper_id, field and
+            that paper's read positions. Use evidence for cross-paper sources with separate paper IDs and positions.
+        investigation: Research questions and named-clue dispositions. Copy complete source_queries[].id strings
+            from task context into query_ids; never abbreviate IDs.
     """
     from lazymind.chat.engine.subagent.context import require_context
     ctx = require_context()
@@ -787,17 +826,8 @@ def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[Pap
             for row in investigation
         ]
     _validate_structure(research_structure, result)
-    _validate_investigation(investigation, result)
     query_receipts = {row['id']: row for row in context.get('source_queries', [])}
-    prepared_clues = _validate_clue_resolutions(investigation, preparation, query_receipts)
-    bound_query_ids = {key for item in investigation for key in item.get('query_ids', [])}
-    bound_query_ids.update(key for item in investigation for row in item.get('clue_resolutions', [])
-                           for key in row['query_ids'])
-    for item in investigation:
-        if any(key not in query_receipts for key in item.get('query_ids', [])):
-            _invalid('investigation.query_ids must use actual query receipt IDs returned by task context')
-        if any(query not in {row['query'] for row in query_receipts.values()} for query in item['queries']):
-            _invalid('investigation.queries must use actual recorded queries; use query_ids for citation queries')
+    prepared_clues, errors = _validate_investigation(investigation, result, preparation, query_receipts)
     allowed = set(supplied)
     checks, seen = [], set()
     for claim in claims or []:
@@ -842,20 +872,40 @@ def academic_submit_relations(analyses: list[PaperAnalysis], relations: list[Pap
         if not set(item.get('relation_ids', [])).issubset(relation_ids):
             _invalid('investigation.relation_ids must refer to this analysis revision')
     versions = _source_versions(contents)
+    reading = context['record'].get('reading', {})
+    by_id = {row['paper_id']: row for row in versions}
+    claim_count = len(claims or [])
+    for index, row in enumerate(checks):
+        path = f'claims[{index}]' if index < claim_count else f'relations[{index - claim_count}]'
+        for ref in row['evidence']:
+            identity = ref['paper_id']
+            label = f'{path}, paper_id={identity!r}'
+            version, read = by_id[identity], reading.get(identity, {})
+            if version['status'] != 'ready':
+                errors.append(f'{label}: content status={version["status"]!r}; there is no ready source to cite. '
+                              'Read available content before citing, or retain the material limitation without '
+                              'inventing positions')
+            elif not read:
+                errors.append(f'{label}: no recorded reading; call academic_read_paper for this paper before citing')
+            elif (read.get('content_hash') != version['content_hash']
+                  or read.get('source_version', '') != version['source_version']):
+                errors.append(f'{label}: source version changed since the recorded reading; '
+                              'reread the relevant content with academic_read_paper before citing')
+            else:
+                unread = sorted(set(ref['positions']) - set(read.get('positions', [])))
+                if unread:
+                    errors.append(f'{label}: unread positions={unread}; recorded positions={read.get("positions", [])}. '
+                                  'Positions belong only to this paper. Read the relevant blocks before citing; '
+                                  'put other papers\' evidence under their own paper_id')
+            ref.update(content_hash=version['content_hash'], source_version=version['source_version'])
+    if errors:
+        _invalid('Correct all submission fields before resubmitting:\n' + '\n'.join(errors))
+    bound_query_ids = {key for item in investigation for key in item.get('query_ids', [])}
+    bound_query_ids.update(key for item in investigation for row in item.get('clue_resolutions', [])
+                           for key in row['query_ids'])
     payload = {'input': result, 'selection': selection, 'claims': claims or [], 'relations': relations,
                'research_structure': research_structure, 'investigation': investigation, 'source_versions': versions,
                'source_queries': [query_receipts[key] for key in sorted(bound_query_ids)]}
-    reading = context['record'].get('reading', {})
-    by_id = {row['paper_id']: row for row in versions}
-    for row in checks:
-        for ref in row['evidence']:
-            identity = ref['paper_id']
-            version, read = by_id[identity], reading.get(identity, {})
-            if (version['status'] != 'ready' or read.get('content_hash') != version['content_hash']
-                    or read.get('source_version', '') != version['source_version']
-                    or not set(ref['positions']).issubset(read.get('positions', []))):
-                _invalid('citations require actual read positions from the current source version: ' + identity)
-            ref.update(content_hash=version['content_hash'], source_version=version['source_version'])
     field_claims = [row for row in checks if row['field'] != 'relation']
     # Preserve authored findings; citation validation does not assign scientific verdicts.
     relation_evidence = {row['claim_id']: row['evidence'] for row in checks if row['field'] == 'relation'}
