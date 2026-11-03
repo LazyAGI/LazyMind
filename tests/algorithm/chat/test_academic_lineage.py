@@ -975,7 +975,8 @@ async def test_large_frozen_inputs_use_existing_path_transport_through_context_c
                           remote_input_transports=worker._resolved_input_transports(contract, inputs))
         assert inputs['expansion_id'] == 'exp'
         prompt = _workflow_material_bindings_section(ctx.params)
-        assert inputs[material] in prompt
+        bindings = json.loads(prompt.rsplit('\n', 1)[-1])
+        assert bindings[material] == {'type': 'json', 'kind': 'path', 'path': inputs[material]}
         assert 'Full frozen metadata' not in prompt
         return inputs[material]
 
