@@ -30,6 +30,22 @@ describe("browser Assistant Bridge session synchronization", () => {
     Reflect.deleteProperty(window, "lazymindDesktop");
   });
 
+  it("forces installation discovery only on an explicit refresh in Desktop", async () => {
+    const status = vi.fn().mockResolvedValue({ agents: {} });
+    Object.defineProperty(window, "lazymindDesktop", { configurable: true, value: {
+      agentIntegrationStatuses: status, assistantSessionClear: vi.fn().mockResolvedValue({ ok: true }),
+    } });
+    await agentIntegrationStatuses();
+    await agentIntegrationStatuses(true);
+    expect(status.mock.calls).toEqual([[false], [true]]);
+  });
+
+  it("passes an explicit refresh to the browser Assistant Bridge", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ agents: {} }), { status: 200 }));
+    await agentIntegrationStatuses(true);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:19091/v1/agents?refresh_installations=true", expect.anything());
+  });
+
   it.each([
     { name: "slow DSH status", request: () => agentIntegrationStatuses(), delay: 20_000, ok: true },
     { name: "slow DSH disconnect", request: () => agentIntegrationAction("deepseek-harness", "disconnect"), delay: 20_000, ok: true },

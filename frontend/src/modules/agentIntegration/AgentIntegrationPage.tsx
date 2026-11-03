@@ -157,7 +157,7 @@ export default function AgentIntegrationPage() {
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef<Promise<void> | null>(null);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((refreshInstallations = false) => {
     if (refreshInFlight.current) return refreshInFlight.current;
     const version = ++refreshVersion.current;
     const isCurrent = () => refreshVersion.current === version;
@@ -172,7 +172,7 @@ export default function AgentIntegrationPage() {
         else localBridgeUnavailable = true;
       };
       try {
-        const result = await retryBridgeResult(agentIntegrationStatuses);
+        const result = await retryBridgeResult(() => agentIntegrationStatuses(refreshInstallations));
         if (!isCurrent()) return;
         if (result.ok) setStatuses(result.data);
         else recordBridgeFailure(result.reason);
@@ -350,7 +350,9 @@ export default function AgentIntegrationPage() {
       setAction(key);
       const result = await agentIntegrationAction(agent, nextAction);
       if (!result.ok) {
-        setError(agent === "deepseek-harness" ? t("agentIntegration.dshErrors.operation_failed") : result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason);
+        const detail = agent === "deepseek-harness" ? t("agentIntegration.dshErrors.operation_failed") : result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason;
+        if (agent === "codex" && restartConfirmed) throw new Error(detail);
+        setError(detail);
         return;
       }
       invalidateRefresh();
@@ -373,6 +375,7 @@ export default function AgentIntegrationPage() {
       return result.data;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      if (agent === "codex" && restartConfirmed) throw cause;
     } finally {
       pendingAgentActions.current.delete(agent);
       setAction((current) => current === key ? "" : current);
@@ -441,7 +444,7 @@ export default function AgentIntegrationPage() {
         </div>
         <Button
           icon={<ReloadOutlined />}
-          onClick={() => void refresh()}
+          onClick={() => void refresh(true)}
           loading={loading || refreshing}
           disabled={loading || refreshing}
         >
@@ -502,7 +505,7 @@ export default function AgentIntegrationPage() {
                       setExternalConfigurationAgent(target);
                       if (target === "workbuddy") setPendingLoginAgent(target);
                     }}
-                    onRefresh={refresh}
+                    onRefresh={() => refresh(true)}
                     t={t}
                   />
                 ))}
@@ -575,7 +578,7 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 }
 
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
-  if (["codex", "workbuddy"].includes(agent) && status.issue && ["startup_unavailable", "installation_unavailable", "cdp_unavailable"].includes(status.issue.code)) {
+  if (["codex", "workbuddy"].includes(agent) && status.issue && ["startup_unavailable", "installation_unavailable", "cdp_unavailable", ...(agent === "codex" ? ["capability_unavailable"] : [])].includes(status.issue.code)) {
     return t(`agentIntegration.connectionErrors.${status.issue.code}`);
   }
   if (agent === "codex" && status.issue && !status.connection?.control_ready) return t("agentIntegration.codexInstallGuide.controlUnavailableDescription");
