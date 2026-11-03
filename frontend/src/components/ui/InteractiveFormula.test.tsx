@@ -16,6 +16,12 @@ it('prefers a paper definition over a built-in meaning',()=>{
  fireEvent.click(screen.getByRole('button',{name:String.raw`Symbol: \times`}));
  expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Cartesian product in this paper');
 });
+it.each([String.raw`\left<x,y\right>`,String.raw`\big<x\big>`])('keeps sized angle delimiters as syntax, not comparison buttons: %s',latex=>{
+ const view=render(<InteractiveFormula latex={latex} sourceKey="delimiters" definitions={[]} evidence={[]} onNavigate={vi.fn()}/>);
+ expect(view.container.querySelector('.pdf-interactive-equation .katex')).toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Symbol: <'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Symbol: >'})).not.toBeInTheDocument();
+});
 it('binds a repaired prime expression to the same existing definition',()=>{
  render(<InteractiveFormula latex={String.raw`L(w')`} originalLatex={String.raw`L(w^{\prime})`} sourceKey="repair" definitions={[{symbol:String.raw`L(w^{\prime})`,meaning:'Loss after the update',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
  fireEvent.click(screen.getByRole('button',{name:"Symbol: L(w')"}));
@@ -31,6 +37,8 @@ it.each([
  [String.raw`x \in \mathbb{R}`,String.raw`\mathbb{R}`,'real numbers'],
  [String.raw`\sqrt{x+y}`,String.raw`\sqrt{x+y}`,'square root'],
  [String.raw`\frac{x}{y}`,String.raw`\frac{x}{y}`,'numerator'],
+ [String.raw`\sum\limits_{i=1}^{n} x_i`,String.raw`\sum\limits_{i=1}^{n}`,'Summation'],
+ [String.raw`\int\nolimits_0^1 x`,String.raw`\int\nolimits_0^1`,'Integral'],
 ])('provides general notation without a generated explanation: %s',(latex,symbol,meaning)=>{
  const view=render(<InteractiveFormula latex={latex} sourceKey="notation" definitions={[]} evidence={[]} onNavigate={vi.fn()}/>);
  expect(view.container.querySelector('.pdf-interactive-equation .katex')).toBeInTheDocument();

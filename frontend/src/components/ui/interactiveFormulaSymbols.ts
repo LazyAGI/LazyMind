@@ -92,6 +92,11 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[],incl
     if(latex[next]==='{')end=groupEnd(next);
     else end=atomEnd(next);
    }
+   if(includeBuiltins&&isBuiltinFormulaSymbol(command[0])){
+    // TeX requires limit controls to immediately follow their operator.
+    const controls=latex.slice(end).match(/^(?:\s*\\(?:limits|nolimits|displaylimits)(?![A-Za-z]))+/);
+    if(controls)end+=controls[0].length;
+   }
   }else if(latex[offset]==='{')end=groupEnd(offset);
   else end=offset+1;
   if(end<=offset)return offset+1;
@@ -113,6 +118,11 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[],incl
    const command=latex.slice(i).match(/^\\([a-zA-Z]+|.)/);
    if(!command)return empty;
    const name=command[1];
+   if(/^(?:left|right|big[lrm]?|Big[lrm]?|bigg[lrm]?|Bigg[lrm]?)$/.test(name)){
+    const delimiter=skip(i+command[0].length);
+    const token=latex.slice(delimiter).match(/^\\(?:[A-Za-z]+|.)|^./);
+    i=delimiter+(token?.[0].length||0);continue;
+   }
    if(['begin','end','tag','label'].includes(name)){
     let next=skip(i+command[0].length);if(latex[next]==='*')next=skip(next+1);
     const envEnd=groupEnd(next);const env=latex.slice(next+1,envEnd-1);

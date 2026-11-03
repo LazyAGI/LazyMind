@@ -95,7 +95,7 @@ const entries: Entry[] = [
 
 const glossary = new Map(entries.flatMap(([aliases, en, zh]) => aliases.split(' ').map(alias => [alias, {en, zh}] as const)));
 export function formulaBuiltinMeaning(latex: string, language: 'en' | 'zh'): string | undefined {
- const compact = latex.trim().replace(/\s+/g, '');
+ const compact = latex.trim().replace(/\\(?:limits|nolimits|displaylimits)(?![A-Za-z])/g, '').replace(/\s+/g, '');
  const name = compact.replace(/^\\(?:operatorname|mathrm|mathsf|text)\{([A-Za-z]+)\}$/, '$1');
  const direct = glossary.get(name);
  if (direct) return direct[language];
