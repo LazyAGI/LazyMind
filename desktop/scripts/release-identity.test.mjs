@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertUniqueReleaseVersion } from "./validate-release-identity.mjs";
 
 test("another tag for the same package version is rejected before any asset upload", () => {
@@ -37,20 +38,29 @@ test("release publication serializes across tag aliases and checks identity befo
 });
 
 test("the actual CLI checks every API page and fails closed on API failure", (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "lm-release-identity-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "lm release identity-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const mockGH = path.join(root, "gh");
+  const mockGH = path.join(root, "gh-fixture.mjs");
   const calls = path.join(root, "calls.json");
-  writeFileSync(mockGH, `#!/usr/bin/env node
-require('node:fs').writeFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)));
-if (process.env.MOCK_FAIL) process.exit(1);
-process.stdout.write(process.env.MOCK_PAGES);
+  writeFileSync(mockGH, `
+import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+childProcess.execFileSync = (command, args, options) => {
+  assert.equal(command, 'gh');
+  assert.equal(options.encoding, 'utf8');
+  writeFileSync(process.env.CALLS, JSON.stringify(args));
+  if (process.env.MOCK_FAIL) throw new Error('fixture GitHub API failure');
+  return process.env.MOCK_PAGES;
+};
+syncBuiltinESMExports();
 `);
-  chmodSync(mockGH, 0o755);
   const run = (pages, fail = "") => execFileSync(process.execPath, [
-    new URL("./validate-release-identity.mjs", import.meta.url).pathname,
+    "--import", pathToFileURL(mockGH).href,
+    fileURLToPath(new URL("./validate-release-identity.mjs", import.meta.url)),
     "--tag", "v1.2.3-alpha.2", "--repository", "fixture/repository",
-  ], { stdio: "pipe", env: { ...process.env, PATH: `${root}${path.delimiter}${process.env.PATH}`,
+  ], { stdio: "pipe", env: { ...process.env,
     CALLS: calls, MOCK_PAGES: JSON.stringify(pages), MOCK_FAIL: fail } });
   assert.doesNotThrow(() => run([[{ tag_name: "v1.2.3-alpha.1" }], []]));
   const args = JSON.parse(readFileSync(calls, "utf8"));

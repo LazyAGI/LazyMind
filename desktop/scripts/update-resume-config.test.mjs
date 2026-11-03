@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import * as build from "./prepare-update-build-config.mjs";
 
 function fixture() {
@@ -50,7 +51,7 @@ test("verification CLI re-evaluates signing/version and executes only helper con
     cwd: new URL("../../local/local-runtime-manager/", import.meta.url),
     env: { ...process.env, GOPROXY: "off", GOSUMDB: "off", GOCACHE: path.join(os.tmpdir(), "lazymind-update-gocache") }, timeout: 60000,
   });
-  const args = [new URL("./prepare-update-build-config.mjs", import.meta.url).pathname, "--platform", "windows", "--arch", "amd64", "--signing-mode", "authenticode", "--package", packagePath, "--verify-helper", helper];
+  const args = [fileURLToPath(new URL("./prepare-update-build-config.mjs", import.meta.url)), "--platform", "windows", "--arch", "amd64", "--signing-mode", "authenticode", "--package", packagePath, "--verify-helper", helper];
   const options = { encoding: "utf8", env: { ...process.env, LAZYMIND_DESKTOP_UPDATE_CONFIG: publicPath }, stdio: ["ignore", "pipe", "pipe"] };
   assert.equal(execFileSync(process.execPath, args, options).trim(), "");
   writeFileSync(packagePath, JSON.stringify({ version: "2.0.0" }));

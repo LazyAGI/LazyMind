@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { prepareUpdateBuildConfig, readUpdateBuildConfig } from "./prepare-update-build-config.mjs";
 
 function options() {
@@ -61,7 +62,7 @@ test("the build CLI emits only the public configuration consumed by both platfor
   const root = mkdtempSync(path.join(os.tmpdir(), "lm-update-config-")); t.after(() => rmSync(root, { recursive: true, force: true }));
   const configPath = path.join(root, "public.json"), packagePath = path.join(root, "package.json");
   const input = options(); writeFileSync(configPath, JSON.stringify(input.configuration)); writeFileSync(packagePath, JSON.stringify({ version: input.packageVersion }));
-  const output = execFileSync(process.execPath, [new URL("./prepare-update-build-config.mjs", import.meta.url).pathname,
+  const output = execFileSync(process.execPath, [fileURLToPath(new URL("./prepare-update-build-config.mjs", import.meta.url)),
     "--platform", "darwin", "--arch", "arm64", "--signing-mode", "developer-id", "--package", packagePath],
     { encoding: "utf8", env: { ...process.env, LAZYMIND_DESKTOP_UPDATE_CONFIG: configPath } }).trim();
   const value = JSON.parse(Buffer.from(output, "base64").toString("utf8"));

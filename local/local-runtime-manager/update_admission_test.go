@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 
 func TestRuntimeUpdateScopeIncludesResolvedExternalStores(t *testing.T) {
 	f := newUpdateStateFixture(t)
-	external := t.TempDir() + "/outside.db"
+	external := filepath.Join(t.TempDir(), "outside.db")
 	f.cfg.UpdateStorage.Databases["auth"] = external
 	scope, err := runtimeUpdateScope(f.cfg, f.paths)
 	if err != nil {

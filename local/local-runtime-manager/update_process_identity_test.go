@@ -113,12 +113,15 @@ func TestUpdateProcessNativeScanRetainsIdentityWithoutRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exe, err = filepath.EvalSymlinks(exe)
+	resolvedExe, err := filepath.EvalSymlinks(exe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	paths := RuntimePaths{RepoRoot: root, RuntimeRoot: root, BuildRoot: filepath.Dir(exe)}
+	// Match either the launch spelling or the OS-resolved executable path.
+	// Windows CIM can retain a short path while EvalSymlinks expands it;
+	// macOS proc_pidpath resolves aliases such as /var -> /private/var.
+	paths := RuntimePaths{RepoRoot: root, RuntimeRoot: root, BuildRoot: filepath.Dir(exe), ResourcesRoot: filepath.Dir(resolvedExe)}
 	records, err := scanLocalRuntimeProcesses(paths)
 	if err != nil {
 		t.Fatal(err)
@@ -131,5 +134,5 @@ func TestUpdateProcessNativeScanRetainsIdentityWithoutRegistry(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("native scan did not find isolated test child")
+	t.Fatalf("native scan did not find isolated test child pid=%d; launch=%q resolved=%q records=%d", actor.PID, exe, resolvedExe, len(records))
 }

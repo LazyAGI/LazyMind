@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import util from "node:util";
 import vm from "node:vm";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const configPath = new URL("../electron/electron-builder.config.cjs", import.meta.url);
 const require = createRequire(configPath);
@@ -65,7 +66,7 @@ function builderFixture(t, mode = "adhoc") {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(configPath, "utf8"), {
     module,
-    __dirname: path.dirname(configPath.pathname),
+    __dirname: path.dirname(fileURLToPath(configPath)),
     require: (name) => {
       if (name === "node:child_process") return { execFile };
       if (name === "../scripts/verify-macos-privacy-identity.cjs") {
@@ -165,7 +166,7 @@ test("release CLI decides canonical version, channel and prerelease status for a
     ["v1.2.3rc1", "1.2.3-rc.1", "rc"], ["v1.2.3-rc.1", "1.2.3-rc.1", "rc"],
   ]) {
     fs.writeFileSync(packagePath, JSON.stringify({ name: "fixture", version: "0.0.0" }));
-    const output = execFileSync(process.execPath, [new URL("./resolve-release-version.mjs", import.meta.url).pathname,
+    const output = execFileSync(process.execPath, [fileURLToPath(new URL("./resolve-release-version.mjs", import.meta.url)),
       "--tag", tag, "--package", packagePath], { encoding: "utf8" });
     const values = Object.fromEntries(output.trim().split("\n").map((line) => line.split("=")));
     assert.equal(values.package_version, version, tag);
