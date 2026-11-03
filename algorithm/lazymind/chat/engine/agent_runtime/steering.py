@@ -35,6 +35,26 @@ class SteeringInterruptedError(BaseException):
     """
 
 
+def continue_before_invocation(plan: AgentRunPlan, items: list[SteeringInput]) -> AgentRunPlan:
+    """Apply guidance to a host-only reply before the first model call."""
+    import lazyllm
+
+    if not items:
+        raise ValueError('continuation requires user guidance')
+    # Tool discovery may already have seeded history before the first model
+    # call. Keep that same list; FunctionCall also uses it via setdefault.
+    workspace = lazyllm.locals['_lazyllm_agent'].setdefault('workspace', {})
+    history = workspace.setdefault('history', list(plan.history))
+    history.append({'role': 'user', 'content': plan.prompt.current_input})
+    guidance = render_steering_context(items)
+    return replace(
+        plan,
+        history=history,
+        prompt=replace(plan.prompt, current_input=guidance, input_content=guidance,
+                       input_title='New user guidance'),
+    )
+
+
 def continue_in_workspace(
     plan: AgentRunPlan, items: list[SteeringInput], assistant_text: str,
 ) -> AgentRunPlan:

@@ -24,6 +24,26 @@ when_to_use: >
   delivery mode: static or dynamic.
 
 runtime:
+  clarification_fields:
+    - id: image_goal
+      label: 图片主体或修改要求
+      question: 想生成什么图片，或对原图做什么修改？
+      reason: 需要明确主体或修改要求，才能继续当前图片任务。
+      required: true
+      type: text
+      validation: {min_length: 1, max_length: 4000, example: '例如：根据上传角色制作一套动态表情包'}
+    - id: image_count
+      label: 数量
+      question: 希望生成多少张？
+      type: text
+      reason: 普通生成当前支持单张；表情包数量由方案校验和审阅确认。
+      patterns: ['([0-9]+)\s*(?:张|个)(?:图片|图|表情包|动图)']
+      validation: {format: positive_integer, min: 1, example: '例如：3'}
+    - id: caption
+      label: 文案
+      question: 图片上需要显示什么文字？
+      type: text
+      reason: 普通图片未要求时不添加文字，动态表情包沿用已有文案审阅。
   publisher_owned_slots: [route_plan, material_summary, ordinary_prompt, ordinary_output, authoritative_image, edit_contract, edit_candidate]
 
 tool_scripts:

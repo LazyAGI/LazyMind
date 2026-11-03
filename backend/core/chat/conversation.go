@@ -436,17 +436,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "load conversation history failed", http.StatusInternalServerError)
 		return
 	}
-	var workspaceBindingCount int64
 	if _, submitted := raw["ask_answers_structured"]; submitted {
-		if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", convID).Count(&workspaceBindingCount).Error; err != nil {
-			common.ReplyErr(w, "validate workspace question failed", http.StatusInternalServerError)
+		if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
+			common.ReplyErr(w, "invalid request", http.StatusBadRequest)
 			return
-		}
-		if workspaceBindingCount > 0 {
-			if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
-				common.ReplyErr(w, "invalid request", http.StatusBadRequest)
-				return
-			}
 		}
 	}
 	if isSidechat {
@@ -551,6 +544,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
+	if !target.IsRegeneration {
+		if continuation := workflowAskContinuation(histories, askAnswersStructuredFromRaw(raw)); continuation != nil {
+			reqBody["workflow_clarification"] = continuation
+		}
+	}
 	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
 	if !validExecutor {
 		common.ReplyErr(w, "conversation has an unsupported chat executor", http.StatusConflict)

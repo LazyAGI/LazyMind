@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Checkbox, Input, Progress, Radio } from "antd";
+import { Button, Checkbox, Input, Progress, Radio, Select } from "antd";
 import { LeftOutlined, RightOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { RcFile } from "antd/es/upload";
@@ -7,7 +7,20 @@ import ImageUpload, { type ImageUploadImperativeProps } from "../ImageUpload";
 import "./index.scss";
 
 export interface AskQuestion {
+  id?: string;
   text: string;
+  reason?: string;
+  required?: boolean;
+  choice_policy?: "seed" | "subset" | "fixed";
+  boolean_labels?: { yes: string; no: string };
+  validation?: {
+    format?: "integer" | "positive_integer";
+    example?: string;
+    min_length?: number;
+    max_length?: number;
+    min?: number;
+    max?: number;
+  };
   type: "boolean" | "single" | "multiple" | "text";
   choices?: string[];
   allow_other?: boolean;
@@ -21,6 +34,7 @@ export interface AskQuestion {
 }
 
 export interface AskPending {
+  workflow?: { workflow_ref: string; revision_id?: string; startup_request_id: string };
   ask_id: string;
   questions: AskQuestion[];
   /** Optional group title shown at the top of the card */
@@ -40,6 +54,7 @@ export interface AskPending {
 }
 
 export interface AskAnsweredQuestion {
+  id?: string;
   text: string;
   type: string;
   choices: string[]; // original choice list (from AskQuestion.choices)
@@ -147,8 +162,31 @@ function questionIsComplete(
   otherOption: string,
 ): boolean {
   if (!isAnswered(ans, otherOption)) return false;
+  if (answerError(q, ans)) return false;
   if (!attachmentIsActive(q, ans) || !q.attachment?.required) return true;
   return files.length > 0 && files.every((file) => Boolean(file.uri));
+}
+
+function answerError(q: AskQuestion, ans: AnswerState): "required" | "length" | "integer" | null {
+  if (!isAnswered(ans, OTHER_OPTION)) {
+    const hasOther = (ans.type === "single" && ans.value === OTHER_OPTION) ||
+      (ans.type === "multiple" && ans.value.includes(OTHER_OPTION));
+    return q.required || hasOther ? "required" : null;
+  }
+  const text = ans.type === "text" ? ans.value.trim() :
+    (ans.type === "single" && ans.value === OTHER_OPTION) ||
+    (ans.type === "multiple" && ans.value.includes(OTHER_OPTION)) ? ans.otherText.trim() : null;
+  const rule = q.validation;
+  if (text === null || !rule) return null;
+  const length = Array.from(text).length;
+  if (length < (rule.min_length ?? 0) || (rule.max_length && length > rule.max_length)) return "length";
+  if (rule.format) {
+    const number = Number(text);
+    if (!text || !Number.isFinite(number) || !Number.isInteger(number) ||
+      (rule.format === "positive_integer" && number <= 0) ||
+      (rule.min !== undefined && number < rule.min) || (rule.max !== undefined && number > rule.max)) return "integer";
+  }
+  return null;
 }
 
 function attachmentRequirementSatisfied(
@@ -174,7 +212,8 @@ function formatAnswer(
   }
   switch (ans.type) {
     case "boolean":
-      return `${q.text}: ${displayChoice(ans.value ?? "")}`;
+      return `${q.text}: ${ans.value === "__ask_user_yes__" ?
+        q.boolean_labels?.yes || displayChoice(ans.value) : q.boolean_labels?.no || displayChoice(ans.value ?? "")}`;
     case "single": {
       const raw = ans.value ?? "";
       // Resolve the original choice index to get the (possibly edited) label.
@@ -225,7 +264,12 @@ function normalizedAskQuestions(
   }];
 }
 
-export default function AskCard({
+export default function AskCard(props: AskCardProps) {
+  // A new card is a new decision scope, even when it reuses the same component.
+  return <AskCardContent key={props.askPending.ask_id} {...props} />;
+}
+
+function AskCardContent({
   askPending,
   onSubmit,
   disabled = false,
@@ -301,8 +345,18 @@ export default function AskCard({
   }, [askPending.ask_id]);
 
   const currentQ = questions[currentIndex]!;
+  const declaredMaxLength = currentQ.validation?.max_length ?? 0;
+  const maxLength = declaredMaxLength > 0 ? declaredMaxLength : undefined;
   const currentAns = answers[currentIndex]!;
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
+  const currentError = answerError(currentQ, currentAns);
+  const showCurrentError = Boolean(currentError && (currentError !== "required" ||
+    (currentAns.type === "single" && currentAns.value === OTHER_OPTION) ||
+    (currentAns.type === "multiple" && currentAns.value.includes(OTHER_OPTION))));
+  const useSelect = currentQ.choice_policy === "fixed" && (currentQ.choices?.length ?? 0) > 6;
+  const selectOptions = (currentQ.choices ?? []).map((value, index) => ({
+    value, label: displayChoice(currentChoices[index] ?? value),
+  }));
 
   const progressPercent = Math.round(
     (answers.filter((answer, index) => questionIsComplete(
@@ -329,6 +383,8 @@ export default function AskCard({
 
   const handleSubmit = async () => {
     if (isReadOnly || submittingRef.current || needsConfirmation) return;
+    const invalidIndex = questions.findIndex((question, index) => answerError(question, answers[index]!));
+    if (invalidIndex >= 0) { setCurrentIndex(invalidIndex); return; }
     if (questions.some((question, index) => !attachmentRequirementSatisfied(
       question, answers[index]!, attachmentFiles[index] ?? [],
     ))) return;
@@ -346,6 +402,7 @@ export default function AskCard({
     const structured: AskAnswersStructured = {
       ask_id: askPending.ask_id,
       questions: questions.map((q, i) => ({
+        ...(q.id ? { id: q.id } : {}),
         text: q.text,
         type: q.type,
         choices: q.choices ?? [],
@@ -446,6 +503,8 @@ export default function AskCard({
           <span className="ask-wizard__index-badge">{currentIndex + 1}</span>
           <span className="ask-wizard__question-text">{currentQ.text}</span>
         </div>
+        {currentQ.reason && <p className="ask-wizard__description">{currentQ.reason}</p>}
+        {currentQ.validation?.example && <p className="ask-wizard__hint">{currentQ.validation.example}</p>}
 
         <div className="ask-wizard__answer-area">
           {currentQ.type === "boolean" && (
@@ -472,7 +531,7 @@ export default function AskCard({
                   }
                   className="ask-wizard__bool-btn"
                 >
-                  {displayChoice(c)}
+                  {ci === 0 ? currentQ.boolean_labels?.yes || displayChoice(c) : currentQ.boolean_labels?.no || displayChoice(c)}
                 </Button>
               ))}
             </div>
@@ -480,6 +539,21 @@ export default function AskCard({
 
           {currentQ.type === "single" && (
             <div className="ask-wizard__choices">
+              {useSelect ? <Select
+                aria-label={currentQ.text}
+                showSearch optionFilterProp="label" listHeight={192} listItemHeight={32}
+                style={{ width: "100%" }} options={selectOptions}
+                value={currentAns.type === "single" ? currentAns.value : null}
+                disabled={isReadOnly}
+                onChange={(chosen: string) => {
+                  if (chosen !== currentQ.attachment?.when_choice) {
+                    attachmentRefs.current[currentIndex]?.clear();
+                    setAttachmentFiles(previous => ({ ...previous, [currentIndex]: [] }));
+                  }
+                  updateAnswer(currentIndex, { type: "single", value: chosen,
+                    otherText: currentAns.type === "single" ? currentAns.otherText : "" });
+                }}
+              /> : <>
               <Radio.Group
                 value={currentAns.type === "single" ? currentAns.value : null}
                 onChange={(e) => {
@@ -516,6 +590,7 @@ export default function AskCard({
                   </Radio>
                 ))}
               </Radio.Group>
+              </>}
               {currentAns.type === "single" &&
                 currentAns.value === otherOption && (
                   <Input
@@ -528,6 +603,7 @@ export default function AskCard({
                       })
                     }
                     disabled={isReadOnly}
+                    maxLength={maxLength}
                     placeholder={t("chat.askCardOtherPlaceholder")}
                     className="ask-wizard__other-input"
                   />
@@ -577,6 +653,14 @@ export default function AskCard({
 
           {currentQ.type === "multiple" && (
             <div className="ask-wizard__choices">
+              {useSelect ? <Select
+                aria-label={currentQ.text} mode="multiple" showSearch optionFilterProp="label"
+                listHeight={192} listItemHeight={32} style={{ width: "100%" }} options={selectOptions}
+                value={currentAns.type === "multiple" ? currentAns.value : []}
+                disabled={isReadOnly}
+                onChange={(value: string[]) => updateAnswer(currentIndex, { type: "multiple", value,
+                  otherText: currentAns.type === "multiple" ? currentAns.otherText : "" })}
+              /> : <>
               <Checkbox.Group
                 value={currentAns.type === "multiple" ? currentAns.value : []}
                 onChange={(vals) =>
@@ -603,6 +687,7 @@ export default function AskCard({
                   </Checkbox>
                 ))}
               </Checkbox.Group>
+              </>}
               {currentAns.type === "multiple" &&
                 currentAns.value.includes(otherOption) && (
                   <Input
@@ -621,6 +706,7 @@ export default function AskCard({
                     }
                     disabled={isReadOnly}
                     placeholder={t("chat.askCardOtherPlaceholder")}
+                    maxLength={maxLength}
                     className="ask-wizard__other-input"
                   />
                 )}
@@ -637,11 +723,15 @@ export default function AskCard({
                 })
               }
               disabled={isReadOnly}
+              status={showCurrentError ? "error" : undefined}
+              maxLength={maxLength}
+              showCount={Boolean(maxLength)}
               placeholder={t("chat.askCardInputPlaceholder")}
               className="ask-wizard__text-input"
               autoSize={{ minRows: 2, maxRows: 5 }}
             />
           )}
+          {showCurrentError && <p role="alert">{t(`chat.askCardValidation.${currentError}`)}</p>}
         </div>
       </div>
 
@@ -670,9 +760,10 @@ export default function AskCard({
               <Button
                 type="primary"
                 onClick={handleSubmit}
-                disabled={needsConfirmation || submitting || questions.some((question, index) => !attachmentRequirementSatisfied(
-                  question, answers[index]!, attachmentFiles[index] ?? [],
-                ))}
+                disabled={needsConfirmation || submitting || questions.some((question, index) =>
+                  Boolean(answerError(question, answers[index]!)) || !attachmentRequirementSatisfied(
+                    question, answers[index]!, attachmentFiles[index] ?? [],
+                  ))}
                 loading={submitting}
                 className="ask-wizard__submit-btn"
               >
