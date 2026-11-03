@@ -1,6 +1,9 @@
 import ReadingPreparationAction from "@/modules/knowledge/paper/ReadingPreparationAction";
 import {PdfStudyActivation,StudySparkle} from "./PdfStudyActivation";
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
+import {AgentAppsAuth} from "@/components/auth";
+import {authServiceApiUrl} from "@/runtime/apiBase";
+import {usePaperReaderSession} from "@/modules/knowledge/api/paperReader";
 import {PdfPaperOverview} from "./PdfPaperOverview";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
@@ -166,9 +169,15 @@ export default function RenderPdf({
   const {label:readerLabel}=usePaperReaderLabels();
   const preferenceKey = pdfSourceHash && pdfIRTarget ? `pdf-reader:${pdfIRTarget?.dataset || ""}:${pdfIRTarget?.document || ""}:${pdfSourceHash}` : undefined;
   const {zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
-  const noteHighlightKey = pdfIRTarget && pdfSourceHash ? `pdf-note-highlights:${pdfIRTarget.dataset}:${pdfIRTarget.document}:${pdfSourceHash}` : undefined;
-  const [noteHighlights,setNoteHighlights] = useState<PdfNoteHighlight[]>([]);
-  useEffect(()=>setNoteHighlights(readPdfNoteHighlights(noteHighlightKey)),[noteHighlightKey,fileData]);
+  const readerSession = usePaperReaderSession();
+  const readerAccount = AgentAppsAuth.getUserInfo();
+  // Never restore legacy unscoped highlights: their account owner is unknown.
+  // Keep credentials out of storage keys, while separating users, tenants and servers.
+  const noteHighlightKey = readerAccount?.userId && pdfIRTarget && pdfSourceHash
+    ? `pdf-note-highlights:v2:${JSON.stringify([authServiceApiUrl("auth/refresh"),readerAccount.userId,readerAccount.tenantId || readerAccount.tenant_id || readerAccount.tenantKey || readerAccount.tenant_key || "",pdfIRTarget.dataset,pdfIRTarget.document,pdfSourceHash])}` : undefined;
+  const [noteHighlightState,setNoteHighlightState] = useState<{key?:string;session:string;highlights:PdfNoteHighlight[]}>({session:readerSession,highlights:[]});
+  const noteHighlights = noteHighlightState.key === noteHighlightKey && noteHighlightState.session === readerSession ? noteHighlightState.highlights : [];
+  useEffect(()=>setNoteHighlightState({key:noteHighlightKey,session:readerSession,highlights:readPdfNoteHighlights(noteHighlightKey)}),[noteHighlightKey,readerSession,fileData]);
   const [readerMode,setReaderMode] = useState<"overview" | "original">("original");
   useEffect(()=>setReaderMode("original"),[fileData]);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
@@ -566,10 +575,10 @@ export default function RenderPdf({
   };
   useEffect(() => {
     if (!pdfNavigateToPage || !Number.isFinite(pdfNavigateToPage.page) || !pdfLoaded || pdfDocument.current?.source !== fileData) return;
-    setReaderMode("original");
     const key = `${pdfNavigateToPage.requestId}:${pdfNavigateToPage.page}`;
     if (lastPageNavigation.current === key) return;
     lastPageNavigation.current = key;
+    setReaderMode("original");
     jumpPage(pdfNavigateToPage.page);
   }, [pdfNavigateToPage?.page,pdfNavigateToPage?.requestId,pdfLoaded,pageTops,numPages,fileData]);
   const changeZoom = (value: number) => {
@@ -923,9 +932,9 @@ export default function RenderPdf({
   };
   useEffect(()=>{
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
-    setReaderMode("original");
     const request=`${pdfNavigateTo.requestId}:${pdfNavigateTo.id}`;
     if(lastRequestedNavigation.current===request || !formulaDocument.blocks.some(block=>block.id===pdfNavigateTo.id))return;
+    setReaderMode("original");
     lastRequestedNavigation.current=request;navigateSourceBlock(pdfNavigateTo.id);
   // Navigation events are keyed by request ID; source/readiness may arrive later.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1062,7 +1071,7 @@ export default function RenderPdf({
     if(!page)return;
     const signature=JSON.stringify(rects);
     const next=[...noteHighlights.filter(item=>item.page!==page||JSON.stringify(item.rects)!==signature),{id:crypto.randomUUID(),page,color,rects}];
-    setNoteHighlights(next);
+    setNoteHighlightState({key:noteHighlightKey,session:readerSession,highlights:next});
     writePdfNoteHighlights(noteHighlightKey,next);
   };
   return (

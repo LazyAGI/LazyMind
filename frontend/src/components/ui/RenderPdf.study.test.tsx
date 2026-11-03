@@ -9,10 +9,73 @@ vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<type
 vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:()=> <aside aria-label="visual-study"/>}));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
 import RenderPdf from './RenderPdf';
+import {AUTH_USER_CHANGE_EVENT} from '@/components/auth';
 function render(ui:ReactNode){const view=renderView(ui);const tools=screen.queryByRole('button',{name:'阅读工具'});if(tools)fireEvent.click(tools);return view;}
 const target={dataset:'d',document:'one'};
 function document(hash='hash'):PdfIRDocument{return {version:1,projection_version:2,source_sha256:hash,parser:{name:'mineru',model:'vlm'},coordinate_space:'normalized_top_left',pages:[{index:0}],blocks:[{id:'formula',type:'formula',page:0,latex:'x',bbox:[.1,.1,.3,.2]},{id:'table',type:'table',page:0,bbox:[.1,.4,.8,.8],table:{rows:[{cells:[{text:'Value',row_span:1,col_span:1}]}],captions:[],footnotes:[],related_blocks:[]}}]};}
 beforeEach(()=>{state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
+
+it('keeps overview selected when geometry changes after a consumed page navigation',async()=>{
+ const props={fileData:'outline-resize.pdf',pdfIRTarget:target,pdfSourceHash:'hash',pdfNavigateToPage:{page:2,requestId:1}};
+ const view=render(<RenderPdf {...props} defaultPageWidth={600}/>);
+ await act(async()=>{});
+ fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+ view.rerender(<RenderPdf {...props} defaultPageWidth={700}/>);
+ expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
+});
+
+it('keeps overview selected when IR refreshes after a consumed block navigation',async()=>{
+ const props={fileData:'outline-refresh.pdf',pdfIRTarget:target,pdfSourceHash:'hash',pdfNavigateTo:{id:'table',requestId:1}};
+ const view=render(<RenderPdf {...props}/>);
+ await act(async()=>{});
+ fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+ state.document={...document()};
+ view.rerender(<RenderPdf {...props}/>);
+ expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
+});
+
+it('does not restore legacy highlights with an unknown account owner',async()=>{
+ sessionStorage.setItem('pdf-note-highlights:d:one:hash',JSON.stringify([{id:'old',page:1,color:'blue',rects:[[.1,.2,.3,.23]]}]));
+ const view=render(<RenderPdf fileData="legacy.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ await act(async()=>{});
+ expect(view.container.querySelector('[data-pdf-note-highlight]')).toBeNull();
+});
+
+it('isolates saved and mounted note highlights when the account changes',async()=>{
+ const previous=localStorage.getItem('lazymind:user');
+ const signIn=(userId:string)=>{localStorage.setItem('lazymind:user',JSON.stringify({userId,token:`token-${userId}`,tenantId:'tenant'}));window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));};
+ try {
+  signIn('alice');
+  const props={fileData:'shared.pdf',pdfIRTarget:target,pdfSourceHash:'hash',onNoteSelection:vi.fn()};
+  const view=render(<RenderPdf {...props}/>);
+  await act(async()=>{});
+  const page=screen.getAllByTestId('rendered-pdf-page')[0];
+  const text=window.document.createElement('span');text.textContent='A private annotation';page.append(text);
+  const pageElement=page.closest('[data-pdf-page-index]')!;
+  vi.spyOn(pageElement,'getBoundingClientRect').mockReturnValue({left:0,top:0,right:600,bottom:800,width:600,height:800,x:0,y:0,toJSON:()=>({})});
+  const range=window.document.createRange();range.selectNodeContents(text);
+  const rect={left:60,top:160,right:180,bottom:184,width:120,height:24};
+  Object.defineProperty(range,'getBoundingClientRect',{value:()=>rect});
+  Object.defineProperty(range,'getClientRects',{value:()=>[rect]});
+  window.getSelection()?.removeAllRanges();window.getSelection()?.addRange(range);
+  fireEvent.mouseUp(text);
+  fireEvent.click(screen.getByRole('button',{name:'高亮并记笔记'}));
+  expect(view.container.querySelector('[data-pdf-note-highlight]')).not.toBeNull();
+  act(()=>signIn('bob'));
+  expect(view.container.querySelector('[data-pdf-note-highlight]')).toBeNull();
+  view.unmount();
+  const reopened=render(<RenderPdf {...props}/>);
+  await act(async()=>{});
+  expect(reopened.container.querySelector('[data-pdf-note-highlight]')).toBeNull();
+  act(()=>signIn('alice'));
+  expect(reopened.container.querySelector('[data-pdf-note-highlight]')).not.toBeNull();
+  reopened.unmount();
+ } finally {
+  if(previous===null)localStorage.removeItem('lazymind:user');else localStorage.setItem('lazymind:user',previous);
+  window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));
+  window.getSelection()?.removeAllRanges();
+ }
+});
 
 it('keeps a paper overview with the source abstract and an unavailable quick-read state',async()=>{
  state.document={...document(),blocks:[

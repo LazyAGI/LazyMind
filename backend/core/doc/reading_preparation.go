@@ -56,20 +56,25 @@ func preparationStatus(j orm.AsyncJob) readingPreparationStatus {
 	return readingPreparationStatus{ModelRequests: result.ModelRequests, JobID: j.ID, Status: j.Status, ProgressCurrent: j.ProgressCurrent, ProgressTotal: j.ProgressTotal, ErrorMessage: j.ErrorMessage, Scopes: p.Scopes}
 }
 func GetReadingPreparation(w http.ResponseWriter, r *http.Request) {
-	row, _, _, ok := loadPDFDocument(r, false)
+	row, ext, _, ok := loadPDFDocument(r, false)
 	if !ok {
 		common.ReplyErr(w, "document not found or forbidden", 404)
 		return
 	}
+	hash, err := pdfIRHash(ext)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), 409)
+		return
+	}
 	var jobs []orm.AsyncJob
-	err := store.DB().WithContext(r.Context()).Where("job_type=? AND create_user_id=?", ReadingPreparationJob, store.UserID(r)).Order("created_at DESC").Find(&jobs).Error
+	err = store.DB().WithContext(r.Context()).Where("job_type=? AND create_user_id=?", ReadingPreparationJob, store.UserID(r)).Order("created_at DESC").Find(&jobs).Error
 	if err != nil {
 		common.ReplyErr(w, "读取准备状态失败", 500)
 		return
 	}
 	for _, j := range jobs {
 		var p readingPreparationPayload
-		if json.Unmarshal(j.PayloadJSON, &p) == nil && p.DatasetID == row.DatasetID && p.DocumentID == row.ID {
+		if json.Unmarshal(j.PayloadJSON, &p) == nil && p.DatasetID == row.DatasetID && p.DocumentID == row.ID && p.SourceSHA256 == hash {
 			common.ReplyOK(w, preparationStatus(j))
 			return
 		}

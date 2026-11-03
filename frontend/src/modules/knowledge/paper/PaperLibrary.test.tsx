@@ -610,7 +610,7 @@ describe('paper library behavior', () => {
         vi.mocked(previewLibraryPapers).mockImplementationOnce((_id, papers) => new Promise(resolve => { release = () => resolve(papers); }));
         await renderLibrary();
         const dialog = await openImportDialog('BibTeX / RIS / CSV', '导入文献题录');
-        fireEvent.click(within(dialog).getByRole('radio', { name: format, exact: true }));
+        fireEvent.click(within(dialog).getByRole('radio', { name: format }));
         const entries = Array.from({ length: 10 }, (_, i) => format === 'BibTeX' ? `@article{p${i},title={Import sample ${i}},year={2024}}` : format === 'RIS' ? `TY  - JOUR\nTI  - Import sample ${i}\nPY  - 2024\nER  -` : `Import sample ${i},Author,2024`);
         const content = (format === 'CSV' ? 'title,authors,year\n' : '') + entries.join('\n');
         fireEvent.change(within(dialog).getByRole('textbox', { name: '文献题录内容' }), { target: { value: content } });

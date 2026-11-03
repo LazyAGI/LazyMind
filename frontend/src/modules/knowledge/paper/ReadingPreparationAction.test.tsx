@@ -63,3 +63,49 @@ it('does not refresh for an old completed job when opened', async () => {
   await act(async () => {});
   expect(refresh).not.toHaveBeenCalled();
 });
+
+it('observes an active job to completion after progress closes and refreshes exactly once', async () => {
+  vi.useFakeTimers();
+  api.get.mockReset().mockResolvedValueOnce({ status: 'not_requested' })
+    .mockResolvedValueOnce({ job_id: 'background-job', status: 'running' })
+    .mockResolvedValueOnce({ job_id: 'background-job', status: 'running' })
+    .mockResolvedValue({ job_id: 'background-job', status: 'succeeded' });
+  api.prepare.mockResolvedValueOnce({ job_id: 'background-job', status: 'pending' });
+  const refresh = vi.fn();
+  render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc' }} onPrepared={refresh} />);
+  expect(api.get).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /开始准备/ }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }));
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(refresh).toHaveBeenCalledOnce();
+  expect(screen.queryByText('论文解析状态')).not.toBeInTheDocument();
+  const reads = api.get.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(api.get).toHaveBeenCalledTimes(reads);
+  expect(api.prepare).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  await act(async () => {});
+  expect(refresh).toHaveBeenCalledOnce();
+});
+
+it.each(['target change', 'unmount'])('stops closed-dialog observation on %s', async (stop) => {
+  vi.useFakeTimers();
+  api.get.mockReset().mockResolvedValue({ job_id: 'active-job', status: 'running' });
+  const refresh = vi.fn();
+  const view = render(<ReadingPreparationAction target={{ dataset: 'ds', document: 'doc' }} onPrepared={refresh} />);
+  fireEvent.click(screen.getByRole('button', { name: '准备进度' }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', { name: /关\s*闭/ }));
+  await act(async () => {});
+  if (stop === 'unmount') view.unmount();
+  else view.rerender(<ReadingPreparationAction target={{ dataset: 'ds', document: 'another-doc' }} onPrepared={refresh} />);
+  const reads = api.get.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(api.get).toHaveBeenCalledTimes(reads);
+  expect(refresh).not.toHaveBeenCalled();
+  expect(api.prepare).not.toHaveBeenCalled();
+});

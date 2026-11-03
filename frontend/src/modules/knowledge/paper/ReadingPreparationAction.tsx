@@ -20,7 +20,10 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
   const [submitting, setSubmitting] = useState(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
-    if (!open) return;
+    if (activeJob.current && !activeJob.current.startsWith(`${targetKey}/`)) activeJob.current = undefined;
+    // Keep observing a known active batch after the dialog closes so the reader
+    // receives its new artifacts. Detailed parse/chat polling remains dialog-only.
+    if (!open && !activeJob.current) return;
     let stale = false; let timer: ReturnType<typeof setTimeout>;
     setState(undefined); setError('');
     const poll = async () => {
@@ -32,13 +35,14 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
           preparedCallback.current?.();
         }
         if (result.status === 'pending' || result.status === 'running') timer = setTimeout(poll, 1500);
+        else activeJob.current = undefined;
       } catch (err) { if (!stale) setError(getLocalizedErrorMessage(err)); }
     };
     void poll(); return () => { stale = true; clearTimeout(timer); };
   }, [open, target.dataset, target.document, revision]);
   const running = state?.status === 'pending' || state?.status === 'running';
   return <><button className="paper-preparation-trigger" type="button" title="查看当前论文的解析与研读准备进度" onClick={() => setOpen(true)}>准备进度</button>
-    <Modal className="paper-preparation-modal" width={600} centered title="当前论文 · 准备进度" open={open} onCancel={() => { if (!submitting) setOpen(false); }} closable={!submitting} maskClosable={!submitting} keyboard={!submitting} cancelButtonProps={{ disabled: submitting }} okText="开始准备" cancelText="关闭" confirmLoading={submitting} okButtonProps={{ disabled: !state || !scopes.length || running || target.canWrite === false }} onOk={async () => {
+    <Modal forceRender className="paper-preparation-modal" width={600} centered title="当前论文 · 准备进度" open={open} onCancel={() => { if (!submitting) setOpen(false); }} closable={!submitting} maskClosable={!submitting} keyboard={!submitting} cancelButtonProps={{ disabled: submitting }} okText="开始准备" cancelText="关闭" confirmLoading={submitting} okButtonProps={{ disabled: !state || !scopes.length || running || target.canWrite === false }} onOk={async () => {
       setSubmitting(true); setError('');
       try {
         const result = await prepareReading(target.dataset, target.document, scopes);
@@ -48,6 +52,7 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
       }
       catch (err) { setError(getLocalizedErrorMessage(err)); } finally { setSubmitting(false); }
     }}>
+      {/* forceRender lets this guard update even while rc-dialog memoizes closed content. */}
       {open && <PaperPreparationStatus key={`${targetKey}/${state?.status || "loading"}`} target={target} onRefresh={() => setRevision(v => v + 1)} />}
       {target.canWrite === false && <Alert type="info" message="当前论文为只读，无法提交准备。" />}
       {error && <Alert type="error" showIcon message={error} />}
