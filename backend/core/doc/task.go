@@ -2959,7 +2959,7 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		if strings.TrimSpace(docRow.LazyllmDocID) == "" {
 			// A retained file has never been submitted to RAG. Its first
 			// reparse is an add, not a rebuild of a nonexistent remote doc.
-			items, err := startParseTasksInternal(r, datasetID, []string{taskID})
+			items, err := startParseTasksInternalAtLevel(r, datasetID, []string{taskID}, processingLevel)
 			results = append(results, items...)
 			if err != nil && len(items) == 0 {
 				markTaskStartFailed(r.Context(), datasetID, taskRow, err.Error())

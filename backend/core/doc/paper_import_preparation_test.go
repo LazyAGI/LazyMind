@@ -3,6 +3,7 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"github.com/gorilla/mux"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/readingpolicy"
@@ -168,5 +169,41 @@ func TestLegacyQueuedPaperImportSkipsUnboundedParsing(t *testing.T) {
 	result, err = runPaperProcessing(t.Context(), asyncjob.Job{ID: "explicit-parse", CreateUserID: "owner", PayloadJSON: mustJSON(payload)}, nil)
 	if err == nil || !strings.Contains(err.Error(), "知识库组件") || strings.Contains(string(result.ResultJSON), "not_requested") {
 		t.Fatalf("explicit parse was skipped: %+v %v", result, err)
+	}
+}
+
+func TestPaperExplicitReparseRetainedFilePreservesRequestedLevel(t *testing.T) {
+	for _, level := range []string{ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed} {
+		t.Run(level, func(t *testing.T) {
+			installOriginalSourceTransport(t)
+			t.Setenv("LAZYMIND_RAG_ENABLED", "true")
+			db, ds, document, task := seedPaperImportPreparation(t, "academic_papers", level, "demand")
+			if document.LazyllmDocID != "" {
+				t.Fatal("fixture must exercise first submission of a retained file")
+			}
+			if err := db.Model(&orm.Task{}).Where("id=?", task.ID).Updates(map[string]any{"task_type": string(TaskTypeReparse), "ext": mustJSON(taskExt{TaskState: string(TaskStateCreating)})}).Error; err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("POST", "/datasets/ds/tasks:start", strings.NewReader(`{"task_ids":["import"]}`))
+			r.Header.Set("X-User-Id", "owner")
+			r = mux.SetURLVars(r, map[string]string{"dataset": ds.ID})
+			w := httptest.NewRecorder()
+			StartTask(w, r)
+			var response StartTasksResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.StartedCount != 1 {
+				t.Fatalf("explicit reparse not accepted: %d %s %v", w.Code, w.Body, err)
+			}
+			var job orm.AsyncJob
+			if err := db.Where("job_type=?", paperProcessingJob).Take(&job).Error; err != nil {
+				t.Fatal(err)
+			}
+			var payload paperProcessingPayload
+			if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Level != level || payload.Automatic {
+				t.Fatalf("explicit reparse became a legacy import job: %+v", payload)
+			}
+		})
 	}
 }
