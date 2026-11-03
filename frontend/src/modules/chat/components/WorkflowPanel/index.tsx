@@ -1993,7 +1993,7 @@ export function WorkflowPanel({
   // transports the selected action; host delivery is not workflow execution.
   const sessionBusy = displayStatus === 'active' || displayStatus === 'loading';
   const approvalStepId = display?.status === 'waiting' ? display.approval_step_id : undefined;
-  const displayStatusKey = workflowDisplayLabel(display?.status);
+  const displayStatusKey = workflowDisplayLabel(display?.status, display?.reason);
   // A native Chat submission can outlive this panel (it moves to the new reply).
   // Keep controls locked until that turn ends, even before workflow events arrive.
   // Dirty editors do not disable retry — click flushes saves first, then proceeds.
@@ -2086,7 +2086,9 @@ export function WorkflowPanel({
         await onSendMessage?.(message, completedContinueStepId
           ? { session_id: sessionId, kind: 'rewind', step_id: completedContinueStepId, expected_state_version: latest?.state_version ?? 0 }
           : display?.status === 'paused'
-            ? { session_id: sessionId, kind: 'resume', expected_state_version: latest?.state_version ?? 0 } : undefined);
+            ? { session_id: sessionId, kind: 'resume', expected_state_version: latest?.state_version ?? 0 }
+            : continueAction?.kind === 'regenerate'
+              ? { session_id: sessionId, kind: 'continue', expected_state_version: latest?.state_version ?? 0 } : undefined);
       } catch (error) { antdMessage.error(getLocalizedErrorMessage(error)); }
     });
   }
@@ -2179,6 +2181,8 @@ export function WorkflowPanel({
 
   const continueLabel = approvalStepId
     ? t('chat.workflowContinueExecution')
+    : continueAction?.kind === 'regenerate'
+      ? t('chat.workflowRegenerate')
     : continueAction?.kind === 'resume'
       ? t('chat.workflowContinue')
     : displayStatus === 'waiting'

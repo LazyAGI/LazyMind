@@ -18,8 +18,11 @@ func guardRunAdvance(tx *gorm.DB, session orm.WorkflowSession) error {
 	if err != nil {
 		return err
 	}
-	if display.Status == "waiting" {
+	if display.ApprovalRequired() {
 		return controlstore.Reject("WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing")
+	}
+	if display.Status == "waiting" && display.Reason == "inputs_changed" {
+		return controlstore.Reject("EDITS_PENDING_CONTINUE", "continue explicitly to regenerate results from the updated inputs")
 	}
 	if display.Status == "paused" || session.Status == "stopped" {
 		return controlstore.Reject("WORKFLOW_PAUSED", "resume the workflow explicitly before starting another attempt")

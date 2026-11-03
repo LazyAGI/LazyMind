@@ -46,8 +46,8 @@ type nativeTurnBinding struct {
 // An unsent/refused request cannot change the workflow's state.
 func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversationID string, req NativeControlCommand) (int64, error) {
 	var version int64
-	if req.Kind != "approve" && req.Kind != "resume" && req.Kind != "retry" && req.Kind != "rewind" {
-		return 0, controlstore.Reject("INVALID_COMMAND", "expected approve, resume, retry or rewind")
+	if req.Kind != "approve" && req.Kind != "resume" && req.Kind != "retry" && req.Kind != "rewind" && req.Kind != "continue" {
+		return 0, controlstore.Reject("INVALID_COMMAND", "expected approve, resume, retry, rewind or continue")
 	}
 	approval := req.Kind == "approve"
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -65,8 +65,11 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 		if err != nil {
 			return err
 		}
-		if approval && (display.Status != "waiting" || req.StepID == "" || display.ApprovalStepID != req.StepID) {
+		if approval && (!display.ApprovalRequired() || req.StepID == "" || display.ApprovalStepID != req.StepID) {
 			return controlstore.Reject("INVALID_COMMAND", "no matching approval checkpoint")
+		}
+		if req.Kind == "continue" && (display.Status != "waiting" || display.Reason != "inputs_changed" || req.PreferenceScope != "" || req.StepID != "") {
+			return controlstore.Reject("INVALID_COMMAND", "no edited workflow awaiting regeneration")
 		}
 		if req.Kind == "resume" && (display.Status != "paused" || req.PreferenceScope != "") {
 			return controlstore.Reject("INVALID_COMMAND", "no paused workflow to resume")

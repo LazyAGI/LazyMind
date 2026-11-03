@@ -18,7 +18,7 @@ func acceptRunControl(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSes
 		if err != nil {
 			return err
 		}
-		approvalPending, completed = projected.Display.Status == "waiting", projected.Projection.Completed
+		approvalPending, completed = projected.Display.ApprovalRequired(), projected.Projection.Completed
 	}
 	status := runstate.AfterControl(session.Status, kind, approvalPending, completed)
 	writeTx := tx

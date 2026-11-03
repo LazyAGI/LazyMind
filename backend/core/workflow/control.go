@@ -177,6 +177,9 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 				return err
 			}
 			if wasEditPaused {
+				if err := acceptRunControl(ctx, tx, session, "continue", nil, nil); err != nil {
+					return err
+				}
 				if err := resumeWorkflowExecution(ctx, tx, session, command.CommandID, &result.Receipt); err != nil {
 					return err
 				}

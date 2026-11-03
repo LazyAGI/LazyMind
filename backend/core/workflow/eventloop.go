@@ -875,7 +875,7 @@ func OnSubAgentDone(
 			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 			return
 		}
-		if display.Status == "waiting" {
+		if display.ApprovalRequired() {
 			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting); err != nil {
 				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 				return

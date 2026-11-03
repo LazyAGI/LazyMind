@@ -37,6 +37,11 @@ func ChatHistoryID(session orm.WorkflowSession) (string, error) {
 	return session.TriggerHistoryID, nil
 }
 
+// ApprovalRequired identifies a live review, not every internal waiting state.
+func (view View) ApprovalRequired() bool {
+	return view.Status == "waiting" && view.Reason == "approval_required" && view.ApprovalStepID != ""
+}
+
 // Read uses durable execution facts so a reload and a live event agree. Callers
 // must propagate read errors; unavailable data is not an execution failure.
 func Read(db *gorm.DB, session orm.WorkflowSession) (View, error) {
@@ -52,12 +57,15 @@ func Read(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 
 func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	var steps []orm.WorkflowSessionStep
-	if err := db.Where("session_id = ? AND validity <> ?", session.ID, "stale").
+	if err := db.Where("session_id = ?", session.ID).
 		Order("created_at DESC, attempt DESC, id DESC").Find(&steps).Error; err != nil {
 		return View{}, err
 	}
 	latest := map[string]orm.WorkflowSessionStep{}
 	for _, step := range steps {
+		if step.Validity == "stale" {
+			continue
+		}
 		if prev, exists := latest[step.StepID]; !exists || step.Attempt > prev.Attempt {
 			latest[step.StepID] = step
 		}
@@ -120,6 +128,13 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	}
 	if paused {
 		return View{Status: "paused", Reason: "user_stopped"}, nil
+	}
+	changed, err := inputsChanged(db, session, steps, current)
+	if err != nil {
+		return View{}, err
+	}
+	if changed {
+		return View{Status: "waiting", Reason: "inputs_changed"}, nil
 	}
 	if len(current) == 0 {
 		return View{Status: "running", Reason: "preparing"}, nil

@@ -4245,6 +4245,8 @@ const enUS = {
     workflowStatusReady: "Ready to run",
     workflowStatusPaused: "Paused",
     workflowStatusBlocked: "Waiting for inputs",
+    workflowStatusInputsChanged: "Waiting to regenerate",
+    workflowRegenerate: "Regenerate",
     workflowStatusWaiting: "Waiting for approval",
     workflowStatusFailed: "Failed",
     workflowStatusStopped: "Stopped",

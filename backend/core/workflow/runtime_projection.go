@@ -20,7 +20,7 @@ import (
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
-	"lazymind/core/workflow/publication"
+	"lazymind/core/workflow/graphsnapshot"
 	"lazymind/core/workflow/runstate"
 )
 
@@ -110,91 +110,12 @@ func decodeSessionRevisionGraph(session *orm.WorkflowSession, revision *orm.Work
 }
 
 func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string, graph *graphengine.CompiledStateGraph) (graphengine.RuntimeSnapshot, error) {
-	var attempts []orm.WorkflowSessionStep
-	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Order("created_at ASC").Find(&attempts).Error; err != nil {
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return graphengine.RuntimeSnapshot{}, err
 	}
-	var revisions []orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).Where("session_id = ? AND selected = ?", sessionID, true).Find(&revisions).Error; err != nil {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	var inputBindings []orm.WorkflowInputBinding
-	if err := db.WithContext(ctx).Where("workflow_session_id = ? AND validity = 'effective'", sessionID).
-		Find(&inputBindings).Error; err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	var decisions []orm.WorkflowRouteDecision
-	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Order("created_at ASC").Find(&decisions).Error; err != nil {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	snapshot := graphengine.RuntimeSnapshot{}
-	var controlledSession orm.WorkflowSession
-	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&controlledSession).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	controlled := controlstore.Controlled(controlledSession)
-	acceptedRevisions := map[string]bool{}
-	if controlled {
-		var reviews []orm.WorkflowReviewCheckpoint
-		if err := db.WithContext(ctx).Where("session_id = ? AND status = ?", sessionID, "accepted").Find(&reviews).Error; err != nil {
-			return graphengine.RuntimeSnapshot{}, err
-		}
-		for _, review := range reviews {
-			var manifest controlstore.Manifest
-			if err := json.Unmarshal([]byte(review.ManifestJSON), &manifest); err != nil {
-				return graphengine.RuntimeSnapshot{}, err
-			}
-			for _, item := range manifest.Items {
-				acceptedRevisions[item.RevisionID] = true
-			}
-		}
-	}
-	for _, row := range attempts {
-		validity := row.Validity
-		if validity == "" {
-			validity = "effective"
-		}
-		snapshot.Attempts = append(snapshot.Attempts, graphengine.AttemptFact{StepID: row.StepID, Status: row.Status, Validity: validity})
-	}
-	for _, row := range revisions {
-		validity := row.Validity
-		if validity == "" {
-			validity = "effective"
-		}
-		valid := validity == "effective"
-		if controlled && valid {
-			valid = false
-			for _, producer := range attempts {
-				if producer.ID == row.ProducerAttemptID || (producer.StepID == row.StepID && producer.Attempt == row.Attempt) {
-					valid = producer.Status == "succeeded" && producer.Validity == "effective" && (!producer.ReviewRequired || acceptedRevisions[row.ID])
-					break
-				}
-			}
-		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: valid})
-	}
-	for _, row := range inputBindings {
-		// Startup answers may share a name with a normalized step output.
-		// They remain session inputs, but cannot witness a material whose
-		// pinned contract declares a step producer, even before it has run.
-		if graph.MaterialProducers[row.MaterialID].Kind == "step" {
-			continue
-		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{
-			MaterialID: row.MaterialID, RevisionID: row.ID, Valid: true,
-		})
-	}
-	for _, row := range decisions {
-		var active, pruned, bypassed []string
-		_ = json.Unmarshal(row.ActivatedJSON, &active)
-		_ = json.Unmarshal(row.PrunedJSON, &pruned)
-		_ = json.Unmarshal(row.BypassedJSON, &bypassed)
-		snapshot.Routes = append(snapshot.Routes, graphengine.RouteFact{From: row.FromStepID, Activated: active, Pruned: pruned, Bypassed: bypassed, Validity: row.Validity})
-	}
-	if err := publication.ProjectInputs(db.WithContext(ctx), controlledSession, &snapshot); err != nil {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	return snapshot, nil
+	session.ID = sessionID
+	return graphsnapshot.Load(db.WithContext(ctx), session, graph)
 }
 
 type projectionResponse struct {

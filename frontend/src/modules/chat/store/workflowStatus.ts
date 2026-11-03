@@ -13,7 +13,9 @@ const displayLabels: Record<WorkflowDisplayState['status'], string> = {
   paused: 'chat.workflowStatusPaused', failed: 'chat.workflowStatusFailed',
   completed: 'chat.workflowStatusDone',
 };
-export const workflowDisplayLabel = (status?: WorkflowDisplayState['status']): string => status ? displayLabels[status] : 'common.loading';
+export const workflowDisplayLabel = (status?: WorkflowDisplayState['status'], reason?: string): string =>
+  status === 'waiting' && reason === 'inputs_changed' ? 'chat.workflowStatusInputsChanged'
+    : status ? displayLabels[status] : 'common.loading';
 
 export interface RuntimeProjectionStatus {
   completed?: boolean;
@@ -58,7 +60,7 @@ export function reconcileWorkflowSessionStatus(
 
 export interface NativeWorkflowControl {
   session_id: string;
-  kind: 'approve' | 'resume' | 'retry' | 'rewind';
+  kind: 'approve' | 'resume' | 'retry' | 'rewind' | 'continue';
   expected_state_version: number;
   step_id?: string;
   preference_scope?: 'step' | 'following';
