@@ -24,8 +24,10 @@ steps:
       Execute step 1 of the bid-tech-proposal pipeline. All required external inputs were
       collected by Workflow preflight before this Session was created. First call
       normalize_bid_parameters(output_format=<output_format>, word_target=<word_target>,
-      use_default_docx_template=<use_default_docx_template>). Do not infer or silently
-      default a value. Save the returned canonical object as generation_parameters with
+      use_default_docx_template=<use_default_docx_template when present>,
+      effect_image_count=<effect_image_count when present>). Omit absent optional arguments.
+      The approved defaults are DOCX with the default bid template; Markdown does not use
+      a DOCX style. Never invent a word target. Save the returned canonical object as generation_parameters with
       content_type="json" together with this step's parsing artifacts.
 
       The Runtime Parameters section
@@ -49,7 +51,9 @@ steps:
       - material: word_target
         required: true
       - material: use_default_docx_template
-        required: true
+        required: false
+      - material: effect_image_count
+        required: false
     outputs:
       - material: generation_parameters
       - material: raw_bid_text
@@ -440,7 +444,9 @@ steps:
       First call render_proposal_image once with image_type="architecture" for a
       4–6-layer system architecture and save its real PNG path as architecture_image.
       Then select effect types that match actual project functions from dashboard,
-      workbench, list, form, approval, analytics, mobile, admin, login and flow. Use five
+      workbench, list, form, approval, analytics, mobile, admin, login and flow.
+      Read generation_parameters: if effect_image_count is present, generate exactly
+      that many effects (1–10); it overrides the automatic count below. Otherwise use five
       distinct types for drafts below 5000 Chinese characters, 6–8 for drafts from 5000
       to 20000 characters, and at most 10 only for longer drafts with enough distinct
       functions. Every image's main block, information density and visual focus must differ
@@ -457,6 +463,8 @@ steps:
       never save spec JSON, HTML, SVG or placeholder text in an image slot.
     tools: [bid_writer_read_markdown, render_proposal_image]
     inputs:
+      - material: generation_parameters
+        required: true
       - material: effective_outline
         required: true
         transport: path
@@ -470,8 +478,9 @@ steps:
       - material: effect_images
       - material: image_manifest
     acceptance_criteria: |
-      One real 1920x1080 architecture PNG and 5–10 real 1920x1080 effect PNGs exist.
-      At least five effect layout types are used, all images share one palette and the
+      One real 1920x1080 architecture PNG exists. The effect PNG count matches the
+      explicit effect_image_count, or the automatic 5–10 range when unspecified.
+      Use distinct effect layout types, all images share one palette and the
       manifest order matches the effect_images order.
 
   compose_proposal_docx:

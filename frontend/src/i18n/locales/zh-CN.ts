@@ -3844,6 +3844,11 @@ const zhCN = {
     editablePptRequiredDesc: "当前环境未安装可编辑 PPTX 导出组件或 Chromium。请先配置或下载安装依赖，也可以改选图片版 PPTX。",
     configureEditablePpt: "配置或下载导出依赖",
     askCardInputPlaceholder: "输入回复…",
+    askCardValidation: {
+      required: "请回答此问题；选择“其他”时请填写具体内容。",
+      length: "输入长度不符合要求，请参考示例调整。",
+      integer: "请输入允许范围内的整数。",
+    },
     askCardOtherPlaceholder: "请输入其他内容…",
     askCardOtherOption: "其他",
     askCardAnswerSeparator: "；",

@@ -31,6 +31,57 @@ workflows/<workflow-id>/
 
 ## 二、workflow.yaml 字段说明
 
+### 启动前字段与 Ask User
+
+`runtime.clarification_fields` 声明用户决策，不等同于文件或产物槽。启动时先复用本次请求、已提交的结构化答案和已批准默认值；适用且 `required: true` 的字段仍缺少，或请求中的明确取值存在冲突、无法确定时才提问。默认值不能覆盖用户明确排除的选项或未解决的冲突。Python 执行本地解析，Core 在 preparation 和直接启动入口校验；缺少必需信息时不创建 Session。没有新增串行模型解析阶段。
+
+```yaml
+runtime:
+  clarification_fields:
+    - id: output_format
+      label: 导出格式
+      question: 需要哪种交付格式？
+      type: single
+      choice_policy: fixed
+      choices: [docx, md]
+      default: docx
+      allow_other: false
+    - id: word_target
+      label: 目标篇幅
+      question: 正文目标字数是多少？
+      reason: 篇幅决定章节分配和写作工作量。
+      type: text
+      required: true
+      resolution: explicit
+      patterns: ['([0-9]+)\s*字']
+      validation: {format: positive_integer, min: 1000, max: 500000, example: '例如：8000'}
+    - id: use_default_docx_template
+      label: 文档样式
+      question: 是否使用默认投标样式？
+      type: boolean
+      default: 'true'
+      boolean_labels: {'yes': 使用默认投标样式, 'no': 使用基础样式}
+      applies_when: {field: output_format, equals: docx}
+```
+
+字段级别由规则组成，不增加一套独立状态：
+
+| 级别 | 表达方式 | 行为 |
+|---|---|---|
+| blocking | `required: true`，没有可用值或默认值 | 阻止启动，只询问未解决项 |
+| defaultable | 声明 `default`，或由既有执行器自动规划 | 不为收集偏好而阻塞；用户明确值优先 |
+| conditional | `applies_when` | 仅条件成立才解析；可与 blocking/defaultable 组合 |
+
+条件只能引用更早声明的字段，并使用 `equals` 或 `not_equals` 之一。`false` 和 `0` 是已提供的值，是否有效由校验规则决定。`value_aliases` 将展示选项映射为执行参数；`patterns` 是包维护者定义的单捕获组正则，不接受模型生成的正则。`resolution: explicit` 禁止使用模型填写的启动参数作为用户选择，必须来自请求中的可验证表达或已提交答案；主题/写作目标等开放语义字段可由现有主模型依据上下文提取。上传问题的 `attachment.material_id` 等于字段 ID 时，以 Core 的真实输入资源绑定为准；点击“上传”或填写文件名不能满足必需文件校验。
+
+本地别名匹配优先使用完整短语，识别紧邻的否定表达；仅对已声明的开关值互相取反，不从“不要英文”推断“使用中文”。篇幅规则通过不参与捕获的分支排除摘要字数；多个不同的正文数量需要确认，相同数量的不同写法不会重复询问。`validation.max_length: 0` 或省略该字段均表示不限制长度。
+
+每张普通澄清卡包含 1–3 个问题，一个问题对应一个决策维度，说明缺少该信息的影响。开放建议单选最多 3 项、多选最多 4 项，按需附加“其他”并在选中后输入；多选允许只选一项。固定枚举不截断合法取值：不超过 6 项平铺，超过 6 项使用可搜索选择器，列表显示区域最多 6 行。Boolean 支持语义完整的 `boolean_labels`；text 支持示例、长度、整数及数值范围校验。业务专用审批、环境输入和词汇复习不套用普通澄清问题数量限制。
+
+卡片持久化 `ask_id`、字段 `id`、工作流引用、固定 revision 和本次启动标识。Core 根据会话内已有卡片验证提交，不接受浏览器替换启动身份；后续批次复用已提交字段。已明确、可采用安全默认值或不适用的字段不应重复提问。简单且信息完整的普通问答不注册通用 Ask User 工具。
+
+内置工作流的默认策略：PPT 主题/页数缺少时阻塞，无模板时 AI 底图必须明确选择，已有模板不询问底图；Writer 复用现有结构/配图规划，不要求用户填写一张参数表；Image 复用原有数量默认和表情包审阅，不因未要求文案而提问；Academic 的主题/类型/篇幅/正文语言/引用格式无安全默认，导出默认 DOCX；Bid 文件与目标字数必需，默认 DOCX 和默认投标样式，效果图未指定则沿用原有自动数量；Product 复用现有路由、阶段篇幅和样例结构，不用旧版严格参数表覆盖当前执行行为。
+
 ### 完整模板
 
 ```yaml

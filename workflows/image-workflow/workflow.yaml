@@ -53,6 +53,26 @@ when_to_use: >
   for text content, quizzes, reports, summaries, or any non-visual task.
 
 runtime:
+  clarification_fields:
+    - id: image_goal
+      label: 图片主体或修改要求
+      question: 想生成什么图片，或对原图做什么修改？
+      reason: 需要明确主体或修改要求才能生成符合预期的图片。
+      required: true
+      type: text
+      validation: {min_length: 1, max_length: 4000, example: '例如：一只在窗边晒太阳的橘猫，水彩风格'}
+    - id: image_count
+      label: 数量
+      question: 希望生成多少张？
+      type: text
+      reason: 未指定时沿用当前路由规则：单项通常为 1，表情包合集为 3。
+      patterns: ['([0-9]+)\s*(?:张|个)(?:图片|图|表情包|动图)']
+      validation: {format: positive_integer, min: 1, example: '例如：3'}
+    - id: caption
+      label: 文案
+      question: 图片上需要显示什么文字？
+      type: text
+      reason: 普通图片不额外添加文字，表情包沿用当前文案规划。
   post_step_checks:
     - step_id: analyze_subject
       tool: check_image_workflow_capabilities

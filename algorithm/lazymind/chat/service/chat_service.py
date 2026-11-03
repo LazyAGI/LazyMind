@@ -686,14 +686,30 @@ def _build_ask_user_tool(runtime_policy: Any = None) -> list:
 def _should_register_ask_user(
     agentic_config: Dict[str, Any],
     disabled_tools: set[str] | None = None,
+    task_profile: Any = None,
+    query: str = '',
 ) -> bool:
     """Respect explicit non-interactive requests and legacy auto workflow sessions."""
     if 'ask_user' in (disabled_tools or set()):
+        return False
+    if _is_ready_simple_answer(task_profile, query):
         return False
     return not (
         agentic_config.get('enable_workflow', True)
         and agentic_config.get('workflow_mode') == 'auto'
     )
+
+
+def _is_ready_simple_answer(profile: Any, query: str = '') -> bool:
+    """Reuse the existing router's high-confidence fast path; no extra classifier."""
+    if re.search(r'问我|向我提问|采访我|访谈我|ask\s+me|interview\s+me', query, re.IGNORECASE):
+        return False
+    return bool(profile is not None and profile.primary_outcome == 'answer'
+                and not profile.secondary_outcomes and profile.complexity == 'simple'
+                and profile.freshness == 'stable' and profile.input_mode == 'query_only'
+                and profile.request_assessment.status == 'ready'
+                and profile.request_assessment.interaction_need == 'none'
+                and not profile.routing_review_required and profile.confidence >= 0.9)
 
 
 def _workflow_startup_clarification_available(
@@ -975,6 +991,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     has_explicit_workflow = bool(
         request.explicit_resource_bindings.workflow_refs
         or request.workflow.allowed_workflow_refs
+        or request.workflow.clarification
         or str((request.workflow.workflow_context or {}).get('workflow_ref') or '').strip()
     )
     if has_explicit_workflow or not provisional.routing_review_required:
@@ -1075,7 +1092,6 @@ async def _handle_chat_impl(
         guard_workflow_agent_stream,
         resolve_workflow_injection_async,
         update_intentwriter,
-        workflow_startup_clarification_already_asked,
     )
 
     conversation_id = (conversation.conversation_id or '').strip()
@@ -1428,6 +1444,7 @@ async def _handle_chat_impl(
         allowed_workflow_refs=effective_allowed_workflow_refs,
         workflow_activations=workflow.activations,
         conversation_history=agent_history,
+        clarification=workflow.clarification,
     )
     agentic_config.update(workflow_contribution.agentic_config_patch)
     from lazymind.chat.host_extensions.registry import apply_host_extensions
@@ -1626,24 +1643,15 @@ async def _handle_chat_impl(
             effective_workflow_catalog,
             discovery_mode=not workflow_turn_is_bound,
         )
-        workflow_startup_clarification_asked = (
-            workflow_startup_clarification_declared
-            and workflow_startup_clarification_already_asked(
-                agent_history,
-                workflow_contribution.runtime_policy,
-                effective_workflow_catalog,
-                discovery_mode=not workflow_turn_is_bound,
-                current_query=language_query,
-            )
-        )
-        allow_ask_user = False if workflow_startup_clarification_asked else (
+        allow_ask_user = (
             (
                 not workflow_turn_is_bound
-                and _should_register_ask_user(agentic_config, disabled)
+                and _should_register_ask_user(agentic_config, disabled, task_profile, language_query)
             )
             or (
                 workflow_startup_clarification_declared
                 and 'ask_user' not in disabled
+                and not _is_ready_simple_answer(task_profile, language_query)
             )
         )
         ask_user_tools = (
@@ -2348,6 +2356,11 @@ async def _handle_chat_impl(
                     stop_tools=stop_tools,
                     history=agent_history,
                 )
+                if workflow_contribution.pending_ask:
+                    async def pending_question_stream():
+                        yield 'event', {'tag': 'ask_pending', **workflow_contribution.pending_ask}
+                        yield 'final', None
+                    guarded_agent_stream = pending_question_stream()
                 async with aclosing(guarded_agent_stream):
                     async for kind, payload in guarded_agent_stream:
                         if kind == 'event':

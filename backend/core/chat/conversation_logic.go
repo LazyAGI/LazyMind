@@ -21,6 +21,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/askuser"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/localworkspace"
@@ -421,6 +422,7 @@ type askAnswersStructuredPayload struct {
 }
 
 type askAnsweredQuestionItem struct {
+	ID            string          `json:"id,omitempty"`
 	Text          string          `json:"text"`
 	Type          string          `json:"type"`
 	Choices       []string        `json:"choices"`
@@ -4865,6 +4867,9 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 func validateWorkspaceAskSubmission(histories []orm.ChatHistory, raw map[string]any) error {
 	submission := askAnswersStructuredFromRaw(raw)
 	if submission == nil {
+		if value, exists := raw["ask_answers_structured"]; exists && value != nil {
+			return common.ResolveAppError("invalid request", http.StatusBadRequest)
+		}
 		return nil
 	}
 	if submittedAskHistoryIndex(histories, submission) >= 0 {
@@ -4936,11 +4941,18 @@ func validAskSubmission(pending, submission map[string]any) bool {
 		text, _ := question["text"].(string)
 		kind, _ := question["type"].(string)
 		item := submitted.Questions[index]
+		id, _ := question["id"].(string)
+		if id != item.ID {
+			return false
+		}
 		choices := askStringSlice(question["choices"])
 		if strings.TrimSpace(item.Text) != strings.TrimSpace(text) || item.Type != kind || !sameStrings(item.Choices, choices) || len(item.CustomChoices) != len(choices) {
 			return false
 		}
 		if len(item.Answer) == 0 || string(item.Answer) == "null" {
+			if required, _ := question["required"].(bool); required {
+				return false
+			}
 			continue
 		}
 		var answer struct {
@@ -4950,6 +4962,28 @@ func validAskSubmission(pending, submission map[string]any) bool {
 		}
 		if json.Unmarshal(item.Answer, &answer) != nil || answer.Type != kind ||
 			!validAskAnswerValue(kind, answer.Value, choices, answer.OtherText) {
+			return false
+		}
+		var contract askuser.Question
+		questionJSON, err := json.Marshal(question)
+		if err != nil || json.Unmarshal(questionJSON, &contract) != nil {
+			return false
+		}
+		if contract.Required && kind == "text" && strings.TrimSpace(fmt.Sprint(answer.Value)) == "" {
+			return false
+		}
+		answerText := ""
+		if kind == "text" {
+			answerText, _ = answer.Value.(string)
+		} else if value, ok := answer.Value.(string); ok && value == askuser.Other {
+			answerText = answer.OtherText
+		} else if values, ok := answer.Value.([]any); ok && slices.Contains(values, any(askuser.Other)) {
+			answerText = answer.OtherText
+		}
+		if answerText != "" && kind != "text" && contract.AllowOther != nil && !*contract.AllowOther {
+			return false
+		}
+		if (kind == "text" || answerText != "") && askuser.ValidateText(answerText, contract.Validation) != nil {
 			return false
 		}
 	}
@@ -5001,10 +5035,13 @@ func validAskAnswerValue(kind string, value any, choices []string, otherText str
 		if !ok || len(values) == 0 {
 			return false
 		}
+		seen := map[string]bool{}
 		for _, value := range values {
-			if !validChoice(value) {
+			text, ok := value.(string)
+			if !ok || seen[text] || !validChoice(value) {
 				return false
 			}
+			seen[text] = true
 		}
 		return true
 	default:

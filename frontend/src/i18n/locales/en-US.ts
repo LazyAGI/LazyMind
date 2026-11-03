@@ -3916,6 +3916,11 @@ const enUS = {
     editablePptRequiredDesc: "The editable PPTX exporter or Chromium is not installed. Configure the dependency first, or choose raster PPTX instead.",
     configureEditablePpt: "Configure export dependency",
     askCardInputPlaceholder: "Enter your reply…",
+    askCardValidation: {
+      required: "Please answer this question. Enter a value when choosing Other.",
+      length: "Please adjust the answer length to match the example.",
+      integer: "Enter an integer within the allowed range.",
+    },
     askCardOtherPlaceholder: "Please specify…",
     askCardOtherOption: "Other",
     askCardAnswerSeparator: "; ",

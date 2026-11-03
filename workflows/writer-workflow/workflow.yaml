@@ -30,6 +30,41 @@ when_to_use: >
   its locator.
 
 runtime:
+  clarification_fields:
+    - id: writing_goal
+      label: 写作目标
+      question: 想写什么内容，或修改哪份文档？
+      reason: 需要明确写作目标或修改对象才能开始。
+      required: true
+      type: text
+      validation: {min_length: 1, max_length: 4000, example: '例如：为新员工写一份企业知识库使用指南'}
+    - id: writing_action
+      label: 写作动作
+      question: 希望对文档做什么处理？
+      type: text
+      reason: 根据明确指令和已有文档自动识别创建、续写或修改。
+    - id: document_structure
+      label: 文档结构
+      question: 希望采用什么文档结构？
+      type: text
+      reason: 未指定时复用现有结构分类和大纲规划。
+    - id: word_target
+      label: 目标篇幅
+      question: 希望正文达到多少字？
+      type: text
+      reason: 未指定时自动规划篇幅，不添加固定字数限制。
+      patterns: ['(?:摘要|abstract)[^0-9，。；;\n]*[0-9]+\s*(?:字|词|words)|([0-9]+)\s*字']
+      validation: {format: positive_integer, min: 1, example: '例如：3000'}
+    - id: visual_policy
+      label: 配图策略
+      question: 希望如何配图？
+      type: text
+      reason: 按明确要求和内容价值规划，优先复用已有素材。
+    - id: output_format
+      label: 产物格式
+      question: 希望使用什么产物格式？
+      type: text
+      reason: 新建使用现有 Markdown 表示，修改时继承源文档表示。
   exclusive_tool_capabilities:
     - writer.create
     - writer.revise

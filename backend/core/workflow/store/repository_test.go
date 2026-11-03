@@ -618,6 +618,22 @@ func TestPreparationIsOwnerScopedAndConsumedOnce(t *testing.T) {
 	}
 }
 
+func TestPreparationMissingClarificationCannotBeConsumed(t *testing.T) {
+	repo := testRepo(t)
+	prepared, _, err := repo.Prepare(context.Background(), "owner", "missing", "workflow", "workflow.v1",
+		json.RawMessage(`{}`), json.RawMessage(`{"status":"needs_input"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, consumed, err := repo.Consume(context.Background(), prepared.ID, "owner", "session"); !errors.Is(err, ErrPreparationNotReady) || consumed {
+		t.Fatalf("incomplete preparation consumed: %v, %v", consumed, err)
+	}
+	got, err := repo.PreparationByKey(context.Background(), "owner", "missing")
+	if err != nil || got.ConsumedAt != nil || got.SessionID != "" {
+		t.Fatalf("rejected consume changed state: %#v %v", got, err)
+	}
+}
+
 func TestCreateHostSessionReplacesOnlyTerminalExternalSessions(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()

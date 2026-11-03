@@ -204,12 +204,8 @@ export interface ChatMessage {
   ask_pending?: {
     env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;
-    questions: Array<{
-      text: string;
-      type: "boolean" | "single" | "multiple" | "text";
-      choices?: string[];
-      allow_other?: boolean;
-    }>;
+    questions: import("../AskCard").AskQuestion[];
+    workflow?: import("../AskCard").AskPending["workflow"];
     title?: string;
     title_i18n_key?: string;
     description?: string;

@@ -31,6 +31,7 @@ import (
 var (
 	ErrNotFound             error = repositoryError("WORKFLOW_NOT_FOUND")
 	ErrPermissionDenied     error = repositoryError("PERMISSION_DENIED")
+	ErrPreparationNotReady  error = repositoryError("PREPARATION_NOT_READY")
 	ErrIdempotencyConflict  error = repositoryError("IDEMPOTENCY_CONFLICT")
 	ErrSessionConflict      error = repositoryError("WORKFLOW_SESSION_CONFLICT")
 	ErrArtifactInUse        error = artifactgraph.ErrArtifactInUse
@@ -1075,6 +1076,12 @@ func (r *Repository) Consume(ctx context.Context, id, owner, sessionID string) (
 		}
 		if result.OwnerUserID != owner {
 			return ErrPermissionDenied
+		}
+		var prepared struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(result.ResponseJSON, &prepared) != nil || (prepared.Status != "" && prepared.Status != "ready") {
+			return ErrPreparationNotReady
 		}
 		if result.ConsumedAt != nil {
 			return nil
