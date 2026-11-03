@@ -5,7 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, message } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModelProviderPage from "./ModelProvidersPage";
@@ -102,7 +102,7 @@ async function renderPage(
       <ModelProviderPage />
     </ConfigProvider>,
   );
-  await screen.findByRole("textbox", { name: "API Host" });
+  await screen.findByRole("textbox", { name: "modelProvider.apiAddressLabel" });
 }
 
 beforeEach(() => {
@@ -141,10 +141,10 @@ describe("supplier endpoints and direct setup", () => {
 
   it("shows supplier settings directly without an instance selector", async () => {
     await renderPage();
-    expect(screen.getAllByRole("textbox", { name: "API Host" })).toHaveLength(
+    expect(screen.getAllByRole("textbox", { name: "modelProvider.apiAddressLabel" })).toHaveLength(
       1,
     );
-    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", {
         name: "modelProvider.workspace.selectConnection",
@@ -163,18 +163,18 @@ describe("supplier endpoints and direct setup", () => {
   });
   it("saves the endpoint through the supplier API and blocks key actions until saved", async () => {
     await renderPage();
-    const endpoint = screen.getByRole("textbox", { name: "API Host" });
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
     fireEvent.change(endpoint, { target: { value: customUrl } });
     expect(
       screen.getByRole("button", {
         name: "modelProvider.workspace.checkConnection",
       }),
     ).toBeDisabled();
-    expect(
-      screen.getByRole("button", {
-        name: "modelProvider.workspace.addKey",
-      }),
-    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.manage" }));
+    const manager = within(await screen.findByRole("dialog"));
+    expect(manager.getByRole("button", { name: "modelProvider.workspace.addKey" })).toBeDisabled();
+    fireEvent.click(manager.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(
       screen.getByRole("button", {
         name: "modelProvider.workspace.saveEndpoint",
@@ -188,7 +188,7 @@ describe("supplier endpoints and direct setup", () => {
 
   it("rejects invalid API hosts before sending an update", async () => {
     await renderPage();
-    fireEvent.change(screen.getByRole("textbox", { name: "API Host" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), {
       target: { value: "bad-url" },
     });
     fireEvent.click(
@@ -247,6 +247,17 @@ describe("supplier endpoints and direct setup", () => {
       mocks.checkGroup.mock.calls[0][0].checkModelProviderOpenAPIRequest;
     expect(payload.base_url).toBe(openAI.base_url);
     expect(payload).not.toHaveProperty("api_key");
+  });
+
+  it("distinguishes recognized Ark credentials from verified inference", async () => {
+    const success = vi.spyOn(message, "success");
+    mocks.checkGroup.mockResolvedValue({ data: { success: true, reason: "credentials_recognized" } });
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.checkConnection" }));
+    expect(await screen.findByText("modelProvider.workspace.arkCredentialsRecognized")).toBeInTheDocument();
+    expect(success).toHaveBeenCalledWith("modelProvider.workspace.arkCredentialsRecognized");
+    expect(success).not.toHaveBeenCalledWith("modelProvider.message.groupVerified");
+    success.mockRestore();
   });
 
   it("checks a custom endpoint without requiring a key", async () => {

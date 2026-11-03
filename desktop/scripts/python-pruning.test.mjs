@@ -7,6 +7,30 @@ import test from "node:test";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
+test("Mac installed RAG verification handles ad-hoc and official arguments with Bash nounset", {
+  skip: process.platform === "win32",
+}, () => {
+  const workflow = readFileSync(path.join(root, ".github/workflows/macos-installer.yml"), "utf8");
+  const step = workflow.split("      - name: Verify paired RAG with installed signed Python\n")[1]
+    .split("\n      - name:")[0];
+  const script = step.split("        run: |\n")[1].replace(/^          /gm, "");
+  for (const official of ["false", "true"]) {
+    const probe = script.replaceAll("${{ needs.build-macos-installer.outputs.official_release }}", official)
+      .replace('"${runtime}/deps/python/algorithm/bin/python"', "printf '%s\\n'");
+    // /bin/bash is Bash 3.2 on macOS: empty arrays fail under set -u there.
+    const args = execFileSync("/bin/bash", ["-c", probe], {
+      env: { ...process.env, INSTALLED_APP: "/tmp/Installed App/LazyMind.app", RUNNER_TEMP: "/tmp/Runner Temp" },
+      encoding: "utf8",
+    }).trim().split("\n");
+    const expected = ["-I", "-B", "desktop/scripts/verify-python-components.py",
+      "--runtime", "/tmp/Installed App/LazyMind.app/Contents/Resources/runtime",
+      "--bundle-dir", "rag-under-test/darwin-arm64",
+      "--report", "/tmp/Runner Temp/installed-rag-verification/report.json"];
+    if (official === "true") expected.push("--require-macos-team-id");
+    assert.deepEqual(args, expected);
+  }
+});
+
 test("Python pruning preserves runtime helpers and Skill assets", () => {
   execFileSync(process.platform === "win32" ? "python" : "python3", [
     "-m", "unittest", "discover", "-s", "tests", "-p", "test_desktop_python_pruning.py", "-v",

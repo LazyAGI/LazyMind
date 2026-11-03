@@ -62,7 +62,7 @@ func TestCanonicalPaperURLsRetainsOtherProviderSources(t *testing.T) {
 func TestAcquirePDFRejectsInvalidArxivBeforeNetwork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := acquirePDF(ctx, FulltextCandidate{URL: "https://example.org/2404.06654.pdf", SourceProvider: "arxiv"})
+	_, _, err := acquirePDF(ctx, "user", FulltextCandidate{URL: "https://example.org/2404.06654.pdf", SourceProvider: "arxiv"})
 	if err == nil || !strings.Contains(err.Error(), "arXiv") {
 		t.Fatalf("must return parse error before attempting network, got %v", err)
 	}

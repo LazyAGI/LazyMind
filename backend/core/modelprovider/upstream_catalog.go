@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/modelsettings"
 )
 
 // HardcodedModelCatalogEnabled reports whether startup should keep seeding the
@@ -22,18 +23,21 @@ func HardcodedModelCatalogEnabled() bool {
 }
 
 type upstreamCatalogFile struct {
-	GeneratedAt string                            `json:"generated_at"`
-	Providers   map[string][]upstreamCatalogModel `json:"providers"`
+	SchemaVersion     int                               `json:"schema_version"`
+	GeneratedAt       string                            `json:"generated_at"`
+	Providers         map[string][]upstreamCatalogModel `json:"providers"`
+	RecognitionModels []upstreamCatalogModel            `json:"recognition_models"`
 }
 
 type upstreamCatalogModel struct {
-	Name      string   `json:"name"`
-	ModelType string   `json:"model_type"`
-	Input     []string `json:"input"`
-	Output    []string `json:"output"`
-	Context   int      `json:"context"`
-	MaxInput  int      `json:"max_input"`
-	MaxOutput int      `json:"max_output"`
+	Name           string                      `json:"name"`
+	ModelType      string                      `json:"model_type"`
+	Input          []string                    `json:"input"`
+	Output         []string                    `json:"output"`
+	Context        int                         `json:"context"`
+	MaxInput       int                         `json:"max_input"`
+	MaxOutput      int                         `json:"max_output"`
+	FeatureSupport *modelsettings.FeatureFlags `json:"feature_support,omitempty"`
 }
 
 func loadUpstreamCatalog(path string) (upstreamCatalogFile, error) {
@@ -71,40 +75,12 @@ func modalitySet(values []string) map[string]bool {
 // catalog model types the rest of LazyMind already stores.
 func inferUpstreamCatalogModel(item upstreamCatalogModel) catalogModel {
 	name := strings.TrimSpace(item.Name)
-	lower := strings.ToLower(name)
 	input := modalitySet(item.Input)
-	output := modalitySet(item.Output)
 	model := catalogModel{Name: name, Vision: input["image"] || input["video"]}
-	switch {
-	case strings.Contains(lower, "rerank"):
-		model.Type = "rerank"
-	case strings.Contains(lower, "embed"):
-		if input["image"] || input["audio"] || input["video"] {
-			model.Type = "multimodal_embedding"
-		} else {
-			model.Type = "embed"
-		}
-	case input["audio"] && output["text"] && !input["text"]:
-		model.Type = "stt"
-	case output["audio"] && !output["text"] && !output["image"] && !output["video"]:
-		model.Type = "tts"
-	case output["image"] && !output["text"] && !output["video"]:
-		if input["image"] {
-			model.Type = "image_editing"
-		} else {
-			model.Type = "text2image"
-		}
-	case output["video"] && !output["text"]:
-		model.Type = "text2video"
-	default:
-		// General chat stays available to the main LLM slot. Vision is a
-		// capability, rather than a separate runtime type, for these models.
-		model.Type = "llm"
-	}
-	// The generator maps specialized catalog types to the existing runtime types.
-	// Modalities alone cannot distinguish embeddings or mixed text/image output.
-	if modelType := strings.TrimSpace(item.ModelType); modelType != "" {
-		model.Type = modelType
+	model.Type = classifyUpstreamModel(item.ModelType, item.Input, item.Output)
+	if isChatTechnicalType(model.Type) && item.FeatureSupport != nil {
+		encoded, _ := json.Marshal(ModelSettings{FeatureSupport: item.FeatureSupport})
+		model.ModelSettings = string(encoded)
 	}
 	if formatted := formatContextTokens(item.MaxInput); formatted != "" {
 		model.MaxInputTokensOverride = formatted
@@ -177,6 +153,9 @@ func SeedUpstreamModelCatalog(ctx context.Context, db *gorm.DB, yamlPath, upstre
 			known := yamlModels[providerName]
 			for _, item := range models {
 				model := inferUpstreamCatalogModel(item)
+				if model.Type == "" || (upstream.SchemaVersion >= 2 && strings.TrimSpace(item.ModelType) == "") {
+					model.Type = "unknown"
+				}
 				if yamlModel, ok := known[model.Name]; ok {
 					model = applyYAMLCatalogMetadata(model, yamlModel)
 				}
@@ -184,6 +163,9 @@ func SeedUpstreamModelCatalog(ctx context.Context, db *gorm.DB, yamlPath, upstre
 					return err
 				}
 				catalogModels = append(catalogModels, model)
+			}
+			if err := reconcileCatalogModelSelections(tx, provider.ID); err != nil {
+				return err
 			}
 			if err := reconcileUpstreamCatalogTemplates(tx, provider.ID, catalogModels); err != nil {
 				return err

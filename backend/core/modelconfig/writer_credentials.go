@@ -37,6 +37,11 @@ type writerConnectionToken struct {
 // Unlike the general chat loader, document writes require all listed tokens to
 // load successfully. An Auth failure must never become a partial account set.
 func LoadWriterProviderToolConfig(ctx context.Context, provider, userID string) (map[string]any, error) {
+	return LoadWriterProviderConnectionConfig(ctx, provider, userID, "")
+}
+
+// A selected connection cannot silently fall back to another account.
+func LoadWriterProviderConnectionConfig(ctx context.Context, provider, userID, connectionID string) (map[string]any, error) {
 	provider = strings.TrimSpace(provider)
 	userID = strings.TrimSpace(userID)
 	if provider == "" || userID == "" {
@@ -44,6 +49,14 @@ func LoadWriterProviderToolConfig(ctx context.Context, provider, userID string) 
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// Obsidian uses the configured runtime vault and filesystem permissions,
+	// not an OAuth connection or a cloud account fallback.
+	if provider == "obsidian" {
+		if connectionID != "" {
+			return nil, errWriterCredentialLoad
+		}
+		return nil, nil
 	}
 	headers := map[string]string{}
 	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
@@ -72,9 +85,17 @@ func LoadWriterProviderToolConfig(ctx context.Context, provider, userID string) 
 		}
 		seen[item.ConnectionID] = struct{}{}
 	}
+	if connectionID != "" {
+		if _, ok := seen[connectionID]; !ok {
+			return nil, errWriterCredentialLoad
+		}
+	}
 	tokens := make([]string, 0, len(connections.Data.Items))
 	bridge := providerconnection.DefaultService()
 	for _, item := range connections.Data.Items {
+		if connectionID != "" && item.ConnectionID != connectionID {
+			continue
+		}
 		if bridge != nil {
 			resolved, err := bridge.ResolveAccessToken(ctx, providerconnection.ResolveRequest{
 				AuthConnectionID: item.ConnectionID, UserID: userID,

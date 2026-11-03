@@ -32,7 +32,7 @@ type activeProviderKeyResponse struct {
 }
 
 // SetActiveProviderKey enables exactly one saved key for the whole supplier.
-// A failed check leaves the previous choice intact. Empty IDs disable all keys.
+// Connection validation is separate. Empty IDs disable all keys.
 func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -87,20 +87,12 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		checkedURL = connectionBaseURL(parent, checkedGroup.BaseURL)
-		result, err := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), checkedURL, checkedKey, "")
-		if err != nil || result == nil || !result.Success {
-			msg := "verification failed"
-			if result != nil && strings.TrimSpace(result.Message) != "" {
-				msg = strings.TrimSpace(result.Message)
-			}
-			common.ReplyErrWithData(w, "verification failed: "+msg, CheckModelProviderData{Success: false, Message: msg}, http.StatusBadGateway)
-			return
-		}
 	}
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := lockProvider(tx, &parent); err != nil {
 			return err
 		}
+		verified := false
 		if req.KeyID != "" {
 			if parent.ActiveKeyRevision != preferenceRevision {
 				return errConnectionChanged
@@ -122,8 +114,13 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 			if keyMatchingID(current.ID, req.KeyID, pool) != checkedKey {
 				return errConnectionChanged
 			}
+			verified = parent.ActiveKeyGroupID == req.GroupID && parent.ActiveKeyID == req.KeyID && current.IsVerified
 		}
-		return saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, req.KeyID != "", time.Now())
+		now := time.Now()
+		if err := saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, verified, now); err != nil {
+			return err
+		}
+		return refreshProviderSelectionBackup(tx, parent, now)
 	})
 	if err != nil {
 		if errors.Is(err, errConnectionChanged) {
@@ -158,6 +155,38 @@ func saveActiveProviderKey(tx *gorm.DB, parent *orm.UserModelProvider, groupID, 
 func setSupplierVerification(tx *gorm.DB, parent orm.UserModelProvider, verified bool, now time.Time) error {
 	return tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).
 		Updates(map[string]any{"is_verified": verified, "updated_at": now}).Error
+}
+
+// Selection is part of the encrypted credential record. Advance its revision
+// and AAD together so a running older upload cannot consume this outbox update.
+func refreshProviderSelectionBackup(tx *gorm.DB, parent orm.UserModelProvider, now time.Time) error {
+	var groups []orm.UserModelProviderGroup
+	if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, parent.CreateUserID).Find(&groups).Error; err != nil {
+		return err
+	}
+	for i := range groups {
+		group := &groups[i]
+		pool, err := apiKeyForGroup(tx, group)
+		if err != nil {
+			return err
+		}
+		if err := validateSavedKeyPool(parent, group.Name, connectionBaseURL(parent, group.BaseURL), pool); err != nil {
+			return err
+		}
+		revision := max(group.CredentialRevision, 1) + 1
+		updates, err := encryptedAPIKeyUpdates(parent.CreateUserID, group.ID, revision, pool, group.CredentialVersion)
+		if err != nil {
+			return err
+		}
+		updates["updated_at"] = now
+		if err := tx.Model(group).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := enqueueCredentialBackup(tx, group.ID, revision, credentialvault.BackupUpsert, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // initializeProviderActiveKey is called with the supplier locked. SQL cannot
@@ -248,10 +277,28 @@ func selectedProviderKey(tx *gorm.DB, parent orm.UserModelProvider) (orm.UserMod
 // ResolveProviderRuntimeCredential returns one consistent supplier endpoint/key
 // snapshot. Model keys never rotate and inactive saved keys are never returned.
 func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string) (string, string, error) {
+	return resolveProviderRuntimeCredential(ctx, db, groupID)
+}
+
+func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string) (string, string, error) {
+	config, err := ResolveProviderRuntimeConfiguration(ctx, db, groupID)
+	return config.BaseURL, config.APIKey, err
+}
+
+type RuntimeProviderConfiguration struct {
+	BaseURL  string
+	APIKey   string
+	Advanced credentialvault.ProviderRequestAdvanced
+}
+
+// ResolveProviderRuntimeConfiguration reads credentials and private request
+// settings under the same supplier lock, preventing mixed runtime snapshots.
+func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, groupID string) (RuntimeProviderConfiguration, error) {
 	if db == nil {
-		return "", "", errors.New("store not initialized")
+		return RuntimeProviderConfiguration{}, errors.New("store not initialized")
 	}
 	var baseURL, key string
+	var advanced credentialvault.ProviderRequestAdvanced
 	var unavailable error
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var requested orm.UserModelProviderGroup
@@ -276,6 +323,11 @@ func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 		if err := lockProvider(tx, &parent); err != nil {
 			return err
 		}
+		var err error
+		advanced, err = ResolveProviderRequestAdvanced(parent)
+		if err != nil {
+			return err
+		}
 		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", requested.ID, parent.ID, parent.CreateUserID).Take(&requested).Error; err != nil {
 			return err
 		}
@@ -288,20 +340,20 @@ func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			if err != nil {
 				return err
 			}
-			if hasKeys || isAPIKeyRequiredForBaseURL(ctx, tx, parent.DefaultModelProviderID, baseURL) {
+			if hasKeys || providerAPIKeyRequiredForBaseURL(ctx, tx, parent, baseURL) {
 				unavailable = ErrProviderKeyDisabled
 				return nil
 			}
 			if err := tx.Where("id = ? AND deleted_at IS NULL", requested.ID).Take(&requested).Error; err != nil {
 				return err
 			}
-			if !requested.IsVerified {
+			if !validCustomProviderURL(RuntimeProviderName(parent), baseURL) {
 				unavailable = ErrProviderKeyUnverified
 				return nil
 			}
 			return nil
 		}
-		selected, selectedKey, err := selectedProviderKey(tx, parent)
+		_, selectedKey, err := selectedProviderKey(tx, parent)
 		if err != nil {
 			if errors.Is(err, ErrProviderKeyDisabled) {
 				unavailable = err
@@ -309,20 +361,18 @@ func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			}
 			return err
 		}
-		if !selected.IsVerified {
-			unavailable = ErrProviderKeyUnverified
-			return nil
-		}
+		// A user's explicit saved-model call uses its enabled credential. A
+		// list-only diagnostic is not admission for the actual inference API.
 		key = selectedKey
 		return nil
 	})
 	if err != nil {
-		return "", "", err
+		return RuntimeProviderConfiguration{}, err
 	}
 	if unavailable != nil {
-		return "", "", unavailable
+		return RuntimeProviderConfiguration{}, unavailable
 	}
-	return baseURL, key, nil
+	return RuntimeProviderConfiguration{BaseURL: baseURL, APIKey: key, Advanced: advanced}, nil
 }
 
 func ResolveProviderAPIKey(ctx context.Context, db *gorm.DB, groupID string) (string, error) {
@@ -380,11 +430,11 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 		common.ReplyErr(w, ErrProviderKeyDisabled.Error(), http.StatusBadRequest)
 		return
 	}
-	if key == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+	if key == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, baseURL) {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
-	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, key, strings.TrimSpace(req.Model))
+	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, key, strings.TrimSpace(req.Model), parent)
 	verifiesCurrent := (selectedKey != "" && key == selectedKey) || (!storedKeys && key == "")
 	if !req.DryRun && verifiesCurrent {
 		err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -440,20 +490,34 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 	if req.DryRun && result.Success {
 		recentVerifyCache.Store(verifyCheckCacheKey(group.ID, baseURL, key), time.Now().Add(5*time.Minute))
 	}
-	common.ReplyOK(w, CheckModelProviderData{Success: result.Success, Message: result.Message})
+	common.ReplyOK(w, CheckModelProviderData{Success: result.Success, Message: result.Message, Reason: result.Reason})
 }
 
 func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool string) error {
 	if strings.TrimSpace(pool) == "" {
 		return nil
 	}
-	catalogKey := strings.TrimSpace(RuntimeProviderName(parent))
-	if catalogKey == "" {
-		catalogKey = strings.TrimSpace(parent.DefaultModelProviderID)
+	catalogKey := CatalogCredentialKey(parent)
+	requestConfig, err := portableProviderRequestConfig(parent)
+	if err != nil {
+		return err
 	}
 	payload, err := credentialvault.EncodeProviderCredentialPayload(credentialvault.ProviderCredential{
-		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool),
+		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool), RequestConfig: requestConfig,
+		ActiveKeyIndex: selectionMetadataCapacity(parent, pool),
 	})
 	clear(payload)
 	return err
+}
+
+func selectionMetadataCapacity(parent orm.UserModelProvider, pool string) *int {
+	if !hasSharedProviderEndpoint(parent) {
+		return nil
+	}
+	// Reserve enough payload space for either explicit disable or any key index.
+	index := -1
+	if count := len(splitAPIKeys(pool)); count > 100 {
+		index = count - 1
+	}
+	return &index
 }

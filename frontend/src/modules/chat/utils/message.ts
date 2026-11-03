@@ -5,11 +5,12 @@ import {
 } from "@/api/generated/chatbot-client";
 import type {
   ChatModelRoute,
+  ChatModelSwitchRecord,
   ConversationHistoryItem as CoreConversationHistoryItem,
   ConversationTrailItem,
 } from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
-import { splitThinkingContent } from "@/modules/chat/utils/thinking";
+import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import { mailConfirmationMetadata, mailConfirmationTurnSignature, type MailConfirmationMetadata } from "./mailConfirmationReplay";
@@ -140,8 +141,10 @@ export function mergeAskPending(previous: any, incoming: any) {
     merged.set(draftId, mergeMailDraftRecord(merged.get(draftId), draft));
   }
   const drafts = [...merged.values()];
+  // Mail receipts span questions; business metadata and labels belong to one ask ID.
+  const sameQuestion = !incoming.ask_id || incoming.ask_id === previous.ask_id;
   return {
-    ...previous,
+    ...(sameQuestion ? previous : {}),
     ...incoming,
     mail_draft_only: incoming.mail_draft_only ?? (mailDraftsFromAskPending(incoming).length > 0),
     mail_draft: drafts[drafts.length - 1] || incoming.mail_draft || previous.mail_draft,
@@ -185,6 +188,7 @@ export type ConversationHistoryRecord = Omit<
       run_status?: "interrupted" | "failed";
       run_terminal?: Record<string, unknown>;
       model_route?: ChatModelRoute;
+      model_switches?: ChatModelSwitchRecord[];
       create_time?: string;
     }>;
   };
@@ -388,6 +392,7 @@ export function buildChatMessageListFromHistory(
           attempt.run_status || attempt.run_terminal?.status || "failed",
         run_terminal: attempt.run_terminal,
         model_route: attempt.model_route,
+        model_switches: attempt.model_switches,
         create_time: attempt.create_time,
         archived_failure: true,
       });
@@ -395,10 +400,9 @@ export function buildChatMessageListFromHistory(
 
     const isLastRecord = record === lastRecord;
     const isActuallyGenerating = isGenerating && isLastRecord;
-    const splitResult = splitThinkingContent(
-      record.result,
-      record.reasoning_content,
-    );
+    const splitResult = record.model_output
+      ? splitModelOutputContent(record.result, record.reasoning_content)
+      : splitThinkingContent(record.result, record.reasoning_content);
     const hasAskPending = !!(record as any).ask_pending;
     const displayAssistantContent = stripAskUserReceipt(
       splitResult.content,
@@ -410,6 +414,7 @@ export function buildChatMessageListFromHistory(
       delta: displayAssistantContent,
       exports: record.exports,
       raw_delta: record.result || "",
+      ...(record.model_output ? { raw_reasoning_content: record.reasoning_content || "" } : {}),
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
         : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
@@ -426,7 +431,10 @@ export function buildChatMessageListFromHistory(
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
       performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
+      model_switches: record.model_switches,
+      model_output: record.model_output,
       fork_read_only: (record as any).fork_read_only,
+      knowledge_operations: (record as any).knowledge_operations,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

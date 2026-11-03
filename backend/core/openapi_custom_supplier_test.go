@@ -16,12 +16,18 @@ func TestOpenAPICustomSupplierContract(t *testing.T) {
 	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	create := schemas["createCustomModelProviderOpenAPIRequest"].(map[string]any)["properties"].(map[string]any)
-	if len(create) != 3 || create["name"] == nil || create["source_provider_id"] == nil || create["base_url"] == nil {
-		t.Fatal("supplier creation must separate display name, protocol source and endpoint")
+	if len(create) != 4 || create["name"] == nil || create["source_provider_id"] == nil || create["base_url"] == nil || create["logo_data_url"] == nil {
+		t.Fatal("supplier creation must separate display name, protocol source, endpoint and optional artwork")
 	}
 	provider := schemas["userModelProviderOpenAPIItem"].(map[string]any)["properties"].(map[string]any)
 	if provider["is_custom"] == nil || provider["protocol_name"] == nil {
 		t.Fatal("supplier list must expose custom identity and technical protocol")
+	}
+	for _, schema := range []string{"userModelProviderOpenAPIItem", "listModelProviderGroupModelsOpenAPIItem", "selectedModelOpenAPIItem"} {
+		properties := schemas[schema].(map[string]any)["properties"].(map[string]any)
+		if properties["brand_key"] == nil || properties["service_key"] == nil {
+			t.Fatalf("%s must retain service identity independently of the runtime protocol", schema)
+		}
 	}
 	chatProvider := schemas["chatModelProviderOpenAPIItem"].(map[string]any)["properties"].(map[string]any)
 	if chatProvider["is_custom"].(map[string]any)["type"] != "boolean" {

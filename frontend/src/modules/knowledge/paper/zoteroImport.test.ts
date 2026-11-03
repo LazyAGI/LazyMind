@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { emptyLibraryV3 } from './libraryModel';
+import { readFileSync } from 'node:fs';
+import { emptyLibrary } from './libraryModel';
 import { buildZoteroImport, parseZoteroJSON, matchLocalZoteroFile, previewZotero, type ZoteroPreview } from './zoteroImport';
 import { axiosInstance } from '@/components/request';
+import { filterZoteroPreview, listZoteroPapers } from './zoteroSelection';
 
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: { post: vi.fn() } }));
 const sample = (): ZoteroPreview => ({
@@ -16,12 +18,29 @@ const sample = (): ZoteroPreview => ({
 });
 
 describe('Zotero import graph', () => {
+  it.skipIf(!process.env.ZOTERO_REAL_PREVIEW_PATH)('builds the opt-in local database preview with valid paper and material ownership', () => {
+    const input = JSON.parse(readFileSync(process.env.ZOTERO_REAL_PREVIEW_PATH!, 'utf8')) as ZoteroPreview;
+    const papers = listZoteroPapers(input);
+    const plan = buildZoteroImport(filterZoteroPreview(input, papers.map(paper => paper.key)), emptyLibrary());
+    expect(plan.counts.papers + plan.counts.existing).toBe(papers.length);
+    const paperIds = new Set(plan.library.papers.map(paper => paper.id));
+    const attachmentIds = new Set(plan.library.attachments.map(attachment => attachment.id));
+    expect(plan.library.notes.every(note => paperIds.has(note.paperId))).toBe(true);
+    expect(plan.library.attachments.every(attachment => paperIds.has(attachment.paperId))).toBe(true);
+    expect(plan.library.annotations.every(annotation => paperIds.has(annotation.paperId) && attachmentIds.has(annotation.attachmentId!))).toBe(true);
+  }, 15000);
+  it('preserves detected database libraries for selection and subsequent attachment requests', async () => {
+    const database = { path: '/data/Zotero/zotero.sqlite', libraries: [{ type: 'users', id: '0', name: '我的文献库' }], library_type: 'users', library_id: '0' };
+    vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { ...sample(), database } });
+    const result = await previewZotero('dataset', { source: 'database', library_type: 'users', library_id: '0' });
+    expect(result.database).toEqual(database);
+  });
   it('preserves nested collections, authors, memberships, notes and PDF annotations without pretending files are stored', () => {
-    const plan = buildZoteroImport(sample(), emptyLibraryV3());
+    const plan = buildZoteroImport(sample(), emptyLibrary());
     expect(plan.library.folders).toHaveLength(2);
     expect(plan.library.folders[1].parentId).toBe(plan.library.folders[0].id);
     const paper = plan.library.papers[0];
-    expect(paper).toMatchObject({ title: 'A paper', authors: 'Ada Lovelace', year: 2024, doi: '10.1234/test' });
+    expect(paper).toMatchObject({ metadata: { title: 'A paper', authors: ['Ada Lovelace'], year: 2024, identifiers: { doi: '10.1234/test' } } });
     expect(paper.collectionIds).toHaveLength(2);
     expect(plan.library.notes[0].content).toBe('Useful note');
     expect(plan.library.annotations[0]).toMatchObject({ paperId: paper.id, quote: 'A result', comment: 'Interesting', page: 3 });
@@ -30,22 +49,53 @@ describe('Zotero import graph', () => {
   });
 
   it('is idempotent and preserves personal edits and uploaded attachment identities', () => {
-    const first = buildZoteroImport(sample(), emptyLibraryV3());
-    first.library.papers[0].title = 'My edited title';
+    const first = buildZoteroImport(sample(), emptyLibrary());
+    first.library.papers[0].metadata.title = 'My edited title';
     first.library.papers[0].status = 'read';
     first.library.papers[0].important = true;
     first.library.attachments[0].contentRef = 'stored-document';
     const next = buildZoteroImport(sample(), first.library);
     expect(next.library.papers).toHaveLength(1);
-    expect(next.library.papers[0]).toMatchObject({ title: 'My edited title', status: 'read', important: true });
+    expect(next.library.papers[0]).toMatchObject({ metadata: { title: 'My edited title' }, status: 'read', important: true });
     expect(next.library.notes).toHaveLength(1);
     expect(next.library.annotations).toHaveLength(1);
     expect(next.attachments).toEqual([]);
     expect(next.counts).toMatchObject({ papers: 0, existing: 1, folders: 0, notes: 0 });
   });
 
+  it('imports selected PDF attachment notes under their paper with stable replay identities', () => {
+    const input = sample();
+    Object.assign((input.items[1] as { data: Record<string, unknown> }).data, { note: '<p>PDF <b>reading note</b></p><script>hidden()</script>', dateAdded: '2024-04-01T00:00:00Z' });
+    input.items.push(
+      { key: 'SOLOPDF1', data: { itemType: 'attachment', filename: 'standalone.pdf', note: '<p>Standalone note</p>' } },
+      { key: 'PAPER002', data: { itemType: 'book', title: 'Unselected' } },
+      { key: 'PDF00002', data: { itemType: 'attachment', parentItem: 'PAPER002', filename: 'other.pdf', note: '<p>Unselected attachment note</p>' } },
+      { key: 'EMPTY001', data: { itemType: 'attachment', parentItem: 'PAPER001', filename: 'empty.pdf', note: '  \n ' } },
+      { key: 'HTML0001', data: { itemType: 'attachment', parentItem: 'PAPER001', contentType: 'text/html', note: 'Excluded snapshot note' } },
+    );
+    const selected = filterZoteroPreview(input, ['PAPER001', 'SOLOPDF1']);
+    const first = buildZoteroImport(selected, emptyLibrary());
+    expect(first.library.notes.map(note => note.content).sort()).toEqual(['PDF reading note', 'Standalone note', 'Useful note']);
+    const childNote = first.library.notes.find(note => note.content === 'PDF reading note')!;
+    const standaloneNote = first.library.notes.find(note => note.content === 'Standalone note')!;
+    const paper = first.library.papers.find(item => item.metadata.title === 'A paper')!;
+    const standalone = first.library.papers.find(item => item.metadata.title === 'standalone.pdf')!;
+    expect(childNote).toMatchObject({ paperId: paper.id, createdAt: '2024-04-01T00:00:00.000Z' });
+    expect(standaloneNote.paperId).toBe(standalone.id);
+    expect(paper.noteIds).toContain(childNote.id);
+    expect(standalone.noteIds).toEqual([standaloneNote.id]);
+    expect(first.counts.notes).toBe(3);
+    childNote.content = 'Personal edit';
+    const replay = buildZoteroImport(selected, first.library);
+    expect(replay.library.notes.map(note => note.id)).toEqual(first.library.notes.map(note => note.id));
+    expect(replay.library.notes.find(note => note.id === childNote.id)?.content).toBe('Personal edit');
+    expect(replay.counts.notes).toBe(0);
+    const otherSource = buildZoteroImport({ ...selected, source_id: 'groups:17' }, emptyLibrary());
+    expect(otherSource.library.notes.some(note => note.id === childNote.id)).toBe(false);
+  });
+
   it('matches an existing DOI and augments relationships without overwriting existing organization', () => {
-    const first = buildZoteroImport(sample(), emptyLibraryV3());
+    const first = buildZoteroImport(sample(), emptyLibrary());
     first.library.papers[0].id = 'my-existing-paper';
     first.library.papers[0].zoteroSources = [];
     first.library.papers[0].source = 'doi';
@@ -68,21 +118,21 @@ describe('Zotero import graph', () => {
   it('rejects cycles and missing collection parents before producing a partial graph', () => {
     const cycle = sample();
     (cycle.collections[0] as { data: { parentCollection: unknown } }).data.parentCollection = 'CHILD001';
-    expect(() => buildZoteroImport(cycle, emptyLibraryV3())).toThrow(/循环/);
+    expect(() => buildZoteroImport(cycle, emptyLibrary())).toThrow(/循环/);
     const missing = sample();
     (missing.collections[0] as { data: { parentCollection: unknown } }).data.parentCollection = 'MISSING1';
-    expect(() => buildZoteroImport(missing, emptyLibraryV3())).toThrow(/父/);
+    expect(() => buildZoteroImport(missing, emptyLibrary())).toThrow(/父/);
   });
 
   it('places imported root collections beneath an existing chosen folder', () => {
-    const library = emptyLibraryV3();
+    const library = emptyLibrary();
     library.folders.push({ id: 'destination', name: 'Imported' });
     const plan = buildZoteroImport(sample(), library, 'destination');
     expect(plan.library.folders.find(folder => folder.name === 'Research')?.parentId).toBe('destination');
   });
 
   it('keeps a matched existing folder identity after the user renames or moves it', () => {
-    const library = emptyLibraryV3();
+    const library = emptyLibrary();
     library.folders.push({ id: 'mine', name: 'Research' }, { id: 'parent', name: 'Personal' });
     const input = sample();
     input.items = input.items.slice(0, 2);
@@ -98,7 +148,7 @@ describe('Zotero import graph', () => {
   it('flattens exported nested items, notes and collections using stable external identities', () => {
     const input = JSON.stringify({ items: [{ key: 'PAPER001', itemType: 'book', title: 'Book', uri: 'http://zotero.org/users/42/items/PAPER001', attachments: [{ key: 'PDF00001', contentType: 'application/pdf', path: 'storage/PDF00001/paper.pdf' }], notes: [{ key: 'NOTE0001', note: '<p>Note</p>' }] }], collections: [{ key: 'ROOT0001', name: 'Root', items: ['PAPER001'], children: [{ key: 'CHILD001', name: 'Child', items: ['PAPER001'] }] }] });
     const parsed = parseZoteroJSON(input);
-    const graph = buildZoteroImport(parsed, emptyLibraryV3());
+    const graph = buildZoteroImport(parsed, emptyLibrary());
     expect(graph.library.notes).toHaveLength(1);
     expect(graph.library.attachments).toHaveLength(1);
     expect(graph.library.papers[0].collectionIds).toHaveLength(2);
@@ -115,7 +165,7 @@ describe('Zotero import graph', () => {
       items: [{ itemID: 123, itemType: 'journalArticle', title: 'Exported paper', uri: 'http://zotero.org/users/42/items/PAPER001', attachments: [{ uri: 'http://zotero.org/users/42/items/PDF00001', mimeType: 'application/pdf', path: 'files/456/paper.pdf' }] }],
       collections: { ROOT0001: { key: 'ROOT0001', name: 'Root', parent: '', items: [123] }, CHILD001: { key: 'CHILD001', name: 'Child', parent: 'ROOT0001', items: [123] } },
     }));
-    const plan = buildZoteroImport(parsed, emptyLibraryV3());
+    const plan = buildZoteroImport(parsed, emptyLibrary());
     expect(plan.library.folders).toHaveLength(2);
     expect(plan.library.folders[1].parentId).toBe(plan.library.folders[0].id);
     expect(plan.library.papers[0].collectionIds).toHaveLength(2);
@@ -146,7 +196,7 @@ describe('Zotero import graph', () => {
     const input = sample();
     input.items = input.items.slice(0, 2);
     input.items.push({ key: 'WEB00001', data: { itemType: 'attachment', parentItem: 'PAPER001', contentType: 'text/html', title: 'Snapshot' } });
-    const plan = buildZoteroImport(input, emptyLibraryV3());
+    const plan = buildZoteroImport(input, emptyLibrary());
     expect(plan.attachments).toHaveLength(1);
     expect(plan.library.attachments).toHaveLength(1);
   });
@@ -160,4 +210,19 @@ describe('Zotero import graph', () => {
     vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { ...sample(), success: false, message: 'Provider rejected request' } });
     await expect(previewZotero('dataset', config)).rejects.toThrow('Provider rejected request');
   });
+});
+
+it('retains selected folder ancestry and duplicate names in different branches', () => {
+ const p = sample();
+ p.collections.push({key:'LEAF0001',data:{key:'LEAF0001',name:'Results',parentCollection:'CHILD001'}}, {key:'OTHER001',data:{key:'OTHER001',name:'Models',parentCollection:false}});
+ const paper = p.items[0] as {data:Record<string,unknown>}; paper.data.collections=['LEAF0001','OTHER001'];
+ const plan = buildZoteroImport(filterZoteroPreview(p,['PAPER001']),emptyLibrary());
+ const folders = plan.library.folders;
+ const root = folders.find(f=>f.name==='Research')!;
+ const child = folders.find(f=>f.name==='Models' && f.parentId===root.id)!;
+ const leaf = folders.find(f=>f.name==='Results')!;
+ const other = folders.find(f=>f.name==='Models' && !f.parentId)!;
+ expect(leaf.parentId).toBe(child.id);
+ expect(other.id).not.toBe(child.id);
+ expect(plan.library.papers[0].collectionIds).toEqual(expect.arrayContaining([leaf.id,other.id]));
 });

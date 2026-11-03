@@ -22,13 +22,16 @@ func TestKnowledgeStorageWithoutRAG(t *testing.T) {
 		t.Fatal(err)
 	}
 	acl.InitStore(db)
+	installOriginalSourceTransport(t)
 	previous := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/api/scan/internal/source-access/by-dataset:batch":
-			return testJSONResponse(200, `{"items":[]}`), nil
+			return previous.RoundTrip(r)
 		case "/api/scan/internal/sources/by-datasets":
 			return testJSONResponse(200, `{"source_map":{}}`), nil
+		case "/api/authservice/user/storage-user/groups/internal":
+			return testJSONResponse(200, `{"groups":[]}`), nil
 		}
 		t.Errorf("storage must not call RAG services: %s", r.URL.Path)
 		return testJSONResponse(503, "{}"), nil
@@ -41,7 +44,23 @@ func TestKnowledgeStorageWithoutRAG(t *testing.T) {
 		return mux.SetURLVars(r, map[string]string{"dataset": "storage-test"})
 	}
 	rec := httptest.NewRecorder()
-	CreateDataset(rec, request("POST", "/datasets?dataset_id=storage-test", `{"display_name":"StorageTest","processing_level":"stored","algo":{"algo_id":"general_algo"}}`))
+	GetKnowledgeOptions(rec, request("GET", "/knowledge/options", ""))
+	var options struct {
+		Algorithms   []Algo `json:"algorithms"`
+		DefaultLevel string `json:"default_processing_level"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &options); err != nil || rec.Code != 200 || len(options.Algorithms) != 0 || options.DefaultLevel != ProcessingLevelIndexed {
+		t.Fatalf("native creation options: %d %s err=%v", rec.Code, rec.Body.String(), err)
+	}
+	rec = httptest.NewRecorder()
+	CreateDataset(rec, request("POST", "/datasets?dataset_id=deferred-test", `{"display_name":"DeferredTest","tags":["test"],"processing_level":"indexed"}`))
+	var deferred Dataset
+	decodeRecorderJSON(t, rec, &deferred)
+	if rec.Code != 200 || deferred.ProcessingLevel != ProcessingLevelIndexed {
+		t.Fatalf("deferred creation: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	CreateDataset(rec, request("POST", "/datasets?dataset_id=storage-test", `{"display_name":"StorageTest","tags":["test"],"processing_level":"stored","algo":{"algo_id":"general_algo"}}`))
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -64,7 +83,7 @@ func TestKnowledgeStorageWithoutRAG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := "%PDF-1.4 synthetic storage fixture, do not parse"
+	original := "%PDF-1.4\nsynthetic storage fixture, do not parse\n%%EOF"
 	if _, err = part.Write([]byte(original)); err != nil {
 		t.Fatal(err)
 	}

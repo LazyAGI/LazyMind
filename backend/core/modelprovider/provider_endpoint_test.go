@@ -1,15 +1,18 @@
 package modelprovider
 
 import (
+	"context"
 	"encoding/json"
 	"lazymind/core/credentialvault"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
@@ -46,7 +49,7 @@ func TestProviderEndpointUpdatePreservesAllConnectionCredentials(t *testing.T) {
 		if err := db.First(&row, "id = ?", id).Error; err != nil {
 			t.Fatal(err)
 		}
-		if row.BaseURL != "https://proxy.example/v1" || row.IsVerified || row.CredentialRevision != 2 {
+		if row.BaseURL != "https://proxy.example/v1/" || row.IsVerified || row.CredentialRevision != 2 {
 			t.Fatalf("connection %s endpoint/revision/verification wrong: %+v", id, row)
 		}
 		if got, err := apiKeyForGroup(db, &row); err != nil || got != want {
@@ -104,18 +107,25 @@ func TestCheckGroupUsesStoredKeyAndSharedEndpoint(t *testing.T) {
 func TestEndpointChangeRejectsInFlightAddKeyWithoutLosingKeys(t *testing.T) {
 	db, parent, group := setupEncryptedGroupKeyTest(t, "old-key\nkeep-key")
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	if err := prepareProviderKeySelection(t.Context(), db, &parent); err != nil {
+		t.Fatal(err)
+	}
 	started, release := make(chan struct{}), make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		close(started)
-		<-release
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true}`))
-	}))
-	defer server.Close()
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	type pausedCredentialSave struct{}
+	var once sync.Once
+	const callback = "test:pause-key-save-read"
+	if err := db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_model_provider_groups" && tx.Statement.Context.Value(pausedCredentialSave{}) == true {
+			once.Do(func() { close(started); <-release })
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
 	request := httptest.NewRequest(http.MethodPost, "/keys", strings.NewReader(`{"api_key":"new-key"}`))
 	request.Header.Set("X-User-Id", "user-1")
 	request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+	request = request.WithContext(context.WithValue(request.Context(), pausedCredentialSave{}, true))
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() { recorder := httptest.NewRecorder(); AddKey(recorder, request); result <- recorder }()
 	<-started

@@ -1,0 +1,16 @@
+Local model serving supplier marks
+Retrieved: 2026-10-23
+
+vLLM: official compact mark from the vLLM media kit
+https://github.com/vllm-project/media-kit
+https://raw.githubusercontent.com/vllm-project/media-kit/main/vLLM-Logo.svg
+
+LMDeploy: official project logo
+https://github.com/InternLM/lmdeploy
+https://raw.githubusercontent.com/InternLM/lmdeploy/main/docs/en/_static/image/lmdeploy-logo.svg
+Project license: Apache-2.0
+https://github.com/InternLM/lmdeploy/blob/main/LICENSE
+
+The original SVG artwork is nested in a tinted rounded tile, without changing
+its geometry, colors or proportions. LMDeploy uses the symbol viewport from
+the left of its full wordmark so it remains legible at supplier icon sizes.

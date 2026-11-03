@@ -168,6 +168,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Accept-Language", input.Language)
 			req.Header.Set("Last-Event-ID", input.LastEventID)
+			// Preserve request provenance for interactive workflow control checks.
+			// Origin was validated at the handshake; it is not supplied by a frame.
+			req.Header.Set("Origin", r.Header.Get("Origin"))
+			req.Header.Set("X-LazyMind-Invocation-Id", r.Header.Get("X-LazyMind-Invocation-Id"))
 			if status := h.Authorize(req); status != http.StatusOK {
 				_ = send(frame{Type: "error", ID: input.ID, Status: status})
 				return

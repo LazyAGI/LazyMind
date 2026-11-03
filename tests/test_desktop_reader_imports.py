@@ -44,3 +44,25 @@ __all__ = ['Document', 'PDFReader', 'inject_reader_config', 'DocField', 'add_pos
 def test_patch_rejects_unknown_initializer():
     with pytest.raises(RuntimeError, match='Unrecognized'):
         patcher.patch_source('print("unknown version")')
+
+
+def test_patch_parsing_service_preserves_exports_without_importing_workers():
+    original = '''from .impl import _Processor
+from .server import DocumentProcessor
+from .worker import DocumentProcessorWorker
+__all__ = ['_Processor', 'DocumentProcessor', 'DocumentProcessorWorker']
+'''
+    patched = patcher.patch_source(original, parsing_service=True)
+    namespace = {'__name__': 'lazyllm.tools.rag.parsing_service'}
+    exec(patched, namespace)
+    assert 'DocumentProcessorWorker' not in namespace
+    calls = []
+
+    def load(name, package):
+        calls.append((name, package))
+        return SimpleNamespace(DocumentProcessorWorker='worker')
+
+    namespace['import_module'] = load
+    assert namespace['__getattr__']('DocumentProcessorWorker') == 'worker'
+    assert calls == [('.worker', 'lazyllm.tools.rag.parsing_service')]
+    assert patcher.patch_source(patched, parsing_service=True) == patched

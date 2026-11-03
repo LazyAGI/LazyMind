@@ -11,6 +11,12 @@ import (
 )
 
 type AggregateDocumentsRequest struct {
+	ResourceIDs     []string `json:"resource_ids,omitempty"`
+	ParentID        *string  `json:"parent_id,omitempty"`
+	Recursive       *bool    `json:"recursive,omitempty"`
+	Match           string   `json:"match,omitempty"`
+	Name            string   `json:"name,omitempty"`
+	Path            string   `json:"path,omitempty"`
 	DatasetIDs      []string `json:"dataset_ids,omitempty"`
 	FileTypes       []string `json:"file_types,omitempty"`
 	DocumentStages  []string `json:"document_stages,omitempty"`
@@ -63,12 +69,18 @@ func AggregateDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, _, err := loadMergedDocumentsBySearch(r.Context(), datasetIDs, "", nil, int(^uint(0)>>1), 0)
+	req.DatasetIDs = datasetIDs
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
 	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	resp := aggregateDocumentRows(rows, req)
+	resp, err := AggregateMetadata(r.Context(), store.DB(), store.LazyLLMDB(), caller, req, AggregateBudget{})
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	common.ReplyJSON(w, resp)
 }
 
@@ -157,7 +169,7 @@ func containsAllNormalized(values []string, want map[string]struct{}) bool {
 func documentRowTags(row mergedDocRow) []string {
 	var tags []string
 	_ = json.Unmarshal(row.Tags, &tags)
-	return tags
+	return normalizeBatchDocumentTags(tags)
 }
 
 func normalizeGroupBy(values []string) []string {

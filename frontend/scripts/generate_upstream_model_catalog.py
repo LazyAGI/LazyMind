@@ -2,7 +2,9 @@
 """Fetch the model catalog from models.dev and OpenRouter at build time.
 
 The JSON is not checked in. Builds share a validated snapshot for 24 hours;
-runtime startup never needs to contact the public catalogs.
+runtime startup never needs to contact the public catalogs. Service availability
+is limited to supported providers; a separate index recognizes model types from
+all upstream suppliers without adding their endpoints or offered models.
 """
 
 import argparse
@@ -27,8 +29,8 @@ def find_root():
 
 ROOT = find_root()
 MODELS_DEV_URL = 'https://models.dev/api.json?type=all'
-OPENROUTER_URL = 'https://openrouter.ai/api/v1/models'
-SCHEMA_VERSION = 1
+OPENROUTER_URL = 'https://openrouter.ai/api/v1/models?output_modalities=all'
+SCHEMA_VERSION = 4
 
 PROVIDER_SOURCES = {
     'Claude': ['anthropic'],
@@ -41,16 +43,6 @@ PROVIDER_SOURCES = {
     'Qwen': ['alibaba-cn', 'alibaba'],
     'SenseNova': ['sensenova'],
     'SiliconFlow': ['siliconflow-cn', 'siliconflow'],
-}
-
-MODALITY_ORDER = ['text', 'image', 'audio', 'video', 'file']
-MODALITY_MAP = {
-    'text': 'text',
-    'image': 'image',
-    'audio': 'audio',
-    'video': 'video',
-    'pdf': 'file',
-    'file': 'file',
 }
 
 
@@ -67,12 +59,14 @@ def fetch_json(url):
 
 
 def normalize_modalities(values):
+    # Retain upstream task modalities, including future ones. Collapsing them
+    # into text/image/audio would lose the distinction between speech, music,
+    # transcription, embeddings, decisions and ordinary chat.
     found = []
-    for value in values or []:
-        mapped = MODALITY_MAP.get(str(value).strip().lower())
-        if mapped and mapped not in found:
-            found.append(mapped)
-    return [item for item in MODALITY_ORDER if item in found]
+    for value in values if isinstance(values, list) else []:
+        if isinstance(value, str) and (normalized := value.strip().lower()) and normalized not in found:
+            found.append(normalized)
+    return found
 
 
 def blank_model(name):
@@ -80,11 +74,42 @@ def blank_model(name):
 
 
 def model_type(kind, model):
-    if kind == 'embedding':
-        return 'multimodal_embedding' if any(m in model['input'] for m in ['image', 'audio', 'video']) else 'embed'
-    if kind == 'image':
-        return 'image_editing' if 'image' in model['input'] else 'text2image'
-    return {'reranking': 'rerank', 'transcription': 'stt', 'speech': 'tts', 'video': 'text2video'}.get(kind, '')
+    inputs, outputs = set(model['input']), set(model['output'])
+    if outputs - {'text', 'image', 'audio', 'video', 'speech', 'transcription', 'embedding', 'embeddings', 'rerank'}:
+        return ''
+    declared = str(kind or '').strip().lower()
+    if declared:
+        if declared in {'embedding', 'embeddings', 'embed'}:
+            return 'multimodal_embedding' if inputs - {'text'} else 'embed'
+        return {
+            'chat': 'llm', 'llm': 'llm', 'vlm': 'vlm',
+            'reranking': 'rerank', 'rerank': 'rerank',
+            'transcription': 'stt', 'stt': 'stt', 'asr': 'stt',
+            'speech': 'tts', 'tts': 'tts',
+            'image': 'text2image', 'text2image': 'text2image',
+            'image_editing': 'image_editing', 'image-editing': 'image_editing',
+            'video': 'text2video', 'text2video': 'text2video',
+            'multimodal_embedding': 'multimodal_embedding',
+        }.get(declared, '')
+    if outputs & {'embeddings', 'embedding'}:
+        return 'multimodal_embedding' if inputs - {'text'} else 'embed'
+    if 'rerank' in outputs:
+        return 'rerank'
+    if 'transcription' in outputs:
+        return 'stt'
+    if 'speech' in outputs:
+        return 'tts'
+    if 'video' in outputs:
+        return 'text2video'
+    if 'image' in outputs:
+        # Image inputs can be optional references for an image-generation API;
+        # they do not prove a separate image-editing adapter is available.
+        return 'text2image'
+    if outputs == {'audio'}:
+        return 'tts'
+    if outputs == {'text'}:
+        return 'stt' if 'audio' in inputs and 'text' not in inputs else 'llm'
+    return ''
 
 
 def from_models_dev(entry, fallback_name):
@@ -98,6 +123,15 @@ def from_models_dev(entry, fallback_name):
     model['max_input'] = int(limit.get('input') or 0)
     model['max_output'] = int(limit.get('output') or 0)
     model['model_type'] = model_type(entry.get('type'), model)
+    support = {}
+    if model['model_type'] in {'llm', 'vlm'}:
+        if isinstance(modalities.get('input'), list):
+            support['vision'] = bool(set(model['input']) & {'image', 'video'})
+        for field, target in [('tool_call', 'tool_calling'), ('reasoning', 'reasoning')]:
+            if isinstance(entry.get(field), bool):
+                support[target] = entry[field]
+    if support:
+        model['feature_support'] = support
     return model
 
 
@@ -110,13 +144,22 @@ def from_openrouter(entry):
     model['context'] = int(entry.get('context_length') or 0)
     top = entry.get('top_provider') or {}
     model['max_output'] = int(top.get('max_completion_tokens') or 0)
+    # Live task modalities take precedence over optional declared metadata.
+    model['model_type'] = model_type(None if model['output'] else entry.get('model_type') or entry.get('type'), model)
+    support = {}
+    if model['model_type'] in {'llm', 'vlm'}:
+        if isinstance(architecture.get('input_modalities'), list):
+            support['vision'] = bool(set(model['input']) & {'image', 'video'})
+        parameters = entry.get('supported_parameters')
+        if isinstance(parameters, list) and all(isinstance(value, str) for value in parameters):
+            support['tool_calling'] = 'tools' in parameters
+            support['reasoning'] = bool(set(parameters) & {'reasoning', 'include_reasoning'})
+    if support:
+        model['feature_support'] = support
     return model
 
 
 def finalize(model):
-    if not model['input'] and not model['output']:
-        model['input'] = ['text']
-        model['output'] = ['text']
     for field in ['context', 'max_input', 'max_output']:
         model[field] = max(0, model[field])
     if model['max_input'] > model['context'] > 0:
@@ -140,6 +183,33 @@ def collect_models_dev(catalog, keys):
         if merged:
             break
     return merged
+
+
+def collect_recognition_models(models_dev, openrouter_models):
+    models = list(openrouter_models.values())
+    for provider_name, provider in models_dev.items():
+        if not isinstance(provider, dict):
+            continue
+        for fallback_name, entry in (provider.get('models') or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            model = from_models_dev(entry, fallback_name)
+            if not model['name']:
+                continue
+            # This supplier's models.dev entries mirror OpenRouter. Keep the
+            # live task evidence instead of introducing a stale mirror conflict.
+            if provider_name == 'openrouter' and model['name'] in openrouter_models:
+                continue
+            models.append(model)
+    distinct = {}
+    for model in models:
+        # A name alone is not an identity: different suppliers may use the same
+        # ID for different tasks. Consumers must see those conflicting records.
+        identity = (model['name'], model['model_type'], tuple(model['input']), tuple(model['output']),
+                    tuple(sorted(model.get('feature_support', {}).items())))
+        if identity not in distinct:
+            distinct[identity] = finalize(model)
+    return [distinct[identity] for identity in sorted(distinct)]
 
 
 def keep_sensenova(name):
@@ -189,10 +259,11 @@ def build_catalog(models_dev, openrouter):
         model = from_openrouter(entry)
         if not model['name']:
             continue
-        # Live API decides availability and limits. models.dev only enriches
-        # type metadata for IDs that are still returned by OpenRouter.
+        # Live API decides availability, task modalities and limits. Only use
+        # type enrichment when the live response has no output evidence at all.
         known = metadata.get(model['name'], {})
-        model['model_type'] = known.get('model_type', '')
+        if not model['output'] and not model['model_type']:
+            model['model_type'] = known.get('model_type', '')
         openrouter_models[model['name']] = model
     providers['OpenRouter'] = [finalize(openrouter_models[name]) for name in sorted(openrouter_models)]
 
@@ -203,6 +274,7 @@ def build_catalog(models_dev, openrouter):
         'generated_at': utc_now(),
         'sources': [MODELS_DEV_URL, OPENROUTER_URL],
         'providers': providers,
+        'recognition_models': collect_recognition_models(models_dev, openrouter_models),
     }
 
 
@@ -211,14 +283,20 @@ def read_snapshot(path):
         with open(path, encoding='utf-8') as handle:
             payload = json.load(handle)
         version = payload.get('schema_version', 0)
-        if version not in (0, SCHEMA_VERSION):
+        if version not in (0, 1, 2, 3, SCHEMA_VERSION):
             return None
         payload['schema_version'] = version
         providers = payload['providers']
         if not isinstance(providers, dict) or not any(providers.values()):
             return None
         datetime.strptime(payload['generated_at'], '%Y-%m-%dT%H:%M:%SZ')
-        for models in providers.values():
+        model_lists = list(providers.values())
+        if version >= 3:
+            recognition = payload.get('recognition_models')
+            if not isinstance(recognition, list) or not recognition:
+                return None
+            model_lists.append(recognition)
+        for models in model_lists:
             if not isinstance(models, list):
                 return None
             for model in models:
@@ -229,8 +307,16 @@ def read_snapshot(path):
                     model.setdefault('model_type', '')
                 if not isinstance(model['name'], str) or not model['name'].strip():
                     return None
+                if not isinstance(model['model_type'], str):
+                    return None
+                support = model.get('feature_support', {})
+                if not isinstance(support, dict) or any(
+                    key not in {'vision', 'tool_calling', 'reasoning'} or not isinstance(value, bool)
+                    for key, value in support.items()
+                ):
+                    return None
                 if any(
-                    not isinstance(model[key], list) or any(v not in MODALITY_ORDER for v in model[key])
+                    not isinstance(model[key], list) or any(not isinstance(v, str) or not v.strip() for v in model[key])
                     for key in ['input', 'output']
                 ):
                     return None

@@ -13,8 +13,8 @@ import "./index.scss";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
 import { TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { localizeErrorCode } from "@/components/request";
-import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {
   waitForRuntimeCapability,
 } from "@/runtime/readiness";
@@ -36,7 +36,8 @@ export interface IRestartKnowledgeProps {
 
 interface IProps {
   parsers?: Array<ParserConfig>;
-  onFinish: () => void;
+  onFinish: (documentIds?: string[]) => void;
+  onError?: (error: unknown, documentIds: string[]) => void;
 }
 
 const allParseList = ["all", "document"];
@@ -60,12 +61,13 @@ const RestartKnowledgeModal = (
   props: IProps,
   ref: Ref<unknown> | undefined,
 ) => {
-  const { parsers, onFinish } = props;
+  const { parsers, onFinish, onError } = props;
   const { t } = useTranslation();
   const { availability } = useRAGComponent();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [runtimeWaiting, setRuntimeWaiting] = useState(false);
+  const [submissionFailed, setSubmissionFailed] = useState(false);
   const [modalInfo, setModalInfo] = useState<IData>();
   const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const [form] = Form.useForm();
@@ -79,6 +81,7 @@ const RestartKnowledgeModal = (
   }));
 
   const onOpen = (data: IData) => {
+    setSubmissionFailed(false);
     setVisible(true);
     setModalInfo(data);
     form.setFieldsValue({
@@ -158,32 +161,34 @@ const RestartKnowledgeModal = (
             },
           },
         ],
-      });
+      }, { silentError: !!onError } as never);
 
       const tasks = createRes.data.tasks || [];
       const taskIds = tasks
         .map((task: { task_id?: string }) => task.task_id)
         .filter((taskId: string | undefined): taskId is string => !!taskId);
       if (!taskIds.length) {
-        message.error(localizeErrorCode("2000509"));
-        return;
+        throw new Error(localizeErrorCode("2000509"));
       }
 
-      const startRes = await TaskServiceApi().startTasks(dataset, { task_ids: taskIds });
+      const startRes = await TaskServiceApi().startTasks(dataset, { task_ids: taskIds }, { silentError: !!onError } as never);
       const startedCount = startRes.data.started_count ?? 0;
       if (startedCount <= 0) {
-        message.error(localizeErrorCode("2000509"));
-        return;
+        throw new Error(localizeErrorCode("2000509"));
       }
       message.success(t("knowledge.createReparseTaskSuccess"));
-      onFinish?.();
+      onFinish?.(ids);
       onCancel();
     } catch (error) {
       if ((error as Error)?.name === "AbortError") {
         return;
       }
+      if (error && typeof error === 'object' && 'errorFields' in error) return;
       console.error(error);
-      message.error(getImportErrorMessage(error));
+      if (onError) {
+        setSubmissionFailed(true);
+        onError(error, modalInfo.ids);
+      } else message.error(getImportErrorMessage(error));
     } finally {
       runtimeWaitAbortRef.current = null;
       setRuntimeWaiting(false);
@@ -258,6 +263,7 @@ const RestartKnowledgeModal = (
         />
       )}
       <Form form={form} layout="vertical">
+        {submissionFailed && <p role="status">解析任务尚未提交，请重试或查看通知。</p>}
         {modalInfo?.ingest && <Alert type="info" showIcon message={t("knowledge.ingestRetainedHint")} />}
         {supportsSegments && (
           <>

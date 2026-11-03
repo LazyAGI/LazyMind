@@ -1,3 +1,4 @@
+import os
 import lazyllm
 from copy import deepcopy
 from typing import NamedTuple, Optional
@@ -16,6 +17,7 @@ from lazyllm.tools.rag.readers import (
 from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
 
 from lazymind.model_config import get_dynamic_role_slot_map
+from lazymind.embedding_options import mark_embedding_query_arguments, wrap_embedding_model
 from lazymind.config import EMBED_IMAGE, EMBED_INDEX_KWARGS, EMBED_KEYS, EMBED_MAIN, config as _cfg
 from lazymind.parsing.engine.readers import ImageEmbReader, VideoReader
 from lazymind.parsing.engine.readers.native_office import NativeOfficeReader
@@ -49,6 +51,7 @@ def _quiet_trace(kbs):
         if llm_config:
             from lazymind.model_config import inject_model_config
             inject_model_config(llm_config)
+        args, kwargs = mark_embedding_query_arguments(args, kwargs)
         return kbs[kb_group](*args, **kwargs)
     return call
 
@@ -321,10 +324,22 @@ def drop_lazyllm_tables() -> None:
         LOG.error(f'[build_document] Failed to drop lazyllm tables: {e}')
 
 
+def configure_algorithm_registration() -> str:
+    if _cfg['force_algo_register']:
+        # Fresh Python workers must observe the same policy as this process.
+        os.environ['LAZYLLM_ALGO_REGISTER_POLICY'] = 'force'
+        lazyllm.config['algo_register_policy'] = 'force'
+    policy = lazyllm.config['algo_register_policy']
+    lazyllm.LOG.info(f'[build_document] effective algorithm registration policy={policy}')
+    return policy
+
+
 def build_document(algo_id: str = ALGO_ID, *, serve: bool = True) -> Document:
+    configure_algorithm_registration()
     processor_url = _cfg['document_processor_url']
     server_port = get_algo_server_port()
-    embed = {k: AutoModel(model=k) for k in EMBED_KEYS}
+    embed = {k: (wrap_embedding_model(AutoModel(model=k), role=k) if k == EMBED_MAIN else AutoModel(model=k))
+             for k in EMBED_KEYS}
 
     # Current LazyLLM expects store_conf on DocumentProcessor when using DocumentProcessor,
     # while Document receives only the remote processor manager.

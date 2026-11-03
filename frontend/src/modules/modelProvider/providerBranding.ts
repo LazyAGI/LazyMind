@@ -10,6 +10,8 @@ const providerLogoAssets: Array<[RegExp, string]> = [
   [/openai/, "openai.svg"],
   [/qwen|tongyi|通义/, "qwen.svg"],
   [/siliconflow/, "siliconflow.svg"],
+  [/^vllm$/, "vllm.svg"],
+  [/^lmdeploy$/, "lmdeploy.svg"],
 ];
 
 export function getProviderLogoUrl(name: string, isCustom = false) {

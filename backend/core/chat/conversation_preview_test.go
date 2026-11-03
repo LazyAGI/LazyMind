@@ -12,7 +12,7 @@ import (
 )
 
 func TestConversationPreviewSummaryIsScopedAndDoesNotChangeActivity(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	before := time.Date(2026, 9, 17, 8, 30, 0, 0, time.UTC)

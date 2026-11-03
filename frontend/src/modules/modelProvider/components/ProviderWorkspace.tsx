@@ -1,28 +1,29 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeftOutlined,
   CheckCircleFilled,
-  CloudOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Drawer,
   Empty,
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Spin,
-  Switch,
-  Tag,
   Tooltip,
   message,
+  type InputRef,
 } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
@@ -36,17 +37,30 @@ import {
   createCustomProvider,
   updateCustomProviderName,
   deleteCustomProvider,
+  resetProvider,
   unwrapModelProviderData,
   updateProviderEndpoint,
   setProviderActiveKey,
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
-import {
-  isLlmChatCapability,
-  resolveLlmMaxInputTokens,
-} from "../maxInputTokens";
-import { ModelModalityMarks } from "./ModelModalityMarks";
+import { getProviderBrandDisplayName, getProviderDisplayName, getProviderServiceDisplayName } from "../providerDisplayNames";
+import { filterSupplierNavigation, hasProgrammingScopeNotice, programmingScopeLink, projectSupplierNavigation } from "../supplierNavigation";
+import { getSupplierBrandKey } from "../supplierServices";
+import { useSupplierOrder } from "../hooks/useSupplierOrder";
+import { useFocusModality } from "../hooks/useFocusModality";
+import { canDiscoverWithoutApiKey } from "../providerAuthentication";
+import { getProviderConnectionFailureMessage } from "../connectionFailure";
+import { SortableSupplierList } from "./SortableSupplierList";
+import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
+import { SavedProviderModels } from "./SavedProviderModels";
+import { ProviderKeyManager } from "./ProviderKeyManager";
+import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
+import { ProviderInformationDrawer } from "./ProviderInformationDrawer";
+import { getProviderInformationCopy } from "../providerInformationCopy";
+import { CustomLogoPicker } from "./CustomLogoPicker";
+import { getCustomLogoCopy } from "../customLogoCopy";
+import { isCustomLogoDataUrl } from "../customLogo";
 import type {
   AddedProvider,
   ModelCapability,
@@ -69,6 +83,7 @@ interface Props {
     group: ProviderConnectionGroup,
   ) => void;
   modelsLoading: Record<string, boolean>;
+  modelsError?: Record<string, string>;
   onAddModel: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   onSyncModels: (
     provider: AddedProvider,
@@ -83,38 +98,68 @@ interface Props {
     provider: AddedProvider,
     group: ProviderConnectionGroup,
     model: ProviderModel,
-  ) => void;
+  ) => void | Promise<boolean>;
   onCheck: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   checking: Record<string, boolean>;
   onReload: () => Promise<void>;
-  cloudAvailable: boolean;
+  onKeySaved?: (
+    provider: AddedProvider,
+    groupId: string,
+    isCurrent: () => boolean,
+  ) => Promise<void>;
   cloudContent: ReactNode;
+  verificationEvent?: { providerId: string; account: string | null; sequence: number };
 }
 
 function Logo({ provider }: { provider: ProviderOption }) {
-  const logo = getProviderLogoUrl(
-    provider.protocolName || provider.source || provider.name,
+  const fallback = getProviderLogoUrl(
+    provider.brandKey || provider.name || provider.protocolName || provider.source,
     provider.isCustom,
-  );
+  ) || "/provider-icons/custom.svg";
+  const logo = isCustomLogoDataUrl(provider.logoDataUrl) ? provider.logoDataUrl : fallback;
   return (
     <span className="provider-workspace-logo" aria-hidden="true">
-      {logo ? <img src={logo} alt="" /> : provider.name.slice(0, 2)}
+      {logo ? <img src={logo} alt="" onError={(event) => {
+        if (event.currentTarget.getAttribute("src") !== fallback) event.currentTarget.src = fallback;
+      }} /> : provider.name.slice(0, 2)}
     </span>
   );
 }
 
+function hasProviderConfiguration(provider: AddedProvider): boolean {
+  return provider.groups.some(
+    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 || group.models.length > 0,
+  );
+}
+
 export function ProviderWorkspace(props: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const focusModality = useFocusModality();
+  const language = i18n?.resolvedLanguage || i18n?.language;
   const label = (key: string, options?: Record<string, unknown>) =>
     t(`modelProvider.workspace.${key}`, options);
   const [selectedId, setSelectedId] = useState(props.highlightProviderId || "");
+  const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
+  const navigationId = useId();
   const [search, setSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
-  const [modelType, setModelType] = useState<string>("all");
+  const [modelType, setModelType] = useState<ModelTaskFilter>("all");
+  const [showHidden, setShowHidden] = useState(false);
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
+  const [requestConfigOpen, setRequestConfigOpen] = useState(false);
+  const [requestConfigRevision, setRequestConfigRevision] = useState(0);
+  const [informationOpen, setInformationOpen] = useState(false);
+  const informationTrigger = useRef<HTMLButtonElement>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
+  const supplierSearch = useRef<InputRef>(null);
+  const supplierSidebar = useRef<HTMLElement>(null);
+  const supplierDetail = useRef<HTMLElement>(null);
+  const supplierButtons = useRef(new Map<string, HTMLButtonElement>());
+  const supplierReturnTarget = useRef<HTMLButtonElement | null>(null);
+  const navigationFocus = useRef<"detail" | "list" | null>(null);
   const [endpointSaving, setEndpointSaving] = useState(false);
+  const [savedEndpoint, setSavedEndpoint] = useState<{ providerId: string; baseUrl: string }>();
   const [keyOpen, setKeyOpen] = useState(false);
   const [keySaving, setKeySaving] = useState(false);
   const [removingKey, setRemovingKey] = useState("");
@@ -123,6 +168,12 @@ export function ProviderWorkspace(props: Props) {
     null,
   );
   const [providerSaving, setProviderSaving] = useState(false);
+  const providerSavePending = useRef(false);
+  const [providerLogoBusy, setProviderLogoBusy] = useState(false);
+  const providerLogoBusyRef = useRef(false);
+  const providerModalGeneration = useRef(0);
+  const logoGeneration = providerModalGeneration.current;
+  const providerModalTarget = useRef<AddedProvider>();
   const [providerDeleting, setProviderDeleting] = useState(false);
   const [deleteModal, deleteModalContext] = Modal.useModal();
   const [initializing, setInitializing] = useState(false);
@@ -130,42 +181,78 @@ export function ProviderWorkspace(props: Props) {
     name: string;
     sourceProviderId: string;
     baseUrl: string;
+    logoDataUrl?: string;
   }>();
   const providerDraft = useSettingsFormDraft(
     providerForm,
     Boolean(providerModal),
-    providerSaving,
+    providerSaving || providerLogoBusy,
   );
   const activeKeyRequestPending = useRef(false);
+  const addKeyRequestPending = useRef(false);
   const [endpointForm] = Form.useForm<{ baseUrl: string }>();
   const [keyForm] = Form.useForm<{ apiKey: string }>();
   const keyDraft = useSettingsFormDraft(keyForm, keyOpen, keySaving);
   const endpointValue = Form.useWatch("baseUrl", endpointForm);
+  const sourceTemplateId = Form.useWatch("sourceProviderId", providerForm);
   const loadedGroups = useRef(new Set<string>());
-  const providers = useMemo(
+  const mergedProviders = useMemo(
     () =>
-      props.providers.map(
-        (provider): AddedProvider =>
-          props.configuredProviders.find((item) => item.id === provider.id) || {
-            ...provider,
-            groups: [],
-          },
-      ),
+      props.providers
+        .map(
+          (provider): AddedProvider =>
+            props.configuredProviders.find(
+              (item) => item.id === provider.id,
+            ) || {
+              ...provider,
+              groups: [],
+            },
+        ),
     [props.providers, props.configuredProviders],
   );
+  const projectedNavigation = useMemo(() => projectSupplierNavigation(mergedProviders), [mergedProviders]);
+  const { providers: navigation, reorder: reorderSuppliers, promote, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
+  const lastVerification = useRef<Props["verificationEvent"]>();
+  useEffect(() => {
+    const event = props.verificationEvent;
+    if (!event || event === lastVerification.current) return;
+    lastVerification.current = event;
+    if (event.account !== localStorage.getItem("lazymind:user")) return;
+    const node = navigation.find(item => item.children.some(child => child.id === event.providerId));
+    if (node) promote(node.id);
+  }, [props.verificationEvent, navigation, promote]);
+  const providers = useMemo(() => navigation.flatMap((node) => node.children), [navigation]);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
+  const selectedAncestorId = navigation.find((node) => node.isBrandGroup && node.children.some((child) => child.id === provider?.id))?.id;
+  const activeSupplierId = useRef<string | undefined>(provider?.id);
+  activeSupplierId.current = provider?.id;
+  useEffect(() => {
+    activeSupplierId.current = provider?.id;
+    return () => { activeSupplierId.current = undefined; };
+  }, [provider?.id]);
+  const providerDisplayName = provider
+    ? getProviderDisplayName(provider, language)
+    : "";
+  const informationCopy = getProviderInformationCopy(language);
   // One private compatibility record belongs to each supplier.
   const group = provider?.groups[0];
   const groupKey = provider && group ? `${provider.id}:${group.id}` : "";
+  const hasSavedKeys = Boolean(group?.keys.length || group?.apiKeyConfigured);
+  const hasEnabledKey = group?.keys.length ? group.keys.some((key) => key.enabled) : Boolean(group?.apiKeyConfigured);
+  const keylessCustom = provider ? canDiscoverWithoutApiKey(provider, group) : false;
+  const verifiedSelection = (hasEnabledKey || keylessCustom) && group?.verified === true;
+  const supplierStatus = verifiedSelection ? "connected" : keylessCustom ? "notConnected" : !hasSavedKeys ? "notConfigured" : !hasEnabledKey ? "disabled" : "notConnected";
+  const modelsError = groupKey ? props.modelsError?.[groupKey] : undefined;
+  const endpointBaseline = savedEndpoint && savedEndpoint.providerId === provider?.id ? savedEndpoint.baseUrl : provider?.baseUrl || "";
   const endpointDirty =
-    Boolean(provider) &&
-    (endpointValue ?? provider.baseUrl).trim() !== provider.baseUrl;
+    Boolean(provider && savedEndpoint?.providerId === provider.id) &&
+    (endpointValue ?? endpointBaseline).trim() !== endpointBaseline;
   const confirmEndpointLeave = useSettingsDraft({
     dirty: endpointDirty,
     saving: endpointSaving,
     discard: () =>
-      endpointForm.setFieldsValue({ baseUrl: provider?.baseUrl || "" }),
+      endpointForm.setFieldsValue({ baseUrl: endpointBaseline }),
   });
 
   useEffect(() => {
@@ -175,8 +262,15 @@ export function ProviderWorkspace(props: Props) {
     }
   }, [props.highlightProviderId]);
   useEffect(() => {
+    if (selectedAncestorId) setExpandedBrands((current) => current.has(selectedAncestorId) ? current : new Set(current).add(selectedAncestorId));
+  }, [provider?.id, selectedAncestorId]);
+  useEffect(() => {
+    setInformationOpen(false);
+  }, [provider?.id]);
+  useEffect(() => {
     if (!provider) return;
     setSelectedId(provider.id);
+    setSavedEndpoint({ providerId: provider.id, baseUrl: provider.baseUrl });
     endpointForm.setFieldsValue({ baseUrl: provider.baseUrl });
   }, [provider?.id, provider?.baseUrl]);
   useEffect(() => {
@@ -185,18 +279,69 @@ export function ProviderWorkspace(props: Props) {
     props.onLoadModels(provider, group);
   }, [groupKey]);
 
-  const changeProvider = (id: string) =>
+  useEffect(() => {
+    const narrowViewport = window.matchMedia("(max-width: 800px)");
+    const focusList = () => {
+      const target = [supplierReturnTarget.current, supplierButtons.current.get(provider?.id || ""),
+        supplierButtons.current.get(selectedAncestorId || "")].find((button) => button?.isConnected && !button.disabled && !button.closest("[hidden]"));
+      if (target) target.focus({ preventScroll: true });
+      else supplierSearch.current?.focus({ preventScroll: true });
+    };
+    const focusDetail = () => informationTrigger.current?.focus({ preventScroll: true });
+    const destination = navigationFocus.current;
+    if (destination && (destination === "detail") === mobileDetail) {
+      navigationFocus.current = null;
+      // Desktop keeps both panes visible, so retain the initiating control's focus.
+      const paneWidth = supplierDetail.current?.parentElement?.getBoundingClientRect().width || 0;
+      if (narrowViewport.matches || (paneWidth > 0 && paneWidth <= 700)) {
+        if (destination === "detail") focusDetail(); else focusList();
+      }
+    }
+    const onBreakpointChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) return;
+      const focused = document.activeElement;
+      if (mobileDetail && supplierSidebar.current?.contains(focused)) focusDetail();
+      else if (!mobileDetail && supplierDetail.current?.contains(focused)) focusList();
+    };
+    narrowViewport.addEventListener("change", onBreakpointChange);
+    return () => narrowViewport.removeEventListener("change", onBreakpointChange);
+  }, [mobileDetail, provider?.id, selectedAncestorId]);
+
+  const selectProvider = (id: string, trigger?: HTMLButtonElement) => {
+    supplierReturnTarget.current = trigger || supplierButtons.current.get(id) || null;
+    navigationFocus.current = "detail";
+    setSelectedId(id);
+    setModelSearch("");
+    setModelType("all");
+    setMobileDetail(true);
+  };
+  const changeProvider = (id: string, trigger: HTMLButtonElement) =>
+    confirmEndpointLeave(() => selectProvider(id, trigger));
+  const returnToSuppliers = () => confirmEndpointLeave(() => {
+    navigationFocus.current = "list";
+    setMobileDetail(false);
+  });
+  const configureInformationProvider = (id: string) => {
+    if (id === provider?.id) {
+      setInformationOpen(false);
+      return;
+    }
+    if (!providers.some((item) => item.id === id)) return;
     confirmEndpointLeave(() => {
-      setSelectedId(id);
-      setModelSearch("");
-      setModelType("all");
-      setMobileDetail(true);
+      setInformationOpen(false);
+      selectProvider(id);
     });
+  };
   const saveEndpoint = async ({ baseUrl }: { baseUrl: string }) => {
     if (!provider || endpointSaving) return;
     setEndpointSaving(true);
     try {
-      await updateProviderEndpoint(provider.id, baseUrl.trim());
+      const saved = await updateProviderEndpoint(provider.id, baseUrl.trim());
+      const canonical = saved?.base_url ?? baseUrl.trim();
+      if (activeSupplierId.current === provider.id) {
+        setSavedEndpoint({ providerId: provider.id, baseUrl: canonical });
+        endpointForm.setFieldsValue({ baseUrl: canonical });
+      }
       confirmEndpointLeave.acceptSaved();
       await props.onReload();
       message.success(label("endpointSaved"));
@@ -211,9 +356,22 @@ export function ProviderWorkspace(props: Props) {
     setKeyOpen(true);
     keyDraft.captureSavedValues();
   };
-  const addKey = async ({ apiKey }: { apiKey: string }) => {
-    if (!provider || keySaving) return;
+  const checkSavedKey = (supplier: AddedProvider, groupId: string, isCurrent: () => boolean) => {
+    void (async () => {
+      try {
+        await props.onKeySaved?.(supplier, groupId, isCurrent);
+      } catch (error) {
+        if (isCurrent()) message.error(getProviderConnectionFailureMessage(error, t));
+      }
+    })();
+  };
+  const addKey = async ({ apiKey }: { apiKey: string }): Promise<boolean> => {
+    if (!provider || addKeyRequestPending.current || !apiKey.trim()) return false;
+    const supplierId = provider.id;
+    addKeyRequestPending.current = true;
     setKeySaving(true);
+    let saved = false;
+    let savedGroupId = group?.id || "";
     try {
       if (group) {
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
@@ -224,26 +382,38 @@ export function ProviderWorkspace(props: Props) {
           }),
         );
       } else {
-        await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
+        const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
           {
             modelProviderId: provider.id,
             createModelProviderGroupOpenAPIRequest: {
               name: provider.name,
               api_key: apiKey.trim(),
-              verify: true,
+              verify: false,
             },
           },
           { timeout: 180000 },
         );
+        const created = unwrapModelProviderData<{ id: string; is_verified?: boolean }>(response.data);
+        savedGroupId = created.id;
       }
-      keyDraft.acceptSaved();
-      keyForm.resetFields();
-      setKeyOpen(false);
+      saved = true;
+      if (activeSupplierId.current === supplierId) {
+        keyDraft.acceptSaved();
+        keyForm.resetFields();
+        setKeyOpen(false);
+      }
       await props.onReload();
-      message.success(label("keyAdded"));
+      if (activeSupplierId.current === supplierId) message.success(label("keyAdded"));
+      if (savedGroupId && activeSupplierId.current === supplierId) {
+        checkSavedKey(provider, savedGroupId, () => activeSupplierId.current === supplierId);
+      }
+      return true;
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      const errorMessage = saved ? label("savedRefreshFailed") : getLocalizedErrorMessage(error);
+      message.error(activeSupplierId.current === supplierId ? errorMessage : `${providerDisplayName}: ${errorMessage}`);
+      return saved;
     } finally {
+      addKeyRequestPending.current = false;
       setKeySaving(false);
     }
   };
@@ -282,44 +452,67 @@ export function ProviderWorkspace(props: Props) {
       setChangingActiveKey("");
     }
   };
-  const openProviderModal = (mode: "create" | "edit") =>
+  const resetProviderModal = () => {
+    providerModalGeneration.current += 1;
+    providerLogoBusyRef.current = false;
+    setProviderLogoBusy(false);
+    providerModalTarget.current = undefined;
+    setProviderModal(null);
+    providerForm.resetFields();
+  };
+  const openProviderModal = (mode: "create" | "edit") => {
+    if (providerSavePending.current || providerLogoBusyRef.current) return;
     confirmEndpointLeave(() => {
+      providerModalGeneration.current += 1;
+      providerLogoBusyRef.current = false;
+      setProviderLogoBusy(false);
+      providerModalTarget.current = mode === "edit" ? provider : undefined;
       const source =
         providers.find(
-          (item) => !item.isCustom && item.source.toLowerCase() === "openai",
+          (item) => !item.isCustom && getSupplierBrandKey(item) === "OpenAI",
         ) ||
         providers.find((item) => !item.isCustom) ||
         provider;
+      providerForm.resetFields();
       providerForm.setFieldsValue({
         name: mode === "edit" ? provider?.name || "" : "",
         sourceProviderId: source?.id || "",
         baseUrl: source?.baseUrl || "",
+        logoDataUrl: mode === "edit" ? provider?.logoDataUrl || undefined : undefined,
       });
       setProviderModal(mode);
       providerDraft.captureSavedValues();
     });
+  };
   const saveProvider = async (values: {
     name: string;
     sourceProviderId: string;
     baseUrl: string;
+    logoDataUrl?: string;
   }) => {
-    if (providerSaving || !providerModal) return;
+    if (providerSavePending.current || providerLogoBusyRef.current || !providerModal) return;
+    const target = providerModalTarget.current;
+    providerSavePending.current = true;
     setProviderSaving(true);
     try {
-      let nextId = provider?.id;
+      let nextId = target?.id;
       if (providerModal === "create") {
         const created = await createCustomProvider({
           name: values.name.trim(),
           source_provider_id: values.sourceProviderId,
           base_url: values.baseUrl.trim(),
+          ...(values.logoDataUrl ? { logo_data_url: values.logoDataUrl } : {}),
         });
         nextId = created.id;
-      } else if (provider) {
-        await updateCustomProviderName(provider.id, values.name.trim());
+      } else if (target) {
+        if ((values.logoDataUrl || "") !== (target.logoDataUrl || "")) {
+          await updateCustomProviderName(target.id, values.name.trim(), values.logoDataUrl || "");
+        } else {
+          await updateCustomProviderName(target.id, values.name.trim());
+        }
       }
       providerDraft.acceptSaved();
-      setProviderModal(null);
-      providerForm.resetFields();
+      resetProviderModal();
       await props.onReload();
       if (nextId) {
         setSelectedId(nextId);
@@ -329,57 +522,42 @@ export function ProviderWorkspace(props: Props) {
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
+      providerSavePending.current = false;
       setProviderSaving(false);
     }
   };
-  const removeProvider = async (confirmIndexedDowngrade: boolean) => {
-    if (!provider?.isCustom || providerDeleting) return;
+  const removeProvider = async () => {
+    if (!provider || providerDeleting) return;
+    const target = provider;
     setProviderDeleting(true);
     try {
-      await deleteCustomProvider(provider.id, confirmIndexedDowngrade);
+      if (target.isCustom) await deleteCustomProvider(target.id);
+      else await resetProvider(target.id);
+      loadedGroups.current.clear();
       await props.onReload();
-      setSelectedId("");
-      message.success(label("supplierDeleted"));
+      setRequestConfigRevision((current) => current + 1);
+      if (target.isCustom) setSelectedId("");
+      message.success(label(target.isCustom ? "supplierDeleted" : "supplierReset"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      const response = (error as { response?: { status?: number; data?: { detail?: string; message?: string } } })?.response;
+      const detail = String(response?.data?.detail || response?.data?.message || "");
+      if (response?.status === 409 && (detail.includes("embedding model is in use") || detail.includes("requires confirmation to downgrade"))) {
+        message.warning(t("modelProvider.embeddingInUse"));
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       setProviderDeleting(false);
     }
   };
-  const confirmDeleteProvider = async () => {
-    if (!provider?.isCustom || providerDeleting) return;
-    setProviderDeleting(true);
-    try {
-      let hasEmbedding = false;
-      if (group) {
-        const response =
-          await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet(
-            { modelProviderId: provider.id, groupId: group.id },
-          );
-        const data = unwrapModelProviderData<{
-          models?: Array<{ model_type?: string }>;
-        }>(response.data);
-        hasEmbedding = (data.models || []).some((model) =>
-          ["embed", "embedding", "embed_main"].includes(
-            (model.model_type || "").trim().toLowerCase(),
-          ),
-        );
-      }
-      deleteModal.confirm({
-        title: label("deleteSupplier"),
-        content: hasEmbedding
-          ? t("modelProvider.confirmDeleteEmbeddingDesc")
-          : label("deleteSupplierHint"),
-        okText: t("common.delete"),
-        cancelText: t("common.cancel"),
-        okButtonProps: { danger: true },
-        onOk: () => removeProvider(hasEmbedding),
-      });
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      setProviderDeleting(false);
-    }
+  const confirmDeleteProvider = () => {
+    if (!provider || providerDeleting) return;
+    deleteModal.confirm({
+      title: label(provider.isCustom ? "deleteSupplier" : "resetSupplier"),
+      content: label(provider.isCustom ? "deleteSupplierHint" : "resetSupplierHint"),
+      okText: label(provider.isCustom ? "deleteSupplier" : "resetSupplier"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: removeProvider,
+    });
   };
   const withProviderModels = async (
     action: (
@@ -388,8 +566,9 @@ export function ProviderWorkspace(props: Props) {
     ) => void,
   ) => {
     if (!provider || initializing) return;
+    const currentProvider = provider.baseUrl === endpointBaseline ? provider : { ...provider, baseUrl: endpointBaseline };
     if (group) {
-      action(provider, group);
+      action(currentProvider, group.baseUrl === endpointBaseline ? group : { ...group, baseUrl: endpointBaseline });
       return;
     }
     setInitializing(true);
@@ -411,63 +590,78 @@ export function ProviderWorkspace(props: Props) {
         id: created.id,
         name: provider.name,
         source: provider.source,
-        baseUrl: provider.baseUrl,
+        baseUrl: endpointBaseline,
         apiKeyConfigured: false,
         verified: created.is_verified === true,
         models: [],
         keys: [],
       };
       await props.onReload();
-      action({ ...provider, groups: [canonical] }, canonical);
+      action({ ...currentProvider, groups: [canonical] }, canonical);
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
       setInitializing(false);
     }
   };
-  const visibleProviders = providers.filter(
-    (item) =>
-      (!configuredOnly || item.groups.length > 0) &&
-      item.name.toLowerCase().includes(search.toLowerCase().trim()),
+  const availableNavigation = navigation.filter(node => showHidden ? hiddenIds.includes(node.id) : !hiddenIds.includes(node.id));
+  const visibleNavigation = filterSupplierNavigation(availableNavigation, search, configuredOnly, hasProviderConfiguration, language);
+  const configuredCount = filterSupplierNavigation(navigation.filter(node => !hiddenIds.includes(node.id)), search, true, hasProviderConfiguration, language).length;
+  const changeVisibility = (id: string) => confirmEndpointLeave(() => {
+    if (showHidden) {
+      restore(id);
+      if (hiddenIds.filter(hidden => navigation.some(node => node.id === hidden)).length <= 1) setShowHidden(false);
+    } else {
+      hide(id);
+      const node = navigation.find(item => item.id === id);
+      if (node?.children.some(item => item.id === provider?.id)) {
+        const next = navigation.find(item => item.id !== id && !hiddenIds.includes(item.id));
+        if (next) selectProvider(next.children[0].id);
+      }
+    }
+  });
+  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0)) ? (
+    <i className={items.some((item) => item.groups.some((candidate) => candidate.verified &&
+      (candidate.keys.some((key) => key.enabled) || (!candidate.keys.length && candidate.apiKeyConfigured) || canDiscoverWithoutApiKey(item, candidate)))) ? "is-ready" : ""}
+      aria-label={label("configured")} />
+  ) : null;
+  const leafButton = (item: AddedProvider, nested = false) => (
+    <button type="button" key={item.id} data-provider-id={item.id}
+      ref={(button) => { if (button) supplierButtons.current.set(item.id, button); else supplierButtons.current.delete(item.id); }}
+      aria-label={nested ? getProviderServiceDisplayName(item, language) : getProviderDisplayName(item, language)}
+      className={`provider-workspace-provider${nested ? " is-service" : ""}${provider?.id === item.id ? " is-active" : ""}`}
+      aria-current={provider?.id === item.id ? "page" : undefined}
+      disabled={initializing || providerSaving || providerDeleting}
+      onClick={(event) => changeProvider(item.id, event.currentTarget)} title={getProviderDisplayName(item, language)}>
+      {!nested ? <Logo provider={item} /> : null}
+      <span className="provider-workspace-provider-name">{nested ? getProviderServiceDisplayName(item, language) : getProviderDisplayName(item, language)}</span>
+      {statusMark([item])}
+    </button>
   );
-  const models = (group?.models || []).filter(
-    (model) =>
-      model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()) &&
-      (modelType === "all" || model.capability === modelType),
+  const searchedModels = (group?.models || []).filter((model) =>
+    model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()),
   );
-  const modelTypes = Array.from(
-    new Set((group?.models || []).map((model) => model.capability)),
-  );
+  const models = searchedModels.filter((model) => matchesModelTaskFilter(model, modelType));
 
   return (
     <section
-      className={`provider-workspace${mobileDetail ? " is-mobile-detail" : ""}`}
+      className={`provider-workspace model-provider-focus-${focusModality}${mobileDetail ? " is-mobile-detail" : ""}`}
+      data-focus-modality={focusModality}
       aria-label={label("title")}
     >
       {deleteModalContext}
-      <header className="provider-workspace-topbar">
-        <div>
-          {props.onBack ? (
-            <button
-              type="button"
-              className="provider-workspace-back"
-              onClick={() => confirmEndpointLeave(props.onBack!)}
-            >
-              <ArrowLeftOutlined aria-hidden="true" />
-              {label("back")}
-            </button>
-          ) : null}
-          <h1>{label("title")}</h1>
-        </div>
-        <div>
-          <Button
-            icon={<CloudOutlined aria-hidden="true" />}
-            onClick={() => setCloudOpen(true)}
+      {props.onBack ? (
+        <header className="provider-workspace-topbar">
+          <button
+            type="button"
+            className="provider-workspace-back"
+            onClick={() => confirmEndpointLeave(props.onBack!)}
           >
-            {label("cloud")}
-          </Button>
-        </div>
-      </header>
+            <ArrowLeftOutlined aria-hidden="true" />
+            {label("back")}
+          </button>
+        </header>
+      ) : null}
       {props.loadError ? (
         <div className="provider-workspace-load-error" role="alert">
           <span>{label("loadFailed")}</span>
@@ -478,10 +672,12 @@ export function ProviderWorkspace(props: Props) {
       ) : null}
       <div className="provider-workspace-body">
         <aside
+          ref={supplierSidebar}
           className="provider-workspace-sidebar"
           aria-label={label("suppliers")}
         >
           <Input
+            ref={supplierSearch}
             allowClear
             prefix={<SearchOutlined aria-hidden="true" />}
             aria-label={t("modelProvider.searchAria")}
@@ -491,52 +687,64 @@ export function ProviderWorkspace(props: Props) {
           />
           <div className="provider-workspace-filters">
             <button
-              className={!configuredOnly ? "is-active" : ""}
+              aria-label={label("all")}
+              aria-pressed={!configuredOnly && !showHidden}
+              className={!configuredOnly && !showHidden ? "is-active" : ""}
               type="button"
-              onClick={() => setConfiguredOnly(false)}
+              onClick={() => { setConfiguredOnly(false); setShowHidden(false); }}
             >
-              {label("all")} <span>{providers.length}</span>
+              {label("all")} <span>{navigation.length - hiddenIds.filter(id => navigation.some(node => node.id === id)).length}</span>
             </button>
             <button
-              className={configuredOnly ? "is-active" : ""}
+              aria-label={label("configured")}
+              aria-pressed={configuredOnly && !showHidden}
+              className={configuredOnly && !showHidden ? "is-active" : ""}
               type="button"
-              onClick={() => setConfiguredOnly(true)}
+              onClick={() => { setConfiguredOnly(true); setShowHidden(false); }}
             >
-              {label("configured")}
+              {label("configured")} <span>{configuredCount}</span>
             </button>
+            {hiddenIds.some(id => navigation.some(node => node.id === id)) ? <button type="button"
+              aria-label={label("hiddenSuppliers")} aria-pressed={showHidden}
+              className={showHidden ? "is-active" : ""}
+              onClick={() => { setShowHidden(true); setConfiguredOnly(false); }}>
+              {label("hiddenSuppliers")} <span>{hiddenIds.filter(id => navigation.some(node => node.id === id)).length}</span>
+            </button> : null}
           </div>
           <nav
             className="provider-workspace-provider-list"
             aria-label={label("suppliers")}
           >
-            {visibleProviders.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                className={`provider-workspace-provider${provider?.id === item.id ? " is-active" : ""}`}
-                aria-current={provider?.id === item.id ? "page" : undefined}
-                disabled={initializing || providerSaving || providerDeleting}
-                onClick={() => changeProvider(item.id)}
-              >
-                <Logo provider={item} />
-                <span>{item.name}</span>
-                {item.groups.length > 0 ? (
-                  <i
-                    className={
-                      item.groups.some((candidate) => candidate.verified)
-                        ? "is-ready"
-                        : ""
-                    }
-                    aria-label={
-                      item.groups.some((candidate) => candidate.verified)
-                        ? t("modelProvider.verified")
-                        : label("configured")
-                    }
-                  />
-                ) : null}
-              </button>
-            ))}
-            {!visibleProviders.length ? (
+            <SortableSupplierList key={scope} items={visibleNavigation}
+              disabled={initializing || providerSaving || providerDeleting}
+              onReorder={reorderSuppliers} onVisibilityChange={changeVisibility} restoring={showHidden}>
+            {(node) => {
+              if (!node.isBrandGroup) return leafButton(node.children[0]);
+              const expanded = Boolean(search.trim()) || expandedBrands.has(node.id);
+              const listId = `${navigationId}-${node.id}`;
+              return <>
+                <button type="button" className="provider-workspace-provider is-brand"
+                  ref={(button) => { if (button) supplierButtons.current.set(node.id, button); else supplierButtons.current.delete(node.id); }}
+                  aria-label={getProviderBrandDisplayName(node, language)} aria-expanded={expanded} aria-controls={listId}
+                  disabled={initializing || providerSaving || providerDeleting}
+                  title={getProviderBrandDisplayName(node, language)}
+                  onClick={() => setExpandedBrands((current) => {
+                    const next = new Set(current);
+                    if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
+                    return next;
+                  })}>
+                  <Logo provider={node.children[0]} />
+                  <span className="provider-workspace-provider-name">{getProviderBrandDisplayName(node, language)}</span>
+                  {statusMark(node.children, true)}
+                  <DownOutlined className={`provider-workspace-brand-arrow${expanded ? " is-expanded" : ""}`} aria-hidden="true" />
+                </button>
+                <ul id={listId} className="provider-workspace-services" hidden={!expanded}>
+                  {node.children.map((child) => <li key={child.id}>{leafButton(child, true)}</li>)}
+                </ul>
+              </>;
+            }}
+            </SortableSupplierList>
+            {!visibleNavigation.length ? (
               <div className="provider-workspace-empty">
                 {props.loading ? (
                   <Spin size="small" />
@@ -546,16 +754,18 @@ export function ProviderWorkspace(props: Props) {
               </div>
             ) : null}
           </nav>
-          <Button
-            className="provider-workspace-add-supplier"
-            icon={<PlusOutlined aria-hidden="true" />}
-            onClick={() => openProviderModal("create")}
-            disabled={initializing || providerSaving}
-          >
-            {label("addSupplier")}
-          </Button>
+          <div className="provider-workspace-sidebar-actions">
+            <Tooltip title={label("addSupplier")}>
+              <Button
+                aria-label={label("addSupplier")}
+                icon={<PlusOutlined aria-hidden="true" />}
+                onClick={() => openProviderModal("create")}
+                disabled={initializing || providerSaving}
+              />
+            </Tooltip>
+          </div>
         </aside>
-        <main className="provider-workspace-detail">
+        <main ref={supplierDetail} className="provider-workspace-detail">
           {provider ? (
             <>
               <header className="provider-workspace-supplier-header">
@@ -565,11 +775,36 @@ export function ProviderWorkspace(props: Props) {
                     className="provider-workspace-mobile-back"
                     aria-label={label("suppliers")}
                     icon={<ArrowLeftOutlined aria-hidden="true" />}
-                    onClick={() => setMobileDetail(false)}
-                  />
+                    onClick={returnToSuppliers}
+                  >
+                    {label("suppliers")}
+                  </Button>
                   <Logo provider={provider} />
-                  <div>
-                    <h2>{provider.name}</h2>
+                  <div className="provider-workspace-supplier-identity">
+                    <h2 title={providerDisplayName}>
+                      <button
+                        ref={informationTrigger}
+                        type="button"
+                        className="provider-workspace-information-trigger"
+                        title={informationCopy.open}
+                        aria-haspopup="dialog"
+                        aria-expanded={informationOpen}
+                        onClick={() => setInformationOpen(true)}
+                      >
+                        <span>{providerDisplayName}</span>
+                        <InfoCircleOutlined aria-hidden="true" />
+                      </button>
+                    </h2>
+                    <span
+                      className={`provider-workspace-status${verifiedSelection ? " is-ready" : ""}`}
+                    >
+                      {verifiedSelection ? (
+                        <CheckCircleFilled aria-hidden="true" />
+                      ) : (
+                        <span className="provider-workspace-status-dot" />
+                      )}
+                      {label(verifiedSelection && getSupplierBrandKey(provider) === "Doubao" ? "credentialsRecognized" : supplierStatus)}
+                    </span>
                   </div>
                 </div>
                 <div className="provider-workspace-supplier-actions">
@@ -584,45 +819,79 @@ export function ProviderWorkspace(props: Props) {
                           Boolean(changingActiveKey) || providerDeleting
                         }
                       />
-                      <Button
-                        type="text"
-                        danger
-                        aria-label={label("deleteSupplier")}
-                        icon={<DeleteOutlined aria-hidden="true" />}
-                        loading={providerDeleting}
-                        disabled={endpointDirty || Boolean(changingActiveKey)}
-                        onClick={() => void confirmDeleteProvider()}
-                      />
                     </>
                   ) : null}
-                  <span
-                    className={`provider-workspace-status${provider.groups.some((candidate) => candidate.verified) ? " is-ready" : ""}`}
-                  >
-                    {provider.groups.some((candidate) => candidate.verified) ? (
-                      <CheckCircleFilled aria-hidden="true" />
-                    ) : (
-                      <span className="provider-workspace-status-dot" />
-                    )}
-                    {provider.groups.some((candidate) => candidate.verified)
-                      ? label("connected")
-                      : label("notConnected")}
-                  </span>
+                  <Tooltip title={label(provider.isCustom ? "deleteSupplier" : "resetSupplier")}>
+                    <Button type="text" danger
+                      aria-label={label(provider.isCustom ? "deleteSupplier" : "resetSupplier")}
+                      icon={<DeleteOutlined aria-hidden="true" />}
+                      loading={providerDeleting}
+                      disabled={endpointDirty || Boolean(changingActiveKey)}
+                      onClick={confirmDeleteProvider} />
+                  </Tooltip>
                 </div>
               </header>
               <div className="provider-workspace-scroll">
+                {getSupplierBrandKey(provider) === "Doubao" ? <Alert
+                  className="provider-workspace-service-scope" type="info" showIcon
+                  message={label("manualModelNotice")}
+                /> : null}
+                {hasProgrammingScopeNotice(provider) ? <Alert
+                  className="provider-workspace-service-scope" type="info" showIcon
+                  message={<span>{label(getSupplierBrandKey(provider) === "GLM" ? "serviceScopeGlm" : getSupplierBrandKey(provider) === "Qwen" ? "serviceScopeQwen" : "serviceScopeGeneric")} {" "}
+                    <a href={programmingScopeLink(provider)} target="_blank" rel="noopener noreferrer">{label("serviceScopeOfficialLink")}</a></span>}
+                /> : null}
+                <section
+                  className="provider-workspace-api-keys"
+                  aria-label={t("modelProvider.apiKeyLabel")}
+                >
+                  <ProviderKeyManager
+                    providerId={provider.id}
+                    providerName={providerDisplayName}
+                    groupId={group?.id || ""}
+                    keys={group?.keys || []}
+                    disabled={endpointDirty || endpointSaving || keySaving}
+                    changingKey={changingActiveKey}
+                    removingKey={removingKey}
+                    onAdd={openAddKey}
+                    onCreate={(apiKey) => addKey({ apiKey })}
+                    onDelete={deleteKey}
+                    onToggle={changeActiveKey}
+                    onReload={async () => {
+                      const supplierId = provider.id;
+                      await props.onReload();
+                      if (group && activeSupplierId.current === supplierId) {
+                        checkSavedKey(provider, group.id, () => activeSupplierId.current === supplierId);
+                      }
+                    }}
+                    checkAction={
+                      <Button
+                        type="text"
+                        onClick={() => void withProviderModels(props.onCheck)}
+                        disabled={
+                          endpointDirty ||
+                          endpointSaving ||
+                          keySaving ||
+                          Boolean(changingActiveKey)
+                        }
+                        loading={initializing || props.checking[groupKey]}
+                      >
+                        {label("checkConnection")}
+                      </Button>
+                    }
+                  />
+                </section>
                 <Form
                   name="supplier-endpoint"
                   form={endpointForm}
                   layout="vertical"
+                  requiredMark={false}
                   onFinish={saveEndpoint}
                   className="provider-workspace-endpoint"
                 >
-                  <div className="provider-workspace-section-heading">
-                    <h3>{label("endpoint")}</h3>
-                  </div>
                   <div className="provider-workspace-endpoint-row">
                     <Form.Item
-                      label="API Host"
+                      label={t("modelProvider.apiAddressLabel")}
                       name="baseUrl"
                       normalize={(value: string) => value.trim()}
                       rules={[
@@ -649,7 +918,9 @@ export function ProviderWorkspace(props: Props) {
                                 parsed.protocol,
                               ) &&
                                 !parsed.username &&
-                                !parsed.password
+                                !parsed.password &&
+                                !parsed.search &&
+                                !parsed.hash
                                 ? Promise.resolve()
                                 : Promise.reject(
                                     new Error(
@@ -670,304 +941,135 @@ export function ProviderWorkspace(props: Props) {
                       ]}
                     >
                       <Input
-                        aria-label="API Host"
+                        aria-label={t("modelProvider.apiAddressLabel")}
                         disabled={Boolean(changingActiveKey)}
                         maxLength={512}
                         spellCheck={false}
                         autoComplete="off"
                       />
                     </Form.Item>
-                    <Button
-                      htmlType="submit"
-                      loading={endpointSaving}
-                      disabled={!endpointDirty || Boolean(changingActiveKey)}
-                    >
-                      {label("saveEndpoint")}
-                    </Button>
+                    {endpointDirty || endpointSaving ? (
+                      <Button
+                        htmlType="submit"
+                        loading={endpointSaving}
+                        disabled={!endpointDirty || Boolean(changingActiveKey)}
+                      >
+                        {label("saveEndpoint")}
+                      </Button>
+                    ) : null}
+                    <Tooltip title={t("modelProvider.requestConfig.title")}>
+                      <Button
+                        type="text"
+                        className="provider-workspace-icon-button"
+                        aria-label={t("modelProvider.requestConfig.title")}
+                        icon={<SettingOutlined aria-hidden="true" />}
+                        disabled={endpointSaving || Boolean(changingActiveKey)}
+                        onClick={() =>
+                          confirmEndpointLeave(() => setRequestConfigOpen(true))
+                        }
+                      />
+                    </Tooltip>
                   </div>
                   {endpointDirty ? <p>{label("endpointHint")}</p> : null}
                 </Form>
                 <section
-                  className="provider-workspace-api-keys"
-                  aria-label="API Key"
-                >
-                  <div className="provider-workspace-key-heading">
-                    <h3>
-                      API Key{" "}
-                      <span className="provider-workspace-count">
-                        {group?.keys.length || 0}
-                      </span>
-                    </h3>
-                    <div className="provider-workspace-key-actions">
-                      <Button
-                        type="text"
-                        onClick={() => void withProviderModels(props.onCheck)}
-                        disabled={
-                          endpointDirty ||
-                          endpointSaving ||
-                          Boolean(changingActiveKey)
-                        }
-                        loading={initializing || props.checking[groupKey]}
-                      >
-                        {label("checkConnection")}
-                      </Button>
-                      <Button
-                        type="link"
-                        icon={<PlusOutlined aria-hidden="true" />}
-                        disabled={endpointDirty || Boolean(changingActiveKey)}
-                        onClick={openAddKey}
-                      >
-                        {label("addKey")}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="provider-workspace-keys">
-                    {group?.keys.length ? (
-                      group.keys.map((key, index) => (
-                        <div className="provider-workspace-key" key={key.id}>
-                          <span>
-                            {label("keyNumber", { number: index + 1 })}
-                          </span>
-                          <code>{key.masked}</code>
-                          <span
-                            className={`provider-workspace-key-state${key.enabled ? " is-enabled" : ""}`}
-                          >
-                            {label(key.enabled ? "keyEnabled" : "keyDisabled")}
-                          </span>
-                          <Switch
-                            size="small"
-                            aria-label={label("useKeyNumber", {
-                              number: index + 1,
-                            })}
-                            checked={key.enabled === true}
-                            loading={changingActiveKey === key.id}
-                            disabled={
-                              endpointDirty ||
-                              endpointSaving ||
-                              Boolean(changingActiveKey) ||
-                              Boolean(removingKey) ||
-                              keySaving
-                            }
-                            onChange={(enabled) =>
-                              void changeActiveKey(key.id, enabled)
-                            }
-                          />
-                          <Popconfirm
-                            title={label("deleteKey")}
-                            description={label("deleteKeyHint")}
-                            okText={t("common.delete")}
-                            cancelText={t("common.cancel")}
-                            okButtonProps={{ danger: true }}
-                            onConfirm={() => deleteKey(key.id)}
-                          >
-                            <Button
-                              type="text"
-                              aria-label={label("deleteKeyNumber", {
-                                number: index + 1,
-                              })}
-                              icon={<DeleteOutlined aria-hidden="true" />}
-                              loading={removingKey === key.id}
-                              disabled={Boolean(changingActiveKey)}
-                            />
-                          </Popconfirm>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="provider-workspace-key-empty">
-                        {group?.apiKeyConfigured
-                          ? label("keyStored")
-                          : label("noKeys")}
-                      </p>
-                    )}
-                  </div>
-                </section>
-                <section
                   className="provider-workspace-models"
                   aria-label={label("models")}
                 >
-                  <div className="provider-workspace-section-heading">
+                  <div className="provider-workspace-section-heading provider-workspace-model-heading">
                     <h3>
                       {label("models")}{" "}
                       <span className="provider-workspace-count">
-                        {group?.models.length || 0}
+                        {group?.modelCount ?? group?.models.length ?? 0}
                       </span>
                     </h3>
-                    <div>
-                      <Tooltip title={label("refreshHint")}>
+                    <div className="provider-workspace-model-toolbar">
+                      <Input
+                        allowClear
+                        prefix={<SearchOutlined aria-hidden="true" />}
+                        aria-label={label("searchModel")}
+                        placeholder={label("searchModel")}
+                        value={modelSearch}
+                        onChange={(event) => setModelSearch(event.target.value)}
+                      />
+                      <Tooltip title={label("syncModels")}>
                         <Button
-                          type="text"
-                          aria-label={label("refreshModels")}
+                          className="provider-workspace-fetch-models"
+                          aria-label={label("getModelList")}
                           icon={<ReloadOutlined aria-hidden="true" />}
                           loading={props.modelsLoading[groupKey]}
-                          disabled={initializing}
+                          disabled={initializing || endpointDirty || endpointSaving || props.modelsLoading[groupKey]}
                           onClick={() =>
-                            void withProviderModels(props.onLoadModels)
+                            void withProviderModels(props.onSyncModels)
+                          }
+                        >
+                          {label("getModelList")}
+                        </Button>
+                      </Tooltip>
+                      <Tooltip title={t("modelProvider.customModel")}>
+                        <Button
+                          type="text"
+                          className="provider-workspace-icon-button"
+                          aria-label={t("modelProvider.customModel")}
+                          icon={<PlusOutlined aria-hidden="true" />}
+                          disabled={initializing || endpointDirty || endpointSaving || props.modelsLoading[groupKey]}
+                          onClick={() =>
+                            void withProviderModels(props.onAddModel)
                           }
                         />
                       </Tooltip>
-                      <Button
-                        icon={<ReloadOutlined aria-hidden="true" />}
-                        disabled={initializing || endpointDirty}
-                        onClick={() =>
-                          void withProviderModels(props.onSyncModels)
-                        }
-                      >
-                        {label("syncModels")}
-                      </Button>
-                      <Button
-                        icon={<PlusOutlined aria-hidden="true" />}
-                        disabled={initializing || endpointDirty}
-                        onClick={() =>
-                          void withProviderModels(props.onAddModel)
-                        }
-                      >
-                        {t("modelProvider.customModel")}
-                      </Button>
+
                     </div>
                   </div>
-                  <div className="provider-workspace-model-toolbar">
-                    <Input
-                      allowClear
-                      prefix={<SearchOutlined aria-hidden="true" />}
-                      aria-label={label("searchModel")}
-                      placeholder={label("searchModel")}
-                      value={modelSearch}
-                      onChange={(event) => setModelSearch(event.target.value)}
-                    />
-                    <Select
-                      aria-label={label("modelType")}
-                      value={modelType}
-                      onChange={setModelType}
-                      options={[
-                        { value: "all", label: label("allTypes") },
-                        ...modelTypes.map((capability) => ({
-                          value: capability,
-                          label: props.capabilityLabel(capability),
-                        })),
-                      ]}
-                    />
-                  </div>
-                  <div
-                    className="provider-workspace-model-table"
-                    role="table"
-                    aria-label={label("models")}
-                  >
-                    <div
-                      className="provider-workspace-model-row is-heading"
-                      role="row"
-                    >
-                      <span role="columnheader">{label("modelId")}</span>
-                      <span role="columnheader">{label("type")}</span>
-                      <span role="columnheader">{label("modalities")}</span>
-                      <span role="columnheader">{label("context")}</span>
-                      <span role="columnheader">{label("actions")}</span>
-                    </div>
-                    {props.modelsLoading[groupKey] ? (
-                      <div className="provider-workspace-empty">
-                        <Spin size="small" />
-                      </div>
-                    ) : (
-                      models.map((model) => (
-                        <div
-                          className="provider-workspace-model-row"
-                          role="row"
-                          key={model.id}
+                  <ModelTaskTabs models={searchedModels} value={modelType} onChange={setModelType} />
+                  {modelsError ? (
+                    <Alert
+                      className="provider-workspace-models-error"
+                      type="error"
+                      showIcon
+                      message={label("modelsLoadFailed")}
+                      description={modelsError}
+                      action={
+                        <Button
+                          size="small"
+                          loading={props.modelsLoading[groupKey]}
+                          onClick={() => {
+                            if (group) props.onLoadModels(provider, group);
+                          }}
                         >
-                          <span
-                            role="cell"
-                            className="provider-workspace-model-name"
-                            title={model.name}
-                          >
-                            {model.name}
-                            {!model.builtIn ? (
-                              <Tag>{t("modelProvider.custom")}</Tag>
-                            ) : null}
-                          </span>
-                          <span role="cell" className="provider-workspace-type">
-                            {props.capabilityLabel(model.capability)}
-                            {model.vision && model.capability === "LLM_CHAT" ? (
-                              <span title={t("modelProvider.visionSupported")}>
-                                {" "}
-                                · V
-                              </span>
-                            ) : null}
-                          </span>
-                          <span role="cell">
-                            <ModelModalityMarks
-                              providerName={
-                                provider.protocolName ||
-                                provider.source ||
-                                provider.name
-                              }
-                              modelName={model.name}
-                              compact
-                            />
-                          </span>
-                          <span
-                            role="cell"
-                            className="provider-workspace-context"
-                          >
-                            {isLlmChatCapability(model.capability)
-                              ? resolveLlmMaxInputTokens(model.maxInputTokens)
-                              : "—"}
-                          </span>
-                          <span
-                            role="cell"
-                            className="provider-workspace-model-actions"
-                          >
-                            <>
-                              {!model.builtIn &&
-                              isLlmChatCapability(model.capability) ? (
-                                <Button
-                                  type="text"
-                                  aria-label={t(
-                                    "modelProvider.editModelWindowAria",
-                                    { name: model.name },
-                                  )}
-                                  icon={<EditOutlined aria-hidden="true" />}
-                                  onClick={() =>
-                                    group &&
-                                    props.onEditModel(provider, group, model)
-                                  }
-                                />
-                              ) : null}
-                              <Popconfirm
-                                title={t("modelProvider.confirmDeleteModel", {
-                                  name: model.name,
-                                })}
-                                description={t(
-                                  model.capability === "EMBEDDING"
-                                    ? "modelProvider.confirmDeleteEmbeddingDesc"
-                                    : "modelProvider.confirmDeleteModelDesc",
-                                )}
-                                okButtonProps={{ danger: true }}
-                                okText={t("common.delete")}
-                                cancelText={t("common.cancel")}
-                                onConfirm={() =>
-                                  group &&
-                                  props.onDeleteModel(provider, group, model)
-                                }
-                              >
-                                <Button
-                                  type="text"
-                                  aria-label={t(
-                                    "modelProvider.deleteModelAria",
-                                    { name: model.name },
-                                  )}
-                                  icon={<DeleteOutlined aria-hidden="true" />}
-                                />
-                              </Popconfirm>
-                            </>
-                          </span>
-                        </div>
-                      ))
-                    )}
-                    {!props.modelsLoading[groupKey] && !models.length ? (
-                      <div className="provider-workspace-empty">
-                        {t("modelProvider.noModels")}
-                      </div>
-                    ) : null}
-                  </div>
+                          {label("retry")}
+                        </Button>
+                      }
+                    />
+                  ) : null}
+                  <SavedProviderModels
+                    models={models}
+                    emptyDescription={
+                      modelType === "all" && !modelSearch.trim()
+                        ? label("syncModelsEmpty")
+                        : label("noMatchingModels")
+                    }
+                    loading={Boolean(props.modelsLoading[groupKey])}
+                    providerName={
+                      provider.protocolName || provider.source || provider.name
+                    }
+                    runtimeIdentity={provider.runtimeIdentity}
+                    supplierName={provider.name}
+                    providerLogoDataUrl={provider.logoDataUrl}
+                    probe={group ? {
+                      providerId: provider.id,
+                      groupId: group.id,
+                      configurationKey: JSON.stringify([provider.protocolName || provider.source, endpointBaseline, group.baseUrl, group.keys.map((key) => [key.id, key.enabled]), requestConfigRevision]),
+                      disabledReason: endpointDirty || endpointSaving ? t("modelProvider.probe.saveAddressFirst") : hasSavedKeys && !hasEnabledKey ? t("modelProvider.probe.reason.key_disabled") : undefined,
+                    } : undefined}
+                    capabilityLabel={props.capabilityLabel}
+                    onEdit={(model) => {
+                      if (group) props.onEditModel(provider, group, model);
+                    }}
+                    onRemove={(model) => {
+                      if (group) return props.onDeleteModel(provider, group, model);
+                    }}
+                  />
                 </section>
               </div>
             </>
@@ -982,7 +1084,30 @@ export function ProviderWorkspace(props: Props) {
           )}
         </main>
       </div>
+      {provider ? (
+        <ProviderInformationDrawer
+          open={informationOpen}
+          provider={{ ...provider, baseUrl: endpointBaseline }}
+          providers={providers.map((item) => item.id === provider.id ? { ...item, baseUrl: endpointBaseline } : item)}
+          onClose={() => setInformationOpen(false)}
+          onConfigure={configureInformationProvider}
+          onAfterClose={() => informationTrigger.current?.focus({ preventScroll: true })}
+        />
+      ) : null}
+      {provider ? (
+        <ProviderRequestConfigDrawer
+          providerId={provider.id}
+          providerName={providerDisplayName}
+          open={requestConfigOpen}
+          onClose={() => setRequestConfigOpen(false)}
+          onSaved={async () => {
+            await props.onReload();
+            setRequestConfigRevision((current) => current + 1);
+          }}
+        />
+      ) : null}
       <Drawer
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={label("cloud")}
         open={cloudOpen}
         width={460}
@@ -991,19 +1116,24 @@ export function ProviderWorkspace(props: Props) {
         {props.cloudContent}
       </Drawer>
       <Modal
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={label(providerModal === "edit" ? "editSupplier" : "addSupplier")}
         open={Boolean(providerModal)}
         centered
         confirmLoading={providerSaving}
-        maskClosable={!providerSaving}
+        closable={!providerSaving && !providerLogoBusy}
+        maskClosable={!providerSaving && !providerLogoBusy}
+        keyboard={!providerSaving && !providerLogoBusy}
+        cancelButtonProps={{ disabled: providerSaving || providerLogoBusy }}
+        okButtonProps={{ disabled: providerSaving || providerLogoBusy }}
         okText={t("common.save")}
-        onCancel={() =>
+        onCancel={() => {
+          if (providerSavePending.current || providerLogoBusyRef.current) return;
           providerDraft.confirmClose(() => {
-            setProviderModal(null);
-            providerForm.resetFields();
-          })
-        }
-        onOk={() => providerForm.submit()}
+            resetProviderModal();
+          });
+        }}
+        onOk={() => { if (!providerLogoBusyRef.current) providerForm.submit(); }}
         destroyOnHidden
       >
         <Form
@@ -1011,7 +1141,16 @@ export function ProviderWorkspace(props: Props) {
           form={providerForm}
           layout="vertical"
           onFinish={saveProvider}
+          disabled={providerSaving || providerLogoBusy}
         >
+          <Form.Item name="logoDataUrl" normalize={(value?: string) => value || undefined}>
+            {providerModal ? <CustomLogoPicker key={logoGeneration} copy={getCustomLogoCopy(t)} disabled={providerSaving}
+              onBusyChange={(busy) => {
+                if (providerModalGeneration.current !== logoGeneration) return;
+                providerLogoBusyRef.current = busy;
+                setProviderLogoBusy(busy);
+              }} /> : <span />}
+          </Form.Item>
           <Form.Item
             label={label("supplierName")}
             name="name"
@@ -1021,7 +1160,12 @@ export function ProviderWorkspace(props: Props) {
                 whitespace: true,
                 message: label("supplierNameRequired"),
               },
-              { max: 255, message: label("supplierNameMax") },
+              {
+                validator: (_, value?: string) =>
+                  new TextEncoder().encode(value?.trim() || "").length <= 255
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(label("supplierNameBytes"))),
+              },
             ]}
           >
             <Input maxLength={255} autoComplete="off" />
@@ -1041,17 +1185,24 @@ export function ProviderWorkspace(props: Props) {
                 <Select
                   options={providers
                     .filter((item) => !item.isCustom)
-                    .map((item) => ({ value: item.id, label: item.name }))}
-                  onChange={(id) =>
-                    providerForm.setFieldValue(
-                      "baseUrl",
-                      providers.find((item) => item.id === id)?.baseUrl || "",
-                    )
-                  }
+                    .map((item) => ({
+                      value: item.id,
+                      label: getProviderDisplayName(item, language),
+                    }))}
+                  onChange={(id) => {
+                    const currentUrl = (providerForm.getFieldValue("baseUrl") || "").trim();
+                    const previousUrl = providers.find((item) => item.id === sourceTemplateId)?.baseUrl.trim();
+                    if (!currentUrl || currentUrl === previousUrl) {
+                      providerForm.setFieldValue(
+                        "baseUrl",
+                        providers.find((item) => item.id === id)?.baseUrl || "",
+                      );
+                    }
+                  }}
                 />
               </Form.Item>
               <Form.Item
-                label="API Host"
+                label={t("modelProvider.apiAddressLabel")}
                 name="baseUrl"
                 rules={[
                   {
@@ -1075,6 +1226,7 @@ export function ProviderWorkspace(props: Props) {
         </Form>
       </Modal>
       <Modal
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={label("addKey")}
         open={keyOpen}
         centered
@@ -1097,7 +1249,7 @@ export function ProviderWorkspace(props: Props) {
           onFinish={addKey}
         >
           <Form.Item
-            label="API Key"
+            label={t("modelProvider.apiKeyLabel")}
             name="apiKey"
             rules={[
               {

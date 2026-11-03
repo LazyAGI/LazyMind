@@ -271,6 +271,9 @@ func (s *Store) ACLsForUserWithGroups(resourceType, resourceID string, userID st
 
 	var rows []orm.ACLModel
 	q.Find(&rows)
+	if len(rows) == 0 {
+		return nil
+	}
 
 	if groupIDs == nil {
 		groupIDs = s.loadUserGroupIDs(userID)

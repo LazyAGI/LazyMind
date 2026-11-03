@@ -16,7 +16,25 @@ import (
 
 func forkFixture(t *testing.T, count int) (*gorm.DB, orm.Conversation, []orm.ChatHistory, forkCreateRequest) {
 	t.Helper()
-	db := newPromptTestDB(t).DB
+	db := orm.MigrateTestDB(t,
+		&orm.ArtifactBinding{}, &orm.ArtifactBlob{}, &orm.ArtifactV2{},
+		&orm.AsyncJob{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{},
+		&orm.Conversation{}, &orm.ConversationArchiveFolder{}, &orm.ConversationArtifact{},
+		&orm.ConversationForkOrigin{}, &orm.ConversationForkRequest{}, &orm.ConversationGroup{},
+		&orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationIdleEvent{},
+		&orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.ConversationToolGrant{},
+		&orm.ConversationWorkspaceBinding{}, &orm.Dataset{}, &orm.DatasetUserState{},
+		&orm.EpisodeMemory{}, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{},
+		&orm.ExternalChatRun{}, &orm.LocalWorkspace{}, &orm.MCPServer{},
+		&orm.MultiAnswersChatHistory{}, &orm.SkillV2Draft{}, &orm.SkillV2Skill{},
+		&orm.SubAgentArtifact{}, &orm.SubAgentTask{}, &orm.TaskAttemptTiming{},
+		&orm.TaskCenterTask{}, &orm.TaskExecutionTiming{}, &orm.UploadSession{},
+		&orm.UploadedFile{}, &orm.UserChatSettings{}, &orm.UserDisabledTool{},
+		&orm.UserEnvironmentVariable{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{},
+		&orm.UserModelProviderGroupModel{}, &orm.UserPersonalizationSetting{}, &orm.UserSelectedCloudModel{},
+		&orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserUIPreferences{},
+		&orm.UserWorkflowSetting{}, &orm.WorkflowSession{},
+	).DB
 	seedAvailableChatModel(t, db, "u1", "provider-fork", "group-fork", "model-fork", "Test", "Test", "A", "llm", true, "fake-test-key")
 	c := sidechatTestConversation(t, db, "fork-source", "u1", "Source")
 	items := make([]orm.ChatHistory, 0, count)

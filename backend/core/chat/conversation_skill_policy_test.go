@@ -20,8 +20,23 @@ import (
 	"lazymind/core/store"
 )
 
+func newSkillPolicyTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	db := newChatExecutionTestDB(t)
+	if err := db.AutoMigrate(
+		&orm.SkillV2Blob{}, &orm.SkillV2Revision{}, &orm.SkillV2RevisionEntry{},
+		&orm.SkillV2DraftEntry{}, &orm.SkillSearchIndex{}, &orm.ResourceSessionSnapshot{},
+		&orm.ResourceUpdateTask{}, &orm.SkillReviewStats{}, &orm.SkillDraftReviewSession{},
+		&orm.SkillDraftReviewActionBatch{}, &orm.SkillDraftReviewActionItem{}, &orm.SkillMarketItem{},
+		&orm.SkillMarketInstall{}, &orm.SkillShareItem{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
 func TestChatFeishuQueryDoesNotInstallSkill(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newSkillPolicyTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	// Chat must work even when the optional builtin catalog is not materialized.
@@ -60,7 +75,7 @@ func TestChatFeishuQueryDoesNotInstallSkill(t *testing.T) {
 }
 
 func TestChatResolvesExplicitBareSkillNameBeforeCallingUpstream(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newSkillPolicyTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Chdir(t.TempDir())
@@ -113,7 +128,7 @@ func TestChatResolvesExplicitBareSkillNameBeforeCallingUpstream(t *testing.T) {
 }
 
 func TestChatAsksUserToResolveAmbiguousBareSkillName(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newSkillPolicyTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Chdir(t.TempDir())
@@ -235,7 +250,7 @@ func TestChatAsksUserToResolveAmbiguousBareSkillName(t *testing.T) {
 }
 
 func TestChatResolvesExplicitBindingAfterMentioningManualSkill(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newSkillPolicyTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Chdir(t.TempDir())
@@ -302,7 +317,7 @@ func TestChatResolvesExplicitBindingAfterMentioningManualSkill(t *testing.T) {
 }
 
 func TestChatResolvesImportedManifestAliasBeforeCallingUpstream(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newSkillPolicyTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Chdir(t.TempDir())
@@ -386,7 +401,7 @@ description: Canonical package description.
 }
 
 func TestChatReturnsStructuredSkillBindingNotFound(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newSkillPolicyTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	t.Chdir(t.TempDir())

@@ -280,7 +280,7 @@ func TestRunDecisionTTLRejectsLateCandidatesForOneDay(t *testing.T) {
 func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspace.OperationRequest) {
 	t.Helper()
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := orm.MigrateAllModelsForTest(t)
+	db := newChatExecutionTestDB(t)
 	// TEST_DB_DRIVER/TEST_DB_DSN already select an isolated PostgreSQL schema.
 	// An explicitly supplied Redis URL selects a disposable integration server;
 	// unique conversation IDs avoid clearing or depending on existing Redis keys.

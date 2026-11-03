@@ -528,27 +528,29 @@
 
   .agent-integration-stage-heading {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 9px;
 
     > div {
       display: flex;
-      align-items: baseline;
-      flex-wrap: wrap;
+      flex-direction: column;
+      align-items: flex-start;
       min-width: 0;
-      gap: 10px;
+      gap: 2px;
     }
 
     strong {
       color: #26344c;
       font-size: 14px;
+      line-height: 22px;
     }
 
     span {
       color: #8a96a8;
       font-size: 12px;
+      line-height: 18px;
     }
   }
 

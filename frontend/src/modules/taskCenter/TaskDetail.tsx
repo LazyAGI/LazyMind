@@ -4,6 +4,7 @@ import '@/modules/notifications/index.scss';
 import ScheduleRunHistory from './ScheduleRunHistory';
 import { describeCron } from './scheduleTime';
 import { useEffect, useMemo, useState } from 'react';
+import { WORKFLOW_TASKS_CHANGED } from './events';
 import { Alert, Button, Drawer, Dropdown, Empty, Tag, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, SyncOutlined } from '@ant-design/icons';
@@ -57,6 +58,11 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
   const goalContent = needsFullGoal ? loadedGoal?.text || t(loadedGoal?.failed ? 'taskCenter.loadError' : 'common.loading') : goalPreview;
   const selectedID = selectedTask?.id;
   useEffect(() => {
+    const changed = () => setRetryVersion(current => current + 1);
+    window.addEventListener(WORKFLOW_TASKS_CHANGED, changed);
+    return () => window.removeEventListener(WORKFLOW_TASKS_CHANGED, changed);
+  }, []);
+  useEffect(() => {
     const renamed = (event: Event) => {
       const { conversationId, displayName } = (event as CustomEvent<ConversationTitleChangedDetail>).detail;
       if (selectedTask?.conversation_id !== conversationId) return;
@@ -100,10 +106,12 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
         const payload = response.data?.data ?? response.data;
         const order: string[] = payload?.graph?.static_order ?? Object.keys(payload?.graph?.nodes ?? {});
         const nodes = payload?.projection?.nodes ?? {};
-        const current: string[] = payload?.projection?.current ?? [];
         setPlannedSteps(order.filter((id) => id !== '__start__' && id !== '__end__').map((id) => ({
           step_id: payload?.graph?.nodes?.[id]?.label || id,
-          status: current.includes(id) ? 'running' : nodes[id]?.execution || 'pending',
+          // Branch selection explains an unexecuted node; preserve actual execution results.
+          status: nodes[id]?.execution === 'none' && ['pruned', 'bypassed'].includes(nodes[id]?.branch)
+            ? nodes[id].branch
+            : nodes[id]?.execution || 'pending',
         })));
       })
       .catch(() => { if (active) setPlannedSteps(null); });
@@ -260,6 +268,7 @@ function taskStatusLabel(status: string, t: (key: string, options?: Record<strin
     pending: t('taskCenter.statusPending'),
     interrupted: t('taskCenter.statusInterrupted'),
     waiting: t('taskCenter.statusWaiting'),
+    paused: t('taskCenter.statusPaused'),
     waiting_inputs: t('taskCenter.statusWaitingInputs'),
     canceled: t('taskCenter.statusCanceled'),
     skipped: t('taskCenter.statusSkipped'),

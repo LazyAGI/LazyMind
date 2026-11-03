@@ -25,6 +25,7 @@ type Error struct {
 	Operation string
 	Message   string
 	Retryable bool
+	Details   map[string]any
 	Reason    string
 	Action    *ErrorAction
 	cause     error

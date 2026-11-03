@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDefaultLlmMaxInputTokens, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "./maxInputTokens";
+import { formatContextWindow, isDefaultLlmMaxInputTokens, parseLlmMaxInputTokens, resolveLlmMaxInputTokens } from "./maxInputTokens";
 
 describe("llm max input tokens", () => {
   it("defaults missing catalog values to 128K", () => {
@@ -22,5 +22,18 @@ describe("llm max input tokens", () => {
     expect(parseLlmMaxInputTokens("128KB")).toBeNull();
     expect(parseLlmMaxInputTokens("0K")).toBeNull();
     expect(parseLlmMaxInputTokens("999999999999999999999999K")).toBeNull();
+  });
+});
+
+// Formatting is display-only: the raw API values retain their original units.
+describe("context window display", () => {
+  it.each([
+    ["999999", "977K"], ["1000000", "1M"], ["1000001", "1M"],
+    ["262144", "256K"], ["1024000", "1M"], ["1048575", "1M"],
+    ["1024001", "1M"], ["1048576", "1M"], ["2097152", "2M"],
+    [" 128k ", "128K"], ["2m", "2M"], ["512", "1K"],
+    ["", null], ["unknown", null], ["0", null], [undefined, null],
+  ])("formats %s as %s", (raw, expected) => {
+    expect(formatContextWindow(raw)).toBe(expected);
   });
 });

@@ -20,12 +20,13 @@ import {
   CommentOutlined,
   EditOutlined,
   PaperClipOutlined,
+  PlusOutlined,
   SettingOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
 import SkillRecordingPanel from "../SkillRecording";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
-import AddIcon from "../../assets/icons/add.svg?react";
 
 import ImageUpload, {
   allowedImageTypes,
@@ -450,6 +451,8 @@ interface ChatInputProps {
   configResetKey?: number | string;
   sessionId?: string;
   isStreaming?: boolean;
+  /** Stop availability can outlive the Chat stream during workflow hand-off. */
+  canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
@@ -528,7 +531,7 @@ export interface SkillDepositStats {
 }
 
 interface SendButtonProps {
-  isStreaming: boolean;
+  canStopGeneration: boolean;
   sendDisabled: boolean;
   disabled: boolean;
   sendLabel: string;
@@ -537,7 +540,7 @@ interface SendButtonProps {
   onStop?: () => void;
 }
 const SendButton: React.FC<SendButtonProps> = ({
-  isStreaming,
+  canStopGeneration,
   sendDisabled,
   disabled,
   sendLabel,
@@ -545,8 +548,9 @@ const SendButton: React.FC<SendButtonProps> = ({
   onSend,
   onStop,
 }) => {
-  const isStopMode = isStreaming && Boolean(onStop);
-  const isDisabled = isStopMode ? disabled : sendDisabled || disabled;
+  const isStopMode = canStopGeneration && Boolean(onStop);
+  // Send prerequisites (empty input, runtime/config readiness) must not block stop.
+  const isDisabled = !isStopMode && (sendDisabled || disabled);
 
   return (
     <button
@@ -719,6 +723,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return () => { window.removeEventListener('resize', updateHeight); window.removeEventListener('scroll', updateHeight, true); };
     }, [activeMenu]);
     const addMenuOpen = activeMenu === "add";
+    const addMenuId = useId();
     const setAddMenuOpen = (open: boolean) => setActiveMenu(open ? "add" : null);
     const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
       kb: boolean | null;
@@ -795,7 +800,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       uri: file.uri, filename: file.name,
     }))], value);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
-    useEffect(() => {
+    // Keep synchronous mode-switch capture aligned with the committed composer.
+    // Async uploads can commit before passive effects update the old listener.
+    useLayoutEffect(() => {
       const transferDraft = (event: Event) => {
         const detail = (event as CustomEvent).detail;
         if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
@@ -1573,12 +1580,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         setAddMenuOpen(open);
                       }}
                       placement="topLeft"
-                      styles={{ body: { height: menuHeight } }}
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
-                        <div className="chat-add-resource-menu">
+                        <div id={addMenuId} className="chat-add-resource-menu">
                           <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
-                            <span aria-hidden="true">◉</span>{t("recording.title")}
+                            <VideoCameraOutlined className="chat-add-resource-menu-icon" />{t("recording.title")}
                           </button>
                             <button
                               type="button"
@@ -1594,35 +1600,24 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                 setAddMenuOpen(false);
                               }}
                             >
-                              <PaperClipOutlined />
+                              <PaperClipOutlined className="chat-add-resource-menu-icon" />
                               {t("chat.addAttachment")}
                             </button>
-                  {showSkillDeposit && isChatContent && (
-                    <Tooltip title={skillDepositTooltip}>
-                      <div
-                        className={`input-bottom-actions-left-item skill-deposit-action${
-                          isSkillDepositDisabled ? " is-disabled" : ""
-                        }`}
-                        aria-disabled={isSkillDepositDisabled}
-                        role="button"
-                        tabIndex={isSkillDepositDisabled ? -1 : 0}
-                        onClick={handleSkillDeposit}
-                        onKeyDown={(event) => {
-                          if (
-                            isSkillDepositDisabled ||
-                            (event.key !== "Enter" && event.key !== " ")
-                          ) {
-                            return;
-                          }
-                          event.preventDefault();
-                          handleSkillDeposit();
-                        }}
-                      >
-                        <BulbOutlined />
-                        {t("chat.skillDeposit")}
-                      </div>
-                    </Tooltip>
-                  )}
+                          {showSkillDeposit && isChatContent && (
+                            <Tooltip title={skillDepositTooltip}>
+                              <span className="chat-add-resource-menu-tooltip-anchor">
+                                <button
+                                  type="button"
+                                  disabled={isSkillDepositDisabled}
+                                  aria-disabled={isSkillDepositDisabled}
+                                  onClick={handleSkillDeposit}
+                                >
+                                  <BulbOutlined className="chat-add-resource-menu-icon" />
+                                  {t("chat.skillDeposit")}
+                                </button>
+                              </span>
+                            </Tooltip>
+                          )}
                           {allowKnowledgeBaseSelection ? (
                             <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
                               <span className="chat-add-resource-menu-tooltip-anchor">
@@ -1638,7 +1633,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                     }, 0);
                                   }}
                                 >
-                                  <BookOutlined />
+                                  <BookOutlined className="chat-add-resource-menu-icon" />
                                   {t("chat.knowledgeBase")}
                                 </button>
                               </span>
@@ -1651,7 +1646,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               promptRef.current?.onOpen();
                             }}
                           >
-                            <CommentOutlined />
+                            <CommentOutlined className="chat-add-resource-menu-icon" />
                             {t("chat.promptTemplate")}
                           </button>
                         </div>
@@ -1659,13 +1654,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     >
                       <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
                         <button type="button"
-                          className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
-                          role="button"
+                          className="chat-add-resource-trigger"
                           tabIndex={disabled || isPromptPolishing ? -1 : 0}
+                          aria-label={t("chat.addResource")}
+                          aria-expanded={addMenuOpen}
+                          aria-controls={addMenuOpen ? addMenuId : undefined}
                           aria-disabled={disabled || isPromptPolishing}
                         >
-                          <AddIcon />
-                          {t("chat.addResource")}
+                          <PlusOutlined className="chat-add-resource-icon" aria-hidden="true" />
                         </button>
                       </Tooltip>
                     </Popover>
@@ -1828,7 +1824,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton
-                      isStreaming={isStreaming}
+                      canStopGeneration={props.canStopGeneration ?? isStreaming}
                       sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}
                       sendLabel={t("chat.send")}

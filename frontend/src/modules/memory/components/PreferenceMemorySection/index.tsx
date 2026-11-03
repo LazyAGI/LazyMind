@@ -50,6 +50,7 @@ import {
 import {
   getPreferenceBudgetTone,
   preferenceOrganizerPresentation,
+  preferenceSnapshotMatchesList,
   isCurrentMemoryConflict,
   isCurrentMemoryResourceNotFound,
   mergePreferenceOrderWithLatest,
@@ -175,6 +176,8 @@ function SortablePreferenceRow({
 export default function PreferenceMemorySection() {
   const { i18n, t } = useTranslation();
   const detailRequestIdRef = useRef(0);
+  const listRequestIdRef = useRef(0);
+  const checkedOrganizerStateRef = useRef("");
   const selectedDetailRef = useRef<PreferenceMemoryItem | null>(null);
   const [list, setList] = useState<PreferenceMemoryList | null>(null);
   const [loading, setLoading] = useState(true);
@@ -201,15 +204,19 @@ export default function PreferenceMemorySection() {
   );
 
   const refresh = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setList((current) => current ? { ...current, budget: undefined } : current);
     setLoadError("");
     try {
-      setList(await listPreferenceMemories());
+      const latest = await listPreferenceMemories();
+      if (requestId !== listRequestIdRef.current) return;
+      setList(latest);
       setOrderConflict(false);
       setOrderError("");
       setPreDragList(null);
     } catch (error) {
+      if (requestId !== listRequestIdRef.current) return;
       if (isCurrentMemoryResourceNotFound(error)) {
         setList(null);
       } else {
@@ -217,7 +224,7 @@ export default function PreferenceMemorySection() {
         setLoadError(getLocalizedErrorMessage(error));
       }
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, []);
 
@@ -231,7 +238,17 @@ export default function PreferenceMemorySection() {
     const presentation = preferenceOrganizerPresentation(completed);
     if (presentation) message[presentation.tone](t(presentation.key));
   });
-  const organizerPresentation = preferenceOrganizerPresentation(organizer.task);
+  const currentOrganizerState = organizer.task?.current_state;
+  useEffect(() => {
+    if (!currentOrganizerState || !list?.budget) return;
+    const version = JSON.stringify([currentOrganizerState.etag, currentOrganizerState.updated_at, currentOrganizerState.max_chars]);
+    if (checkedOrganizerStateRef.current === version) return;
+    checkedOrganizerStateRef.current = version;
+    if (!preferenceSnapshotMatchesList(currentOrganizerState, list)) {
+      void refresh();
+    }
+  }, [currentOrganizerState, list, refresh]);
+  const organizerPresentation = preferenceOrganizerPresentation(organizer.task, list);
   const organizerLabel = organizer.active && organizerPresentation
     ? organizerPresentation.key : "admin.memoryPreferenceOrganize";
   const organizerResultLabel = !organizer.active ? organizerPresentation?.key : null;

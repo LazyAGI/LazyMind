@@ -7,9 +7,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import AutoModel, LOG
 
-from lazymind.chat.engine.agent_runtime import (
-    AgentExecutionOptions, AgentExecutor, AgentRole, AgentRunPlan, PromptBuilder,
-)
+from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
 from lazymind.model_config import inject_model_config
 
 _THINK_RE = re.compile(r'<(?:redacted_thinking|think)>.*?</(?:redacted_thinking|think)>', re.S | re.I)
@@ -79,16 +77,17 @@ def evaluate_step(
         ),
         source='platform.driver',
     )
-    plan = AgentRunPlan(
-        role=AgentRole.DRIVER, prompt=builder.build(), history=[], tools=[],
-        execution_options=AgentExecutionOptions(),
-    )
+    prompt = builder.build()
     try:
         sid = session_id or f'driver_{workflow_id}_{step_id}'
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
         inject_model_config(llm_config)
-        response = AgentExecutor().run(AutoModel(model='llm'), plan)
+        # Evaluation has no actions to execute. ReactAgent requires tools even
+        # for a single turn, so use the configured model directly.
+        response = AutoModel(model='llm').share(stream=False)(
+            f'{prompt.system_prompt}\n\n{prompt.current_input}',
+        )
         cleaned = _clean_message(str(response or ''))
         if not cleaned:
             raise DriverEvaluationError('DriverAgent returned an empty assessment.')

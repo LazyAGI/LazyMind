@@ -11,7 +11,7 @@ import (
 )
 
 func TestOrdinaryRecoveryDoesNotCompleteNewTaskFromOlderHistory(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	now := time.Now().UTC()
 	historyAt := now.Add(-time.Minute)
 	tasks := []orm.TaskCenterTask{
@@ -60,7 +60,7 @@ func TestOrdinaryRecoveryDoesNotCompleteNewTaskFromOlderHistory(t *testing.T) {
 func TestOrdinaryRecoveryUsesLatestSequenceAcrossSingleAndDualHistories(t *testing.T) {
 	for _, latest := range []string{"single", "dual"} {
 		t.Run(latest, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newNotificationTestDB(t).DB
 			now := time.Now().UTC()
 			task := orm.TaskCenterTask{ID: "task", UserID: "owner", ConversationID: "conversation", TaskType: "background_chat", Status: "running", CreatedAt: now.Add(-time.Minute)}
 			if err := db.Create(&task).Error; err != nil {
@@ -96,7 +96,7 @@ func TestOrdinaryRecoveryUsesLatestSequenceAcrossSingleAndDualHistories(t *testi
 }
 
 func TestOrdinaryWorkflowRecoveryRechecksSessionAfterConcurrentRetry(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	if db.Dialector.Name() != "sqlite" {
 		t.Skip("SQLite snapshot retry regression; PostgreSQL uses a session row lock")
 	}

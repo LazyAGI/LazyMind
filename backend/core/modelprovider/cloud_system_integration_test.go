@@ -108,6 +108,7 @@ func TestSelectingCloudRetainsDormantLocalSelectionButMakesCloudAuthoritative(t 
 	now := time.Now().UTC()
 	provider := orm.UserModelProvider{
 		ID: "provider-local", DefaultModelProviderID: "default-local", Name: "Local OpenAI",
+		ProtocolName: "OpenAI", IsCustom: true,
 		Category: "model", Capabilities: "has_models",
 		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User", CreatedAt: now, UpdatedAt: now},
 	}
@@ -118,7 +119,7 @@ func TestSelectingCloudRetainsDormantLocalSelectionButMakesCloudAuthoritative(t 
 	}
 	model := orm.UserModelProviderGroupModel{
 		ID: "model-local", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID,
-		ProviderName: provider.Name, Name: "personal-chat", ModelType: "llm",
+		ProviderName: "OpenAI", Name: "personal-chat", ModelType: "llm",
 		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User", CreatedAt: now, UpdatedAt: now},
 	}
 	selection := orm.UserSelectedModel{
@@ -245,6 +246,7 @@ func TestUnavailableCloudDefaultTemporarilyFallsBackToDormantLocalModel(t *testi
 	now := time.Now().UTC()
 	provider := orm.UserModelProvider{
 		ID: "provider-dormant", DefaultModelProviderID: "default-dormant", Name: "Dormant Local",
+		ProtocolName: "OpenAI", IsCustom: true,
 		Category: "model", Capabilities: "has_models",
 		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User", CreatedAt: now, UpdatedAt: now},
 	}
@@ -255,7 +257,7 @@ func TestUnavailableCloudDefaultTemporarilyFallsBackToDormantLocalModel(t *testi
 	}
 	model := orm.UserModelProviderGroupModel{
 		ID: "model-dormant", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID,
-		ProviderName: provider.Name, Name: "personal-chat", ModelType: "llm",
+		ProviderName: "OpenAI", Name: "personal-chat", ModelType: "llm",
 		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User", CreatedAt: now, UpdatedAt: now},
 	}
 	selection := orm.UserSelectedModel{
@@ -298,7 +300,7 @@ func TestUnavailableCloudDefaultTemporarilyFallsBackToDormantLocalModel(t *testi
 		t.Fatalf("load local fallback after Cloud became unavailable: %v", err)
 	}
 	llm, ok := config["llm"].(map[string]any)
-	if !ok || llm["model"] != "personal-chat" || llm["base_url"] != "https://personal.example/v1" {
+	if !ok || llm["model"] != "personal-chat" || llm["base_url"] != "https://personal.example/v1/" {
 		t.Fatalf("runtime did not use the dormant local model: %#v", config)
 	}
 }

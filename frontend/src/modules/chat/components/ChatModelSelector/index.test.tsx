@@ -18,6 +18,7 @@ import ChatModelSelector from ".";
 import {
   fetchChatModelCatalog,
   updateConversationChatModel,
+  updateDefaultChatModel,
 } from "./api";
 
 const LAZYMIND_CLOUD_SESSION_CHANGED_EVENT = "lazymind:cloud-session-changed";
@@ -72,6 +73,7 @@ vi.mock("@/runtime/cloud/session", () => ({
 vi.mock("./api", () => ({
   fetchChatModelCatalog: vi.fn(),
   updateConversationChatModel: vi.fn(),
+  updateDefaultChatModel: vi.fn().mockResolvedValue(undefined),
 }));
 
 const fetchCatalogMock = vi.mocked(fetchChatModelCatalog);
@@ -133,10 +135,69 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
-  it('shows the provider brand beside each model instead of the group heading', async () => {
+  it("inherits the uploaded supplier logo in both the current trigger and chooser", async () => {
+    const value = catalog();
+    const logo = "data:image/png;base64,uploaded-model";
+    value.providers[0].source = "own";
+    value.providers[0].logo_data_url = logo;
+    fetchCatalogMock.mockResolvedValue(value);
+    render(<ChatModelSelector />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" });
+    expect(trigger.querySelector("img")).toHaveAttribute("src", logo);
+    fireEvent.click(trigger);
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("button", { name: /DeepSeek-V3/ }).querySelector("img")).toHaveAttribute("src", logo);
+  });
+  it("refreshes a stored selection after its supplier logo is reset", async () => {
+    const value = catalog();
+    value.providers[0].source = "own";
+    useModelSelectionStore.getState().setSelection(NEW_CHAT_MODEL_SELECTION_KEY, {
+      ...value.selection,
+      logo_data_url: "data:image/png;base64,old-logo",
+    });
+    fetchCatalogMock.mockResolvedValue(value);
+    render(<ChatModelSelector />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" });
+    expect(trigger.querySelector("img")).toHaveAttribute("src", "/provider-icons/deepseek.svg");
+    expect(useModelSelectionStore.getState().selections[NEW_CHAT_MODEL_SELECTION_KEY]?.logo_data_url).toBeUndefined();
+  });
+  it("reloads the authoritative selection after a main conversation fallback while disabled", async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector conversationId="conversation-1" disabled />);
+    expect(await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" })).toBeInTheDocument();
+    const replacement = catalog();
+    replacement.selection = { ...replacement.selection, model_id: "gpt-4o", source: "shared", provider_name: "OpenAI", model_name: "GPT-4o" };
+    fetchCatalogMock.mockResolvedValue(replacement);
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:chat-model-selection-changed", { detail: { conversationId: "other" } })));
+    expect(fetchCatalogMock).toHaveBeenCalledTimes(1);
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:chat-model-selection-changed", { detail: { conversationId: "conversation-1" } })));
+    expect(await screen.findByRole("button", { name: "当前模型：OpenAI · GPT-4o" })).toBeInTheDocument();
+    expect(useModelSelectionStore.getState().selections["conversation-1"]).toMatchObject({ model_id: "gpt-4o", source: "shared" });
+    expect(updateSelectionMock).not.toHaveBeenCalled();
+    expect(useModelSelectionStore.getState().selections[NEW_CHAT_MODEL_SELECTION_KEY]).toBeUndefined();
+  });
+
+  it("does not replace a newer stored selection with an older catalog response", async () => {
+    let resolve!: (value: ChatModelCatalog) => void;
+    fetchCatalogMock.mockImplementationOnce(() => new Promise<ChatModelCatalog>(value => { resolve = value; }));
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    useModelSelectionStore.getState().setSelection("conversation-1", {
+      ...catalog("Latest choice", 4).selection, model_id: "gpt-4o", source: "shared", provider_name: "OpenAI",
+    });
+    await act(async () => resolve(catalog("Stale choice", 3)));
+    expect(await screen.findByRole("button", { name: "当前模型：OpenAI · Latest choice" })).toBeInTheDocument();
+    expect(useModelSelectionStore.getState().selections["conversation-1"]).toMatchObject({ version: 4, model_id: "gpt-4o", source: "shared" });
+  });
+  it('shows the selected provider brand in the trigger and beside each model', async () => {
     fetchCatalogMock.mockResolvedValue(catalog());
     render(<ChatModelSelector />);
-    fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
+    expect(screen.getByRole('button', { name: '当前模型：模型信息加载中' }).querySelector('img')).toBeNull();
+    const trigger = await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' });
+    const triggerIcon = trigger.querySelector('img');
+    expect(triggerIcon).toHaveAttribute('src', '/provider-icons/deepseek.svg');
+    expect(triggerIcon).toHaveAttribute('alt', '');
+    expect(triggerIcon?.parentElement).toHaveAttribute('aria-hidden', 'true');
+    fireEvent.click(trigger);
     const dialog = within(await screen.findByRole('dialog'));
     const deepseekOption = dialog.getByRole('button', { name: /DeepSeek-V3/ });
     const openaiOption = dialog.getByRole('button', { name: /GPT-4o/ });
@@ -289,6 +350,18 @@ describe("ChatModelSelector", () => {
     expect(fetchCatalogMock).toHaveBeenCalledTimes(2);
   });
 
+  it("saves a fixed choice as the default only before the conversation exists", async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector />);
+    fireEvent.click(await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" }));
+    const options = screen.getAllByRole("button");
+    const alternative = options.find((button) => button.textContent?.includes("GPT-4o") && button.getAttribute("role") !== "combobox");
+    expect(alternative).toBeDefined();
+    fireEvent.click(alternative!);
+    await waitFor(() => expect(updateDefaultChatModel).toHaveBeenCalled());
+    expect(updateConversationChatModel).not.toHaveBeenCalled();
+  });
+
   it("keeps a new-chat Auto choice local for the first request", async () => {
     fetchCatalogMock.mockResolvedValue(catalog("DeepSeek-V3", 0));
     const onSelectionChange = vi.fn();
@@ -307,9 +380,8 @@ describe("ChatModelSelector", () => {
       { mode: "auto" },
       expect.objectContaining({ mode: "auto", version: 0 }),
     );
-    expect(
-      await screen.findByRole("button", { name: "当前模型：Auto" }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", { name: "当前模型：Auto" });
+    expect(trigger.querySelector("img")).toBeNull();
   });
 
   it("shows the most recently resolved model beside Auto", async () => {
@@ -325,11 +397,13 @@ describe("ChatModelSelector", () => {
 
     render(<ChatModelSelector conversationId="conversation-1" />);
 
-    expect(
-      await screen.findByRole("button", {
-        name: "当前模型：Auto · DeepSeek · DeepSeek-V3",
-      }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", {
+      name: "当前模型：Auto · DeepSeek · DeepSeek-V3",
+    });
+    expect(trigger.querySelector("img")).toHaveAttribute(
+      "src",
+      "/provider-icons/deepseek.svg",
+    );
   });
 
   it("preserves an available new-chat choice when another selector loads", async () => {
@@ -380,11 +454,11 @@ describe("ChatModelSelector", () => {
 
     render(<ChatModelSelector onSelectionChange={onSelectionChange} />);
 
-    expect(
-      await screen.findByRole("button", {
-        name: "当前模型：Removed Provider · Removed Model · 模型不可用",
-      }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", {
+      name: "当前模型：Removed Provider · Removed Model · 模型不可用",
+    });
+    expect(trigger.querySelector("img")).toBeNull();
+    expect(trigger.querySelector('[data-icon="api"]')).toBeInTheDocument();
     expect(
       useModelSelectionStore.getState().selections[
         NEW_CHAT_MODEL_SELECTION_KEY

@@ -18,7 +18,7 @@ $configExample = Join-Path $repoRoot 'local\config.env.example'
 
 function Import-EnvFile([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
-    foreach ($line in Get-Content -LiteralPath $Path) {
+    foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
         $text = $line.Trim()
         if (-not $text -or $text.StartsWith('#')) { continue }
         if ($text.StartsWith('export ')) { $text = $text.Substring(7).Trim() }
@@ -56,7 +56,7 @@ function Initialize-Environment {
     if (-not $profile) {
         $envFile = Join-Path $repoRoot '.env'
         if (Test-Path -LiteralPath $envFile) {
-            $profileLine = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^\s*MIRROR_PROFILE\s*=' } | Select-Object -First 1
+            $profileLine = Get-Content -LiteralPath $envFile -Encoding UTF8 | Where-Object { $_ -match '^\s*MIRROR_PROFILE\s*=' } | Select-Object -First 1
             if ($profileLine) { $profile = ($profileLine -split '=', 2)[1].Trim() }
         }
     }
@@ -85,6 +85,25 @@ function Invoke-Doctor {
     Assert-Command 'uv.exe' 'Install uv (https://docs.astral.sh/uv/).'
     Assert-Command 'node.exe' 'Install Node.js 20 or newer.'
     Assert-Command 'pnpm.cmd' 'Install pnpm.'
+    # Windows Go locks go.mod even for a read. Some WSL shares allow normal
+    # reads but reject LockFileEx, so executable discovery alone is insufficient.
+    Push-Location $managerDir
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $moduleOutput = & go.exe list -m 2>&1
+        $moduleExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        Pop-Location
+    }
+    if ($moduleExitCode -ne 0) {
+        $detail = ($moduleOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        if ($repoRoot -match '(?:^|::)\\\\(wsl\.localhost|wsl\$)\\') {
+            throw "Windows Go cannot read the module on this WSL share. Use 'make local-up' inside WSL, or check out the repository on a Windows local drive and rerun 'make local-win-up'. Original error: $detail"
+        }
+        throw "Windows Go cannot read the runtime manager module. Check the Go version, module file access, and toolchain configuration. Original error: $detail"
+    }
     Write-Host 'Windows local runtime prerequisites are available (CGO is disabled).'
 }
 

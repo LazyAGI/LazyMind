@@ -1,0 +1,131 @@
+.provider-key-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--provider-control-size, 32px);
+  align-items: center;
+  gap: 8px;
+  .provider-workspace-keys {
+    container-type: inline-size;
+    min-width: 0;
+  }
+}
+.provider-key-inline-create {
+  .ant-input { min-height: 38px; font-size: 12px; }
+  > p { margin: 5px 0 0; color: var(--ant-color-error, #bd3e45); font-size: 12px; }
+}
+.provider-key-row {
+  gap: 10px;
+  code {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .provider-key-row-actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0;
+  }
+  .provider-key-row-actions .ant-btn {
+    width: 26px;
+    min-width: 26px;
+    padding: 0;
+    height: 28px;
+    color: var(--provider-muted, #697586);
+  }
+  .provider-key-row-usage {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .provider-workspace-key-state {
+    color: var(--provider-muted, #697586);
+    font-size: 10px;
+    &.is-enabled {
+      color: var(--provider-green, #168057);
+    }
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .provider-key-row-actions .ant-btn:not(.provider-key-row-reveal) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  .provider-key-row-actions:hover .ant-btn,
+  .provider-key-row-actions:focus-within .ant-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .provider-key-row-actions .ant-btn:not(.provider-key-row-reveal) {
+    transition: none;
+  }
+}
+.provider-key-manager-drawer {
+  .ant-drawer-header {
+    padding: 20px 24px;
+  }
+  .ant-drawer-title {
+    font-size: 16px;
+  }
+  .provider-key-row {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    margin-bottom: 10px;
+    border: 1px solid #e6e9ef;
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  button:focus-visible {
+    outline: 2px solid #2f6df6;
+    outline-offset: 2px;
+  }
+}
+.provider-key-manager-hint {
+  color: #697586;
+  font-size: 12px;
+  margin: 0 0 20px;
+}
+@media (pointer: coarse) {
+  .provider-key-inline-create .ant-input { min-height: 44px; }
+  .provider-key-row {
+    flex-wrap: wrap;
+    code {
+      flex-basis: calc(100% - 84px);
+    }
+    .provider-key-row-usage {
+      order: 1;
+    }
+    .provider-key-row-actions {
+      order: 2;
+      margin-left: auto;
+    }
+  }
+  .provider-key-row .provider-key-row-actions .ant-btn {
+    min-width: 44px;
+    width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+}
+@container (max-width: 300px) {
+  .provider-key-row {
+    flex-wrap: wrap;
+    code {
+      flex-basis: calc(100% - 84px);
+    }
+    .provider-key-row-usage {
+      order: 1;
+    }
+    .provider-key-row-actions {
+      order: 2;
+      margin-left: auto;
+    }
+  }
+}

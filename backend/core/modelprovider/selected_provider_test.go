@@ -177,6 +177,51 @@ func TestSetSelectedProviderRejectsDefaultBaseURLWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestSetSelectedProviderAcceptsBuiltInKeylessTranslation(t *testing.T) {
+	db := setupSelectedProviderTestDB(t)
+	now := time.Now()
+	if err := db.Create(&orm.DefaultModelProvider{
+		ID: "default-google-web", Name: "Google Translate Web", Description: "Keyless translation",
+		BaseURL: "https://translate.googleapis.com/", Category: "translation", Capabilities: "keyless_translation",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserModelProvider{
+		ID: "provider-google-web", DefaultModelProviderID: "default-google-web", Name: "Google Translate Web",
+		Category: "translation", Capabilities: "keyless_translation",
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserModelProviderGroup{
+		ID: "group-google-web", UserModelProviderID: "provider-google-web", Name: "Google Translate Web",
+		BaseURL: "https://translate.googleapis.com/", APIKey: "", IsVerified: true,
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := performSetSelectedProvider(`{"selections":[{"category":"translation","group_id":"group-google-web"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected keyless translation selection, got %d: %s", rec.Code, rec.Body.String())
+	}
+	selected, err := loadSelectedProviders(t.Context(), db, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 1 || selected[0].ProviderName != "Google Translate Web" {
+		t.Fatalf("selection = %#v", selected)
+	}
+	var provider orm.UserModelProvider
+	if err := db.Where("id = ?", "provider-google-web").Take(&provider).Error; err != nil {
+		t.Fatal(err)
+	}
+	items := buildListItems(t.Context(), db, []orm.UserModelProvider{provider}, "zh-CN")
+	if len(items) != 1 || !items[0].IsConfigured {
+		t.Fatalf("keyless translation card should show configured: %#v", items)
+	}
+}
+
 func TestLoadSelectedProvidersSkipsUnverifiedGroups(t *testing.T) {
 	db := setupSelectedProviderTestDB(t)
 	seedProviderGroup(t, db, "user-1", "provider-search", "group-search", "Bing", "search")

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import ChatExportActions from "./ChatExportActions";
 import ArtifactCollectorCard from "../../ArtifactCollectorCard";
+import { ArtifactPreviewContext, useArtifactPreviewController } from "../../ArtifactPreview/context";
 
 const api = vi.hoisted(() => ({ create: vi.fn(), error: vi.fn(), download: vi.fn() }));
 vi.mock("react-i18next", async (importOriginal) => ({ ...await importOriginal<typeof import("react-i18next")>(), useTranslation: () => ({ t: (key: string) => key }) }));
@@ -22,6 +23,46 @@ beforeEach(() => {
 });
 
 describe("Chat export actions", () => {
+  it("closes a withdrawn export preview and retains saved exports and real tool artifacts", () => {
+    const saved = { ...artifact, value: { text: "saved answer", chat_export: true } };
+    const tool = { ...artifact, artifact_id: "tool-file", filename: "tool.md", value: { text: "completed tool result" } };
+    useTaskCenterStore.setState({ artifactsByConversation: { conv: [saved, tool] as any } });
+    const view = render(<ChatExportActions {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportView · 报告.md" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    view.rerender(<ChatExportActions {...props} content="restored" exports={[]} sources={[]} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv).toEqual([saved, tool]);
+    render(<ArtifactCollectorCard sessionId="conv" historyId="history" currentExportIds={[]} />);
+    expect(screen.getByText("报告.md")).toBeVisible();
+    expect(screen.getByText("tool.md")).toBeVisible();
+  });
+  it("returns from the shared preview to the same list and selection", async () => {
+    useTaskCenterStore.setState({ artifactsByConversation: { conv: [{ ...artifact, conversation_id: "conv" } as any] } });
+    function SharedPreview() {
+      const preview = useArtifactPreviewController("conv");
+      return <ArtifactPreviewContext.Provider value={preview}>
+        <ChatExportActions {...props} />
+        {preview.target && <section aria-label="Shared preview">
+          {preview.target.content}<button onClick={preview.close}>Close preview</button>
+        </section>}
+      </ArtifactPreviewContext.Provider>;
+    }
+    render(<SharedPreview />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportView · 报告.md" }));
+    const row = screen.getByRole("button", { name: "报告.md" }).closest(".artifact-collector__file-item") as HTMLElement;
+    fireEvent.click(within(row).getByRole("checkbox"));
+    expect(within(row).getByRole("checkbox")).not.toBeChecked();
+    fireEvent.click(within(row).getByRole("button", { name: "报告.md" }));
+    expect(screen.getByRole("region", { name: "Shared preview" })).toHaveTextContent("报告😀");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+    await screen.findByRole("dialog");
+    expect(within(row).getByRole("checkbox")).not.toBeChecked();
+    expect(api.create).not.toHaveBeenCalled();
+    expect(api.download).not.toHaveBeenCalled();
+  });
+
   it("saves the exact slice once, opens the file list with download, and reopens saved artifacts", async () => {
     let resolve: (value: unknown) => void = () => {};
     api.create.mockReturnValue(new Promise((done) => { resolve = done; }));

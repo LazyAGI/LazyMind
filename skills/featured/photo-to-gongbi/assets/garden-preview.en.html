@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garden portrait · Gongbi transformation</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f6f1e7; color: #39362e; font: 15px/1.65 system-ui, -apple-system, "PingFang SC", sans-serif; }
+    main { max-width: 1100px; margin: auto; padding: 28px 24px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    p { margin: 0 0 20px; color: #666157; }
+    .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    figure { margin: 0; padding: 14px; background: #fffdf8; border: 1px solid #ded7c9; border-radius: 14px; }
+    img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #ede8dc; border-radius: 8px; }
+    figcaption { margin-top: 10px; font-weight: 600; }
+    small { display: block; margin-top: 18px; color: #746e63; }
+    @media (max-width: 650px) { .pair { grid-template-columns: 1fr; } main { padding: 20px 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Garden portrait · Before and after</h1>
+  <p>Preserve the seated pose, round fan, lotus pond, and stone bridge. Fine ink lines and translucent color washes soften the photographic contrast.</p>
+  <div class="pair" aria-label="Garden photo and Gongbi painting comparison">
+    <figure>
+      <img src="{{asset_url:garden_source}}" alt="Input: a fictional woman holding a round fan by a garden lotus pond">
+      <figcaption>01 · Source portrait</figcaption>
+    </figure>
+    <figure>
+      <img src="{{asset_url:style_preview}}" alt="Output: a lightly colored Gongbi painting preserving the pose, fan, and garden composition">
+      <figcaption>02 · Gongbi painting</figcaption>
+    </figure>
+  </div>
+  <small>The example portrait was AI-generated. Upload your own photo for an actual edit; these preview images will not become your result.</small>
+</main>
+</body>
+</html>

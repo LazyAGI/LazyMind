@@ -20,6 +20,7 @@ describe('resolvePendingApprovalStep', () => {
         },
       ],
       projection: {
+        display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'review-images' },
         nodes: {
           automatic: {
             requires_approval: false, execution: 'succeeded', validity: 'effective',

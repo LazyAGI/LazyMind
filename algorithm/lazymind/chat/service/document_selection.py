@@ -74,6 +74,8 @@ def _find_positioned_segment(context: Dict[str, Any], selected_text: str) -> str
             group='block', keyword=selected_text, doc_id=document_id,
             kb_id=dataset_id, phrase=True, sort_by='score', size=20,
         )
+        from lazymind.chat.engine.tools.infra.kb_ownership import filter_active_nodes
+        candidates = filter_active_nodes(candidates)
     except Exception as exc:
         LOG.info(f'[DocumentSelection] positioned segment lookup unavailable: {exc}')
         return ''

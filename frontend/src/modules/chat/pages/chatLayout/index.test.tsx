@@ -3,7 +3,11 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatLayout from "./index";
+import type { WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import { readChatConversationFilters, selectChatConversationSources } from "../../constants/chat";
+
+vi.mock("@/modules/chat/components/ArtifactPreview", () => ({ default: () => null }));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -41,6 +45,9 @@ const mocks = vi.hoisted(() => ({
   tasksByConversation: {} as Record<string, Array<{ task_id: string; agent_type?: string }>>,
   taskLoading: {} as Record<string, boolean>,
   workflowSessions: {} as Record<string, any>,
+  workflowUIs: {} as Record<string, WorkflowUI>,
+  fetchWorkflowUI: vi.fn(),
+  taskCenterDisplayCount: vi.fn((tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0)),
   dismissedWorkflowSessions: {} as Record<string, Array<{ session_id: string; workflow_id: string }>>,
   forkBegin: vi.fn(),
 }));
@@ -172,7 +179,7 @@ vi.mock("@/modules/chat/components/ArtifactPanel", () => ({
   },
 }));
 vi.mock("@/modules/chat/components/TaskCenter/taskTimeline", () => ({
-  taskCenterDisplayCount: (tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0),
+  taskCenterDisplayCount: mocks.taskCenterDisplayCount,
 }));
 vi.mock("@/modules/chat/components/ImageUpload", () => ({
   allowedUploadTypes: [],
@@ -237,10 +244,10 @@ vi.mock("@/modules/chat/store/workflowPanel", () => {
     autoRunningByConversation: {},
     sessionByConversation: mocks.workflowSessions,
     dismissedSessionsByConversation: mocks.dismissedWorkflowSessions,
-    workflowUIByWorkflow: {},
+    workflowUIByWorkflow: mocks.workflowUIs,
     focusedTabByConversation: {},
     focusedSortOrderByConversation: {},
-    fetchWorkflowUI: vi.fn(),
+    fetchWorkflowUI: mocks.fetchWorkflowUI,
     syncSessionSearchConfig: vi.fn(),
   };
   return {
@@ -280,6 +287,7 @@ describe("ChatLayout conversation loading", () => {
     mocks.restoredIntent = null;
     mocks.latestSideChatPanelProps = null;
     mocks.locationSearch = "";
+    Object.keys(mocks.workflowUIs).forEach(key => { delete mocks.workflowUIs[key]; });
     Object.keys(mocks.artifactsByConversation).forEach((key) => {
       delete mocks.artifactsByConversation[key];
     });
@@ -441,6 +449,22 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.latestChatContainerProps.onFork).toBeUndefined();
     expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("medium");
+  });
+
+  it.each([
+    { session_id: "workflow", kind: "resume", expected_state_version: 4 },
+    { session_id: "workflow", kind: "approve", step_id: "review", expected_state_version: 5 },
+    { session_id: "workflow", kind: "approve", step_id: "review", expected_state_version: 5, preference_scope: "step" },
+  ])("includes the explicit workflow decision in the actual Chat request: %j", async (control) => {
+    render(<ChatLayout setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE([], "chat_action_next", {}, { workflow_control: control });
+    });
+    expect(JSON.parse(mocks.sseConstructor.mock.calls[0][1].payload).workflow_control).toEqual(control);
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE([], "chat_action_next", {}, {});
+    });
+    expect(JSON.parse(mocks.sseConstructor.mock.calls[1][1].payload)).not.toHaveProperty("workflow_control");
   });
 
   it("sends an initial model selection only for the first new-conversation request", async () => {
@@ -1095,6 +1119,21 @@ describe("ChatLayout conversation loading", () => {
 
 
   const sidebarProps = { conversationId: "source", setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+  it('uses the bound revision for configuration requests and planned step counts when versions change', async () => {
+    mocks.workflowSessions.source = { session_id: 'run-1', workflow_id: 'smoke', pinned_revision_id: 'v1', status: 'active', steps: [] };
+    mocks.workflowUIs[workflowUICacheKey('smoke', 'v1', 'zh-CN')] = { tabs: ['prepare', 'result'].map(id => ({ id, slots: [] })) };
+    mocks.workflowUIs[workflowUICacheKey('smoke', 'v2', 'zh-CN')] = { tabs: ['prepare', 'review', 'result'].map(id => ({ id, slots: [] })) };
+    // A legacy workflow-only entry must never win over either version.
+    mocks.workflowUIs['smoke:zh-CN'] = { tabs: [] };
+    const view = render(<ChatLayout {...sidebarProps} />);
+    await waitFor(() => expect(mocks.fetchWorkflowUI).toHaveBeenLastCalledWith('smoke', 'v1'));
+    expect(mocks.taskCenterDisplayCount).toHaveBeenLastCalledWith([], [], false, 2);
+    mocks.workflowSessions.source = { ...mocks.workflowSessions.source, session_id: 'run-2', pinned_revision_id: 'v2' };
+    view.rerender(<ChatLayout {...sidebarProps} />);
+    await waitFor(() => expect(mocks.fetchWorkflowUI).toHaveBeenLastCalledWith('smoke', 'v2'));
+    expect(mocks.taskCenterDisplayCount).toHaveBeenLastCalledWith([], [], false, 3);
+  });
+
   async function openOverview() {
     fireEvent.click(await screen.findByRole("button", { name: "chat.sidebar.open" }));
   }
@@ -1221,27 +1260,34 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
   });
 
-  it("starts a new side chat for each selection invocation, including the same text", async () => {
+  it("updates the selected quote without remounting the side chat or losing its draft", async () => {
     render(<ChatLayout {...sidebarProps} />);
     await screen.findByRole("button", { name: "chat.sidebar.open" });
-    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "同一段选文", historyId: "h1" }));
+    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "第一段选文", historyId: "h1" }));
     const first = screen.getByTestId("side-chat-panel");
-    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "同一段选文", historyId: "h1" }));
-    expect(screen.getByTestId("side-chat-panel")).not.toBe(first);
-    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute("data-selected-text", "同一段选文");
-    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByLabelText("Side chat draft"), { target: { value: "unfinished follow-up" } });
+    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "第二段选文", historyId: "h2" }));
+    expect(screen.getByTestId("side-chat-panel")).toBe(first);
+    expect(first).toHaveAttribute("data-selected-text", "第二段选文");
+    expect(screen.getByLabelText("Side chat draft")).toHaveValue("unfinished follow-up");
+    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "第二段选文", historyId: "h2" }));
+    expect(screen.getByTestId("side-chat-panel")).toBe(first);
+    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId("conversation-menu-overview"));
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
-    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Side chat draft")).toHaveValue("unfinished follow-up");
+    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
   });
 
-  it("returns to overview after discarding side chat", async () => {
+  it("closes the entire right panel after discarding side chat", async () => {
     render(<ChatLayout {...sidebarProps} />);
     await openOverview();
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
     fireEvent.click(screen.getByRole("button", { name: "Close side chat" }));
     expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
-    expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chat.sidebar.open" })).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("conversation-context-panel")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
   });
 
   it("leaves references to message popovers without routing them into the sidebar", async () => {

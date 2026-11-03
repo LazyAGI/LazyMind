@@ -24,11 +24,15 @@ def main_model_supports_vision() -> bool:
     if not is_model_role_available('llm'):
         return False
     config = _llm_configuration()
-    return config.get('vision') is True or str(config.get('type', '')).lower() == 'vlm'
+    features = config.get('features') or {}
+    if features.get('vision') is False or config.get('vision') is False:
+        return False
+    return features.get('vision') is True or config.get('vision') is True or str(config.get('type', '')).lower() == 'vlm'
 
 
 def select_vision_model_role() -> str:
-    if is_model_role_available('vlm'):
+    from lazymind.model_features import feature_is_enabled
+    if is_model_role_available('vlm') and feature_is_enabled('vision', role='vlm'):
         return 'vlm'
     if not is_model_role_available('llm'):
         raise VisionModelUnavailable('未配置视觉模型或主模型，请在模型设置中配置后重试。')

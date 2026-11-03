@@ -202,6 +202,12 @@ Dashboard 仅绑定 `127.0.0.1`，且对应存储为外部服务时不会启动�
 
 ---
 
+## Zotero 导入
+
+共享服务和 Docker 部署支持远端 Zotero 与 WebDAV 导入。本地 Zotero 来源读取的是 Core 所在机器，因此共享部署会在连接 Zotero 前拒绝该来源，显式填写 `localhost`、`127.0.0.1` 或 `host.docker.internal` 也不能绕过。
+
+原生本地／桌面运行时保留本机初始化管理员账号的 Zotero 访问。运行时管理器会设置 `LAZYMIND_RUNTIME_MODE=local` 和明确的 `LAZYMIND_BOOTSTRAP_ADMIN_USERNAME`；Core 使用请求的 Bearer Token 向鉴权服务验证身份，并要求用户 ID、配置的用户名和 `system-admin` 角色全部匹配。其他账号或缺失本机账号配置返回 403，身份验证服务不可用返回 503。桌面自动登录已使用该账号，无需额外配置。共享部署应保持非本地运行模式，使用远端 Zotero 凭据或导入选中的文件。
+
 ## 常用操作
 
 不重新构建，直接重启容器：

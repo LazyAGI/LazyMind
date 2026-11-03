@@ -30,7 +30,7 @@ func renameConversationRequest(id, user, body string) *httptest.ResponseRecorder
 func TestRenameConversationPersistsAcrossViewsWithoutChangingActivity(t *testing.T) {
 	for _, work := range []bool{false, true} {
 		t.Run(fmt.Sprintf("work=%t", work), func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newChatExecutionTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			before := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
@@ -112,7 +112,7 @@ func TestRenameConversationPersistsAcrossViewsWithoutChangingActivity(t *testing
 }
 
 func TestRenameConversationValidatesInputAndOwnership(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	if err := db.Create(&orm.Conversation{ID: "rename", DisplayName: "Original", BaseModel: orm.BaseModel{CreateUserID: "u1"}}).Error; err != nil {

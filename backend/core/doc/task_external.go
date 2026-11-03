@@ -62,6 +62,10 @@ type transferRequest struct {
 }
 
 func callExternalAddDocs(r *http.Request, req addRequest) ([]addResultItem, error) {
+	return callExternalAddDocsContext(r.Context(), req)
+}
+
+func callExternalAddDocsContext(ctx context.Context, req addRequest) ([]addResultItem, error) {
 	url := common.JoinURL(parsingServiceEndpoint(), "/v1/docs/add")
 	log.Logger.Info().
 		Str("handler", "StartTask").
@@ -80,7 +84,7 @@ func callExternalAddDocs(r *http.Request, req addRequest) ([]addResultItem, erro
 			Msg("calling external add-docs item")
 	}
 	var resp any
-	if err := common.ApiPost(r.Context(), url, req, nil, &resp, 15*time.Second); err != nil {
+	if err := common.ApiPost(ctx, url, req, nil, &resp, 15*time.Second); err != nil {
 		log.Logger.Error().
 			Err(err).
 			Str("handler", "StartTask").

@@ -2,13 +2,16 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"lazymind/core/learning"
 	"strings"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
+	"lazymind/core/paperlibrary"
 )
 
 type DatasetServiceErrorCode string
@@ -42,6 +45,8 @@ func (e *DatasetServiceError) Unwrap() error {
 }
 
 type DatasetCatalogCaller struct {
+	UserName      string
+	Permissions   []string
 	UserID        string
 	Authorization string
 	TenantID      string
@@ -64,14 +69,18 @@ func NewDatasetCatalogService(deps DatasetCatalogServiceDeps) (*DatasetCatalogSe
 }
 
 type DatasetListRequest struct {
-	UserID       string
-	Keyword      string
-	Tags         []string
-	Offset       int
-	Limit        int
-	OrderBy      string
-	SourceFilter string
-	Caller       DatasetCatalogCaller
+	DatasetIDs     []string
+	Match          string
+	Scene          string
+	RequiredAction string
+	UserID         string
+	Keyword        string
+	Tags           []string
+	Offset         int
+	Limit          int
+	OrderBy        string
+	SourceFilter   string
+	Caller         DatasetCatalogCaller
 }
 
 type DatasetListResult struct {
@@ -82,9 +91,10 @@ type DatasetListResult struct {
 }
 
 type DatasetGetRequest struct {
-	UserID    string
-	DatasetID string
-	Caller    DatasetCatalogCaller
+	IncludeConfiguration bool
+	UserID               string
+	DatasetID            string
+	Caller               DatasetCatalogCaller
 }
 
 func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetListRequest) (DatasetListResult, error) {
@@ -107,10 +117,35 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		sourceFilter = ""
 	}
 	caller := req.Caller
-	caller.UserID = firstNonEmpty(strings.TrimSpace(caller.UserID), userID)
+	if caller.UserID != "" && strings.TrimSpace(caller.UserID) != userID {
+		return DatasetListResult{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "caller identity mismatch"}
+	}
+	caller.UserID = userID
+	action := req.RequiredAction
+	if action == "" {
+		action = "read"
+	}
+	permission := map[string]string{"read": acl.PermissionDatasetRead, "write": acl.PermissionDatasetWrite, "upload": acl.PermissionDatasetUpload}[action]
+	if permission == "" || (req.Match != "" && req.Match != "contains" && req.Match != "exact") {
+		return DatasetListResult{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "invalid catalog filter"}
+	}
 
 	order := resolveDatasetListOrder(req.OrderBy)
 	base := s.db.WithContext(ctx).Model(&orm.Dataset{}).Where("datasets.deleted_at IS NULL")
+	base = base.Where("COALESCE(NULLIF(TRIM(datasets.tenant_id), ''), 'default') = ?", resourceTenant(caller.TenantID))
+	if len(req.DatasetIDs) > 0 {
+		base = base.Where("datasets.id IN ?", req.DatasetIDs)
+	}
+	if req.Match == "exact" {
+		base = base.Where("datasets.display_name = ?", keyword)
+	}
+	if req.Scene != "" {
+		if req.Scene == "academic_papers" || req.Scene == "paper_collection" {
+			base = base.Where("datasets.scene IN ?", []string{"academic_papers", "paper_collection"})
+		} else {
+			base = base.Where("datasets.scene = ?", req.Scene)
+		}
+	}
 	if order.usageJoin {
 		base = base.Joins("LEFT JOIN dataset_user_states dus ON dus.dataset_id = datasets.id AND dus.create_user_id = ?", userID)
 	}
@@ -131,7 +166,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		if order.usageJoin {
 			query = query.Select("datasets.*")
 		} else {
-			query = query.Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state, processing_level, processing_revision, transition_status, reader_fallback_accepted`)
+			query = query.Select("datasets.*")
 		}
 		query = query.
 			Order(order.clause).
@@ -149,7 +184,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		}
 		for _, ds := range rows {
 			perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
-			if len(perms) == 0 {
+			if !catalogAllowsAction(perms, permission) {
 				continue
 			}
 			if !datasetMatchesKeyword(&ds, keyword) {
@@ -160,7 +195,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 			}
 			candidates = append(candidates, ds)
 		}
-		candidates = filterDatasetsByScanSourceAccessForCaller(ctx, caller, candidates, acl.PermissionDatasetRead)
+		candidates = filterDatasetsByScanSourceAccessForCaller(ctx, caller, candidates, permission)
 
 		if len(candidates) > 0 {
 			candidateIDs := make([]string, len(candidates))
@@ -188,6 +223,10 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	}
 
 	out := s.datasetsFromRows(ctx, page, userID, groupIDs, pageSourceMap, pageSourceTypeMap)
+	if err := s.addPaperStatistics(ctx, page, out); err != nil {
+		return DatasetListResult{}, err
+	}
+	s.addAllowedActions(ctx, caller, out)
 	end := offset + len(page)
 	return DatasetListResult{
 		Datasets:   out,
@@ -197,41 +236,83 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	}, nil
 }
 
-func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRequest) (Dataset, error) {
+func (s *DatasetCatalogService) accessibleDataset(ctx context.Context, req DatasetGetRequest) (orm.Dataset, []string, DatasetCatalogCaller, error) {
 	if s == nil || s.db == nil {
-		return Dataset{}, &DatasetServiceError{Code: DatasetServiceInternal, Message: "dataset service is not configured"}
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceInternal, Message: "dataset service is not configured"}
 	}
 	userID := strings.TrimSpace(req.UserID)
 	if userID == "" {
-		return Dataset{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "user_id is required"}
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "user_id is required"}
 	}
 	datasetID := strings.TrimSpace(req.DatasetID)
 	if datasetID == "" {
-		return Dataset{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "invalid dataset id"}
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceInvalidArgument, Message: "invalid dataset id"}
 	}
 	caller := req.Caller
-	caller.UserID = firstNonEmpty(strings.TrimSpace(caller.UserID), userID)
+	if caller.UserID != "" && strings.TrimSpace(caller.UserID) != userID {
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "caller identity mismatch"}
+	}
+	caller.UserID = userID
 
 	var ds orm.Dataset
 	if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).First(&ds).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return Dataset{}, &DatasetServiceError{Code: DatasetServiceNotFound, Message: "dataset not found", Err: err}
+			return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceNotFound, Message: "dataset not found", Err: err}
 		}
-		return Dataset{}, &DatasetServiceError{Code: DatasetServiceUnavailable, Message: "query dataset failed", Err: err}
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceUnavailable, Message: "query dataset failed", Err: err}
+	}
+	if resourceTenant(ds.TenantID) != resourceTenant(caller.TenantID) {
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceNotFound, Message: "dataset not found"}
 	}
 	datasetACL := datasetACLForUser(&ds, userID)
 	if len(datasetACL) == 0 {
-		return Dataset{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
 	}
 	if !datasetAllowedByScanSourceForCaller(ctx, caller, ds.ID, acl.PermissionDatasetRead) {
-		return Dataset{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
+		return orm.Dataset{}, nil, DatasetCatalogCaller{}, &DatasetServiceError{Code: DatasetServiceForbidden, Message: "dataset forbidden"}
 	}
+
+	return ds, datasetACL, caller, nil
+}
+
+// GetDatasetAccess shares the catalog access policy without loading configuration, statistics or parser metadata.
+func (s *DatasetCatalogService) GetDatasetAccess(ctx context.Context, req DatasetGetRequest) (Dataset, error) {
+	ds, permissions, _, err := s.accessibleDataset(ctx, req)
+	if err != nil {
+		return Dataset{}, err
+	}
+	return Dataset{DatasetID: ds.ID, Scene: canonicalKnowledgeScene(ds.Scene), IsOwner: ds.CreateUserID == strings.TrimSpace(req.UserID), Acl: permissions}, nil
+}
+
+func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRequest) (Dataset, error) {
+	ds, datasetACL, caller, err := s.accessibleDataset(ctx, req)
+	if err != nil {
+		return Dataset{}, err
+	}
+	userID := strings.TrimSpace(req.UserID)
 
 	createdByDataSource := isDatasetCreatedByDataSource(ctx, ds.ID)
 	installedMap := batchCheckInstalledMarketDatasets(ctx, userID, []string{ds.ID})
 	cloudMap := map[string]bool{ds.ID: createdByDataSource}
 	sourceTypeMap := buildDatasetSourceTypeMap([]string{ds.ID}, cloudMap, installedMap)
-	return s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil), nil
+	out := []Dataset{s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil)}
+	if err := s.addPaperStatistics(ctx, []orm.Dataset{ds}, out); err != nil {
+		return Dataset{}, err
+	}
+	if req.IncludeConfiguration {
+		var refs []learning.KnowledgeBaseCapability
+		if err := s.db.WithContext(ctx).Where("dataset_id = ? AND enabled = ?", ds.ID, true).Order("display_order ASC").Find(&refs).Error; err != nil {
+			return Dataset{}, err
+		}
+		out[0].ProfileID, _ = knowledgeExt(ds.Ext)["profile_id"].(string)
+		for _, row := range refs {
+			var config map[string]any
+			_ = json.Unmarshal([]byte(row.SettingsJSON), &config)
+			out[0].ReadingCapabilities = append(out[0].ReadingCapabilities, learning.CapabilityRef{Key: row.CapabilityKey, Version: row.CapabilityVersion, Enabled: row.Enabled, DisplayOrder: row.DisplayOrder, Settings: config})
+		}
+	}
+	s.addAllowedActions(ctx, caller, out)
+	return out[0], nil
 }
 
 func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm.Dataset, userID string, groupIDs []string, sourceMap map[string]bool, sourceTypeMap map[string]string) []Dataset {
@@ -255,6 +336,30 @@ func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm
 	return out
 }
 
+func (s *DatasetCatalogService) addPaperStatistics(ctx context.Context, rows []orm.Dataset, out []Dataset) error {
+	ids := []string{}
+	for _, row := range rows {
+		if canonicalKnowledgeScene(row.Scene) == "academic_papers" {
+			ids = append(ids, row.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	views, err := paperlibrary.Statistics(ctx, s.db, ids)
+	if err != nil {
+		return &DatasetServiceError{Code: DatasetServiceUnavailable, Message: "query paper library statistics failed", Err: err}
+	}
+	for i := range out {
+		if view, ok := views[out[i].DatasetID]; ok {
+			count, pdfCount := view.PaperCount, view.PDFAttachmentCount
+			out[i].PaperCount, out[i].PDFAttachmentCount = &count, &pdfCount
+			out[i].IsEmpty = count == 0
+		}
+	}
+	return nil
+}
+
 func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Dataset, userID string, datasetACL []string, stats datasetStats, createdByDataSource bool, sourceType string, liveParsers []ParserConfig) Dataset {
 	algo := parseDatasetAlgo(ds.Ext)
 	if liveParsers == nil {
@@ -262,7 +367,8 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 	}
 	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 	return Dataset{
-		Name:                   "datasets/" + ds.ID,
+		Name:  "datasets/" + ds.ID,
+		Scene: canonicalKnowledgeScene(ds.Scene), ResourceVersion: ds.ResourceVersion,
 		DatasetID:              ds.ID,
 		DisplayName:            ds.DisplayName,
 		Desc:                   ds.Desc,
@@ -282,7 +388,6 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 		Acl:                    datasetACL,
 		ShareType:              shareTypeToPB(ds.ShareType),
 		Type:                   datasetTypeToPB(ds.Type),
-		LibraryKind:            parseDatasetLibraryKind(ds.Ext),
 		Tags:                   parseDatasetTags(ds.Ext),
 		DefaultDataset:         isDefaultDatasetForUserWithDB(ctx, s.db, userID, ds.ID),
 		CreatedByDataSource:    &createdByDataSource,
@@ -315,4 +420,24 @@ func datasetFetchSize(pageSize int) int {
 		fetchSize = 500
 	}
 	return fetchSize
+}
+
+func catalogAllowsAction(permissions []string, action string) bool {
+	for _, permission := range permissions {
+		if permission == action || permission == acl.PermissionDatasetWrite {
+			return true
+		}
+		if action == acl.PermissionDatasetRead && permission == acl.PermissionDatasetUpload {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalKnowledgeScene(value string) string {
+	scene, err := resourceScene(value)
+	if err != nil {
+		return value
+	}
+	return scene
 }

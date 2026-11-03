@@ -44,6 +44,8 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 }
 
 func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
+	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "")
+	t.Setenv("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON", "")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
@@ -75,6 +77,8 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=admin")
 	assertEnvContains(t, env, "LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=admin")
 	assertEnvNotContains(t, env, "LAZYMIND_CAPABILITY_MCP_ENABLED=")
+	assertEnvContains(t, env, "LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED=true")
+	assertEnvContains(t, env, "LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON=")
 }
 
 func TestCloudTokenStoreModeUsesSystemStoreOutsideLocalProfile(t *testing.T) {

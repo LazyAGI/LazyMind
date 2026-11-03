@@ -1,24 +1,31 @@
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { computeTextSha256 } from '../utils/fileHash';
-import { emptyLibraryV3, type Annotation, type PaperLibraryDataV3, type PaperRecord } from './libraryModel';
+import { emptyLibrary, withLibraryGraph, type Annotation, type CompletePaperLibrary, type PaperRecord } from './libraryModel';
+import type { PaperLibraryData } from './model';
 import { normalizeDoi } from './model';
 
 export interface ZoteroImportConfig {
-  source: 'local' | 'remote' | 'webdav';
+  source: 'database' | 'local' | 'remote' | 'webdav';
   library_type: 'users' | 'groups';
   library_id: string;
   api_key?: string;
   local_url?: string;
   webdav?: { url: string; username: string; password: string };
 }
-export interface ZoteroPreview { items: unknown[]; collections: unknown[]; source_id: string; warnings: string[] }
-export interface ZoteroImportOptions { includeAttachments: boolean; localFiles: File[]; targetFolderId?: string | null }
+export interface ZoteroDatabaseInfo {
+  path: string;
+  libraries: Array<{ type: 'users' | 'groups'; id: string; name: string }>;
+  library_type: 'users' | 'groups';
+  library_id: string;
+}
+export interface ZoteroPreview { items: unknown[]; collections: unknown[]; source_id: string; warnings: string[]; database?: ZoteroDatabaseInfo }
+export interface ZoteroImportOptions { includeAttachments: boolean; localFiles: File[]; targetFolderId?: string | null; onProgress?: (stage: string) => void }
 export interface ZoteroImportResult { imported: number; attachments: number; failures?: string[] }
 export interface ZoteroAttachmentCandidate { id: string; paperId: string; key: string; name: string; md5?: string; localPath?: string }
 export interface ZoteroPaperRecord extends PaperRecord { zoteroSources?: string[] }
-type ZoteroFolderRecord = PaperLibraryDataV3['folders'][number] & { zoteroSources?: string[] };
+type ZoteroFolderRecord = PaperLibraryData['folders'][number] & { zoteroSources?: string[] };
 export interface ZoteroImportPlan {
-  library: Omit<PaperLibraryDataV3, 'papers' | 'folders' | 'collections'> & { papers: ZoteroPaperRecord[]; folders: ZoteroFolderRecord[]; collections: ZoteroFolderRecord[] };
+  library: Omit<CompletePaperLibrary, 'papers' | 'folders' | 'collections'> & { papers: ZoteroPaperRecord[]; folders: ZoteroFolderRecord[]; collections: ZoteroFolderRecord[] };
   attachments: ZoteroAttachmentCandidate[];
   counts: { papers: number; existing: number; folders: number; notes: number; annotations: number; pdfs: number };
 }
@@ -55,7 +62,18 @@ function decodePreview(value: unknown): ZoteroPreview {
     throw new Error('Zotero 返回的数据格式无效，未导入任何文献');
   }
   if (body.items.length > 50000 || body.collections.length > 10000 || text(body.source_id).length > 2000) throw new Error('Zotero 文献库超过单次导入上限，请分批导入');
-  return { items: body.items, collections: body.collections, source_id: text(body.source_id), warnings: (body.warnings || []) as string[] };
+  let database: ZoteroDatabaseInfo | undefined;
+  if (body.database !== undefined) {
+    const info = object(body.database);
+    if (!info || typeof info.path !== 'string' || !['users', 'groups'].includes(text(info.library_type)) || !/^\d+$/.test(text(info.library_id))
+      || !Array.isArray(info.libraries) || info.libraries.length > 10000 || !info.libraries.every(value => {
+        const library = object(value);
+        return library && ['users', 'groups'].includes(text(library.type)) && /^\d+$/.test(text(library.id)) && !!text(library.name);
+      })) throw new Error('本地 Zotero 文献库信息无效，请重新读取数据库');
+    database = { path: info.path, library_type: info.library_type as 'users' | 'groups', library_id: info.library_id as string,
+      libraries: info.libraries.map(value => { const library = value as Record<string, string>; return { type: library.type as 'users' | 'groups', id: library.id, name: library.name }; }) };
+  }
+  return { items: body.items, collections: body.collections, source_id: text(body.source_id), warnings: (body.warnings || []) as string[], ...(database ? { database } : {}) };
 }
 export async function previewZotero(datasetId: string, config: ZoteroImportConfig, signal?: AbortSignal): Promise<ZoteroPreview> {
   try {
@@ -152,7 +170,7 @@ function noteText(value: unknown): string {
   doc.querySelectorAll('p,div,li').forEach(node => node.append('\n'));
   return (doc.body.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
-const authors = (data: ObjectValue) => list(data.creators).map(object).filter((creator): creator is ObjectValue => !!creator && (!creator.creatorType || creator.creatorType === 'author' || creator.creatorType === 'bookAuthor')).map(creator => text(creator.name) || [text(creator.firstName), text(creator.lastName)].filter(Boolean).join(' ')).filter(Boolean).join(', ');
+const authors = (data: ObjectValue) => list(data.creators).map(object).filter((creator): creator is ObjectValue => !!creator && (!creator.creatorType || creator.creatorType === 'author' || creator.creatorType === 'bookAuthor')).map(creator => text(creator.name) || [text(creator.firstName), text(creator.lastName)].filter(Boolean).join(' ')).filter(Boolean);
 const tagsOf = (data: ObjectValue) => unique(list(data.tags).map(value => text(object(value)?.tag) || text(value)).filter(Boolean));
 const arxivOf = (data: ObjectValue) => {
   const match = [text(data.archiveID), text(data.extra), text(data.url)].join('\n').match(/(?:arxiv(?:\.org\/(?:abs|pdf)\/|:\s*)|^)(\d{4}\.\d{4,5})(?:v\d+)?/i);
@@ -161,15 +179,36 @@ const arxivOf = (data: ObjectValue) => {
 const timestamp = (value: unknown, fallback: string) => { const valueText = text(value); return valueText && !Number.isNaN(Date.parse(valueText)) ? new Date(valueText).toISOString() : fallback; };
 const pdfAttachment = (data: ObjectValue) => data.contentType === 'application/pdf' || data.mimeType === 'application/pdf' || /\.pdf$/i.test(text(data.filename) || text(data.path));
 
-export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryDataV3, targetFolderId?: string | null): ZoteroImportPlan {
+export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryData, targetFolderId?: string | null): ZoteroImportPlan {
   decodePreview(preview);
   if (targetFolderId && !current.folders.some(folder => folder.id === targetFolderId)) throw new Error('导入目标文件夹已不存在，请重新选择');
-  const library: ZoteroImportPlan['library'] = JSON.parse(JSON.stringify(current));
+  const library: ZoteroImportPlan['library'] = withLibraryGraph(JSON.parse(JSON.stringify(current)));
   const counts = { papers: 0, existing: 0, folders: 0, notes: 0, annotations: 0, pdfs: 0 };
   const attachments: ZoteroAttachmentCandidate[] = [];
+  const collectionsByID = new Map(library.collections.map(item => [item.id, item]));
   for (const folder of library.folders) {
-    if (!library.collections.some(collection => collection.id === folder.id)) library.collections.push({ ...folder });
+    if (!collectionsByID.has(folder.id)) { const collection = { ...folder }; library.collections.push(collection); collectionsByID.set(folder.id, collection); }
   }
+  const papersByID = new Map<string, ZoteroPaperRecord>();
+  const papersByIdentity = new Map<string, ZoteroPaperRecord>();
+  const paperOrder = new Map<ZoteroPaperRecord, number>();
+  const indexPaper = (paper: ZoteroPaperRecord) => {
+    if (!paperOrder.has(paper)) paperOrder.set(paper, paperOrder.size);
+    papersByID.set(paper.id, paper);
+    const keys = [...(paper.zoteroSources || []).map(key => `source:${key}`),
+      ...(paper.metadata.identifiers.doi ? [`doi:${normalizeDoi(paper.metadata.identifiers.doi)}`] : []),
+      ...(paper.metadata.identifiers.arxiv ? [`arxiv:${paper.metadata.identifiers.arxiv.replace(/v\d+$/, '')}`] : [])];
+    for (const key of keys) {
+      const previous = papersByIdentity.get(key);
+      if (!previous || paperOrder.get(paper)! < paperOrder.get(previous)!) papersByIdentity.set(key, paper);
+    }
+  };
+  library.papers.forEach(indexPaper);
+  const firstPaper = (...papers: Array<ZoteroPaperRecord | undefined>) => papers.filter((paper): paper is ZoteroPaperRecord => !!paper).sort((a,b) => paperOrder.get(a)! - paperOrder.get(b)!)[0];
+  const attachmentsByID = new Map(library.attachments.map(item => [item.id, item]));
+  const noteIDs = new Set(library.notes.map(item => item.id));
+  const annotationIDs = new Set(library.annotations.map(item => item.id));
+  const relationIDs = new Set(library.relations.map(item => item.id));
   const now = new Date().toISOString();
   const collectionMap = new Map<string, ObjectValue>();
   for (const value of preview.collections) {
@@ -194,9 +233,9 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     const id = existing?.id || stableID;
     if (existing) existing.zoteroSources = unique([...(existing.zoteroSources || []), external]);
     else { library.folders.push({ id, name: text(data.name), parentId, zoteroSources: [external] }); counts.folders++; }
-    const collection = library.collections.find(item => item.id === id);
+    const collection = collectionsByID.get(id);
     if (collection) collection.zoteroSources = unique([...(collection.zoteroSources || []), external]);
-    else library.collections.push({ id, name: existing?.name || text(data.name), parentId: existing ? existing.parentId || null : parentId, zoteroSources: [external] });
+    else { const added = { id, name: existing?.name || text(data.name), parentId: existing ? existing.parentId || null : parentId, zoteroSources: [external] }; library.collections.push(added); collectionsByID.set(id, added); }
     folderIDs.set(key, id); visiting.delete(key); return id;
   };
   collectionMap.forEach((_, key) => ensureCollection(key));
@@ -218,28 +257,30 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     const doi = normalizeDoi(text(data.DOI) || text(data.doi)); const arxiv = arxivOf(data);
     const collections = membership(data);
     const stableID = recordID(preview.source_id, 'paper', key);
-    const existing = library.papers.find(paper => paper.id === stableID || paper.zoteroSources?.includes(external))
-      || library.papers.find(paper => (doi && normalizeDoi(paper.doi || '') === doi) || (arxiv && paper.arxiv?.replace(/v\d+$/, '') === arxiv));
+    const existing = firstPaper(papersByID.get(stableID), papersByIdentity.get(`source:${external}`))
+      || firstPaper(doi ? papersByIdentity.get(`doi:${doi}`) : undefined, arxiv ? papersByIdentity.get(`arxiv:${arxiv}`) : undefined);
     if (existing) {
       existing.zoteroSources = unique([...(existing.zoteroSources || []), external]);
       existing.tags = unique([...existing.tags, ...tagsOf(data)]);
-      existing.collectionIds = unique([...existing.collectionIds, ...collections]);
-      existing.doi ||= doi || undefined; existing.arxiv ||= arxiv;
-      existing.authors ||= authors(data); existing.venue ||= text(data.publicationTitle) || text(data.proceedingsTitle) || text(data.publisher);
-      existing.abstract ||= text(data.abstractNote); existing.metadata.abstract ||= text(data.abstractNote);
+      existing.collectionIds = unique([...(existing.collectionIds || []), ...collections]);
+      if (!existing.metadata.authors.length) existing.metadata.authors = authors(data); existing.metadata.venue ||= text(data.publicationTitle) || text(data.proceedingsTitle) || text(data.publisher);
+      existing.metadata.abstract ||= text(data.abstractNote);
       existing.metadata.identifiers.doi ||= doi || undefined; existing.metadata.identifiers.arxiv ||= arxiv;
-      existing.year ||= Number(text(data.date).match(/\b(\d{4})\b/)?.[1]) || 0;
-      paperIDs.set(key, existing.id); counts.existing++; return;
+      existing.metadata.year ||= Number(text(data.date).match(/\b(\d{4})\b/)?.[1]) || 0;
+      indexPaper(existing); paperIDs.set(key, existing.id); counts.existing++; return;
     }
     const record: ZoteroPaperRecord = {
-      id: stableID, title: text(data.title) || text(data.filename) || '未命名文献', authors: authors(data),
-      venue: text(data.publicationTitle) || text(data.proceedingsTitle) || text(data.publisher), year: Number(text(data.date).match(/\b(\d{4})\b/)?.[1]) || 0,
-      doi: doi || undefined, arxiv, abstract: text(data.abstractNote), sourceUrl: safeURL(data.url),
+      id: stableID, revision: 0,
+      metadata: {
+        title: text(data.title) || text(data.filename) || '未命名文献', authors: authors(data),
+        venue: text(data.publicationTitle) || text(data.proceedingsTitle) || text(data.publisher), year: Number(text(data.date).match(/\b(\d{4})\b/)?.[1]) || 0,
+        abstract: text(data.abstractNote), identifiers: { doi: doi || undefined, arxiv }, confidence: {},
+      }, sourceUrl: safeURL(data.url),
       folderId: collections[0] || targetFolderId || null, status: 'unread', important: false, tags: tagsOf(data), source: 'zotero', parse: 'ready',
-      incomplete: standalone || !text(data.title), metadata: { abstract: text(data.abstractNote), identifiers: { doi: doi || undefined, arxiv }, confidence: {} },
+      incomplete: standalone || !text(data.title),
       attachmentIds: [], noteIds: [], annotationIds: [], collectionIds: collections, relatedPaperIds: [], zoteroSources: [external],
     };
-    library.papers.push(record); paperIDs.set(key, stableID); counts.papers++;
+    library.papers.push(record); indexPaper(record); paperIDs.set(key, stableID); counts.papers++;
   };
   rawItems.forEach((data, key) => { if (!['attachment', 'note', 'annotation'].includes(text(data.itemType))) addPaper(key, data); });
   const attachmentIDs = new Map<string, string>();
@@ -250,29 +291,30 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     let paperId = paperIDs.get(text(data.parentItem));
     if (!text(data.parentItem)) { addPaper(key, { ...data, filename }, true); paperId = paperIDs.get(key); }
     if (!paperId) throw new Error('Zotero PDF 缺少对应文献，未导入');
-    const paper = library.papers.find(item => item.id === paperId)!;
+    const paper = papersByID.get(paperId)!;
     const id = recordID(preview.source_id, 'attachment', key); attachmentIDs.set(key, id);
-    let attachment = library.attachments.find(item => item.id === id);
+    let attachment = attachmentsByID.get(id);
     if (!attachment) {
       attachment = { id, paperId, name: filename, kind: 'pdf', mimeType: 'application/pdf', source: 'zotero', addedAt: timestamp(data.dateAdded, now), sourceUrl: safeURL(data.url), isPrimary: !paper.attachmentIds.length };
-      library.attachments.push(attachment);
+      library.attachments.push(attachment); attachmentsByID.set(id, attachment);
     }
     paper.attachmentIds = unique([...paper.attachmentIds, id]);
     if (!attachment.contentRef || text((attachment as unknown as ObjectValue).processingError)) attachments.push({ id, paperId, key, name: filename, md5: text(data.md5) || undefined, localPath: text(data.path) || undefined });
     counts.pdfs++;
   });
   rawItems.forEach((data, key) => {
-    if (data.itemType !== 'note') return;
-    const paperId = paperIDs.get(text(data.parentItem));
+    const attachmentNote = data.itemType === 'attachment' && pdfAttachment(data) && !!text(data.note);
+    if (data.itemType !== 'note' && !attachmentNote) return;
+    const paperId = paperIDs.get(text(data.parentItem) || (attachmentNote ? key : ''));
     if (!paperId) {
       if (text(data.parentItem)) throw new Error('Zotero 笔记缺少对应文献，未导入');
       return; // Standalone notes have no paper parent; the preview lists this limitation.
     }
-    const id = recordID(preview.source_id, 'note', key); const paper = library.papers.find(item => item.id === paperId)!;
-    if (!library.notes.some(note => note.id === id)) {
+    const id = recordID(preview.source_id, attachmentNote ? 'attachment-note' : 'note', key); const paper = papersByID.get(paperId)!;
+    if (!noteIDs.has(id)) {
       const content = noteText(data.note);
       library.notes.push({ id, paperId, title: content.split('\n')[0].slice(0, 80) || 'Zotero 笔记', content, kind: 'note', createdAt: timestamp(data.dateAdded, now), updatedAt: timestamp(data.dateModified, now) });
-      counts.notes++;
+      noteIDs.add(id); counts.notes++;
     }
     paper.noteIds = unique([...paper.noteIds, id]);
   });
@@ -280,17 +322,17 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     if (data.itemType !== 'annotation') return;
     const attachmentId = attachmentIDs.get(text(data.parentItem));
     if (!attachmentId) return;
-    const attachment = library.attachments.find(item => item.id === attachmentId)!;
-    const paper = library.papers.find(item => item.id === attachment.paperId)!;
+    const attachment = attachmentsByID.get(attachmentId)!;
+    const paper = papersByID.get(attachment.paperId)!;
     const id = recordID(preview.source_id, 'annotation', key);
-    if (!library.annotations.some(annotation => annotation.id === id)) {
+    if (!annotationIDs.has(id)) {
       let position: ObjectValue | undefined;
       if (text(data.annotationPosition)) { try { position = object(JSON.parse(text(data.annotationPosition))); } catch { throw new Error('Zotero 批注位置信息无效，未导入'); } }
       const color: Annotation['color'] = ({ '#ffd400': 'yellow', '#2ea8e5': 'blue', '#ff6666': 'red', '#5fb236': 'green' } as Record<string, Annotation['color']>)[text(data.annotationColor)] || 'yellow';
       library.annotations.push({ id, paperId: paper.id, attachmentId, quote: text(data.annotationText), comment: text(data.annotationComment), color, page: typeof position?.pageIndex === 'number' && position.pageIndex >= 0 ? position.pageIndex + 1 : undefined, createdAt: timestamp(data.dateAdded, now) });
-      counts.annotations++;
+      annotationIDs.add(id); counts.annotations++;
     }
-    paper.annotationIds = unique([...paper.annotationIds, id]);
+    paper.annotationIds = unique([...(paper.annotationIds || []), id]);
   });
   rawItems.forEach((data, key) => {
     const from = paperIDs.get(key); if (!from) return;
@@ -298,9 +340,9 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     for (const uri of Array.isArray(relation) ? relation : relation ? [relation] : []) {
       const to = paperIDs.get(text(uri).split('/items/')[1]); if (!to || to === from) continue;
       const id = recordID(preview.source_id, 'relation', `${from}:${to}`);
-      if (!library.relations.some(item => item.id === id)) library.relations.push({ id, fromPaperId: from, toPaperId: to, kind: 'related' });
-      const paper = library.papers.find(item => item.id === from)!;
-      paper.relatedPaperIds = unique([...paper.relatedPaperIds, to]);
+      if (!relationIDs.has(id)) { library.relations.push({ id, fromPaperId: from, toPaperId: to, kind: 'related' }); relationIDs.add(id); }
+      const paper = papersByID.get(from)!;
+      paper.relatedPaperIds = unique([...(paper.relatedPaperIds || []), to]);
     }
   });
   if (library.papers.length > 10000) throw new Error('导入后文献超过论文库 10000 篇上限，请分批整理');
@@ -327,8 +369,8 @@ export function matchLocalZoteroFile(candidate: Pick<ZoteroAttachmentCandidate, 
 }
 
 export function summarizeZoteroPreview(preview: ZoteroPreview) {
-  const plan = buildZoteroImport(preview, emptyLibraryV3());
+  const plan = buildZoteroImport(preview, emptyLibrary());
   const standaloneNotes = preview.items.filter(value => { const data = dataOf(value); return data.itemType === 'note' && !text(data.parentItem); }).length;
   const otherAttachments = preview.items.filter(value => { const data = dataOf(value); return data.itemType === 'attachment' && !pdfAttachment(data); }).length;
-  return { ...plan.counts, titles: plan.library.papers.slice(0, 4).map(paper => paper.title), warnings: [...preview.warnings, ...(standaloneNotes ? [`${standaloneNotes} 条独立笔记没有关联文献，本次不会导入。`] : []), ...(otherAttachments ? [`${otherAttachments} 个非 PDF 附件本次不会导入。`] : [])] };
+  return { ...plan.counts, titles: plan.library.papers.slice(0, 4).map(paper => paper.metadata.title), warnings: [...preview.warnings, ...(standaloneNotes ? [`${standaloneNotes} 条独立笔记没有关联文献，本次不会导入。`] : []), ...(otherAttachments ? [`${otherAttachments} 个非 PDF 附件本次不会导入。`] : [])] };
 }

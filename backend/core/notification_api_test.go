@@ -31,7 +31,16 @@ type notificationAPI struct {
 
 func newNotificationAPI(t *testing.T) *notificationAPI {
 	t.Helper()
-	db := orm.MigrateAllModelsForTest(t)
+	db := orm.MigrateTestDB(t,
+		&orm.TaskCenterTask{}, &orm.TaskNotification{}, &orm.UserNotificationPreferences{},
+		&orm.DesktopNotificationReceipt{}, &orm.UserSchedule{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{},
+		&orm.ScheduleDependency{}, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{},
+		&orm.AutomationGroup{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+		&orm.UserSelectedCloudModel{}, &orm.UserSelectedModel{},
+		&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{},
+		&orm.ConversationArtifact{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{}, &orm.ExternalChatRun{},
+	)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	router := mux.NewRouter()

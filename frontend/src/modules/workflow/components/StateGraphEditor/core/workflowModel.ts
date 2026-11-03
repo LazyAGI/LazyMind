@@ -218,6 +218,7 @@ export interface WorkflowRuntimePolicy {
     id: string;
     label?: string;
     question: string;
+    ask_when?: string;
     type?: 'text' | 'boolean' | 'single' | 'multiple';
     choices?: string[];
     choice_policy?: 'seed' | 'subset' | 'fixed';

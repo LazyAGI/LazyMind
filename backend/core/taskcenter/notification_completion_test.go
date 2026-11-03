@@ -10,12 +10,26 @@ import (
 	"lazymind/core/common/orm"
 )
 
+// Notifications traverse task completion, workflow/history recovery and scheduled
+// output collection. Keep those tables together; unrelated application tables
+// are covered by the migration suite rather than every notification scenario.
+func newNotificationTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	return orm.MigrateTestDB(t,
+		&orm.TaskCenterTask{}, &orm.TaskNotification{}, &orm.UserNotificationPreferences{},
+		&orm.DesktopNotificationReceipt{}, &orm.UserSchedule{}, &orm.TaskRunOutput{},
+		&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{},
+		&orm.ConversationArtifact{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{},
+	)
+}
+
 func TestOrdinaryTaskCompletionUsesOnlyDesktopAndCurrentGate(t *testing.T) {
 	for _, taskType := range []string{"workflow_run", "background_chat"} {
 		for _, event := range []string{"succeeded", "failed"} {
 			for _, gate := range []string{"on", "master off", "desktop off"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", taskType, event, gate), func(t *testing.T) {
-					db := orm.MigrateAllModelsForTest(t).DB
+					db := newNotificationTestDB(t).DB
 					defaults := DefaultNotificationConfig()
 					defaults.Events["succeeded"] = NotificationEventRule{Enabled: false, Content: "full"}
 					defaults.Events["failed"] = NotificationEventRule{Enabled: false, Content: "full"}
@@ -80,7 +94,7 @@ func TestOrdinaryTaskCompletionUsesOnlyDesktopAndCurrentGate(t *testing.T) {
 func TestOrdinaryTaskCompletionPreservesTerminalAndArchiveBoundaries(t *testing.T) {
 	for _, state := range []string{"canceled", "skipped", "succeeded", "failed", "archived", "waiting"} {
 		t.Run(state, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newNotificationTestDB(t).DB
 			sessionID := "session"
 			task := orm.TaskCenterTask{ID: "ordinary", UserID: "owner", TaskType: "workflow_run", WorkflowSessionID: &sessionID, Status: state}
 			if state == "archived" {
@@ -109,7 +123,7 @@ func TestOrdinaryTaskCompletionPreservesTerminalAndArchiveBoundaries(t *testing.
 }
 
 func TestUnresolvedScheduleDefaultCreatesSkippedNoticeWithoutDispatch(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	defaults := DefaultNotificationConfig()
 	defaults.Channels["wechat"] = NotificationChannelRule{Enabled: true}
 	raw, _ := json.Marshal(defaults)
@@ -145,7 +159,7 @@ func TestUnresolvedScheduleDefaultCreatesSkippedNoticeWithoutDispatch(t *testing
 func TestUnconfiguredScheduleCompletionUsesDesktopWithoutOutputOrExternalPolicy(t *testing.T) {
 	for _, event := range []string{"succeeded", "failed"} {
 		t.Run(event, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newNotificationTestDB(t).DB
 			defaults := DefaultNotificationConfig()
 			defaults.Channels["feishu"] = NotificationChannelRule{Enabled: true, AccountID: "account", RecipientID: "recipient"}
 			raw, _ := json.Marshal(defaults)
@@ -178,7 +192,7 @@ func TestUnconfiguredScheduleCompletionUsesDesktopWithoutOutputOrExternalPolicy(
 }
 
 func TestOrdinaryCompletionIdentityChangesAfterRetryButNotCallbackReplay(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	task := orm.TaskCenterTask{ID: "workflow", UserID: "owner", TaskType: "workflow_run", Status: "running"}
 	if err := CreateTask(t.Context(), db, &task); err != nil {
 		t.Fatal(err)
@@ -216,7 +230,7 @@ func TestOrdinaryCompletionIdentityChangesAfterRetryButNotCallbackReplay(t *test
 }
 
 func TestOrdinaryFailureReplayPreservesCompletionUntilExplicitRetry(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	task := orm.TaskCenterTask{ID: "workflow", UserID: "owner", TaskType: "workflow_run", Status: "running"}
 	if err := CreateTask(t.Context(), db, &task); err != nil {
 		t.Fatal(err)
@@ -254,7 +268,7 @@ func TestScheduledRetryHasNewOccurrenceButCallbackReplayDoesNot(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		for _, event := range []string{"succeeded", "failed"} {
 			t.Run(fmt.Sprintf("configured=%v/%s", configured, event), func(t *testing.T) {
-				db := orm.MigrateAllModelsForTest(t).DB
+				db := newNotificationTestDB(t).DB
 				scheduleID := "schedule"
 				task := orm.TaskCenterTask{ID: "scheduled", UserID: "owner", TaskType: "scheduled", ScheduleID: &scheduleID, Status: "running"}
 				if configured {

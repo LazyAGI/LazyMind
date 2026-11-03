@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -20,8 +21,12 @@ type listItem struct {
 	ID                     string              `json:"id"`
 	DefaultModelProviderID string              `json:"default_model_provider_id"`
 	Name                   string              `json:"name"`
+	LogoDataURL            string              `json:"logo_data_url,omitempty"`
+	BrandKey               string              `json:"brand_key,omitempty"`
+	ServiceKey             string              `json:"service_key,omitempty"`
 	IsCustom               bool                `json:"is_custom"`
 	ProtocolName           string              `json:"protocol_name"`
+	RuntimeIdentity        string              `json:"runtime_identity,omitempty"`
 	Description            string              `json:"description"`
 	BaseURL                string              `json:"base_url"`
 	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
@@ -147,6 +152,10 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
+		if row.Category == "translation" && !IsTranslationProviderAvailable(row.Name) {
+			continue
+		}
+		brandKey, serviceKey := ProviderServiceIdentity(row)
 		caps := splitCapabilities(row.Capabilities)
 		if hasSharedProviderEndpoint(row) {
 			caps = modelSupplierCapabilities(row.Capabilities)
@@ -155,6 +164,9 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			ID:                     row.ID,
 			DefaultModelProviderID: row.DefaultModelProviderID,
 			Name:                   row.Name,
+			LogoDataURL:            row.LogoDataURL,
+			BrandKey:               brandKey,
+			ServiceKey:             serviceKey,
 			IsCustom:               row.IsCustom,
 			ProtocolName:           RuntimeProviderName(row),
 			Description:            row.Description,
@@ -181,12 +193,13 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	}
 	type localizedDescriptionRow struct {
 		ID              string      `gorm:"column:id"`
+		Name            string      `gorm:"column:name"`
 		DescriptionI18n orm.RawJSON `gorm:"column:description_i18n"`
 	}
 	var descriptionRows []localizedDescriptionRow
 	if err := db.WithContext(ctx).
 		Model(&orm.DefaultModelProvider{}).
-		Select("id, description_i18n").
+		Select("id, name, description_i18n").
 		Where("id IN ? AND deleted_at IS NULL", defaultProviderIDs).
 		Find(&descriptionRows).Error; err == nil {
 		descriptionByID := make(map[string][]byte, len(descriptionRows))
@@ -194,6 +207,14 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			descriptionByID[row.ID] = []byte(row.DescriptionI18n)
 		}
 		for i := range out {
+			for _, template := range descriptionRows {
+				if template.ID == out[i].DefaultModelProviderID {
+					if normalized := normalizeProviderName(template.Name); normalized == "vllm" || normalized == "lmdeploy" {
+						out[i].RuntimeIdentity = template.Name
+					}
+					break
+				}
+			}
 			out[i].Description = selectLocalizedDescription(
 				descriptionByID[out[i].DefaultModelProviderID],
 				locale,
@@ -206,15 +227,19 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		Model(&orm.UserModelProviderGroup{}).
 		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
 		Find(&configuredRows).Error; err == nil {
-		defaultProviderIDByProviderID := make(map[string]string, len(out))
-		for i := range out {
-			defaultProviderIDByProviderID[out[i].ID] = out[i].DefaultModelProviderID
+		providerByID := make(map[string]orm.UserModelProvider, len(rows))
+		for _, row := range rows {
+			providerByID[row.ID] = row
 		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			row.APIKey, _ = apiKeyForGroup(db.WithContext(ctx), &row)
-			if strings.TrimSpace(row.APIKey) != "" ||
-				isCustomBaseURL(ctx, db, defaultProviderIDByProviderID[row.UserModelProviderID], row.BaseURL) {
+			parent := providerByID[row.UserModelProviderID]
+			apiKey, _ := apiKeyForGroup(db.WithContext(ctx), &row)
+			if strings.TrimSpace(apiKey) != "" ||
+				!providerAPIKeyRequiredForBaseURL(ctx, db, parent, row.BaseURL) ||
+				(parent.Category == "translation" &&
+					!isCustomBaseURL(ctx, db, parent.DefaultModelProviderID, row.BaseURL) &&
+					isSelectableProviderGroup(ctx, db, parent.DefaultModelProviderID, row.BaseURL, apiKey)) {
 				configuredProviderIDs[row.UserModelProviderID] = true
 			}
 		}
@@ -264,33 +289,52 @@ func selectLocalizedDescription(raw []byte, locale, fallback string) string {
 // user_model_providers for the given user (matched by default_model_provider_id).
 // It also syncs category and capabilities for already-existing rows.
 func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, userName string) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		err := syncUserProvidersFromDefaultsOnce(ctx, db, userID, userName)
+		if !errors.Is(err, errServiceSyncConflict) || attempt == 1 {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncUserProvidersFromDefaultsOnce(ctx context.Context, db *gorm.DB, userID, userName string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing []orm.UserModelProvider
 		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND is_custom = ?", userID, false).Find(&existing).Error; err != nil {
 			return err
 		}
-		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
-		for i := range existing {
-			existingByDefault[existing[i].DefaultModelProviderID] = &existing[i]
-		}
-
 		var defs []orm.DefaultModelProvider
 		if err := tx.Where("deleted_at IS NULL").Find(&defs).Error; err != nil {
 			return err
 		}
 
 		now := time.Now()
+		if err := rebindLegacyServiceProviders(tx, existing, defs, now); err != nil {
+			return err
+		}
+		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
+		for i := range existing {
+			existingByDefault[existing[i].DefaultModelProviderID] = &existing[i]
+		}
 		var toCreate []orm.UserModelProvider
 		for i := range defs {
 			d := defs[i]
 			if row, ok := existingByDefault[d.ID]; ok {
+				if d.Name == "vLLM" && row.Name == "VLLM" {
+					if err := tx.Model(row).Update("name", d.Name).Error; err != nil {
+						return err
+					}
+				}
 				// Sync category / capabilities from defaults if changed.
 				if row.Category != d.Category || row.Capabilities != d.Capabilities {
-					_ = tx.Model(row).Updates(map[string]interface{}{
+					if err := tx.Model(row).Updates(map[string]interface{}{
 						"category":     d.Category,
 						"capabilities": d.Capabilities,
 						"updated_at":   now,
-					})
+					}).Error; err != nil {
+						return err
+					}
 				}
 			} else {
 				toCreate = append(toCreate, orm.UserModelProvider{
@@ -334,7 +378,7 @@ func splitCapabilities(caps string) []string {
 }
 
 func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
-	if normalizeProviderName(RuntimeProviderName(row)) == "openai" {
+	if normalizeProviderName(RuntimeProviderName(row)) == "openai" && (row.IsCustom || normalizeProviderName(row.Name) == "openai") {
 		required := true
 		return []baseURLPresetItem{
 			{Key: "official", Value: row.BaseURL, Label: "OpenAI", APIKeyRequired: &required},

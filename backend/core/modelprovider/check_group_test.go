@@ -155,7 +155,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			requestBody:   `{"provider_name":"Qwen","base_url":"https://models.example.com/v1","dry_run":false}`,
 			wantStatus:    http.StatusOK,
 			wantSource:    "qwen",
-			wantURL:       "https://models.example.com/v1",
+			wantURL:       "https://models.example.com/v1/",
 			wantAPIKey:    "stored-key",
 		},
 		{
@@ -183,7 +183,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 			wantStatus:    http.StatusOK,
 			wantAPIKey:    "proxy-request-key",
 			wantSource:    "qwen",
-			wantURL:       "http://12.34.56.78:8000/v1",
+			wantURL:       "http://12.34.56.78:8000/v1/",
 		},
 		{
 			name:          "request provider fragment is replaced by canonical parent",
@@ -353,7 +353,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 	}
 }
 
-func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
+func TestCreateAndUpdateSupplierCredentialsSaveBeforeIndependentVerification(t *testing.T) {
 	t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "create-group-test-key")
 
 	db, err := gorm.Open(sqlite.Open("file:create_group_verify?mode=memory&cache=shared"), &gorm.Config{})
@@ -432,8 +432,8 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
 	}
-	if received.APIKey != "submitted-key" {
-		t.Fatalf("upstream api key = %q, want submitted key", received.APIKey)
+	if received.APIKey != "" {
+		t.Fatal("saving a key must not contact verification")
 	}
 	var createResponse struct {
 		Data struct {
@@ -443,15 +443,15 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&createResponse); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if createResponse.Data.IsVerified == nil || !*createResponse.Data.IsVerified {
-		t.Fatalf("expected create response is_verified=true, got %v", createResponse.Data.IsVerified)
+	if createResponse.Data.IsVerified == nil || *createResponse.Data.IsVerified {
+		t.Fatalf("saving must not mark verified, got %v", createResponse.Data.IsVerified)
 	}
 	var group orm.UserModelProviderGroup
 	if err := db.Where("user_model_provider_id = ?", userProvider.ID).Take(&group).Error; err != nil {
 		t.Fatalf("load created group: %v", err)
 	}
-	if !group.IsVerified {
-		t.Fatal("expected created group to be marked verified")
+	if group.IsVerified {
+		t.Fatal("saving must not mark verified")
 	}
 
 	updateReq := httptest.NewRequest(
@@ -471,8 +471,8 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("expected update status %d, got %d: %s", http.StatusOK, updateRec.Code, updateRec.Body.String())
 	}
-	if received.APIKey != "updated-key" {
-		t.Fatalf("updated upstream api key = %q, want updated key", received.APIKey)
+	if received.APIKey != "" {
+		t.Fatal("updating a key must not contact verification")
 	}
 	var updateResponse struct {
 		Data struct {
@@ -483,8 +483,8 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 	if err := json.NewDecoder(updateRec.Body).Decode(&updateResponse); err != nil {
 		t.Fatalf("decode update response: %v", err)
 	}
-	if updateResponse.Data.Check == nil || !updateResponse.Data.Check.Success {
-		t.Fatalf("expected successful verification data, got %+v", updateResponse.Data.Check)
+	if updateResponse.Data.Check != nil {
+		t.Fatalf("save response must not claim a check ran, got %+v", updateResponse.Data.Check)
 	}
 	if updateResponse.Data.IsVerified == nil || *updateResponse.Data.IsVerified {
 		t.Fatal("replacing the enabled key must leave its successor inactive")
@@ -506,15 +506,15 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 
 	CreateGroup(failedRec, failedReq)
 
-	if failedRec.Code != http.StatusBadGateway {
-		t.Fatalf("expected status %d, got %d: %s", http.StatusBadGateway, failedRec.Code, failedRec.Body.String())
+	if failedRec.Code != http.StatusOK {
+		t.Fatalf("configuration must save before verification: %d %s", failedRec.Code, failedRec.Body.String())
 	}
 	var count int64
-	if err := db.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ?", userProvider.ID).Count(&count).Error; err != nil {
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ?", rejectedProvider.ID).Count(&count).Error; err != nil {
 		t.Fatalf("count created groups: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("expected failed verification to create no group, got %d groups", count)
+		t.Fatalf("configuration was not persisted independently: %d groups", count)
 	}
 }
 
@@ -690,8 +690,16 @@ func TestCustomBaseURLWithoutKeyVerificationStateTransitions(t *testing.T) {
 	verifyResponse := updateGroup(
 		`{"name":"Renamed Local OpenAI","base_url":"http://host.docker.internal:24/v1/","verify":true}`,
 	)
-	if !*verifyResponse.Data.IsVerified {
-		t.Fatal("expected successful keyless custom endpoint check to mark group verified")
+	if *verifyResponse.Data.IsVerified || checkCalls != 0 {
+		t.Fatal("legacy verify on save must not run a supplier check")
+	}
+	checkReq := httptest.NewRequest(http.MethodPost, "/check", strings.NewReader(`{}`))
+	checkReq.Header.Set("X-User-Id", "user-1")
+	checkReq = mux.SetURLVars(checkReq, map[string]string{"model_provider_id": userProvider.ID, "group_id": createResponse.Data.ID})
+	checkRec := httptest.NewRecorder()
+	CheckGroup(checkRec, checkReq)
+	if checkRec.Code != http.StatusOK {
+		t.Fatal(checkRec.Body.String())
 	}
 	if checkCalls != 1 {
 		t.Fatalf("explicit verification calls = %d, want 1", checkCalls)

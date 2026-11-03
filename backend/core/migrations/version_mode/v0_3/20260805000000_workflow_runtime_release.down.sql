@@ -1,6 +1,13 @@
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE skill_market_items DROP COLUMN display_i18n;
 
+ALTER TABLE user_model_provider_group_models DROP COLUMN enabled;
+ALTER TABLE user_model_provider_group_models DROP COLUMN model_settings;
+ALTER TABLE default_models DROP COLUMN model_settings;
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers DROP COLUMN logo_data_url;
+ALTER TABLE user_model_providers DROP COLUMN request_config;
+
 -- Restore only migration-owned associations. New custom suppliers remain as
 -- independent legacy providers; their technical name is restored for old code,
 -- with their display name retained on the private credential/model store.
@@ -115,6 +122,14 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
     next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
 DROP TABLE model_provider_endpoint_backups;
 
+-- +migrate Dialect *
+DROP TABLE IF EXISTS academic_paper_contents;
+DROP TABLE IF EXISTS academic_handoffs;
+DROP TABLE IF EXISTS academic_expansion_rounds;
+DROP TABLE IF EXISTS academic_expansions;
+DROP TABLE IF EXISTS academic_user_paper_states;
+DROP TABLE IF EXISTS academic_document_states;
+
 DROP TABLE IF EXISTS document_folder_nodes;
 DROP TABLE IF EXISTS document_folder_inventories;
 
@@ -123,7 +138,33 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS paper_library_legacy_states;
 DROP TABLE IF EXISTS paper_libraries;
+DROP TABLE IF EXISTS paper_library_attachments;
+DROP TABLE IF EXISTS paper_library_notes;
+DROP TABLE IF EXISTS paper_library_entries;
+DROP TABLE IF EXISTS paper_library_folders;
+DROP TABLE rejected_document_publications;
+DROP TABLE document_ownership_backfills;
+
+-- +migrate Dialect postgres
+DROP TRIGGER knowledge_dataset_membership_version ON documents;
+DROP TRIGGER knowledge_document_version ON documents;
+DROP FUNCTION knowledge_dataset_membership_version();
+DROP FUNCTION knowledge_document_version();
+-- +migrate Dialect sqlite
+DROP TRIGGER knowledge_dataset_membership_update;
+DROP TRIGGER knowledge_dataset_membership_delete;
+DROP TRIGGER knowledge_dataset_membership_insert;
+DROP TRIGGER knowledge_document_version;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE resource_operation_receipts;
+ALTER TABLE documents DROP COLUMN resource_version;
+ALTER TABLE datasets DROP COLUMN resource_version;
+ALTER TABLE datasets DROP COLUMN scene;
+
+-- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;
 DROP INDEX IF EXISTS idx_user_env_user_name_active;
@@ -204,6 +245,8 @@ DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 -- These columns are introduced by the current mainline release and must be
 -- removed when rolling the aggregate back to the previous release.
 -- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_provider_group_models DROP COLUMN max_output_tokens;
+ALTER TABLE user_model_provider_group_models DROP COLUMN input_token_limit;
 ALTER TABLE user_model_provider_group_models DROP COLUMN vision;
 ALTER TABLE default_models DROP COLUMN vision;
 
@@ -285,6 +328,7 @@ ALTER TABLE conversations
     DROP COLUMN IF EXISTS thinking_depth,
     DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS workflow_trust_notice_dismissed,
     DROP COLUMN IF EXISTS performance_stats_enabled,
     DROP COLUMN IF EXISTS sensitive_word_filter_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
@@ -473,6 +517,7 @@ DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN thinking_depth;
 ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN workflow_trust_notice_dismissed;
 ALTER TABLE user_ui_preferences DROP COLUMN performance_stats_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN sensitive_word_filter_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;

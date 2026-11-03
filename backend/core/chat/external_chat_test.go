@@ -27,15 +27,23 @@ import (
 
 func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *gorm.DB) {
 	t.Helper()
-	database := newPromptTestDB(t)
+	database := orm.MigrateTestDB(t,
+		&orm.AgentInvocation{}, &orm.ChatHistory{}, &orm.Conversation{},
+		&orm.ConversationArtifact{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{},
+		&orm.ConversationOpening{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{},
+		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.ExternalChatHost{},
+		&orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.MCPServer{},
+		&orm.MultiAnswersChatHistory{}, &orm.SkillV2Skill{}, &orm.SubAgentTask{},
+		&orm.TaskAttemptTiming{}, &orm.TaskCenterTask{}, &orm.TaskExecutionTiming{},
+		&orm.TaskNotification{}, &orm.UserChatSettings{}, &orm.UserDisabledTool{},
+		&orm.UserEnvironmentVariable{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{},
+		&orm.UserModelProviderGroupModel{}, &orm.UserNotificationPreferences{}, &orm.UserPersonalizationSetting{},
+		&orm.UserSelectedCloudModel{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{},
+		&orm.UserUIPreferences{}, &orm.UserWorkflowSetting{}, &orm.WorkflowHumanArtifact{},
+		&orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowSession{},
+		&orm.WorkflowSlotRevision{},
+	)
 	db := database.DB
-	if err := db.AutoMigrate(
-		&orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.TaskCenterTask{},
-		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{}, &orm.AgentInvocation{},
-		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.ConversationArtifact{},
-	); err != nil {
-		t.Fatalf("migrate External Chat test store: %v", err)
-	}
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{
 		ID:        "conversation-1",

@@ -56,12 +56,12 @@ vi.mock("../api", () => ({
 }));
 
 const selectedLlm = {
-  model_key: "llm", model_id: "model", name: "Demo model", provider_name: "Demo",
+  model_key: "llm", model_id: "model", name: "Demo model", provider_name: "SiliconFlow",
   user_model_provider_id: "provider", user_model_provider_group_id: "group",
   group_name: "Demo group", availability: "available", max_input_tokens: "128K", share: true,
 };
 const availableModel = {
-  id: "model", name: "Demo model", model_type: "llm", provider_name: "Demo",
+  id: "model", name: "Demo model", model_type: "llm", provider_name: "SiliconFlow",
   user_model_provider_id: "provider", user_model_provider_group_id: "group", group_name: "Demo group",
 };
 const selectedParsing = {
@@ -86,7 +86,7 @@ function renderPanel(
 }
 
 const basic = () => screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
-const categoryNames = ["visual", "voice", "retrieval", "evolution"] as const;
+const categoryNames = ["visual", "retrieval", "voice", "evolution"] as const;
 type CategoryName = typeof categoryNames[number];
 const categoryButton = (category: CategoryName) => screen.getByRole("button", {
   name: new RegExp(`modelProvider.defaults.${category}Title`),
@@ -127,7 +127,7 @@ describe("default capability configuration groups", () => {
     mocks.role = "system-admin";
     mocks.imageEmbedEnabled = true;
     mocks.cloudAvailable = false;
-    mocks.providers.mockResolvedValue({ data: { providers: [{ id: "provider", name: "Demo" }] } });
+    mocks.providers.mockResolvedValue({ data: { providers: [{ id: "provider", name: "Demo", protocol_name: "SiliconFlow", is_custom: true }] } });
     mocks.selections.mockResolvedValue({ data: { selections: [selectedLlm] } });
     mocks.services.mockResolvedValue({ data: { selections: [selectedParsing] } });
     mocks.models.mockResolvedValue({ data: { models: [availableModel] } });
@@ -139,19 +139,119 @@ describe("default capability configuration groups", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it("shows two basic selectors on entry and keeps optional categories collapsed", async () => {
+  it("shows the four tool services in the requested order and opens their configuration", async () => {
+    const configureTool = vi.fn();
+    render(<DefaultModelConfigPanel
+      cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "ready" }}
+      modelProviderSetupState="ready"
+      onConfigureCloudService={mocks.configureService}
+      onConfigureToolService={configureTool}
+      toolServiceSummaries={{ translation: "Google Translate Web" }}
+      onConfigureProviders={mocks.configureProviders}
+      onModelSelectionChanged={mocks.changed}
+      onRetrySetup={vi.fn()}
+    />);
+    const retrieval = await screen.findByRole("region", { name: "modelProvider.defaults.retrievalTitle" });
+    const rows = within(retrieval).getAllByRole("group");
+    expect(rows.slice(0, 4).map((row) => row.getAttribute("aria-label")))
+      .toEqual(["搜索引擎", "学术搜索引擎", "文档解析（OCR）", "机器翻译"]);
+    for (const [index, category] of ["search", "academic", "parsing", "translation"].entries()) {
+      fireEvent.click(within(rows[index]).getByRole("button", { name: "modelProvider.configureCapability" }));
+      expect(configureTool).toHaveBeenLastCalledWith(category);
+    }
+    expect(within(rows[3]).getByText("Google Translate Web")).toBeInTheDocument();
+  });
+
+  it("keeps context length inside the selected model control, without a metadata line", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [{ ...selectedLlm, max_input_tokens: "1000000" }] } });
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
-    await waitFor(() => expect(screen.getAllByRole("combobox")).toHaveLength(2));
+    const row = group("modelProvider.module.llmChatTitle");
+    const badge = await within(row).findByText("1M");
+    expect(badge.closest(".ant-select")).not.toBeNull();
+    expect(row.querySelector(".model-provider-default-meta")).not.toHaveTextContent("1M");
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("opens configuration for an already configured external service", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const row = group("modelProvider.module.cloudParsingServiceTitle");
+    await within(row).findByRole("combobox");
+    fireEvent.click(within(row).getByRole("button", { name: "modelProvider.configureCapability" }));
+    expect(mocks.configureService).toHaveBeenCalledWith("cloudParsing");
+  });
+
+  it("groups models by supplier, supports collapsing, and keeps the selected label", async () => {
+    mocks.providers.mockResolvedValue({ data: { providers: [
+      { id: "provider", name: "Demo", protocol_name: "SiliconFlow", is_custom: true },
+      { id: "other", name: "Other", protocol_name: "SiliconFlow", is_custom: true },
+    ] } });
+    mocks.models.mockResolvedValue({ data: { models: [
+      { ...availableModel, is_default: true },
+      { ...availableModel, id: "other-model", name: "Other model", user_model_provider_id: "other", user_model_provider_group_id: "other-group" },
+    ] } });
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    fireEvent.mouseDown(select);
+    const supplier = await screen.findByRole("button", { name: /^Demo\s*1$/ });
+    expect(supplier).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByText("modelProvider.builtInModelSuffix")).not.toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.customModelSuffix")).not.toBeInTheDocument();
+    fireEvent.click(supplier);
+    expect(supplier).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Demo model", { selector: "strong" })).not.toBeInTheDocument();
+    expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · Demo")).toBeInTheDocument();
+    expect(screen.getByText("Other model", { selector: "strong" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Other model", { selector: "strong" }));
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalled());
+    expect(mocks.saveModel.mock.calls[0][0].setSelectedModelsOpenAPIRequest.selections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ model_key: "llm", model_id: "other-model" }),
+    ]));
+  });
+
+  it("reveals collapsed supplier models when searching", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    fireEvent.mouseDown(select);
+    fireEvent.click(await screen.findByRole("button", { name: /^Demo\s*1$/ }));
+    expect(screen.queryByText("Demo model", { selector: "strong" })).not.toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "Demo model" } });
+    expect(await screen.findByText("Demo model", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Demo\s*1$/ })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows two basic selectors and expands every available category on entry", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    await waitFor(() => expect(screen.getAllByRole("combobox")).toHaveLength(11));
     const basic = screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
     expect(within(basic).getAllByRole("group")).toHaveLength(2);
     expect(within(basic).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toBeInTheDocument();
     expect(within(basic).getByRole("group", { name: "modelProvider.module.embeddingTitle" })).toBeInTheDocument();
-    for (const category of ["visual", "voice", "retrieval", "evolution"]) {
-      expect(screen.getByRole("button", { name: new RegExp(`modelProvider.defaults.${category}Title`) })).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByRole("region", { name: `modelProvider.defaults.${category}Title` })).not.toBeInTheDocument();
+    const headings = [...document.querySelectorAll(".model-defaults-group-heading")].map((heading) => heading.textContent);
+    expect(headings).toEqual([
+      expect.stringContaining("modelProvider.defaults.visualTitle"),
+      expect.stringContaining("modelProvider.defaults.retrievalTitle"),
+      expect.stringContaining("modelProvider.defaults.voiceTitle"),
+      expect.stringContaining("modelProvider.defaults.evolutionTitle"),
+    ]);
+    for (const category of ["visual", "retrieval", "voice", "evolution"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`modelProvider.defaults.${category}Title`) })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("region", { name: `modelProvider.defaults.${category}Title` })).toBeInTheDocument();
     }
-    expect(screen.queryByRole("group", { name: "modelProvider.module.ttsTitle" })).not.toBeInTheDocument();
+    const retrievalRows = screen
+      .getByRole("region", { name: "modelProvider.defaults.retrievalTitle" })
+      .querySelectorAll(".model-provider-default-row");
+    expect([...retrievalRows].map((row) => row.getAttribute("aria-label"))).toEqual([
+      "modelProvider.module.searchEngineServiceTitle",
+      "modelProvider.module.cloudParsingServiceTitle",
+      "modelProvider.module.rerankTitle",
+      "modelProvider.module.multimodalEmbeddingTitle",
+    ]);
+    expect(screen.getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
   });
 
   it("shows custom supplier identity without its private storage group", async () => {
@@ -165,8 +265,21 @@ describe("default capability configuration groups", () => {
     expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · My gateway").closest(".ant-select-selection-item")?.querySelector("img")).toHaveAttribute("src", "/provider-icons/custom.svg");
     fireEvent.mouseDown(select);
     await waitFor(()=>expect(document.querySelector(".model-provider-select-option small")).toHaveTextContent("My gateway"));
+    expect(document.querySelector(".model-provider-select-option")).toHaveClass("is-child");
     expect(screen.queryByText(/Legacy connection/)).not.toBeInTheDocument();
     expect(screen.queryByText("My gateway / My gateway")).not.toBeInTheDocument();
+  });
+
+  it("inherits an uploaded custom supplier logo without per-model artwork", async () => {
+    const logo = "data:image/png;base64,supplier-logo";
+    mocks.providers.mockResolvedValue({data:{providers:[{id:"provider",name:"My gateway",protocol_name:"OpenAI",is_custom:true,logo_data_url:logo}]}});
+    renderPanel();
+    await screen.findByRole("region", {name:"modelProvider.defaults.basicTitle"});
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    const selected = await screen.findByText("Demo model · My gateway");
+    expect(selected.closest(".ant-select-selection-item")?.querySelector("img")).toHaveAttribute("src", logo);
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(document.querySelector(".model-provider-select-option img")).toHaveAttribute("src", logo));
   });
 
   it("uses the canonical supplier identity for a shared model outside the personal catalog", async () => {
@@ -181,18 +294,41 @@ describe("default capability configuration groups", () => {
     expect(screen.queryByText("Demo model · OpenAI")).not.toBeInTheDocument();
   });
 
-  it("reveals optional models only for the selected category and supports collapsing it", async () => {
+  it("keeps every category visible by default and supports collapsing one category", async () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const voice = expandCategory("voice");
     expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
     expect(within(voice).getAllByRole("group")).toHaveLength(2);
     expect(within(voice).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "modelProvider.module.textToImageTitle" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "modelProvider.module.textToImageTitle" })).toBeInTheDocument();
     fireEvent.click(categoryButton("voice"));
     expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("region", { name: "modelProvider.defaults.voiceTitle" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("group")).toHaveLength(2);
+    expect(screen.getByRole("group", { name: "modelProvider.module.textToImageTitle" })).toBeInTheDocument();
+  });
+
+  it("reopens a manually collapsed group when a new highlight targets it", async () => {
+    const { rerender } = renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    fireEvent.click(categoryButton("voice"));
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<DefaultModelConfigPanel
+      cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "empty" }}
+      modelProviderSetupState="ready"
+      onConfigureCloudService={mocks.configureService}
+      onConfigureProviders={mocks.configureProviders}
+      onModelSelectionChanged={mocks.changed}
+      onRetrySetup={vi.fn()}
+      highlightTarget="tts"
+    />);
+
+    const voice = await screen.findByRole("region", { name: "modelProvider.defaults.voiceTitle" });
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
+    const target = within(voice).getByRole("group", { name: "modelProvider.module.ttsTitle" });
+    expect(target).toHaveClass("is-config-highlighted");
+    await waitFor(() => expect(target).toHaveFocus());
   });
 
   it("automatically reveals and focuses a deep-linked capability in a collapsed category", async () => {
@@ -201,10 +337,10 @@ describe("default capability configuration groups", () => {
     const visual = await screen.findByRole("region", { name: "modelProvider.defaults.visualTitle" });
     const target = within(visual).getByRole("group", { name: "modelProvider.module.textToImageTitle" });
     expect(categoryButton("visual")).toHaveAttribute("aria-expanded", "true");
-    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
     expect(target).toHaveClass("is-config-highlighted");
     await waitFor(() => expect(target).toHaveFocus());
-    expect(target.scrollIntoView).toHaveBeenCalled();
+    expect(target.scrollIntoView).not.toHaveBeenCalled();
     expect(resolved).not.toHaveBeenCalled();
   });
 

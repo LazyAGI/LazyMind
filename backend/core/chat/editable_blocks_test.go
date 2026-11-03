@@ -22,7 +22,7 @@ func TestReplaceEditableBlockOnlyChangesMatchingFence(t *testing.T) {
 }
 
 func TestPatchEditableBlockPersistsAndRejectsStaleContent(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
 	store.Init(database.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now()

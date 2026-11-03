@@ -163,6 +163,39 @@ func resolveRunTerminal(
 // ValidateWorkspaceRun uses the pre-dispatch run registration; a ChatHistory
 // row need not exist yet. A cancellation/terminal decision always fences it.
 func ValidateWorkspaceRun(ctx context.Context, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
+	ext, err := ValidateActiveRun(ctx, stateStore, req)
+	if err != nil {
+		return nil, err
+	}
+	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
+	snapshot := localworkspace.SnapshotFromMetadata(ext["workspace_context"])
+	if snapshot == nil {
+		return nil, invalid
+	}
+	if snapshot.WorkspaceID != req.WorkspaceID {
+		return nil, invalid
+	}
+	return snapshot, nil
+}
+
+// Serialize state-backed run transitions with file commits using the existing
+// conversation row. No expiring mutex can release a writer that is still live.
+func withChatRunUpdate(ctx context.Context, conversationID string, update func() error) error {
+	db := store.DB()
+	if db == nil {
+		return update()
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.Conversation{}).Where("id = ?", conversationID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		return update()
+	})
+}
+
+// ValidateActiveRun returns trusted frozen run input after live cancellation checks.
+func ValidateActiveRun(ctx context.Context, stateStore state.Store, req localworkspace.OperationRequest) (map[string]any, error) {
 	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
 	if stateStore == nil || req.RunID == "" || req.HistoryID == "" || req.TaskID != "" || req.Generation != "" {
 		return nil, invalid
@@ -195,34 +228,12 @@ func ValidateWorkspaceRun(ctx context.Context, stateStore state.Store, req local
 		return nil, err
 	}
 	if len(input.Ext) == 0 {
-		return nil, invalid
+		return map[string]any{}, nil
 	}
 	ext := map[string]any{}
 	if err := json.Unmarshal(input.Ext, &ext); err != nil {
 		return nil, err
 	}
-	snapshot := localworkspace.SnapshotFromMetadata(ext["workspace_context"])
-	if snapshot == nil {
-		return nil, invalid
-	}
-	if snapshot.WorkspaceID != req.WorkspaceID {
-		return nil, invalid
-	}
-	return snapshot, nil
-}
 
-// Serialize state-backed run transitions with file commits using the existing
-// conversation row. No expiring mutex can release a writer that is still live.
-func withChatRunUpdate(ctx context.Context, conversationID string, update func() error) error {
-	db := store.DB()
-	if db == nil {
-		return update()
-	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.Conversation{}).Where("id = ?", conversationID).
-			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
-			return err
-		}
-		return update()
-	})
+	return ext, nil
 }

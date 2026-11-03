@@ -8,6 +8,7 @@ import {
 } from "@ant-design/icons";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
+import { runStatusTitleKey } from "@/modules/chat/components/RunStatusCard";
 import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { formatThinkingForDisplay, summarizeSearchToolsFromText } from "@/modules/chat/utils/thinking";
@@ -15,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import ChatImages from "../../ChatImages";
 import ChatFiles from "../../ChatFiles";
 import { getCiteMessages } from "../utils/citeMessage";
+import MessageArtifactLinks from '../../ArtifactPreview/MessageArtifactLinks';
 
 const ThinkIcon = new URL("../../../assets/images/think.png", import.meta.url)
   .href;
@@ -83,10 +85,24 @@ export default function ChatMessageContent({
   const thinkingKey = uniqueKey || item.history_id || item.id || "default";
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
+  const runStatus = item.run_terminal?.status || item.run_status;
+  const isTerminalStatus =
+    runStatus === "completed" ||
+    runStatus === "failed" ||
+    runStatus === "interrupted" ||
+    runStatus === "cancelled";
   const isStreaming =
-    !item.run_status &&
+    !isTerminalStatus &&
     item.finish_reason !==
       ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+  const thinkingTitleKey =
+    isTerminalStatus && runStatus !== "completed"
+      ? item.run_terminal
+        ? runStatusTitleKey(item.run_terminal)
+        : `chat.runStatus.${runStatus}`
+      : item.delta || !isStreaming
+        ? "chat.thinkingDone"
+        : "chat.thinking";
   const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
   const searchSummary = summarizeSearchToolsFromText(
     item.raw_delta || item.reasoning_content,
@@ -116,6 +132,7 @@ export default function ChatMessageContent({
 
   const renderMarkdown = (text: string) => (
     <MarkdownViewer
+      previewArtifacts
       sources={sources}
       IS_STREAMING={isStreaming}
       conversationId={item.fork_read_only ? undefined : conversationId}
@@ -171,7 +188,7 @@ export default function ChatMessageContent({
           >
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">
-              {item.delta ? t("chat.thinkingDone") : t("chat.thinking")}
+              {t(thinkingTitleKey)}
               {searchSummary ? ` · ${searchSummary}` : ""}
               {thinkingDuration ? ` (${thinkingDuration})` : ""}
             </span>
@@ -194,6 +211,9 @@ export default function ChatMessageContent({
       <div className="chat-text">
         {renderMarkdown(item.display_delta || item.delta)}
       </div>
+      {item.role !== RoleTypes.USER && !isStreaming && !item.fork_read_only && conversationId && (item.history_id || item.id) &&
+        <MessageArtifactLinks conversationId={conversationId} historyId={item.history_id || item.id}
+          content={item.delta || ''} exports={item.exports} sources={item.sources} />}
     </Flex>
   );
 }

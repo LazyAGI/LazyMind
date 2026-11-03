@@ -58,7 +58,7 @@ def _resolve_runtime_annotations(value: Any) -> None:
     if not annotations or not any(isinstance(item, str) for item in annotations.values()):
         return
     try:
-        target.__annotations__ = get_type_hints(value)
+        target.__annotations__ = get_type_hints(value, include_extras=True)
     except (NameError, TypeError):
         # Third-party callables can have intentionally unresolved annotations.
         # Leave those untouched; only LazyMind-owned tools are expected to resolve.

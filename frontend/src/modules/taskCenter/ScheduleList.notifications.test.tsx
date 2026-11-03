@@ -5,8 +5,8 @@ import ScheduleList from './ScheduleList';
 const mocks = vi.hoisted(() => ({
   listSchedules: vi.fn(), listScheduleTasks: vi.fn(), getPreferences: vi.fn(), getScheduleNotifications: vi.fn(),
 }));
-vi.mock('react-i18next', async original => ({
-  ...await original<typeof import('react-i18next')>(),
+vi.mock('react-i18next', async importOriginal => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));

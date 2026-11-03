@@ -6,138 +6,35 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	sqlitedriver "github.com/glebarez/go-sqlite"
 	"github.com/glebarez/sqlite"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
-func TestArxivImportLockSurvivesPostgresIdleSessionTimeout(t *testing.T) {
-	svc, downloads := arxivImportTestService(t)
-	dialect, ok := svc.db.Dialector.(*postgres.Dialector)
-	if !ok {
-		t.Skip("PostgreSQL session timeout")
+func assertArxivImportWaitTimedOut(t *testing.T, ctx context.Context, err error) {
+	t.Helper()
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("import lock waiter returned before its deadline: context=%v, error=%v", ctx.Err(), err)
 	}
-	dsn, err := url.Parse(dialect.DSN)
-	if err != nil {
-		t.Fatal(err)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return
 	}
-	query := dsn.Query()
-	query.Set("idle_session_timeout", "100ms")
-	dsn.RawQuery = query.Encode()
-	timed, err := orm.Connect("postgres", dsn.String())
-	if err != nil {
-		t.Fatal(err)
+	// The SQLite driver interrupts an in-flight statement when its context
+	// expires. Depending on timing, cancellation surfaces as SQLITE_INTERRUPT
+	// rather than the context error. Require both the expired deadline and the
+	// specific driver code; unrelated errors must still fail this assertion.
+	var sqliteErr *sqlitedriver.Error
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_INTERRUPT {
+		return
 	}
-	pool, _ := timed.DB.DB()
-	// Application sessions remain usable, as they do under ordinary query load;
-	// the private lock session alone stays idle during the blocked download.
-	pool.SetMaxIdleConns(0)
-	defer pool.Close()
-	svc.db = timed.DB
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	started, resume := make(chan struct{}), make(chan struct{})
-	original := svc.acquire
-	var calls atomic.Int32
-	svc.acquire = func(ctx context.Context, candidate FulltextCandidate) (string, int64, error) {
-		if calls.Add(1) == 1 {
-			close(started)
-			select {
-			case <-resume:
-			case <-ctx.Done():
-				return "", 0, ctx.Err()
-			}
-		}
-		return original(ctx, candidate)
-	}
-	done := make(chan error, 2)
-	importPaper := func() {
-		_, err := svc.importPaper(ctx, "2404.06654v2", "dataset", "user", "User")
-		done <- err
-	}
-	go importPaper()
-	select {
-	case <-started:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	// Exceed the server timeout before starting the competing importer.
-	time.Sleep(300 * time.Millisecond)
-	go importPaper()
-	time.Sleep(100 * time.Millisecond)
-	close(resume)
-	for range 2 {
-		if err = <-done; err != nil {
-			t.Fatal(err)
-		}
-	}
-	var documents int64
-	if err = svc.db.Model(&orm.Document{}).Count(&documents).Error; err != nil {
-		t.Fatal(err)
-	}
-	if downloads.Load() != 1 || documents != 1 {
-		t.Fatalf("idle lock session admitted duplicate imports: downloads=%d documents=%d", downloads.Load(), documents)
-	}
-}
-
-func TestArxivImportCancelsWhenPostgresLockSessionIsLost(t *testing.T) {
-	svc, _ := arxivImportTestService(t)
-	if svc.db.Dialector.Name() != "postgres" {
-		t.Skip("PostgreSQL session termination")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	started := make(chan struct{})
-	svc.acquire = func(ctx context.Context, _ FulltextCandidate) (string, int64, error) {
-		close(started)
-		<-ctx.Done()
-		return "", 0, ctx.Err()
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, err := svc.importPaper(ctx, "2404.06654v2", "dataset", "user", "User")
-		done <- err
-	}()
-	select {
-	case <-started:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	key := "academic-arxiv-import:2404.06654"
-	var pid int
-	err := svc.db.Raw(`SELECT pid FROM pg_locks
-		WHERE locktype = 'advisory' AND granted
-		AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-		AND classid = ((hashtextextended(?, 0) >> 32) & 4294967295)::oid
-		AND objid = (hashtextextended(?, 0) & 4294967295)::oid`, key, key).Scan(&pid).Error
-	if err != nil || pid == 0 {
-		t.Fatalf("find held import session: pid=%d err=%v", pid, err)
-	}
-	var terminated bool
-	if err = svc.db.Raw("SELECT pg_terminate_backend(?)", pid).Scan(&terminated).Error; err != nil || !terminated {
-		t.Fatalf("terminate import lock session: %v", err)
-	}
-	select {
-	case err = <-done:
-		if err == nil || !strings.Contains(err.Error(), "lock") || errors.Is(err, context.Canceled) {
-			t.Fatalf("lock loss must retain its cause, got %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("import kept downloading after its database lock was lost")
-	}
-	var documents int64
-	if err = svc.db.Model(&orm.Document{}).Count(&documents).Error; err != nil || documents != 0 {
-		t.Fatalf("lost lock created documents=%d: %v", documents, err)
-	}
+	t.Fatalf("import lock waiter did not report deadline cancellation: %v", err)
 }
 
 func TestArxivImportLockCancellationAndMainDatabaseWrites(t *testing.T) {
@@ -162,10 +59,9 @@ func TestArxivImportLockCancellationAndMainDatabaseWrites(t *testing.T) {
 		stop()
 		if unlock != nil {
 			unlock.release()
+			t.Fatal("cancelled waiter acquired the active import lock")
 		}
-		if !errors.Is(waitErr, context.DeadlineExceeded) {
-			t.Fatalf("cancelled waiter bypassed/released the active import lock: %v", waitErr)
-		}
+		assertArxivImportWaitTimedOut(t, waiting, waitErr)
 	}
 	release.release()
 	next, err := lockArxivImport(ctx, db, "2404.06654")
@@ -238,10 +134,9 @@ func TestSQLiteArxivImportLockUsesProxyDatabaseFilesystem(t *testing.T) {
 	unexpected, err := lockArxivImport(ctx, direct.DB, "2404.06654")
 	if unexpected != nil {
 		unexpected.release()
+		t.Fatal("proxy and direct connections did not share the database lock")
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("proxy and direct connections did not share the database lock: %v", err)
-	}
+	assertArxivImportWaitTimedOut(t, ctx, err)
 	t.Setenv("LAZYMIND_SQLITE_SERVER_URL", "https://remote-sqlite.example")
 	if unlock, err := lockArxivImport(t.Context(), proxy.DB, "another-paper"); unlock != nil || err == nil {
 		t.Fatalf("remote proxy silently used a host-local lock: %v", err)

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>园林人像 · 工笔转绘对照</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f6f1e7; color: #39362e; font: 15px/1.65 system-ui, -apple-system, "PingFang SC", sans-serif; }
+    main { max-width: 1100px; margin: auto; padding: 28px 24px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    p { margin: 0 0 20px; color: #666157; }
+    .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    figure { margin: 0; padding: 14px; background: #fffdf8; border: 1px solid #ded7c9; border-radius: 14px; }
+    img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: contain; background: #ede8dc; border-radius: 8px; }
+    figcaption { margin-top: 10px; font-weight: 600; }
+    small { display: block; margin-top: 18px; color: #746e63; }
+    @media (max-width: 650px) { .pair { grid-template-columns: 1fr; } main { padding: 20px 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>园林人像 · 原图与工笔画</h1>
+  <p>保留人物坐姿、团扇、荷塘与石桥，以细墨线和薄层淡彩柔和照片明暗。</p>
+  <div class="pair" aria-label="园林照片与工笔画对照">
+    <figure>
+      <img src="{{asset_url:garden_source}}" alt="输入：虚构女性在园林荷塘边持团扇的实景照片">
+      <figcaption>01 · 人物原图</figcaption>
+    </figure>
+    <figure>
+      <img src="{{asset_url:style_preview}}" alt="输出：保留人物坐姿、团扇和园林构图的淡彩工笔画">
+      <figcaption>02 · 工笔画成图</figcaption>
+    </figure>
+  </div>
+  <small>示例人物原图为 AI 生成。实际使用时请上传自己的照片；本案例图片不会作为用户成图。</small>
+</main>
+</body>
+</html>

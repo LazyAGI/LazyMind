@@ -19,7 +19,9 @@ from lazymind.chat.service.utils.citations import (
 def test_kb_toolkit_is_available_without_selected_kb():
     lazyllm.globals['agentic_config'] = {'filters': {}}
     toolkit = KBToolkit()
-    assert 'list_knowledge_bases' in toolkit.__public_apis__
+    assert toolkit.__public_apis__ == [
+        'read_document', 'kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
+    ]
     with pytest.raises(ToolExecutionError, match='kb_ids is required'):
         toolkit._kb_ids()
 
@@ -284,7 +286,15 @@ def _node(uid, *, parent=None, number=1, kb_id='kb-one', docid='doc-one'):
     )
 
 
+def _authorize_fixture_nodes(monkeypatch):
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.infra.kb_ownership.post_core_api',
+        lambda path, payload, **kwargs: {'response': {'items': payload['items']}},
+    )
+
+
 def test_parent_node_derives_kb_id_from_target_node(monkeypatch):
+    _authorize_fixture_nodes(monkeypatch)
     current = _node('node-one', parent='parent-one')
     parent = _node('parent-one')
     calls = []
@@ -306,6 +316,7 @@ def test_parent_node_derives_kb_id_from_target_node(monkeypatch):
 
 
 def test_window_nodes_derive_scope_and_position_from_target_node(monkeypatch):
+    _authorize_fixture_nodes(monkeypatch)
     seed = _node('node-one', number=3)
     previous = _node('node-zero', number=2)
     following = _node('node-two', number=4)
@@ -391,6 +402,7 @@ def test_scoped_kb_node_navigation_rejects_outside_or_unknown_scope(monkeypatch,
 
 @pytest.mark.parametrize('outside', [False, True])
 def test_scoped_kb_checks_parent_and_window_results(monkeypatch, outside):
+    _authorize_fixture_nodes(monkeypatch)
     seed = _node('seed', parent='parent')
     related = _node('parent', kb_id='outside-kb' if outside else 'kb-one')
     document = SimpleNamespace(
@@ -438,3 +450,33 @@ def test_lazy_kb_actual_tool_call_forwards_decoded_ids(monkeypatch):
     }}}])
     assert result[0]['ok'] is True
     assert calls == [['ds_example']]
+
+
+def test_deleted_node_is_not_expanded_or_serialized(monkeypatch):
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.infra.kb_ownership.post_core_api',
+        lambda *args, **kwargs: {'response': {'items': []}},
+    )
+    calls = []
+    def get_nodes(**kwargs):
+        calls.append(kwargs)
+        return [_node('deleted', parent='parent')]
+    monkeypatch.setattr('lazymind.chat.engine.tools.kb.DOCUMENT', SimpleNamespace(get_nodes=get_nodes))
+    result = KBToolkit().kb_get_parent_node('deleted')
+    assert result['items'] == []
+    assert result['current_node'] is None
+    assert calls == [{'uids': ['deleted']}]
+
+
+def test_pinned_legacy_kb_keeps_original_names_without_mutating_normal_registry():
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'kb-one'}}
+    legacy = LazyKBToolkit(legacy_management=True)
+    names = _kb_tool_names(ToolManager([legacy]))
+    assert {'KBToolkit_list_knowledge_bases', 'KBToolkit_list_knowledge_base_documents',
+            'KBToolkit_aggregate_knowledge_base_documents'} <= names
+    assert len(names) == 8
+    normal = _kb_tool_names(ToolManager([LazyKBToolkit()]))
+    assert len(normal) == 5
+    assert 'KBToolkit_list_knowledge_bases' not in normal

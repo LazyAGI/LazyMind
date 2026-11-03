@@ -10,6 +10,7 @@ RUNTIME_EVENT_TYPES = frozenset({
     'model_call_started',
     'model_retry_scheduled',
     'model_call_finished',
+    'model_switched',
     'run_finished',
 })
 INCOMPLETE_MODEL_FINISHES = frozenset({
@@ -45,6 +46,7 @@ class RunAccumulator:
     ask_pending: bool = False
     terminal_emitted: bool = False
     last_model_terminal: Optional[Dict[str, Any]] = None
+    fallback_code: str = ''
 
     def observe_model_event(self, event: Dict[str, Any]) -> None:
         if event.get('type') != 'model_call_finished': return
@@ -78,6 +80,10 @@ class RunAccumulator:
             return 'cancelled', 'user_cancelled', ''
         if outcome == RunOutcome.SUCCEEDED:
             return 'completed', 'awaiting_user_input' if self.ask_pending else 'normal', ''
+        if self.fallback_code == 'runtime_failure':
+            return 'failed', 'runtime_failure', 'runtime_failure'
+        if self.fallback_code in {'model_fallback_exhausted', 'model_context_not_fit'}:
+            return 'failed', 'model_failure', self.fallback_code
         terminal = self.last_model_terminal or {}
         if terminal.get('kind') == 'finish':
             finish = str(terminal.get('finish') or 'unknown')
@@ -88,6 +94,8 @@ class RunAccumulator:
             # rather than incomplete model generation.
             return 'failed', 'runtime_failure', 'runtime_failure'
         if terminal.get('kind') == 'failure':
+            if terminal.get('fallback_code') in {'model_fallback_exhausted', 'model_context_not_fit'}:
+                return 'failed', 'model_failure', terminal['fallback_code']
             failure = terminal.get('failure') or {}
             code = str(
                 failure.get('code')

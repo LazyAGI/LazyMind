@@ -524,7 +524,7 @@ func (h WorkflowControlHandler) Read(w http.ResponseWriter, r *http.Request) {
 		for i := range steps {
 			dto.Steps = append(dto.Steps, toStepDTO(&steps[i]))
 		}
-		result = map[string]any{"control": projection.Control, "session": dto, "projection": projection.Projection}
+		result = map[string]any{"control": projection.Control, "session": dto, "projection": projection.Projection, "display": projection.Display}
 		return nil
 	})
 	if err != nil {

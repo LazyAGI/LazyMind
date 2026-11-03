@@ -9,6 +9,8 @@ import ArtifactCollectorCard from "../../ArtifactCollectorCard";
 import MarkdownViewer from "../../MarkdownViewer";
 import type { ChatExport } from "../types";
 import "./ChatExportActions.scss";
+import { useArtifactPreview } from '../../ArtifactPreview/context';
+import { filePreviewTarget } from '../../ArtifactPreview/target';
 
 import { exportCitationMarkdown } from "@/modules/chat/utils/chatExportCitations";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
@@ -23,6 +25,7 @@ interface Props {
 
 export default function ChatExportActions({ content, exports, conversationId, historyId, sources = [] }: Props) {
   const { t } = useTranslation();
+  const preview = useArtifactPreview();
   const artifacts = useTaskCenterStore((state) => state.artifactsByConversation[conversationId]);
   const load = useTaskCenterStore((state) => state.loadConversationArtifacts);
   const upsert = useTaskCenterStore((state) => state.upsertConversationArtifact);
@@ -106,11 +109,19 @@ export default function ChatExportActions({ content, exports, conversationId, hi
       <Tooltip title={buttonLabel}>{button}</Tooltip>
     </Dropdown> : <Tooltip title={buttonLabel}>{button}</Tooltip>}
     <Drawer open={open} onClose={() => { setOpen(false); setSelected(null); }}
-      title={t("chat.exportView")} width="min(640px, 100vw)" destroyOnHidden
+      title={t("chat.exportView")} width="min(640px, 100vw)"
       className="chat-export-drawer">
       <ArtifactCollectorCard sessionId={conversationId} historyId={historyId}
         currentExportIds={validExports.map((item) => item.export_id)}
-        previewArtifactId={selected?.artifact_id} onPreview={setSelected} />
+        previewArtifactId={selected?.artifact_id} onPreview={(artifact, file) => {
+          if (preview) {
+            const currentRevision = revision.current;
+            setOpen(false);
+            preview.open(filePreviewTarget(file), { onClose: () => {
+              if (revision.current === currentRevision) setOpen(true);
+            } });
+          } else setSelected(artifact);
+        }} />
       {selected && <section className="chat-export-drawer__preview" aria-label={t("chat.exportPreviewing")}>
         <div className="chat-export-drawer__summary">
           <strong>{selected.filename}</strong>

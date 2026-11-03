@@ -53,3 +53,17 @@ export async function patchSideChatThinkingDepth(
     { silentError: true } as any,
   );
 }
+
+export async function patchSideChatSource(
+  childConversationId: string,
+  source?: SideChatSource | null,
+): Promise<SideChatConversation> {
+  const response = await conversationsApi.apiCoreConversationsChildIdSidechatPatch(
+    {
+      childId: childConversationId,
+      updateSidechatSourceOpenAPIRequest: buildSideChatCreateBody(source),
+    },
+    { silentError: true } as never,
+  );
+  return normalizeSideChatConversation(response.data);
+}

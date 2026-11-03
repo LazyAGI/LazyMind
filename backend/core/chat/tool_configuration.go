@@ -80,8 +80,14 @@ var configurationLabels = map[string]string{
 	"web_search": "网页搜索", "academic_search": "学术搜索",
 }
 
-func probeToolConfiguration(ctx context.Context, db *gorm.DB, userID, service string) (toolConfigurationSnapshot, error) {
-	disabled, err := listDisabledToolNames(ctx, db, userID)
+func probeToolConfiguration(ctx context.Context, db *gorm.DB, userID, service string, visibility ...[]string) (toolConfigurationSnapshot, error) {
+	var disabled []string
+	var err error
+	if len(visibility) > 0 {
+		disabled = visibility[0]
+	} else {
+		disabled, err = listDisabledToolNames(ctx, db, userID)
+	}
 	if err != nil {
 		return toolConfigurationSnapshot{}, err
 	}
@@ -235,7 +241,7 @@ func prepareToolConfiguration(ctx context.Context, db *gorm.DB, userID, conversa
 	if active == 0 {
 		return ToolConfigurationAction{}, gorm.ErrRecordNotFound
 	}
-	snapshot, err := probeToolConfiguration(ctx, db, userID, req.Service)
+	snapshot, err := probeRunToolConfiguration(ctx, db, userID, conversationID, req.HistoryID, req.RunID, req.Service)
 	if err != nil {
 		return ToolConfigurationAction{}, err
 	}
@@ -254,7 +260,7 @@ func prepareToolConfiguration(ctx context.Context, db *gorm.DB, userID, conversa
 }
 
 func refreshToolConfiguration(ctx context.Context, db *gorm.DB, action *ToolConfigurationAction) (toolConfigurationSnapshot, error) {
-	snapshot, err := probeToolConfiguration(ctx, db, action.UserID, action.Service)
+	snapshot, err := probeRunToolConfiguration(ctx, db, action.UserID, action.ConversationID, action.HistoryID, action.RunID, action.Service)
 	if err != nil {
 		return snapshot, err
 	}
@@ -285,7 +291,7 @@ func refreshToolConfigurations(ctx context.Context, db *gorm.DB, actions []ToolC
 		snapshot, ok := snapshots[action.Service]
 		if !ok {
 			var err error
-			snapshot, err = probeToolConfiguration(ctx, db, action.UserID, action.Service)
+			snapshot, err = probeRunToolConfiguration(ctx, db, action.UserID, action.ConversationID, action.HistoryID, action.RunID, action.Service)
 			if err != nil {
 				return nil, err
 			}
@@ -327,7 +333,7 @@ func InternalToolConfiguration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Operation == "check" {
-		snapshot, err := probeToolConfiguration(r.Context(), db, userID, req.Service)
+		snapshot, err := probeRunToolConfiguration(r.Context(), db, userID, conversationID, req.HistoryID, req.RunID, req.Service)
 		if err != nil {
 			common.ReplyErr(w, "configuration unavailable", 503)
 			return
@@ -434,4 +440,31 @@ func ListToolConfigurations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, ToolConfigurationListResponse{Actions: actions})
+}
+
+// Tool visibility is fixed at launch; connection credentials remain live.
+func probeRunToolConfiguration(ctx context.Context, db *gorm.DB, user, conversation, history, run, service string) (toolConfigurationSnapshot, error) {
+	if history == "" || run == "" {
+		return probeToolConfiguration(ctx, db, user, service)
+	}
+	var row struct{ Ext json.RawMessage }
+	scope := "id = ? AND conversation_id = ? AND run_id = ?"
+	err := db.WithContext(ctx).Model(&orm.ChatHistory{}).Select("ext").Where(scope, history, conversation, run).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = db.WithContext(ctx).Model(&orm.MultiAnswersChatHistory{}).Select("ext").Where(scope, history, conversation, run).Take(&row).Error
+	}
+	if err != nil {
+		return toolConfigurationSnapshot{}, err
+	}
+	var snapshot map[string]json.RawMessage
+	if json.Unmarshal(row.Ext, &snapshot) == nil {
+		if raw, exists := snapshot["disabled_tools"]; exists {
+			var names []string
+			if err := json.Unmarshal(raw, &names); err != nil {
+				return toolConfigurationSnapshot{}, err
+			}
+			return probeToolConfiguration(ctx, db, user, service, names)
+		}
+	}
+	return probeToolConfiguration(ctx, db, user, service)
 }

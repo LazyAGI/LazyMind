@@ -47,7 +47,8 @@ func beginDisplayExecution(ctx context.Context, db *gorm.DB, taskID, executionID
 	}
 	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ? AND status IN ?", taskID, []string{StatusPending, StatusRunning}).Updates(map[string]any{
 		"execution_id": executionID, "display_revision": gorm.Expr("display_revision + 1"), "started_at": nil, "finished_at": nil, "sources": orm.RawJSON(`[]`),
-		"progress_pct": 0,
+		"progress_pct":  0,
+		"current_phase": gorm.Expr("CASE WHEN current_phase IN ? THEN ? ELSE current_phase END", []string{"model_fallback_exhausted", "model_context_not_fit"}, ""),
 	})
 	if result.Error != nil {
 		return result.Error
@@ -175,12 +176,21 @@ func routeExecutionEvent(ctx context.Context, db *gorm.DB, taskID, executionID s
 		if err != nil {
 			return err
 		}
-		if task.ExecutionID != executionID {
+		if task.ExecutionID != executionID || ev.ExecutionID != "" && ev.ExecutionID != executionID {
 			return ErrStaleExecution
 		}
+		if isTerminal(task.Status) && ev.ModelOutput != nil && ev.ModelOutput.Phase != "rollback" {
+			return ErrTaskTerminal
+		}
 		ev.ExecutionID = executionID
-		if role, content := remoteStepContent(ev); role != "" {
-			if err := AppendRemoteStep(ctx, tx, taskID, role, content); err != nil {
+		if role, content := remoteStepContent(ev); role != "" && ev.ModelOutput == nil {
+			var err error
+			if task.AgentType != "workflow_step" && role != "plan" {
+				ev.Seq, err = appendExecutionStep(ctx, tx, taskID, executionID, role, content)
+			} else {
+				err = AppendRemoteStep(ctx, tx, taskID, role, content)
+			}
+			if err != nil {
 				return fmt.Errorf("persist task step: %w", err)
 			}
 		}
@@ -226,6 +236,9 @@ func taskTransaction(ctx context.Context, db *gorm.DB, fn func(*gorm.DB) error) 
 // lock, then locks the task before persisting. Authorization before body decoding
 // alone cannot fence a lease replaced while a request is in flight.
 func ingestRemoteTaskEvent(ctx context.Context, db *gorm.DB, event TaskEvent, lease string) (bool, error) {
+	if event.ModelOutput != nil || event.RuntimeEvent != nil {
+		return false, taskdisplay.ErrInvalidProcessStep
+	}
 	accepted := false
 	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		locked := tx.Model(&orm.WorkflowSessionStep{}).Where("task_id = ? AND lease_token = ?", event.TaskID, lease).

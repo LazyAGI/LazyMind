@@ -4,14 +4,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/store"
 )
 
 func TestPermissionPreferenceCASAndNewConversationInheritance(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := orm.MigrateAllModelsForTest(t)
+	db := newConversationTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	patch := func(body string) *httptest.ResponseRecorder {

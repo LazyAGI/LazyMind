@@ -60,6 +60,18 @@ function finishFrame() {
 }
 
 describe('canvas authoring geometry', () => {
+  it('blocks the imperative add entry point while readonly and enables it when conversion finishes', () => {
+    const ref = createRef<CanvasHandle>();
+    const onModelChange = vi.fn();
+    const view = render(<Canvas model={model} errors={[]} onModelChange={onModelChange} canvasRef={ref} readonly />);
+    act(() => ref.current?.addNode());
+    expect(onModelChange).not.toHaveBeenCalled();
+    view.rerender(<Canvas model={model} errors={[]} onModelChange={onModelChange} canvasRef={ref} />);
+    act(() => ref.current?.addNode());
+    const updated = onModelChange.mock.calls[0][0];
+    view.rerender(<Canvas model={updated} errors={[]} onModelChange={onModelChange} canvasRef={ref} />);
+    expect(screen.getByText('selfEvolutionRun.canvasNewStepLabel properties')).toBeVisible();
+  });
   it('centers the measured node in the resized flow after opening its properties', () => {
     const ref = createRef<CanvasHandle>();
     const onModelChange = vi.fn();

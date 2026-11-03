@@ -8,7 +8,7 @@ import (
 )
 
 func TestChatProviderMetadataKeepsCustomIdentityAndTechnicalProtocol(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatModelTestDB(t).DB
 	seedAvailableChatModel(t, db, "owner", "custom", "private-store", "chat", "OpenAI", "Proxy Alpha", "gpt-4o-mini", "llm", true, "selected-key")
 	if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "custom").Updates(map[string]any{"name": "Proxy Alpha", "protocol_name": "OpenAI", "is_custom": true}).Error; err != nil {
 		t.Fatal(err)

@@ -630,7 +630,14 @@ func TestDocumentDirectoriesPreferenceDefaultsAndRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		body    string
 		enabled bool
-	}{{"", true}, {`{"document_directories_enabled":false}`, false}, {`{"document_directories_enabled":true}`, true}} {
+	}{
+		{"", false},
+		{`{"performance_stats_enabled":true}`, false},
+		{`{"document_directories_enabled":false}`, false},
+		{`{"document_directories_enabled":true}`, true},
+		{`{"performance_stats_enabled":false}`, true},
+		{"", true},
+	} {
 		method := http.MethodPatch
 		if tc.body == "" {
 			method = http.MethodGet

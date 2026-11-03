@@ -17,7 +17,7 @@ import (
 
 func TestProjectTypesHaveIndependentLifecycle(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := orm.MigrateAllModelsForTest(t)
+	db := newConversationTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	const uid = "project-types"
@@ -139,7 +139,7 @@ func TestProjectTypesHaveIndependentLifecycle(t *testing.T) {
 
 func TestSameNameProjectsUseDirectoryIdentity(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := orm.MigrateAllModelsForTest(t)
+	db := newConversationTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	const uid = "same-name-projects"

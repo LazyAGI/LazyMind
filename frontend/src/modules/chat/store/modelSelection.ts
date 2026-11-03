@@ -26,6 +26,7 @@ export type ChatModelOption = Pick<ChatModelListOpenAPIItem, "id" | "name"> &
   };
 
 export type ChatModelProvider = Pick<ChatModelProviderOpenAPIItem, "id" | "name"> & {
+  logo_data_url?: string;
   source?: ChatModelProviderOpenAPIItem["source"];
   is_custom?: boolean;
   models: ChatModelOption[];

@@ -240,6 +240,8 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_EVO_SERVICE_URL=" + endpoints.Host.EvoBaseURL,
 		"LAZYMIND_CORE_SELF_URL=" + endpoints.Host.CoreBaseURL,
 		"LAZYMIND_BROWSER_ENABLED=" + envText("LAZYMIND_BROWSER_ENABLED", "true"),
+		"LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED=" + envText("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "true"),
+		"LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON=" + envText("LAZYMIND_KNOWLEDGE_MOVE_BUDGET_JSON", ""),
 		"LAZYMIND_BROWSER_MCP_URL=" + endpoints.Host.CoreBaseURL + "/mcp/browser/v1",
 		"LAZYMIND_BROWSER_PREFERRED_DEVICE_BROWSER=" + preferredBrowser,
 		"LAZYMIND_BROWSER_EXTENSION_SOURCE_DIR=" + filepath.Join(paths.RepoRoot, "browser-extension"),

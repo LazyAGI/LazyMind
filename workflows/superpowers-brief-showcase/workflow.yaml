@@ -22,18 +22,22 @@ steps:
   label: Implement and review
 slots:
 - id: brief
+  user_visible: false
   label: Dispatch Brief
   type: json
   cardinality: single
 - id: admission
+  user_visible: false
   label: Checked Brief
   type: json
   cardinality: single
 - id: implementation
+  user_visible: true
   label: labels.py
   type: text
   cardinality: single
 - id: checks
+  user_visible: true
   label: Test output
   type: text
   cardinality: single

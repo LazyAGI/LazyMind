@@ -1,3 +1,4 @@
+import { SourceImportActions } from "../SourceImports";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -53,6 +54,9 @@ import {
   saveArtifactFileAs,
 } from "@/modules/chat/utils/artifactFileActions";
 import { hasDesktopFileBridge } from "@/runtime/desktopBridge";
+import { useArtifactPreview } from '../ArtifactPreview/context';
+import { filePreviewTarget, urlPreviewTarget, type ArtifactPreviewTarget } from '../ArtifactPreview/target';
+import { toArtifactFiles } from '../ArtifactCollectorCard/artifactFiles';
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
@@ -102,6 +106,7 @@ export function markdownUrlTransform(value: string): string {
 
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
+  previewArtifacts?: boolean;
   markSources: ChatSource[];
   artifacts: ConversationArtifact[];
   conversationId?: string;
@@ -202,6 +207,7 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
         {previewText && <p className="md-source-preview-summary">{previewText}</p>}
         {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
       </a>
+      <SourceImportActions source={source} />
     </div>
   );
 }
@@ -254,12 +260,23 @@ function normalizeMarkdownForDisplay(content: string) {
 
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
-  const { resolveImageUrl } = useContext(MarkdownRenderContext);
-  const [imageLoadError, setImageLoadError] = useState(false);
-  const [previewVisible, setPreviewVisible] = useState(false);
+  const { resolveImageUrl, previewArtifacts, conversationId } = useContext(MarkdownRenderContext);
+  const sharedPreview = useArtifactPreview();
   const [resolvedSrc, setResolvedSrc] = useState(() =>
     resolveCoreAssetUrl(props.src || ""),
   );
+  // Cross-origin images can render without CORS, but the shared file preview
+  // fetches their bytes. Keep the direct image preview for those URLs.
+  let sameOrigin = false;
+  try { sameOrigin = new URL(resolvedSrc, window.location.origin).origin === window.location.origin; } catch { /* Invalid image URL. */ }
+  const useShared = previewArtifacts && sharedPreview && sameOrigin;
+  const openImage = () => {
+    if (!useShared) { setPreviewVisible(true); return; }
+    const name = basenameFromPath(props.src || '') || 'image.png';
+    sharedPreview.open(urlPreviewTarget(resolvedSrc, /\.[a-z0-9]+$/i.test(name) ? name : 'image.png', conversationId));
+  };
+  const [imageLoadError, setImageLoadError] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,7 +303,9 @@ const ImageComponent = (props: any) => {
   }, [props.src, resolveImageUrl]);
 
   if (imageLoadError || !resolvedSrc) {
-    return null;
+    return useShared ? <button type="button" className="md-file-link md-file-link--preview" onClick={openImage}>
+      {props.alt || t("chat.previewImage")}
+    </button> : null;
   }
 
   const { node: _node, src: _src, ...imageProps } = props;
@@ -296,17 +315,18 @@ const ImageComponent = (props: any) => {
       <Image
         {...imageProps}
         src={resolvedSrc}
-        preview={{
+        preview={useShared ? false : {
           visible: previewVisible,
           onVisibleChange: setPreviewVisible,
         }}
+        onClick={useShared ? openImage : undefined}
         role="button"
         tabIndex={0}
         aria-label={props.alt || t("chat.previewImage")}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            setPreviewVisible(true);
+            openImage();
           }
         }}
         onError={() => setImageLoadError(true)}
@@ -399,13 +419,18 @@ function ArtifactFileLink({
   href,
   filename,
   pending,
+  target,
 }: {
   children: ReactNode;
   href: string;
   filename: string;
   pending?: boolean;
+  target?: ArtifactPreviewTarget;
 }) {
   const { t } = useTranslation();
+  const preview = useArtifactPreview();
+  const { previewArtifacts } = useContext(MarkdownRenderContext);
+  const useShared = Boolean(previewArtifacts && preview && target);
   const desktop = hasDesktopFileBridge();
   const ready = Boolean(href) && !pending;
 
@@ -468,7 +493,9 @@ function ArtifactFileLink({
     ];
   }, [desktop, filename, href, ready, runAction, t]);
 
-  const content = pending || !href ? (
+  const content = useShared ? (
+    <button type="button" className="md-file-link md-file-link--preview" onClick={() => preview!.open(target!)}>{children}</button>
+  ) : pending || !href ? (
     <span className="md-file-link md-file-link--pending">{children}</span>
   ) : (
     <a
@@ -489,6 +516,7 @@ function ArtifactFileLink({
   );
 
   return (
+    <span className="md-file-actions">
     <Dropdown
       trigger={["contextMenu"]}
       menu={{ items }}
@@ -496,11 +524,17 @@ function ArtifactFileLink({
     >
       {content}
     </Dropdown>
+    {useShared && <button type="button" className="md-file-download" disabled={!ready}
+      aria-label={t('chat.preview.download', { name: filename })}
+      onClick={() => void runAction(() => downloadArtifactFile(href, filename), 'chat.fileDownloadFailed')}>
+      {t('chat.fileDownload')}
+    </button>}
+    </span>
   );
 }
 
 const LinkComponent = (props: any) => {
-  const { isStreaming, markSources, artifacts } = useContext(
+  const { isStreaming, markSources, artifacts, conversationId } = useContext(
     MarkdownRenderContext,
   );
   const href = typeof props.href === "string" ? props.href : "";
@@ -633,6 +667,7 @@ const LinkComponent = (props: any) => {
 
     return (
       <Popover
+        trigger={["hover", "focus"]}
         mouseEnterDelay={0.2}
         placement="top"
         classNames={{ root: "md-source-popover md-source-popover--interactive" }}
@@ -648,6 +683,9 @@ const LinkComponent = (props: any) => {
       <ArtifactFileLink
         href={resolvedHref}
         filename={artifactFilename}
+        target={linkedArtifact && toArtifactFiles([linkedArtifact])[0]
+          ? filePreviewTarget(toArtifactFiles([linkedArtifact])[0])
+          : urlPreviewTarget(resolvedHref, artifactFilename || String(props.children || 'file'), conversationId)}
         pending={!resolvedHref}
       >
         {props.children}
@@ -660,6 +698,7 @@ const LinkComponent = (props: any) => {
       <ArtifactFileLink
         href={resolvedHref}
         filename={basenameFromPath(href)}
+        target={urlPreviewTarget(resolvedHref || href, basenameFromPath(href), conversationId)}
         pending={!resolvedHref}
       >
         {props.children}
@@ -731,6 +770,7 @@ const MarkdownViewer = memo((props: any) => {
     historyId,
     onCiteMessage,
     resolveImageUrl,
+    previewArtifacts = false,
     ...markdownProps
   } = props;
   const normalizedChildren =
@@ -776,6 +816,7 @@ const MarkdownViewer = memo((props: any) => {
   const renderContextValue = useMemo(
     () => ({
       isStreaming: Boolean(IS_STREAMING),
+      previewArtifacts,
       markSources,
       artifacts,
       conversationId,
@@ -785,6 +826,7 @@ const MarkdownViewer = memo((props: any) => {
     }),
     [
       IS_STREAMING,
+      previewArtifacts,
       markSources,
       artifacts,
       conversationId,

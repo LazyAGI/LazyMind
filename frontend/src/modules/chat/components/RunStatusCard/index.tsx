@@ -10,6 +10,8 @@ import { MODEL_FAILURE_CODES } from "@/modules/chat/utils/chatStreamError";
 
 import "./index.scss";
 
+const MODEL_FALLBACK_CODES = new Set(["model_fallback_exhausted", "model_context_not_fit"]);
+
 const RUNTIME_FAILURE_CODES = new Set([
   "request_rejected",
   "user_env_unavailable",
@@ -18,6 +20,7 @@ const RUNTIME_FAILURE_CODES = new Set([
 
 const KNOWN_CODES = new Set([
   ...MODEL_FAILURE_CODES,
+  ...MODEL_FALLBACK_CODES,
   ...RUNTIME_FAILURE_CODES,
   "length",
   "content_filter",
@@ -84,7 +87,7 @@ export function runStatusDescription(
   const parts: string[] = [];
   if (!isUserCancelledTerminal(terminal)) {
     const reasonKey = terminal.code && KNOWN_CODES.has(terminal.code) && (
-      isModelTerminal(terminal) || RUNTIME_FAILURE_CODES.has(terminal.code)
+      isModelTerminal(terminal) || RUNTIME_FAILURE_CODES.has(terminal.code) || MODEL_FALLBACK_CODES.has(terminal.code)
     )
       ? `chat.runStatus.codes.${terminal.code}`
       : terminal.reason === "model_incomplete"
@@ -171,8 +174,9 @@ export default function RunStatusCard({
   const className = isCancelled
     ? "chat-run-status-card chat-run-status-card--cancelled"
     : "chat-run-status-card";
-  const shouldChangeModel = canChangeModel(terminal);
-  const shouldCheckSettings = MODEL_SETTINGS_CODES.has(terminal.code || "");
+  const isFallbackFailure = MODEL_FALLBACK_CODES.has(terminal.code || "");
+  const shouldChangeModel = canChangeModel(terminal) || isFallbackFailure;
+  const shouldCheckSettings = MODEL_SETTINGS_CODES.has(terminal.code || "") || isFallbackFailure;
   const modelSettingsUrl = (() => {
     const params = new URLSearchParams({ section: "models", view: "providers" });
     if (conversationId) {

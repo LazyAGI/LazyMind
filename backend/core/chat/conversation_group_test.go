@@ -13,7 +13,7 @@ import (
 )
 
 func TestConversationGroupFirstMessagePersistsMembershipBeforeModel(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newChatExecutionTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
@@ -59,7 +59,7 @@ func TestConversationGroupFirstMessagePersistsMembershipBeforeModel(t *testing.T
 }
 
 func TestConversationGroupFirstMessageRejectsStaleOrExistingTarget(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newChatExecutionTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	request := sidechatRequest(http.MethodPost, "/api/core/conversations:chat", "user-1", `{"conversation_id":"new-group-conversation","group_id":"deleted-group","stream":true,"input":[{"input_type":"text","text":"first message"}]}`, nil)
@@ -85,7 +85,7 @@ func TestConversationGroupFirstMessageRejectsStaleOrExistingTarget(t *testing.T)
 }
 
 func TestConversationOrganizerProtectsSingleBatchAndFamilyDelete(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newChatExecutionTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	root := sidechatTestConversation(t, db.DB, "locked-root", "user-1", "Root")
@@ -156,7 +156,7 @@ func TestConversationOrganizerProtectsSingleBatchAndFamilyDelete(t *testing.T) {
 }
 
 func TestConversationDetailReturnsGroupAndOrganizerLock(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t)
+	db := newChatExecutionTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	c := sidechatTestConversation(t, db.DB, "group-detail", "user-1", "Grouped")

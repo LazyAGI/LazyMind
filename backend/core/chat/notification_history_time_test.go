@@ -21,7 +21,7 @@ import (
 func TestNotificationHistoryEditsKeepOriginalCompletion(t *testing.T) {
 	for _, mutation := range []string{"editable", "feedback", "dual_selection"} {
 		t.Run(mutation, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newChatNotificationTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			completedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
@@ -161,7 +161,7 @@ func historyTimePreferencesRequest(t *testing.T, method string, body any) map[st
 func TestNotificationHistoryTerminalReplayKeepsTimeForOwnedRun(t *testing.T) {
 	for _, dual := range []bool{false, true} {
 		t.Run(fmt.Sprint("dual=", dual), func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newChatNotificationTestDB(t).DB
 			old := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 			if err := db.Create(&orm.Conversation{ID: "time-conv"}).Error; err != nil {
 				t.Fatal(err)
@@ -214,7 +214,7 @@ func TestNotificationHistoryTerminalReplayKeepsTimeForOwnedRun(t *testing.T) {
 }
 
 func TestNotificationHistoryFeedbackDoesNotReplaceGeneratingMetadata(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newChatNotificationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	if err := db.Create(&orm.Conversation{ID: "time-conv"}).Error; err != nil {
@@ -234,7 +234,7 @@ func TestNotificationHistoryFeedbackDoesNotReplaceGeneratingMetadata(t *testing.
 }
 
 func TestNotificationHistoryFeedbackRechecksRunAfterRegenerationClaimsRow(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newChatNotificationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	if err := db.Create(&orm.Conversation{ID: "time-conv"}).Error; err != nil {
@@ -296,7 +296,7 @@ func TestNotificationHistoryFeedbackRechecksRunAfterRegenerationClaimsRow(t *tes
 }
 
 func TestNotificationHistoryImmediateTerminalReplayCannotFinishNewerTask(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newChatNotificationTestDB(t).DB
 	old := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	if err := db.Create(&orm.Conversation{ID: "time-conv"}).Error; err != nil {
 		t.Fatal(err)
@@ -323,7 +323,7 @@ func TestNotificationHistoryImmediateTerminalReplayCannotFinishNewerTask(t *test
 func TestNotificationHistoryNativeTerminalsPersistRunCompletion(t *testing.T) {
 	for _, transport := range []string{"single", "nonstream", "dual", "immediate_failed", "prestream_failed"} {
 		t.Run(transport, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newChatNotificationTestDB(t).DB
 			if err := db.Create(&orm.Conversation{ID: "time-conv"}).Error; err != nil {
 				t.Fatal(err)
 			}

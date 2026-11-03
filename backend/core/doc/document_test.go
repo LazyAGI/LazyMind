@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/learning"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -161,14 +162,19 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.Dataset{},
+		&learning.KnowledgeBaseCapability{}, &learning.CapabilityProfile{},
 		&orm.Document{},
 		&orm.Task{},
 		&orm.UploadedFile{},
 		&orm.DefaultDataset{},
+		&orm.DocumentProcessingState{},
+		&orm.DocumentOwnershipBackfill{},
+		&orm.RejectedDocumentPublication{},
 		&orm.KnowledgeMarketInstall{},
 		&orm.EvalSet{},
 		&readonlyorm.LazyLLMDocRow{},
 		&readonlyorm.LazyLLMDocServiceTaskRow{},
+		&readonlyorm.LazyLLMDocParseStateRow{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
@@ -177,6 +183,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 }
 
 func TestCreateDocumentStoresExplicitFolderTypeForDottedName(t *testing.T) {
+	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "dataset-1", "user-1")
 
@@ -214,6 +221,7 @@ func TestCreateDocumentStoresExplicitFolderTypeForDottedName(t *testing.T) {
 }
 
 func TestUpdateDocumentAcceptsArbitraryStoredType(t *testing.T) {
+	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "dataset-1", "user-1")
 	seedDocumentListDoc(t, db, "dataset-1", "doc-1", "special.bin", time.Now().UTC(), "user-1", nil)
@@ -653,6 +661,7 @@ func TestListDocumentsByDatasetsRequiresDatasetIDs(t *testing.T) {
 }
 
 func TestDeleteDocumentRecalculatesParentFolderSize(t *testing.T) {
+	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
 	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
 
@@ -687,6 +696,7 @@ func TestBatchDeleteDocumentRecalculatesParentFolderSize(t *testing.T) {
 }
 
 func TestDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
+	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
 	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
 	assertDatasetStats(t, "dataset-1", 1, 31744)
@@ -707,6 +717,7 @@ func TestDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
 }
 
 func TestDeleteDottedFolderUsesStoredDocumentType(t *testing.T) {
+	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
 	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
 	if err := db.Model(&orm.Document{}).Where("id = ?", "folder-1").Updates(map[string]any{

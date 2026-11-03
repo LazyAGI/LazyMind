@@ -20,6 +20,7 @@ _ERROR_LINE = re.compile(
 )
 _EXIT_CODE = re.compile(r'(?:exit(?:\s*code)?|return(?:ed)?\s*code|status)\s*[:=]?\s*(-?\d+)', re.I)
 _URL = re.compile(r'https?://[^\s\'"<>]+', re.IGNORECASE)
+_IMAGE_TOOLS = {'image_generator', 'image_editor'}
 
 
 @dataclass(frozen=True)
@@ -30,8 +31,7 @@ class ToolCompactionPlan:
     after_tokens: int
     spill_path: str = ''
     spill_bytes: int = 0
-    tool_name: str = ''
-    original_content: Any = None
+    spill_text: str = ''
 
 
 def _as_text(content: Any) -> str:
@@ -221,6 +221,8 @@ def _classify(tool_name: str) -> str:
     if special:
         return special
     name = str(tool_name or '').strip().lower()
+    if name in _IMAGE_TOOLS:
+        return 'image'
     if not name:
         return 'generic'
     if any(token in name for token in (
@@ -394,6 +396,48 @@ def compact_search_result(tool_name: str, content: Any, observation: Any = None)
     return '\n'.join(lines), 'search'
 
 
+def _image_result_metadata(tool_name: str, content: Any, observation: Any = None) -> list[str]:
+    if str(tool_name or '').strip().lower() not in _IMAGE_TOOLS:
+        return []
+    if isinstance(observation, dict) and observation.get('ok') is False and observation.get('error'):
+        return ['Image tool failure (no successful output is confirmed):',
+                json.dumps({'ok': False, 'error': observation['error']}, ensure_ascii=False)]
+    parsed = _structured_payload(content, observation)
+    if not isinstance(parsed, dict):
+        return []
+    payload = _result_payload(parsed)
+    # Keep exact locators, never a head/tail excerpt of signed URLs. Prompts and
+    # provider metadata can be much longer than the actual image result.
+    fields = ('local_path', 'image_url', 'image_markdown')
+    evidence = {key: payload[key] for key in ('ok', 'success', 'status', 'error', 'message', 'msg') if key in payload}
+    for key in ('ok', 'error'):
+        if key in parsed:
+            evidence[key] = parsed[key]
+    if isinstance(observation, dict) and observation.get('ok') is False:
+        evidence['ok'] = False
+    failed = evidence.get('ok') is False or evidence.get('success') is False or bool(evidence.get('error'))
+    if not failed:
+        evidence.update({key: payload[key] for key in fields if isinstance(payload.get(key), str)})
+        images = payload.get('images')
+        if isinstance(images, list):
+            evidence['images'] = [
+                {key: item[key] for key in fields if isinstance(item.get(key), str)}
+                for item in images if isinstance(item, dict)
+            ]
+    if not evidence:
+        return []
+    return ['Image tool evidence (copy output links exactly; do not invent file_id references):',
+            json.dumps(evidence, ensure_ascii=False, separators=(',', ':'))]
+
+
+def compact_image_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
+    metadata = _image_result_metadata(tool_name, content, observation)
+    if not metadata:
+        # Unknown/failed result formats must not lose their diagnostic content.
+        return _as_text(content), 'noop'
+    return '\n'.join(['[Earlier tool result compacted]', f'Tool: {tool_name}', *metadata]), 'image'
+
+
 def compact_generic_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
     _ = observation
     text = _as_text(content)
@@ -410,6 +454,7 @@ def compact_generic_result(tool_name: str, content: Any, observation: Any = None
 
 
 _COMPACTORS: dict[str, Callable[[str, Any, Any], tuple[str, str]]] = {
+    'image': compact_image_result,
     'shell': compact_shell_result,
     'file': compact_file_result,
     'search': compact_search_result,
@@ -458,7 +503,7 @@ def _spill_filename(tool_name: str, content: str) -> str:
 
 def _is_browser_tool(tool_name: str) -> bool:
     normalized = str(tool_name or '').strip().lower()
-    return normalized.startswith('browser_') or normalized.startswith('browser.')
+    return normalized.startswith(('mcp_browser_', 'browser_', 'browser.'))
 
 
 def _browser_json_envelope(text: str) -> tuple[str, Any, str] | None:
@@ -574,9 +619,13 @@ def spill_tool_result_to_workspace(
     if not root:
         return None
     text, filename = _spill_text_and_name(root, tool_name, content, observation)
+    return _write_spill(root, os.path.join('tool_spills', filename), text)
+
+
+def _write_spill(root: str, rel_path: str, text: str) -> str:
     spill_dir = os.path.join(root, 'tool_spills')
     os.makedirs(spill_dir, exist_ok=True)
-    path = os.path.join(spill_dir, filename)
+    path = os.path.join(root, rel_path)
     temporary = ''
     try:
         with tempfile.NamedTemporaryFile(
@@ -610,6 +659,7 @@ def format_spilled_tool_notice(
     rel_path: str,
     size_bytes: int,
     workspace: str = '',
+    observation: Any = None,
 ) -> str:
     size_kb = size_bytes / 1024
     lines = [
@@ -622,6 +672,7 @@ def format_spilled_tool_notice(
         'Omitting offset repeats the first window; turn is not a page number.',
     ]
     lines.extend(_browser_spill_metadata(tool_name, content))
+    lines.extend(_image_result_metadata(tool_name, content, observation))
     lines.extend([
         'Excerpt:',
         _head_tail(_as_text(content), head=500, tail=300),
@@ -649,15 +700,8 @@ def compact_or_spill_tool_result(
         except Exception:
             rel_path = None
         if rel_path:
-            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace)
+            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace, observation)
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
-    if _file_result_details(tool_name, content, observation):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
-            tool_name,
-            content,
-            observation,
-        )
-        return compacted, compactor, before_tokens, after_tokens, '', 0
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -684,7 +728,7 @@ def plan_tool_result_compaction(
         )
         rel_path = os.path.join('tool_spills', filename)
         spill_bytes = len(spill_text.encode('utf-8', errors='replace'))
-        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes, workspace)
+        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes, workspace, observation)
         after = estimate_tokens(notice)
         if after < before:
             return ToolCompactionPlan(
@@ -694,19 +738,8 @@ def plan_tool_result_compaction(
                 after,
                 spill_path=rel_path,
                 spill_bytes=spill_bytes,
-                tool_name=tool_name,
-                original_content=content,
+                spill_text=spill_text,
             )
-    if _file_result_details(tool_name, content, observation):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
-            tool_name,
-            content,
-            observation,
-        )
-        return ToolCompactionPlan(
-            compacted, compactor, before_tokens, after_tokens,
-            tool_name=tool_name, original_content=content,
-        )
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -714,7 +747,6 @@ def plan_tool_result_compaction(
     )
     return ToolCompactionPlan(
         compacted, compactor, before_tokens, after_tokens,
-        tool_name=tool_name, original_content=content,
     )
 
 
@@ -725,36 +757,5 @@ def commit_tool_result_plan(
 ) -> ToolCompactionPlan:
     if plan.compactor != 'spill' or not plan.spill_path or not workspace:
         return plan
-    rel_path = spill_tool_result_to_workspace(
-        workspace,
-        plan.tool_name,
-        plan.original_content,
-    )
-    if not rel_path:
-        return ToolCompactionPlan(
-            _as_text(plan.original_content),
-            'noop',
-            plan.before_tokens,
-            plan.before_tokens,
-            tool_name=plan.tool_name,
-            original_content=plan.original_content,
-        )
-    if rel_path == plan.spill_path:
-        return plan
-    notice = format_spilled_tool_notice(
-        plan.tool_name,
-        plan.original_content,
-        rel_path,
-        plan.spill_bytes,
-        workspace,
-    )
-    return ToolCompactionPlan(
-        notice,
-        'spill',
-        plan.before_tokens,
-        estimate_tokens(notice),
-        spill_path=rel_path,
-        spill_bytes=plan.spill_bytes,
-        tool_name=plan.tool_name,
-        original_content=plan.original_content,
-    )
+    _write_spill(os.path.realpath(workspace), plan.spill_path, plan.spill_text)
+    return plan

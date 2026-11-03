@@ -94,9 +94,21 @@ def test_kb_tmp_search_core_flow(monkeypatch, tmp_path):
 
 
 def test_temp_kb_runtime_registers_block_group(monkeypatch):
+    import lazyllm
     from lazymind.chat.engine.tools.algo import search_temp
+    from lazymind.embedding_options import configure_embedding_options, embedding_query
 
     calls = []
+    model_roles = []
+    embedded_texts = []
+
+    def embed(text):
+        embedded_texts.append(text)
+        return [0.25, 0.5]
+
+    def build_model(model):
+        model_roles.append(model)
+        return embed
 
     class FakeTempDocRetriever:
         def __init__(self, embed):
@@ -110,12 +122,21 @@ def test_temp_kb_runtime_registers_block_group(monkeypatch):
             calls.append(('add_subretriever', group, kwargs))
             return self
 
-    monkeypatch.setattr(search_temp, 'AutoModel', lambda model: f'model:{model}')
+    monkeypatch.setattr(search_temp, 'AutoModel', build_model)
     monkeypatch.setattr(search_temp, '_ConversationTempDocRetriever', FakeTempDocRetriever)
 
-    search_temp._make_retriever(use_embed=True)
+    with lazyllm.new_session():
+        configure_embedding_options({search_temp.EMBED_MAIN: {
+            'type': 'embed', 'embedding': {'query_prefix': 'query: ', 'passage_prefix': 'passage: '},
+        }})
+        search_temp._make_retriever(use_embed=True)
+        assert calls[0][0] == 'init'
+        embedding = calls[0][1]
+        assert embedding('document') == [0.25, 0.5]
+        assert embedding(embedding_query('question')) == [0.25, 0.5]
 
-    assert calls[0] == ('init', f'model:{search_temp.EMBED_MAIN}')
+    assert model_roles == [search_temp.EMBED_MAIN]
+    assert embedded_texts == ['passage: document', 'query: question']
     assert calls[1][0] == 'create_node_group'
     assert calls[1][1]['name'] == 'block'
     assert calls[2][0] == 'add_subretriever'

@@ -15,7 +15,7 @@ import (
 
 func TestWorkspaceWorkCreationLocksBindingAndRollsBackUnauthorizedGrant(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := newPromptTestDB(t)
+	db := newConversationTestDB(t)
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

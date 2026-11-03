@@ -2,7 +2,9 @@ package modelconfig
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -14,7 +16,9 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/modelprovider"
+	"lazymind/core/modelsettings"
 	coreproviderconnection "lazymind/core/providerconnection"
 )
 
@@ -218,16 +222,28 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string, scope
 
 type SelectedRuntimeModel struct {
 	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
+	RuntimeProviderID  string `gorm:"column:runtime_provider_id"`
+	ProviderGroupID    string `gorm:"column:provider_group_id"`
+	CredentialRevision int64  `gorm:"column:credential_revision"`
+	// RuntimeIdentity is the catalog identity used to choose a LazyLLM
+	// adapter. It is separate from ProviderName, which may be an
+	// OpenAI-compatible protocol for local vLLM/LMDeploy providers.
+	RuntimeIdentity    string `gorm:"column:runtime_identity"`
 	ModelType          string
 	TechnicalModelType string
 	Vision             bool
+	ModelSettings      string                                  `gorm:"column:model_settings"`
+	RequestAdvanced    credentialvault.ProviderRequestAdvanced `gorm:"-" json:"-"`
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
 	BaseURL            string
 	APIKey             string
 	APIKeyCiphertext   string
+	SkipAuth           bool `gorm:"-"`
 	MaxInputTokens     *string
+	InputTokenLimit    *string
+	MaxOutputTokens    *string
 }
 
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
@@ -289,9 +305,18 @@ func LoadLLMConfigWithEvolution(ctx context.Context, db *gorm.DB, userID string,
 }
 
 func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolution bool) (map[string]any, error) {
+	return loadLLMConfigWithOptions(ctx, db, userID, omitEvolution, false, runtimeCredentials{})
+}
+
+// loadLLMConfigWithOptions keeps the legacy role loading behavior while allowing
+// chat runtime preparation to omit the chat role and reuse credential results.
+func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, omitEvolution, omitChat bool, credentials runtimeCredentials) (map[string]any, error) {
 	selectionScope := func(query *gorm.DB) *gorm.DB {
 		if omitEvolution {
-			return query.Where("usm.model_type <> ?", "evo_llm")
+			query = query.Where("usm.model_type <> ?", "evo_llm")
+		}
+		if omitChat {
+			query = query.Where("LOWER(TRIM(usm.model_type)) <> ?", "llm")
 		}
 		return query
 	}
@@ -302,13 +327,13 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, m.vision, "+
+				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
-				"m.name AS model_name, "+
-				"g.id AS runtime_group_id, g.base_url, "+
+				"m.name AS model_name, m.user_model_provider_id AS runtime_provider_id, "+
+				"g.id AS runtime_group_id, g.id AS provider_group_id, g.credential_revision, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
-				"m.max_input_tokens",
+				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -320,18 +345,31 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL AND g.is_verified = ?",
-			true,
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL",
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Scan(&ownRows).Error
 	if err != nil {
 		return nil, err
 	}
+	populateRuntimeIdentities(ctx, db, ownRows)
 	ownRows = eligibleRuntimeModels(ownRows)
-	if err := decryptRuntimeModels(ctx, db, ownRows); err != nil {
-		return nil, err
+	availableOwn := make([]SelectedRuntimeModel, 0, len(ownRows))
+	blockedOwnTypes := make(map[string]struct{})
+	var ownCredentialError error
+	for _, row := range ownRows {
+		candidate := []SelectedRuntimeModel{row}
+		if err := decryptRuntimeModelsWithCache(ctx, db, candidate, credentials); err != nil {
+			blockedOwnTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
+			if ownCredentialError == nil {
+				ownCredentialError = err
+			}
+			continue
+		}
+		availableOwn = append(availableOwn, candidate[0])
 	}
+	ownRows = availableOwn
 
 	var cloudSelections []orm.UserSelectedCloudModel
 	if db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
@@ -346,6 +384,9 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	unresolvedCloudTypes := make(map[string]struct{}, len(cloudSelections))
 	resolvedCloudRows := make([]SelectedRuntimeModel, 0, len(cloudSelections))
 	for _, selection := range cloudSelections {
+		if omitChat && strings.EqualFold(strings.TrimSpace(selection.ModelType), "llm") {
+			continue
+		}
 		resolved, available, err := ResolveCloudRuntimeModel(ctx, selection.ModelType, selection.PublicModelKey)
 		if err != nil || !available {
 			// Keep the user's stored Cloud preference, but let the dormant local
@@ -370,6 +411,14 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	rows := make([]SelectedRuntimeModel, 0, len(ownRows)+len(resolvedCloudRows))
 	rows = append(rows, ownRows...)
 	rows = append(rows, resolvedCloudRows...)
+	if len(rows) == 0 && ownCredentialError != nil {
+		return nil, ownCredentialError
+	}
+	for modelType := range blockedOwnTypes {
+		// A disabled explicit selection must not silently borrow another user's
+		// supplier; unrelated roles can continue with their own credentials.
+		coveredTypes[modelType] = struct{}{}
+	}
 	for _, row := range rows {
 		coveredTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
 	}
@@ -381,22 +430,25 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, m.vision, "+
+				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
-				"m.name AS model_name, "+
-				"g.id AS runtime_group_id, g.base_url, "+
+				"m.name AS model_name, m.user_model_provider_id AS runtime_provider_id, "+
+				"g.id AS runtime_group_id, g.id AS provider_group_id, g.credential_revision, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
-				"m.max_input_tokens",
+				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
 				"m.id = usm.user_model_provider_group_model_id AND "+
+				"m.create_user_id = usm.user_id AND "+
 				"m.deleted_at IS NULL",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
+				"g.create_user_id = usm.user_id AND "+
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
 				"g.deleted_at IS NULL AND g.is_verified = ?",
 			true,
 		).
@@ -405,16 +457,18 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	if err != nil {
 		return nil, err
 	}
+	populateRuntimeIdentities(ctx, db, sharedRows)
 	sharedRows = eligibleRuntimeModels(sharedRows)
-	if err := decryptRuntimeModels(ctx, db, sharedRows); err != nil {
-		return nil, err
-	}
 
 	// Explicit own/Cloud selections take priority; shared rows fill missing types.
 	for _, row := range sharedRows {
 		normalized := strings.ToLower(strings.TrimSpace(row.ModelType))
 		if _, covered := coveredTypes[normalized]; !covered {
-			rows = append(rows, row)
+			candidate := []SelectedRuntimeModel{row}
+			if err := decryptRuntimeModelsWithCache(ctx, db, candidate, credentials); err != nil {
+				continue
+			}
+			rows = append(rows, candidate[0])
 			coveredTypes[normalized] = struct{}{}
 		}
 	}
@@ -430,6 +484,15 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		rows = filtered
 	}
 
+	if omitChat {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !strings.EqualFold(strings.TrimSpace(row.ModelType), "llm") {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
 	return BuildLLMConfig(rows), nil
 }
 
@@ -573,7 +636,7 @@ func LoadToolConfigForCapabilities(
 		config = merge(config, entry)
 	}
 	for _, provider := range cloudToolProviders {
-		if !has("cloud_files") && !has(provider) {
+		if !has("cloud_files") && !has(provider) && !(provider == "github" && has("github_prs")) {
 			continue
 		}
 		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
@@ -685,10 +748,12 @@ func splitOCRAuthKeys(raw string) []string {
 }
 
 type selectedProviderConfig struct {
-	ProviderName     string
-	BaseURL          string
-	APIKey           string
-	APIKeyCiphertext string
+	ProviderName       string
+	BaseURL            string
+	APIKey             string
+	APIKeyCiphertext   string
+	GroupID            string
+	CredentialRevision int64
 }
 
 // TranslationConfig contains the selected translation provider and its decrypted
@@ -699,15 +764,141 @@ type TranslationConfig struct {
 	APIKey       string
 }
 
+// TranslationConfigSnapshot pins a provider group for an asynchronous job.
+// It contains only a revocable database reference, never credential material.
+type TranslationConfigSnapshot struct {
+	GroupID            string `json:"group_id"`
+	CredentialRevision int64  `json:"credential_revision"`
+	ProviderName       string `json:"provider_name"`
+	BaseURLHash        string `json:"base_url_sha256"`
+}
+
+// TranslationProviderGroup exposes the name of a usable connection and a
+// revocable reference for document jobs. Credential material never leaves Core.
+type TranslationProviderGroup struct {
+	GroupID      string
+	GroupName    string
+	ProviderName string
+	Snapshot     TranslationConfigSnapshot
+}
+
+var ErrTranslationProviderReferenceChanged = errors.New("translation provider group was removed or changed; create a new translation job")
+
+// ListTranslationProviderGroups returns only verified translation connections
+// owned by the user with either a stored secret or a known keyless provider.
+func ListTranslationProviderGroups(ctx context.Context, db *gorm.DB, userID string) ([]TranslationProviderGroup, error) {
+	if strings.TrimSpace(userID) == "" {
+		return []TranslationProviderGroup{}, nil
+	}
+	type row struct {
+		GroupID            string
+		GroupName          string
+		ProviderName       string
+		BaseURL            string
+		CredentialRevision int64
+		APIKey             string
+		APIKeyCiphertext   string
+	}
+	var rows []row
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("g.id AS group_id, g.name AS group_name, p.name AS provider_name, g.base_url, "+
+			"g.credential_revision, g.api_key, g.api_key_ciphertext").
+		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
+		Where("g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? AND p.category = ?", userID, true, "translation").
+		Order("p.name ASC, g.name ASC, g.id ASC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]TranslationProviderGroup, 0, len(rows))
+	for _, item := range rows {
+		apiKey, resolveErr := modelprovider.ResolveAPIKey(item.APIKey, item.APIKeyCiphertext)
+		if resolveErr != nil {
+			// A damaged credential makes only this connection unavailable.
+			continue
+		}
+		if strings.TrimSpace(apiKey) == "" && !isKeylessTranslationProvider(item.ProviderName) {
+			continue
+		}
+		groups = append(groups, TranslationProviderGroup{
+			GroupID: item.GroupID, GroupName: item.GroupName, ProviderName: item.ProviderName,
+			Snapshot: TranslationConfigSnapshot{GroupID: item.GroupID, CredentialRevision: item.CredentialRevision,
+				ProviderName: item.ProviderName, BaseURLHash: translationEndpointHash(item.BaseURL)},
+		})
+	}
+	return groups, nil
+}
+
+func LoadTranslationConfigSnapshot(ctx context.Context, db *gorm.DB, userID string) (*TranslationConfigSnapshot, error) {
+	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "translation", false)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	if strings.TrimSpace(row.APIKey) == "" && !isKeylessTranslationProvider(row.ProviderName) {
+		return nil, nil
+	}
+	return &TranslationConfigSnapshot{GroupID: row.GroupID, CredentialRevision: row.CredentialRevision,
+		ProviderName: row.ProviderName, BaseURLHash: translationEndpointHash(row.BaseURL)}, nil
+}
+
+func (snapshot TranslationConfigSnapshot) CacheIdentity() string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d", snapshot.ProviderName, snapshot.BaseURLHash, snapshot.GroupID, snapshot.CredentialRevision)
+}
+
+func translationEndpointHash(endpoint string) string {
+	sum := sha256.Sum256([]byte(endpoint))
+	return fmt.Sprintf("%x", sum)
+}
+
+// ResolveTranslationConfigSnapshot loads the exact captured group without
+// consulting the user's current selection. Deleted or revised credentials are
+// unusable by queued jobs, even if their old payloads remain in the database.
+func ResolveTranslationConfigSnapshot(ctx context.Context, db *gorm.DB, userID string, snapshot TranslationConfigSnapshot) (TranslationConfig, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(snapshot.GroupID) == "" {
+		return TranslationConfig{}, fmt.Errorf("%w: provider reference is incomplete", ErrTranslationProviderReferenceChanged)
+	}
+	var row selectedProviderConfig
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("p.name AS provider_name, g.base_url, g.id AS group_id, g.credential_revision, g.api_key, g.api_key_ciphertext").
+		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
+		Where("g.id = ? AND g.create_user_id = ? AND g.deleted_at IS NULL AND p.category = ?", snapshot.GroupID, userID, "translation").
+		Limit(1).Scan(&row).Error
+	if err != nil {
+		return TranslationConfig{}, err
+	}
+	if row.GroupID == "" || row.ProviderName != snapshot.ProviderName || translationEndpointHash(row.BaseURL) != snapshot.BaseURLHash ||
+		row.CredentialRevision != snapshot.CredentialRevision {
+		return TranslationConfig{}, ErrTranslationProviderReferenceChanged
+	}
+	apiKey, err := modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	if err != nil {
+		return TranslationConfig{}, err
+	}
+	if strings.TrimSpace(apiKey) == "" && !isKeylessTranslationProvider(snapshot.ProviderName) {
+		return TranslationConfig{}, fmt.Errorf("%w: credential is unavailable", ErrTranslationProviderReferenceChanged)
+	}
+	return TranslationConfig{ProviderName: snapshot.ProviderName, BaseURL: row.BaseURL, APIKey: apiKey}, nil
+}
+
 func LoadTranslationConfig(ctx context.Context, db *gorm.DB, userID string) (*TranslationConfig, error) {
 	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "translation", false)
 	if err != nil || row == nil {
 		return nil, err
 	}
-	if strings.TrimSpace(row.APIKey) == "" {
+	if strings.TrimSpace(row.APIKey) == "" && !isKeylessTranslationProvider(row.ProviderName) {
 		return nil, nil
 	}
 	return &TranslationConfig{ProviderName: row.ProviderName, BaseURL: row.BaseURL, APIKey: row.APIKey}, nil
+}
+
+// IsTranslationProviderAvailable defines the translators exposed in this release.
+// Paused providers retain their saved credentials and implementations for restoration.
+func IsTranslationProviderAvailable(name string) bool {
+	return modelprovider.IsTranslationProviderAvailable(name)
+}
+
+// Only built-in, fixed-endpoint translators may be selected without a secret.
+func isKeylessTranslationProvider(name string) bool {
+	return modelprovider.IsKeylessTranslationProvider(name)
 }
 
 func loadSelectedProviderConfig(
@@ -721,7 +912,7 @@ func loadSelectedProviderConfig(
 	q := db.WithContext(ctx).Table("user_selected_providers usp").
 		Select(
 			"p.name AS provider_name, "+
-				"g.base_url, "+
+				"g.base_url, g.id AS group_id, g.credential_revision, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins("JOIN user_model_provider_groups g ON g.id = usp.user_model_provider_group_id AND g.deleted_at IS NULL").
@@ -766,11 +957,13 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("g.id AS runtime_group_id, m.provider_name, m.name AS model_name, g.base_url, g.api_key, g.api_key_ciphertext").
+		Select("g.id AS runtime_group_id, m.user_model_provider_id AS runtime_provider_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
-				"g.deleted_at IS NULL",
+				"g.create_user_id = m.create_user_id AND "+
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL AND g.is_verified = ?", true,
 		).
 		Where("m.model_type IN ? AND m.is_default = ? AND m.deleted_at IS NULL", []string{"embed", "cross_modal_embed"}, true).
 		Order("m.created_at ASC").
@@ -782,26 +975,149 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	if row.ProviderName == "" && row.ModelName == "" {
 		return nil, nil
 	}
-	row.BaseURL, row.APIKey, err = modelprovider.ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID)
-	if err != nil {
+	rows := []SelectedRuntimeModel{row}
+	populateRuntimeIdentities(ctx, db, rows)
+	if err := decryptRuntimeModels(ctx, db, rows); err != nil {
 		return nil, err
 	}
-	cfg := map[string]any{
-		"source":   modelprovider.LazyLLMSource(row.ProviderName),
-		"model":    row.ModelName,
-		"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
-		"api_key":  row.APIKey,
-	}
+	rows[0].ModelType = "embed_main"
+	config := BuildLLMConfig(rows)
+	cfg, _ := config["embed_main"].(map[string]any)
+
 	return cfg, nil
 }
 
-func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
-	for i := range rows {
-		baseURL, apiKey, err := modelprovider.ResolveProviderRuntimeCredential(ctx, db, rows[i].RuntimeGroupID)
-		if err != nil {
-			return err
+// populateRuntimeIdentities enriches selected rows with the immutable catalog
+// identity used by local runtime adapters. Older installations and focused
+// test databases may not have the provider catalog tables yet; in that case
+// the existing protocol/provider name remains the compatibility fallback.
+func populateRuntimeIdentities(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) {
+	if db == nil || len(rows) == 0 ||
+		!db.Migrator().HasTable(&orm.UserModelProvider{}) ||
+		!db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		id := strings.TrimSpace(row.RuntimeProviderID)
+		if id == "" {
+			continue
 		}
-		rows[i].BaseURL, rows[i].APIKey = baseURL, apiKey
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var providers []struct {
+		ID                     string `gorm:"column:id"`
+		DefaultModelProviderID string `gorm:"column:default_model_provider_id"`
+	}
+	if err := db.WithContext(ctx).
+		Table("user_model_providers").
+		Select("id, default_model_provider_id").
+		Where("id IN ? AND deleted_at IS NULL", ids).
+		Find(&providers).Error; err != nil {
+		return
+	}
+	defaultIDs := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		if id := strings.TrimSpace(provider.DefaultModelProviderID); id != "" {
+			defaultIDs = append(defaultIDs, id)
+		}
+	}
+	if len(defaultIDs) == 0 {
+		return
+	}
+	var templates []struct {
+		ID   string `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := db.WithContext(ctx).
+		Table("default_model_providers").
+		Select("id, name").
+		Where("id IN ? AND deleted_at IS NULL", defaultIDs).
+		Find(&templates).Error; err != nil {
+		return
+	}
+	nameByID := make(map[string]string, len(templates))
+	for _, template := range templates {
+		nameByID[template.ID] = strings.TrimSpace(template.Name)
+	}
+	identityByProvider := make(map[string]string, len(providers))
+	for _, provider := range providers {
+		if identity := nameByID[provider.DefaultModelProviderID]; identity != "" {
+			identityByProvider[provider.ID] = identity
+		}
+	}
+	for i := range rows {
+		if identity := identityByProvider[strings.TrimSpace(rows[i].RuntimeProviderID)]; identity != "" {
+			rows[i].RuntimeIdentity = identity
+		}
+	}
+}
+
+func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
+	return decryptRuntimeModelsWithCache(ctx, db, rows, runtimeCredentials{})
+}
+
+// decryptRuntimeModelsWithCache resolves the provider runtime once per group
+// revision while retaining the advanced request settings used by legacy
+// providers. The cache is an optimization; an empty cache keeps old callers
+// fully compatible.
+func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel, credentials runtimeCredentials) error {
+	for i := range rows {
+		groupID := strings.TrimSpace(rows[i].RuntimeGroupID)
+		if groupID == "" {
+			groupID = strings.TrimSpace(rows[i].ProviderGroupID)
+		}
+		if credentials != nil && groupID != "" {
+			key := runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}
+			if cached, ok := credentials[key]; ok &&
+				(cached.err != nil || strings.TrimSpace(cached.key) != "" || strings.TrimSpace(cached.baseURL) != "") {
+				if cached.err != nil {
+					return cached.err
+				}
+				rows[i].APIKey = cached.key
+				if strings.TrimSpace(cached.baseURL) != "" {
+					rows[i].BaseURL = cached.baseURL
+				}
+				rows[i].SkipAuth = strings.TrimSpace(cached.key) == "" && strings.TrimSpace(rows[i].BaseURL) != ""
+				continue
+			}
+		}
+		resolvedKey, resolveErr := credentials.resolve(groupID, rows[i].CredentialRevision, rows[i].APIKey, rows[i].APIKeyCiphertext)
+		runtimeConfig, runtimeErr := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, groupID)
+		if runtimeErr == nil {
+			rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
+			rows[i].RequestAdvanced = runtimeConfig.Advanced
+			rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
+			if groupID != "" && credentials != nil {
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL}
+			}
+			continue
+		}
+		// A legacy envelope can be valid even when the group row predates the
+		// current credential-version column. Preserve that key and the stored
+		// endpoint instead of rejecting the whole role.
+		if resolveErr == nil && strings.TrimSpace(resolvedKey) != "" &&
+			!errors.Is(runtimeErr, modelprovider.ErrProviderKeyDisabled) &&
+			!errors.Is(runtimeErr, modelprovider.ErrProviderKeyUnverified) {
+			rows[i].APIKey = resolvedKey
+			rows[i].SkipAuth = strings.TrimSpace(resolvedKey) == "" && strings.TrimSpace(rows[i].BaseURL) != ""
+			if groupID != "" && credentials != nil {
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: resolvedKey, baseURL: rows[i].BaseURL}
+			}
+			continue
+		}
+		if runtimeErr != nil {
+			return runtimeErr
+		}
+		return resolveErr
 	}
 	return nil
 }
@@ -809,6 +1125,9 @@ func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRunti
 func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 	eligible := rows[:0]
 	for _, row := range rows {
+		if !runtimeModelAdapterAvailable(row) {
+			continue
+		}
 		// Ignore retired metadata selections, including their stored credentials.
 		if strings.EqualFold(strings.TrimSpace(row.ModelType), "conversation_metadata") {
 			continue
@@ -826,6 +1145,9 @@ func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	out := map[string]any{}
 	for _, row := range rows {
+		if !runtimeModelAdapterAvailable(row) {
+			continue
+		}
 		role := strings.ToLower(strings.TrimSpace(row.ModelType))
 		baseURL := modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL)
 		cfg := map[string]any{
@@ -834,9 +1156,42 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": baseURL,
 			"api_key":  row.APIKey,
 		}
-		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
+		if row.SkipAuth && strings.TrimSpace(row.APIKey) == "" {
+			cfg["skip_auth"] = true
+		}
+		settings, err := modelsettings.Decode(row.ModelSettings)
+		if err != nil {
+			continue
+		}
+		technical := row.TechnicalModelType
+		if technical == "" {
+			technical = role
+		}
+		// A legacy dedicated vision binding is itself an explicit vision choice.
+		// Saved feature overrides still take precedence over that old binding.
+		legacyVision := row.Vision || role == "vlm" && isChatTechnicalType(technical)
+		features := modelsettings.Effective(settings, legacyVision, technical)
+		if role == "vlm" && (features.Vision == nil || !*features.Vision) {
+			continue
+		}
+		cfg["vision"] = features.Vision != nil && *features.Vision
+		if technical == "llm" || technical == "vlm" || role == "llm" || role == "vlm" || role == "evo_llm" {
+			cfg["features"] = features
+		}
+		if settings.Embedding != nil {
+			cfg["embedding"] = settings.Embedding
+		}
+		if !row.RequestAdvanced.Empty() {
+			cfg["request_advanced"] = row.RequestAdvanced
+		}
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
+		}
+		if row.InputTokenLimit != nil && strings.TrimSpace(*row.InputTokenLimit) != "" {
+			cfg["input_token_limit"] = *row.InputTokenLimit
+		}
+		if row.MaxOutputTokens != nil && strings.TrimSpace(*row.MaxOutputTokens) != "" {
+			cfg["max_output_tokens"] = *row.MaxOutputTokens
 		}
 		if role == modelprovider.EvoModelKey {
 			descriptor, ok := openCodeDescriptor(row)
@@ -853,7 +1208,28 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	return out
 }
 
+func runtimeModelAdapterAvailable(row SelectedRuntimeModel) bool {
+	technical := strings.TrimSpace(row.TechnicalModelType)
+	if technical == "" {
+		// Stored selections carry a group ID and their actual technical type.
+		// A role binding must never classify an unclassified saved model.
+		if strings.TrimSpace(row.RuntimeGroupID) != "" {
+			return false
+		}
+		technical = row.ModelType
+	}
+	identity := strings.TrimSpace(row.RuntimeIdentity)
+	if identity == "" {
+		identity = row.ProviderName
+	}
+	return modelprovider.RuntimeSupportsModelType(identity, technical)
+}
+
 func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {
+	features := modelprovider.EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: row.TechnicalModelType, Vision: row.Vision, ModelSettings: row.ModelSettings})
+	if features.ToolCalling != nil && !*features.ToolCalling {
+		return modelprovider.OpenCodeModelDescriptor{}, false
+	}
 	return modelprovider.ResolveOpenCodeModel(
 		row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType, row.IsDefault,
 	)
@@ -937,4 +1313,9 @@ func APIKeyState(value any) string {
 		return "empty"
 	}
 	return "set"
+}
+
+func isChatTechnicalType(technical string) bool {
+	technical = strings.ToLower(strings.TrimSpace(technical))
+	return technical == "llm" || technical == "vlm"
 }

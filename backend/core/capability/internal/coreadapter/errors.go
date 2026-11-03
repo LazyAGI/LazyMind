@@ -52,6 +52,8 @@ func mapDatasetError(operation string, err error) error {
 	var serviceErr *doc.DatasetServiceError
 	if errors.As(err, &serviceErr) {
 		switch serviceErr.Code {
+		case "UNSUPPORTED_FORMAT", "CONFLICT", "SOURCE_CHANGED", "FILE_NOT_FOUND", "FILE_NOT_ACCESSIBLE":
+			return capability.NewError(capability.ErrorCode(serviceErr.Code), operation, serviceErr.Message, false, err)
 		case doc.DatasetServiceInvalidArgument:
 			return capability.NewError(capability.InvalidArgument, operation, serviceErr.Message, false, err)
 		case doc.DatasetServiceNotFound, doc.DatasetServiceForbidden:

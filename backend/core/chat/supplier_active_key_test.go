@@ -10,7 +10,7 @@ import (
 )
 
 func TestChatBuilderUsesSingleSupplierKeyFromAnotherConnection(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatModelTestDB(t).DB
 	seedAvailableChatModel(t, db, "owner", "supplier", "models", "chat", "OpenAI", "Models", "gpt-4o-mini", "llm", true, "inactive-model-key")
 	group := orm.UserModelProviderGroup{ID: "keys", UserModelProviderID: "supplier", Name: "Saved keys", APIKey: "enabled-key\nunused-key", IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}}
 	if err := db.Create(&group).Error; err != nil {

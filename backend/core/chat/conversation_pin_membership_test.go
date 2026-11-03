@@ -10,7 +10,7 @@ import (
 func TestConversationPinLeavesOrdinaryGroupWithoutChangingActivity(t *testing.T) {
 	for _, kind := range []string{"group", "project"} {
 		t.Run(kind, func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newConversationTestDB(t).DB
 			before := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 			conversation := orm.Conversation{ID: "member", BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: before, UpdatedAt: before}}
 			group := orm.ConversationGroup{ID: "group", UserID: "u1", Kind: kind, Name: "Group", NormalizedName: "group"}

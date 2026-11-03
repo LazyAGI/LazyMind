@@ -11,10 +11,14 @@ import (
 	"lazymind/core/log"
 )
 
-// Chat has native DOCX/PPTX readers, unlike the knowledge-base ingestion pipeline.
+// PPTX stays native in Chat; on-demand pptx_analyzer owns content inspection.
+// Chat also has a native DOCX reader, unlike the knowledge-base ingestion pipeline.
 // Preserve converted PDFs when available, but do not require an Office service
 // merely to read an attachment on desktop.
 func resolveChatAttachmentPath(ctx context.Context, path string, ocrConfig map[string]any) (string, error) {
+	if strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".pptx") {
+		return path, nil
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
 		switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
 		case ".docx", ".pptx":

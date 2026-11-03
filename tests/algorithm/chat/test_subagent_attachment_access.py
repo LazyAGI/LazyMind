@@ -162,10 +162,9 @@ def test_subagent_plan_renders_inherited_attachments_without_exposing_internal_p
 
 
 def test_subagent_registers_attachment_tools_as_one_conditional_group():
-    attachment_configs = [
-        *runner.USER_ATTACHMENT_TOOL_CONFIGS,
-        runner.ATTACHMENT_EDIT_TOOL_CONFIG,
-    ]
+    attachment_configs = runner._resolve_attachment_configs(
+        {'files': ['/uploads/current.txt']}, 'document_edit', {},
+    )
 
     without_attachments = {
         tool.__name__ for tool in runner._build_subagent_tools([])

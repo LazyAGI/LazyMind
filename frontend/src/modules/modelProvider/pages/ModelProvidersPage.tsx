@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AutoComplete,
   Button,
-  Checkbox,
   Form,
   Input,
   Modal,
@@ -33,6 +32,7 @@ import {
 import { RightOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   cancelCredentialRestore,
+  addGroupModels,
   getCredentialBackupStatus,
   getCredentialRestoreDiscovery,
   getCredentialRestoreOperation,
@@ -42,7 +42,7 @@ import {
   startCredentialRestore,
   listRemoteGroupModels,
   unwrapModelProviderData,
-  updateGroupModelMaxInputTokens,
+  updateGroupModel,
   withModelProviderJsonOptions,
   type CredentialRestoreRecord,
   type RemoteGroupModel,
@@ -60,11 +60,22 @@ import type {
 import { getProviderLogoUrl } from "../providerBranding";
 import {
   LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
-  isLlmChatCapability,
   parseLlmMaxInputTokens,
-  resolveLlmMaxInputTokens,
 } from "../maxInputTokens";
 import { ProviderWorkspace } from "../components/ProviderWorkspace";
+import { ProviderModelCatalogDrawer, type CatalogModelChoice } from "../components/ProviderModelCatalogDrawer";
+import { sortCustomModelsFirst } from "../modelOrdering";
+import { getModelTaskType } from "../modelTaskTypes";
+import { ModelTypeIcon } from "../components/ModelTypeBadge";
+import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRuntimeModelType, supportsModelContext, supportsStoredModelContext } from "../modelCapabilities";
+import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
+import { canDiscoverWithoutApiKey } from "../providerAuthentication";
+import { getProviderConnectionFailureMessage } from "../connectionFailure";
+import { getProviderDisplayName } from "../providerDisplayNames";
+import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
+import { ModelFeaturesEditor } from "../components/ModelFeaturesEditor";
+import { EmbeddingOptionsEditor } from "../components/EmbeddingOptionsEditor";
+import { editableModelSettings, isModelFeatureEnabled, type EmbeddingEditorValues, type ModelSettings } from "../modelSettings";
 import "../index.scss";
 
 export type ModelCapability =
@@ -78,9 +89,19 @@ export type ModelCapability =
   | "TEXT_TO_VIDEO"
   | "MULTIMODAL_EMBEDDING"
   | "IMAGE_EDITING"
-  | "LLM_SELF_EVOLUTION";
+  | "LLM_SELF_EVOLUTION"
+  | "UNKNOWN";
+
+export function getSelectableModelCapabilities(
+  capabilities: readonly ModelCapability[],
+  protocol?: string,
+  providerIdentity?: string,
+): ModelCapability[] {
+  return getSelectableCapabilities(capabilities, protocol, providerIdentity);
+}
 
 export interface ProviderModel {
+  modelSettings?: ModelSettings;
   vision?: boolean;
   id: string;
   name: string;
@@ -88,13 +109,19 @@ export interface ProviderModel {
   builtIn: boolean;
   enabled: boolean;
   maxInputTokens?: string;
+  inputTokenLimit?: string;
+  maxOutputTokens?: string;
 }
 
 export interface ProviderOption {
   id: string;
   name: string;
+  logoDataUrl?: string;
+  brandKey?: string;
+  serviceKey?: string;
   isCustom?: boolean;
   protocolName?: string;
+  runtimeIdentity?: string;
   brand: string;
   logoUrl?: string;
   headline: string;
@@ -113,6 +140,7 @@ export interface ProviderConnectionGroup {
   apiKeyConfigured: boolean;
   verified: boolean;
   models: ProviderModel[];
+  modelCount?: number;
   keys: Array<{ id: string; masked: string; enabled?: boolean }>;
 }
 
@@ -131,11 +159,8 @@ interface EditModelWindowModalState {
   model: ProviderModel;
 }
 
-interface EditModelWindowFormValues {
-  maxInputTokens: string;
-}
-
-interface CustomModelFormValues {
+interface CustomModelFormValues extends EmbeddingEditorValues {
+  modelSettings?: ModelSettings;
   vision?: boolean;
   providerId: string;
   groupId: string;
@@ -145,6 +170,7 @@ interface CustomModelFormValues {
 }
 
 const capabilityLabelKeys: Record<ModelCapability, string> = {
+  UNKNOWN: "modelProvider.taskType.unknown",
   LLM_CHAT: "modelProvider.capability.llmChat",
   EMBEDDING: "modelProvider.capability.embedding",
   VLM: "modelProvider.capability.vlm",
@@ -158,52 +184,6 @@ const capabilityLabelKeys: Record<ModelCapability, string> = {
   LLM_SELF_EVOLUTION: "modelProvider.capability.selfEvolution",
 };
 
-// SenseNova base URL values and new-platform defaults.
-const SENSENOVA_NEW_BASE_URL = "https://token.sensenova.cn/v1/";
-
-const SENSENOVA_DEFAULT_VERIFY_MODEL = "sensenova-6.8-flash-lite";
-
-function isSensenovaProvider(
-  provider?: Pick<ProviderOption, "source" | "name"> | null,
-): boolean {
-  if (!provider) return false;
-  return (
-    provider.source === "sensenova" ||
-    provider.name?.toLowerCase() === "sensenova"
-  );
-}
-
-export function isOpenAIProvider(
-  provider?: Pick<ProviderOption, "source" | "name"> | null,
-): boolean {
-  if (!provider) return false;
-  return normalizeProviderKey(provider.source || provider.name) === "openai";
-}
-
-export function hasOpenAIRequestPath(
-  provider: Pick<ProviderOption, "source" | "name"> | null | undefined,
-  baseUrl?: string,
-): boolean {
-  if (!isOpenAIProvider(provider) || !baseUrl) return false;
-
-  try {
-    const segments = new URL(baseUrl).pathname.split("/").filter(Boolean);
-    const v1Index = segments.findIndex(
-      (segment) => segment.toLowerCase() === "v1",
-    );
-    return v1Index >= 0 && v1Index < segments.length - 1;
-  } catch {
-    return false;
-  }
-}
-
-function isSensenovaNewBaseUrl(url?: string): boolean {
-  return (
-    normalizeBaseUrlForCompare(url) ===
-    normalizeBaseUrlForCompare(SENSENOVA_NEW_BASE_URL)
-  );
-}
-
 function createConnectionGroup(
   provider: ProviderOption,
   overrides: Partial<ProviderConnectionGroup> = {},
@@ -216,6 +196,7 @@ function createConnectionGroup(
     apiKeyConfigured: overrides.apiKeyConfigured ?? false,
     verified: overrides.verified ?? false,
     models: overrides.models || provider.models.map((model) => ({ ...model })),
+    modelCount: overrides.modelCount ?? overrides.models?.length ?? provider.models.length,
     keys: overrides.keys || [],
   };
 }
@@ -233,7 +214,8 @@ enum ModelProviderModelType {
   ImageEditing = "image_editing",
 }
 
-const modelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
+const modelTypeByCapability: Record<ModelCapability, string> = {
+  UNKNOWN: "",
   EMBEDDING: ModelProviderModelType.Embedding,
   VLM: ModelProviderModelType.VLM,
   RERANK: ModelProviderModelType.Rerank,
@@ -273,8 +255,12 @@ function getProviderBrand(name: string) {
 }
 
 export function mapModelTypeToCapability(modelType?: string): ModelCapability {
-  const normalized = (modelType || "").trim().toLowerCase();
-  if (normalized === ModelProviderModelType.MultimodalEmbedding)
+  const normalized = normalizeRuntimeModelType(modelType || "");
+  if (
+    normalized === ModelProviderModelType.MultimodalEmbedding ||
+    normalized === "cross_modal_embed" ||
+    normalized === "embed_image"
+  )
     return "MULTIMODAL_EMBEDDING";
   if (
     normalized === ModelProviderModelType.Embedding ||
@@ -295,7 +281,7 @@ export function mapModelTypeToCapability(modelType?: string): ModelCapability {
     normalized.includes("vision")
   )
     return "VLM";
-  return "LLM_CHAT";
+  return normalized === "llm" ? "LLM_CHAT" : "UNKNOWN";
 }
 
 const createModelProviderFallbacks = (
@@ -352,8 +338,12 @@ function getLocalizedProviderDescription(
 interface ApiProvider {
   id: string;
   name: string;
+  logo_data_url?: string;
+  brand_key?: string;
+  service_key?: string;
   is_custom?: boolean;
   protocol_name?: string;
+  runtime_identity?: string;
   description?: string;
   base_url?: string;
 }
@@ -363,6 +353,7 @@ interface ApiGroup {
   name: string;
   base_url?: string;
   has_api_key?: boolean;
+  model_count?: number;
   is_verified?: boolean;
   user_model_provider_id: string;
   keys?: Array<{ id: string; masked: string; enabled?: boolean }>;
@@ -371,6 +362,7 @@ interface ApiGroup {
 interface CheckModelProviderResult {
   success: boolean;
   message?: string;
+  reason?: string;
 }
 
 export function resolveSavedProviderGroupVerified(group: {
@@ -384,12 +376,16 @@ export function resolveSavedProviderGroupVerified(group: {
 }
 
 interface ApiModel {
+  model_settings?: ModelSettings;
   vision?: boolean;
   id: string;
   name: string;
   model_type?: string;
   is_default?: boolean;
   max_input_tokens?: string;
+  input_token_limit?: string | null;
+  max_output_tokens?: string | null;
+  enabled?: boolean;
 }
 
 function mapApiProvider(
@@ -401,10 +397,14 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
+    logoDataUrl: provider.logo_data_url || undefined,
+    brandKey: provider.brand_key,
+    serviceKey: provider.service_key,
     isCustom: provider.is_custom === true,
     protocolName: provider.protocol_name || provider.name,
-    brand: provider.is_custom ? "API" : getProviderBrand(provider.protocol_name || provider.name),
-    logoUrl: getProviderLogoUrl(provider.protocol_name || provider.name, provider.is_custom),
+    runtimeIdentity: provider.runtime_identity,
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.brand_key || provider.name || provider.protocol_name || ""),
+    logoUrl: getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
@@ -444,21 +444,25 @@ function mapApiGroup(
       ? (group as ApiGroup).base_url || provider.baseUrl
       : (group as ProviderConnectionGroup).baseUrl || provider.baseUrl,
     keys: group.keys || [],
+    modelCount: isApiGroup ? (group as ApiGroup).model_count : (group as ProviderConnectionGroup).modelCount,
     apiKeyConfigured: isApiGroup
       ? Boolean((group as ApiGroup).has_api_key)
       : (group as ProviderConnectionGroup).apiKeyConfigured,
     verified: isApiGroup
       ? Boolean((group as ApiGroup).is_verified)
       : (group as ProviderConnectionGroup).verified,
-    models: models.map((model) => ({
+    models: sortCustomModelsFirst(models.map((model) => ({
       id: model.id,
       name: model.name,
       capability: mapModelTypeToCapability(model.model_type),
       vision: model.vision,
+      modelSettings: model.model_settings,
       builtIn: Boolean(model.is_default),
-      enabled: true,
+      enabled: model.enabled !== false,
       maxInputTokens: model.max_input_tokens,
-    })),
+      inputTokenLimit: model.input_token_limit || undefined,
+      maxOutputTokens: model.max_output_tokens || undefined,
+    }))),
   });
 }
 
@@ -468,23 +472,6 @@ function normalizeModelName(value: string) {
 
 function normalizeFormText(value?: string) {
   return value?.trim() || "";
-}
-
-function normalizeBaseUrlForCompare(value?: string) {
-  const normalized = normalizeFormText(value).replace(/\/+$/, "");
-  return normalized === "https://token.sensenova.cn/v1/chat/completions"
-    ? "https://token.sensenova.cn/v1"
-    : normalized;
-}
-
-function isDefaultProviderBaseUrl(
-  provider: Pick<ProviderOption, "baseUrl">,
-  baseUrl?: string,
-) {
-  return (
-    normalizeBaseUrlForCompare(baseUrl) ===
-    normalizeBaseUrlForCompare(provider.baseUrl)
-  );
 }
 
 function getCredentialRestoreFailureCode(error: unknown) {
@@ -498,23 +485,6 @@ function getCredentialRestoreFailureCode(error: unknown) {
   if (!data || typeof data !== "object" || !("reason_code" in data))
     return undefined;
   return String((data as { reason_code?: unknown }).reason_code || "");
-}
-
-export function shouldRedirectCustomBaseUrlToOpenAI(
-  provider: Pick<ProviderOption, "source" | "name" | "baseUrl">,
-  previousBaseUrl: string | undefined,
-  nextBaseUrl: string | undefined,
-) {
-  if (
-    isOpenAIProvider(provider) ||
-    normalizeBaseUrlForCompare(previousBaseUrl) ===
-      normalizeBaseUrlForCompare(nextBaseUrl) ||
-    isDefaultProviderBaseUrl(provider, nextBaseUrl)
-  ) {
-    return false;
-  }
-  // SenseNova's Token Plan endpoint is an official preset, not a private deployment.
-  return !isSensenovaProvider(provider) || !isSensenovaNewBaseUrl(nextBaseUrl);
 }
 
 interface ModelProviderPageProps {
@@ -534,7 +504,6 @@ export default function ModelProviderPage({
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [customModelForm] = Form.useForm<CustomModelFormValues>();
-  const [editModelWindowForm] = Form.useForm<EditModelWindowFormValues>();
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>(
@@ -544,8 +513,17 @@ export default function ModelProviderPage({
     useState<CustomModelModalState | null>(null);
   const [editModelWindowModal, setEditModelWindowModal] =
     useState<EditModelWindowModalState | null>(null);
+  const [customModelSaving, setCustomModelSaving] = useState(false);
+  const customModelSavePending = useRef(false);
+  const remoteModelRequest = useRef(0);
+  const groupModelVersions = useRef<Record<string, number>>({});
+  const modelDeleteRequests = useRef(new Map<string, Promise<boolean>>());
+  const [modelsError, setModelsError] = useState<Record<string, string>>({});
   const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
+  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string; remoteModels?: RemoteGroupModel[]; discoveryError?: string } | null>(null);
+  const keyDiscoveryRequests = useRef(new Set<string>());
+  const [discoveringGroupIds, setDiscoveringGroupIds] = useState<Record<string, boolean>>({});
   const [contextWindowMode, setContextWindowMode] = useState<"auto" | "manual">(
     "auto",
   );
@@ -589,6 +567,7 @@ export default function ModelProviderPage({
   const [contextWindowExpanded, setContextWindowExpanded] = useState(false);
   const watchedCustomCapability = Form.useWatch("capability", customModelForm);
   const cloudCatalogRequestIdRef = useRef(0);
+  const providerLoadRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const addedProviderListRef = useRef<AddedProvider[]>([]);
   addedProviderListRef.current = addedProviderList;
@@ -604,10 +583,7 @@ export default function ModelProviderPage({
   const customModelDraft = useSettingsFormDraft(
     customModelForm,
     Boolean(customModelModal),
-  );
-  const modelWindowDraft = useSettingsFormDraft(
-    editModelWindowForm,
-    Boolean(editModelWindowModal),
+    customModelSaving,
   );
   const loadCloudSystemProvider = useCallback(async () => {
     const requestId = ++cloudCatalogRequestIdRef.current;
@@ -753,30 +729,27 @@ export default function ModelProviderPage({
   );
 
   const loadModelProviders = useCallback(async () => {
+    const requestId = ++providerLoadRequestIdRef.current;
+    const isCurrent = () => requestId === providerLoadRequestIdRef.current;
     const isFirstLoad = !initialProvidersLoadedRef.current;
     if (isFirstLoad) {
       setLoading(true);
     }
     try {
       const providers = await fetchProviderOptions();
+      // A newer refresh owns the result; superseded requests are not failures.
+      if (!isCurrent()) return true;
       setProviderOptions(providers);
 
       const withGroupsResponse =
         await modelProvidersApi.apiCoreModelProvidersWithGroupsGet();
+      if (!isCurrent()) return true;
       const withGroupsData = unwrapModelProviderData<{
         providers?: ApiProvider[];
       }>(withGroupsResponse.data);
       const addedIds = new Set(
         (withGroupsData.providers || []).map((provider) => provider.id),
       );
-      const previousModelsByGroupId = new Map<string, ProviderModel[]>();
-      for (const item of addedProviderListRef.current) {
-        for (const group of item.groups) {
-          if (group.models.length) {
-            previousModelsByGroupId.set(group.id, group.models);
-          }
-        }
-      }
       const addedProviders = await Promise.all(
         providers
           .filter((provider) => addedIds.has(provider.id))
@@ -791,41 +764,47 @@ export default function ModelProviderPage({
               groupResponse.data,
             );
             const groups = (groupData.groups || []).map((group) =>
-              mapApiGroup(
-                provider,
-                group,
-                previousModelsByGroupId.get(group.id) || [],
-              ),
+              mapApiGroup(provider, group, []),
             );
             return { ...provider, groups };
           }),
       );
 
-      setAddedProviderList(addedProviders);
+      if (!isCurrent()) return true;
+      setAddedProviderList((current) => {
+        if (!isCurrent()) return current;
+        const cachedModels = new Map(
+          current.flatMap((item) =>
+            item.groups.map((group) => [group.id, group.models] as const),
+          ),
+        );
+        return addedProviders.map((item) => ({
+          ...item,
+          groups: item.groups.map((group) => ({
+            ...group,
+            models: cachedModels.get(group.id) || [],
+          })),
+        }));
+      });
       setLoadError(false);
       return true;
     } catch (error) {
+      if (!isCurrent()) return true;
       setLoadError(true);
       return false;
     } finally {
-      initialProvidersLoadedRef.current = true;
-      setLoading(false);
+      if (isCurrent()) {
+        initialProvidersLoadedRef.current = true;
+        setLoading(false);
+      }
     }
   }, [fetchProviderOptions]);
 
   useEffect(() => {
     void loadModelProviders();
-    // Group models are fetched on expand. Re-running this on i18n identity
-    // changes (tab blur/focus) used to wipe them and show an empty list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!initialProvidersLoadedRef.current) {
-      return;
-    }
-    void fetchProviderOptions().then(setProviderOptions);
-  }, [currentLanguage, fetchProviderOptions]);
+    // Language refreshes share the metadata gate and retain cached group models.
+    return () => { providerLoadRequestIdRef.current += 1; };
+  }, [currentLanguage, loadModelProviders]);
 
   const loadCredentialBackup = useCallback(async (showLoading = true) => {
     if (showLoading) setCredentialBackupLoading(true);
@@ -1046,12 +1025,16 @@ export default function ModelProviderPage({
     };
   }, [credentialRestoreStatus.status, loadModelProviders]);
 
+  const [verificationEvent, setVerificationEvent] = useState<{ providerId: string; account: string | null; sequence: number }>();
+
   const verifyProviderGroup = async (
     provider: AddedProvider,
     group: ProviderConnectionGroup,
     apiKey: string,
+    isCurrent: () => boolean = () => true,
   ) => {
     const providerId = provider.id;
+    const verificationAccount = localStorage.getItem("lazymind:user");
     const groupId = group.id;
     const requestApiKey = normalizeFormText(apiKey);
     const verifyKey = `${providerId}:${groupId}`;
@@ -1068,19 +1051,6 @@ export default function ModelProviderPage({
         ...(requestApiKey ? { api_key: requestApiKey } : {}),
         dry_run: false,
       };
-      const representativeChatModel = group.models.find(
-        (model) => model.capability === "LLM_CHAT",
-      )?.name;
-      if (representativeChatModel) {
-        payload.model = representativeChatModel;
-      }
-      // The new SenseNova platform URL requires a model name for connectivity check.
-      if (
-        isSensenovaProvider(provider) &&
-        isSensenovaNewBaseUrl(group.baseUrl)
-      ) {
-        payload.model = SENSENOVA_DEFAULT_VERIFY_MODEL;
-      }
       const checkResponse =
         await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost(
           {
@@ -1089,7 +1059,7 @@ export default function ModelProviderPage({
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             checkModelProviderOpenAPIRequest: payload as any,
           },
-          { timeout: 3 * 60 * 1000 },
+          withModelProviderJsonOptions({ timeout: 3 * 60 * 1000, silentError: true }),
         );
       const checkResult = unwrapModelProviderData<CheckModelProviderResult>(
         checkResponse.data,
@@ -1113,18 +1083,19 @@ export default function ModelProviderPage({
         ),
       );
       if (isVerified) {
+        setVerificationEvent(current => ({ providerId, account: verificationAccount, sequence: (current?.sequence || 0) + 1 }));
         await loadModelProviders();
-        message.success(t("modelProvider.message.groupVerified"));
+        if (isCurrent()) message.success(t(checkResult?.reason === "credentials_recognized" ? "modelProvider.workspace.arkCredentialsRecognized" : "modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
         return true;
       }
-      message.error(localizeErrorCode("2000509"));
+      if (isCurrent()) message.error(getProviderConnectionFailureMessage(checkResult, t, localizeErrorCode("2000509")));
       void onConfigurationChanged?.();
     } catch (error) {
       // A failed upstream check may still have persisted an unverified state.
       await loadModelProviders();
       void onConfigurationChanged?.();
-      message.error(getLocalizedErrorMessage(error));
+      if (isCurrent()) message.error(getProviderConnectionFailureMessage(error, t));
     } finally {
       setVerifyingGroupIds((current) => {
         const next = { ...current };
@@ -1142,6 +1113,8 @@ export default function ModelProviderPage({
       return;
     }
 
+    const version = groupModelVersions.current[groupKey] || 0;
+    setModelsError((current) => { const next = { ...current }; delete next[groupKey]; return next; });
     setLoadingGroupModelIds((current) => ({ ...current, [groupKey]: true }));
     try {
       const modelResponse =
@@ -1154,6 +1127,7 @@ export default function ModelProviderPage({
       const modelData = unwrapModelProviderData<{ models?: ApiModel[] }>(
         modelResponse.data,
       );
+      if ((groupModelVersions.current[groupKey] || 0) !== version) return;
       const nextGroup = mapApiGroup(provider, group, modelData.models || []);
       setAddedProviderList((current) =>
         current.map((item) =>
@@ -1161,13 +1135,18 @@ export default function ModelProviderPage({
             ? {
                 ...item,
                 groups: item.groups.map((candidate) =>
-                  candidate.id === groupId ? nextGroup : candidate,
+                  candidate.id === groupId
+                    ? { ...candidate, models: nextGroup.models, modelCount: nextGroup.models.length }
+                    : candidate,
                 ),
               }
             : item,
         ),
       );
     } catch (error) {
+      if ((groupModelVersions.current[groupKey] || 0) === version) {
+        setModelsError((current) => ({ ...current, [groupKey]: getLocalizedErrorMessage(error) }));
+      }
     } finally {
       setLoadingGroupModelIds((current) => {
         const next = { ...current };
@@ -1191,44 +1170,56 @@ export default function ModelProviderPage({
     if (!provider || !group || remoteModelsLoading) {
       return;
     }
+    const request = ++remoteModelRequest.current;
     setRemoteModelsLoading(true);
     try {
       const data = await listRemoteGroupModels(provider.id, group.id);
-      setRemoteModels(data.models || []);
-    } catch {
-      setRemoteModels([]);
-      message.error(t("modelProvider.error.loadRemoteModelsFailed"));
+      if (remoteModelRequest.current === request) setRemoteModels(data.models || []);
+    } catch (error) {
+      if (remoteModelRequest.current === request) {
+        setRemoteModels([]);
+        message.error(getProviderConnectionFailureMessage(error, t));
+      }
     } finally {
-      setRemoteModelsLoading(false);
+      if (remoteModelRequest.current === request) setRemoteModelsLoading(false);
     }
   };
 
-  const appendGroupModel = (
+  const appendGroupModels = (
     providerId: string,
     groupId: string,
-    nextModel: ProviderModel,
+    nextModels: ProviderModel[],
+    totalCount?: number,
   ) => {
+    if (!nextModels.length) return;
+    const key = `${providerId}:${groupId}`;
+    groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
     setAddedProviderList((current) =>
       current.map((item) =>
         item.id === providerId
           ? {
               ...item,
-              groups: item.groups.map((candidate) =>
-                candidate.id === groupId
-                  ? { ...candidate, models: [...candidate.models, nextModel] }
-                  : candidate,
-              ),
+                groups: item.groups.map((candidate) => {
+                  if (candidate.id !== groupId) return candidate;
+                  const models = new Map(candidate.models.map((model) => [model.id, model]));
+                  const before = models.size;
+                  for (const model of nextModels) models.set(model.id, model);
+                  return { ...candidate, models: [...models.values()], modelCount: totalCount ?? Math.max(candidate.modelCount || 0, candidate.models.length) + models.size - before };
+                }),
             }
           : item,
       ),
     );
   };
 
+  const appendGroupModel = (providerId: string, groupId: string, model: ProviderModel) => appendGroupModels(providerId, groupId, [model]);
+
   const openCustomModelModal = (
     provider: AddedProvider,
     group: ProviderConnectionGroup,
-    fetchRemote = false,
   ) => {
+    remoteModelRequest.current += 1;
+    setRemoteModelsLoading(false);
     setContextWindowExpanded(false);
     setContextWindowMode("auto");
     setRemoteModels([]);
@@ -1236,23 +1227,177 @@ export default function ModelProviderPage({
     customModelForm.setFieldsValue({
       providerId: provider.id,
       groupId: group.id,
-      capability: provider.capabilities[0] || "LLM_CHAT",
+      capability: getSelectableModelCapabilities(provider.capabilities, provider.protocolName || provider.source, provider.runtimeIdentity || provider.name)[0] || "LLM_CHAT",
       name: "",
       maxInputTokens: undefined,
     });
     customModelDraft.captureSavedValues();
-    if (fetchRemote) {
-      setRemoteModelsLoading(true);
-      void listRemoteGroupModels(provider.id, group.id)
-        .then((data) => setRemoteModels(data.models || []))
-        .catch(() =>
-          message.error(t("modelProvider.error.loadRemoteModelsFailed")),
-        )
-        .finally(() => setRemoteModelsLoading(false));
+  };
+
+  const addCatalogModel = async (providerId: string, groupId: string, choice: CatalogModelChoice) => {
+    const currentProvider = addedProviderListRef.current.find((provider) => provider.id === providerId);
+    const currentGroup = currentProvider?.groups.find((group) => group.id === groupId);
+    if (!currentGroup) throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
+    if (choice.model_type && !isModelTypeSupportedByProtocol(choice.model_type, currentProvider?.protocolName || currentProvider?.source, currentProvider?.runtimeIdentity || currentProvider?.name))
+      throw new Error(t("modelProvider.catalog.unsupportedType"));
+    if (currentGroup.models.some((model) => normalizeModelName(model.name) === normalizeModelName(choice.name))) return;
+    const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
+      modelProviderId: providerId,
+      groupId,
+      addModelProviderGroupModelOpenAPIRequest: {
+        name: choice.name.trim(),
+        model_type: choice.model_type,
+        vision: choice.model_type === "llm" && choice.vision === true,
+        ...(choice.model_settings ? { model_settings: choice.model_settings } : {}),
+        ...(choice.max_input_tokens && supportsStoredModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
+      },
+    });
+    const created = unwrapModelProviderData<ApiModel>(response.data);
+    appendGroupModel(providerId, groupId, {
+      id: created.id,
+      name: created.name,
+      capability: mapModelTypeToCapability(created.model_type || choice.model_type),
+      builtIn: Boolean(created.is_default),
+      vision: created.vision,
+      modelSettings: created.model_settings,
+      enabled: true,
+      maxInputTokens: created.max_input_tokens || choice.max_input_tokens,
+    });
+  };
+
+  const addCatalogModels = async (providerId: string, groupId: string, choices: CatalogModelChoice[]) => {
+    let succeeded = 0;
+    let failed = 0;
+    for (let offset = 0; offset < choices.length; offset += 200) {
+      const batch = choices.slice(offset, offset + 200);
+      try {
+        const result = await addGroupModels(providerId, groupId, batch.map((choice) => ({
+          name: choice.name.trim(),
+          model_type: choice.model_type,
+          vision: choice.model_type === "llm" && choice.vision === true,
+          ...(choice.model_settings ? { model_settings: choice.model_settings } : {}),
+          ...(choice.max_input_tokens && supportsStoredModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
+        })));
+        const saved = result.models || [];
+        appendGroupModels(providerId, groupId, saved.map((model) => ({
+          id: model.id,
+          name: model.name,
+          capability: mapModelTypeToCapability(model.model_type),
+          builtIn: model.is_default,
+          vision: model.vision,
+          modelSettings: model.model_settings,
+          enabled: true,
+          maxInputTokens: model.max_input_tokens || undefined,
+          inputTokenLimit: model.input_token_limit || undefined,
+          maxOutputTokens: model.max_output_tokens || undefined,
+        })), result.total_count);
+        succeeded += saved.length;
+        failed += result.failures?.length || 0;
+      } catch {
+        failed += batch.length;
+      }
+    }
+    return { succeeded, failed };
+  };
+
+  const discoverModelsAfterKeySaved = async (
+    provider: AddedProvider,
+    groupId: string,
+    isCurrent: () => boolean,
+  ) => {
+    const key = `${provider.id}:${groupId}`;
+    if (!isCurrent() || keyDiscoveryRequests.current.has(key)) return;
+    keyDiscoveryRequests.current.add(key);
+    let discovered: RemoteGroupModel[] | undefined;
+    let added = false;
+    const openCatalog = () => {
+      if (isCurrent()) setCatalogTarget({ providerId: provider.id, groupId, remoteModels: discovered });
+    };
+    try {
+      // Read the saved selection: adding a second key must not enable it or
+      // bypass a deliberately disabled supplier's current key.
+      const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({ modelProviderId: provider.id });
+      let savedGroup = unwrapModelProviderData<{ groups?: ApiGroup[] }>(response.data).groups?.find((group) => group.id === groupId);
+      const hasEnabledSavedKey = (candidate?: ApiGroup) => Boolean(candidate && (candidate.keys?.length ? candidate.keys.some((key) => key.enabled) : candidate.has_api_key));
+      if (!isCurrent() || !savedGroup || !hasEnabledSavedKey(savedGroup)) return;
+      if (!savedGroup.is_verified) {
+        const currentModels = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId)?.models || [];
+        const canonical = mapApiGroup(provider, savedGroup, []);
+        const verified = await verifyProviderGroup(provider, { ...canonical, models: currentModels }, "", isCurrent);
+        if (!isCurrent() || !verified) return;
+        const refreshed = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({ modelProviderId: provider.id });
+        savedGroup = unwrapModelProviderData<{ groups?: ApiGroup[] }>(refreshed.data).groups?.find((group) => group.id === groupId);
+        if (!isCurrent() || !savedGroup?.is_verified || !hasEnabledSavedKey(savedGroup)) return;
+      }
+      setDiscoveringGroupIds((current) => ({ ...current, [key]: true }));
+      const version = groupModelVersions.current[key] || 0;
+      const savedResponse = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet({ modelProviderId: provider.id, groupId });
+      if (!isCurrent() || version !== (groupModelVersions.current[key] || 0)) return;
+      const snapshot = mapApiGroup(provider, savedGroup, unwrapModelProviderData<{ models?: ApiModel[] }>(savedResponse.data).models || []);
+      const mergeProvider = (item: AddedProvider): AddedProvider => ({
+        ...item,
+        groups: item.groups.some((group) => group.id === groupId)
+          ? item.groups.map((group) => group.id === groupId ? snapshot : group)
+          : [...item.groups, snapshot],
+      });
+      const mergeSnapshot = (current: AddedProvider[]) => current.some((item) => item.id === provider.id)
+        ? current.map((item) => item.id === provider.id ? mergeProvider(item) : item)
+        : [...current, mergeProvider(provider)];
+      addedProviderListRef.current = mergeSnapshot(addedProviderListRef.current);
+      setAddedProviderList(mergeSnapshot);
+
+      const remote = await listRemoteGroupModels(provider.id, groupId);
+      if (!isCurrent()) return;
+      const unique = new Map<string, RemoteGroupModel>();
+      for (const model of remote.models || []) {
+        const name = normalizeModelName(model.name);
+        if (name && !unique.has(name)) unique.set(name, model);
+      }
+      discovered = [...unique.values()];
+      const currentSelection = () => {
+        const current = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId);
+        return isCurrent() && current?.verified && current.baseUrl === snapshot.baseUrl &&
+          current.keys.find((key) => key.enabled)?.id === snapshot.keys.find((key) => key.enabled)?.id;
+      };
+      if (!currentSelection()) return;
+      if (discovered.length >= 5) {
+        openCatalog();
+        return;
+      }
+      const protocol = provider.protocolName || provider.source;
+      for (const model of discovered) {
+        const current = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId);
+        if (!current || !currentSelection()) return;
+        if (current.models.some((saved) => normalizeModelName(saved.name) === normalizeModelName(model.name))) continue;
+        const metadata = resolveRemoteModelMetadata(protocol, model);
+        const modelType = metadata.modelType;
+        if (!isModelTypeSupportedByProtocol(modelType, protocol, provider.runtimeIdentity || provider.name)) {
+          openCatalog();
+          continue;
+        }
+        await addCatalogModel(provider.id, groupId, {
+          name: model.name,
+          model_type: modelType,
+          max_input_tokens: model.max_input_tokens,
+          vision: metadata.vision,
+          model_settings: metadata.modelSettings,
+        });
+        added = true;
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        setCatalogTarget({ providerId: provider.id, groupId, remoteModels: discovered, discoveryError: getProviderConnectionFailureMessage(error, t) });
+      }
+    } finally {
+      if (added) void onConfigurationChanged?.();
+      keyDiscoveryRequests.current.delete(key);
+      setDiscoveringGroupIds((current) => { const next = { ...current }; delete next[key]; return next; });
     }
   };
 
   const closeCustomModelModal = () => {
+    remoteModelRequest.current += 1;
+    setRemoteModelsLoading(false);
     setContextWindowExpanded(false);
     setContextWindowMode("auto");
     setRemoteModels([]);
@@ -1264,80 +1409,56 @@ export default function ModelProviderPage({
     provider: AddedProvider,
     group: ProviderConnectionGroup,
     model: ProviderModel,
-  ) => {
-    setEditModelWindowModal({ provider, group, model });
-    editModelWindowForm.setFieldsValue({
-      maxInputTokens: resolveLlmMaxInputTokens(model.maxInputTokens),
-    });
-    modelWindowDraft.captureSavedValues();
-  };
+  ) => setEditModelWindowModal({ provider, group, model });
 
-  const closeEditModelWindowModal = () => {
-    setEditModelWindowModal(null);
-    editModelWindowForm.resetFields();
-  };
-
-  const saveEditModelWindow = async (values: EditModelWindowFormValues) => {
+  const saveEditedModel = async (values: ModelEditorValues) => {
     const target = editModelWindowModal;
-    if (!target) {
-      return;
-    }
-    const maxInputTokens = parseLlmMaxInputTokens(values.maxInputTokens);
-    if (!maxInputTokens) {
-      editModelWindowForm.setFields([
-        {
-          name: "maxInputTokens",
-          errors: [t("modelProvider.validation.maxInputTokensInvalid")],
-        },
-      ]);
-      return;
-    }
-    try {
-      const updated = await updateGroupModelMaxInputTokens(
-        target.provider.id,
-        target.group.id,
-        target.model.id,
-        maxInputTokens,
-      );
-      setAddedProviderList((current) =>
-        current.map((provider) =>
-          provider.id === target.provider.id
-            ? {
-                ...provider,
-                groups: provider.groups.map((group) =>
-                  group.id === target.group.id
-                    ? {
-                        ...group,
-                        models: group.models.map((model) =>
-                          model.id === target.model.id
-                            ? {
-                                ...model,
-                                maxInputTokens:
-                                  updated.max_input_tokens || maxInputTokens,
-                              }
-                            : model,
-                        ),
-                      }
-                    : group,
-                ),
-              }
-            : provider,
-        ),
-      );
-      message.success(t("modelProvider.message.modelWindowUpdated"));
-      void onConfigurationChanged?.();
-      closeEditModelWindowModal();
-    } catch {
-      message.error(t("modelProvider.error.updateModelFailed"));
-    }
+    if (!target) return;
+    if (!(values.capability === "UNKNOWN" && target.model.capability === "UNKNOWN") && !isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), target.provider.protocolName || target.provider.source, target.provider.runtimeIdentity || target.provider.name))
+      throw new Error(t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"));
+    const updated = await updateGroupModel(target.provider.id, target.group.id, target.model.id, {
+      name: values.name.trim(),
+      model_type: getModelTypeForCapability(values.capability),
+      vision: values.capability === "LLM_CHAT" && values.vision === true,
+      ...(values.modelSettings !== undefined ? { model_settings: values.modelSettings } : {}),
+      ...(supportsStoredModelContext(values.capability) ? { max_input_tokens: values.maxInputTokens, input_token_limit: values.inputTokenLimit, max_output_tokens: values.maxOutputTokens } : {}),
+      ...(target.model.builtIn ? { customize: true } : {}),
+    });
+    const key = `${target.provider.id}:${target.group.id}`;
+    groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
+    setAddedProviderList((current) => current.map((provider) => provider.id === target.provider.id ? {
+      ...provider,
+      groups: provider.groups.map((group) => group.id === target.group.id ? {
+        ...group,
+        models: group.models.map((model) => model.id === target.model.id ? {
+          ...model,
+          name: updated.name,
+          capability: mapModelTypeToCapability(updated.model_type),
+          vision: updated.vision,
+          modelSettings: updated.model_settings,
+          maxInputTokens: updated.max_input_tokens,
+          inputTokenLimit: updated.input_token_limit || undefined,
+          maxOutputTokens: updated.max_output_tokens || undefined,
+          builtIn: Boolean(updated.is_default),
+        } : model),
+      } : group),
+    } : provider));
+    message.success(t("modelProvider.message.modelUpdated"));
+    void onConfigurationChanged?.();
   };
 
   const addCustomModel = async (values: CustomModelFormValues) => {
+    if (customModelSavePending.current) return;
     const provider = addedProviderList.find(
       (item) => item.id === values.providerId,
     );
     const group = provider?.groups.find((item) => item.id === values.groupId);
     if (!provider || !group) {
+      return;
+    }
+
+    if (!isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), provider.protocolName || provider.source, provider.runtimeIdentity || provider.name)) {
+      customModelForm.setFields([{ name: "capability", errors: [t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType")] }]);
       return;
     }
 
@@ -1356,10 +1477,12 @@ export default function ModelProviderPage({
       return;
     }
 
+    customModelSavePending.current = true;
+    setCustomModelSaving(true);
     try {
       let maxInputTokens: string | null | undefined;
       if (
-        isLlmChatCapability(values.capability) &&
+        supportsModelContext(values.capability) &&
         contextWindowMode === "manual"
       ) {
         maxInputTokens = parseLlmMaxInputTokens(values.maxInputTokens);
@@ -1372,6 +1495,9 @@ export default function ModelProviderPage({
           ]);
           return;
         }
+      } else if (supportsModelContext(values.capability)) {
+        const discoveredContext = remoteModels.find((model) => model.name.trim() === values.name.trim())?.max_input_tokens;
+        if (discoveredContext?.trim()) maxInputTokens = parseLlmMaxInputTokens(discoveredContext) || undefined;
       }
       const createdModel = unwrapModelProviderData<ApiModel>(
         (
@@ -1383,7 +1509,8 @@ export default function ModelProviderPage({
                 name: values.name.trim(),
                 model_type: getModelTypeForCapability(values.capability),
                 vision:
-                  values.capability === "LLM_CHAT" && values.vision === true,
+                  values.capability === "LLM_CHAT" && isModelFeatureEnabled(values.modelSettings, "vision", values.vision === true),
+                ...(editableModelSettings(values.capability, values.modelSettings, values) !== undefined ? { model_settings: editableModelSettings(values.capability, values.modelSettings, values) } : {}),
                 ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
               },
             },
@@ -1399,6 +1526,7 @@ export default function ModelProviderPage({
         ),
         builtIn: Boolean(createdModel.is_default),
         vision: createdModel.vision,
+        modelSettings: createdModel.model_settings,
         enabled: true,
         maxInputTokens:
           createdModel.max_input_tokens || maxInputTokens || undefined,
@@ -1407,52 +1535,86 @@ export default function ModelProviderPage({
       message.success(t("modelProvider.message.modelAdded"));
       void onConfigurationChanged?.();
       closeCustomModelModal();
-    } catch (error) {}
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+    } finally {
+      customModelSavePending.current = false;
+      setCustomModelSaving(false);
+    }
   };
 
-  const deleteCustomModel = async (
+  const deleteCustomModel = (
     providerId: string,
     groupId: string,
     model: ProviderModel,
+    notify = true,
   ) => {
-    try {
-      await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(
-        {
-          modelProviderId: providerId,
-          groupId,
-          modelId: model.id,
-        },
-        model.capability === "EMBEDDING"
-          ? { params: { confirm_indexed_downgrade: true } }
-          : undefined,
-      );
-      setAddedProviderList((current) =>
-        current.map((provider) =>
-          provider.id === providerId
-            ? {
-                ...provider,
-                groups: provider.groups.map((group) =>
-                  group.id === groupId
-                    ? {
-                        ...group,
-                        models: group.models.filter(
-                          (item) => item.id !== model.id,
-                        ),
-                      }
-                    : group,
-                ),
-              }
-            : provider,
-        ),
-      );
-      message.success(t("modelProvider.message.modelDeleted"));
-      void onConfigurationChanged?.();
-    } catch (error) {}
+    const operationKey = `${providerId}:${groupId}:${model.id}`;
+    const existing = modelDeleteRequests.current.get(operationKey);
+    if (existing) return existing;
+    const operation = Promise.resolve().then(async () => {
+      try {
+        await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(
+          {
+            modelProviderId: providerId,
+            groupId,
+            modelId: model.id,
+          },
+          { silentError: true } as never,
+        );
+        const key = `${providerId}:${groupId}`;
+        groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
+        setAddedProviderList((current) =>
+          current.map((provider) =>
+            provider.id === providerId
+              ? {
+                  ...provider,
+                  groups: provider.groups.map((group) =>
+                    group.id === groupId
+                      ? {
+                          ...group,
+                          models: group.models.filter(
+                            (item) => item.id !== model.id,
+                          ),
+                          modelCount: Math.max(0, (group.modelCount ?? group.models.length) - 1),
+                        }
+                      : group,
+                  ),
+                }
+              : provider,
+          ),
+        );
+        if (notify) {
+          message.success(t("modelProvider.message.modelDeleted"));
+          void onConfigurationChanged?.();
+        }
+        return true;
+      } catch (error) {
+        const response = (error as { response?: { status?: number; data?: { detail?: unknown; message?: unknown } } })?.response;
+        const detail = String(response?.data?.detail || response?.data?.message || "");
+        const embeddingBlocked = response?.status === 409 &&
+          (detail.includes("requires confirmation to downgrade") || detail.includes("embedding model is in use"));
+        if (embeddingBlocked) {
+          if (notify) message.warning({ key: "embedding-in-use", content: t("modelProvider.embeddingInUse") });
+          else throw new Error(t("modelProvider.embeddingInUse"));
+        } else if (notify) message.error(getLocalizedErrorMessage(error));
+
+        return false;
+      } finally {
+        modelDeleteRequests.current.delete(operationKey);
+      }
+    });
+    modelDeleteRequests.current.set(operationKey, operation);
+    return operation;
   };
+
+  const catalogProvider = addedProviderList.find((provider) => provider.id === catalogTarget?.providerId);
+  const catalogGroup = catalogProvider?.groups.find((group) => group.id === catalogTarget?.groupId);
 
   return (
     <div className="model-provider-page-content">
       <ProviderWorkspace
+        verificationEvent={verificationEvent}
         providers={providerOptions}
         configuredProviders={addedProviderList}
         loading={loading}
@@ -1466,26 +1628,30 @@ export default function ModelProviderPage({
         onLoadModels={(provider, group) =>
           void loadGroupModels(provider.id, group.id)
         }
-        modelsLoading={loadingGroupModelIds}
+        modelsLoading={{ ...loadingGroupModelIds, ...discoveringGroupIds }}
+        modelsError={modelsError}
         onAddModel={openCustomModelModal}
         onSyncModels={(provider, group) =>
-          openCustomModelModal(provider, group, true)
+          {
+            setCatalogTarget({ providerId: provider.id, groupId: group.id });
+            void loadGroupModels(provider.id, group.id);
+          }
         }
         onEditModel={openEditModelWindowModal}
         onDeleteModel={(provider, group, model) =>
-          void deleteCustomModel(provider.id, group.id, model)
+          deleteCustomModel(provider.id, group.id, model)
         }
         onCheck={(provider, group) =>
           void verifyProviderGroup(provider, group, "")
         }
         checking={verifyingGroupIds}
+        onKeySaved={discoverModelsAfterKeySaved}
         onReload={async () => {
           const refreshed = await loadModelProviders();
           void onConfigurationChanged?.();
           if (!refreshed)
             throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
         }}
-        cloudAvailable={cloudRuntimeAvailable}
         cloudContent={
           <>
             <CloudSystemProviderCard
@@ -1515,56 +1681,42 @@ export default function ModelProviderPage({
         }
       />
 
-      <Modal
-        centered
-        destroyOnHidden
-        okText={t("common.save")}
-        open={!!editModelWindowModal}
-        title={t("modelProvider.editModelWindowTitle", {
-          name: editModelWindowModal?.model.name || "",
-        })}
-        width={420}
-        onCancel={() =>
-          modelWindowDraft.confirmClose(closeEditModelWindowModal)
-        }
-        onOk={() => editModelWindowForm.submit()}
-      >
-        <Form<EditModelWindowFormValues>
-          autoComplete="off"
-          className="model-provider-form"
-          form={editModelWindowForm}
-          layout="vertical"
-          onFinish={saveEditModelWindow}
-        >
-          <Form.Item
-            label={t("modelProvider.maxInputTokensLabel")}
-            name="maxInputTokens"
-            normalize={(value: string | undefined) => value?.trim()}
-            rules={[
-              {
-                required: true,
-                message: t("modelProvider.validation.maxInputTokensRequired"),
-              },
-              {
-                validator: (_, value?: string) =>
-                  parseLlmMaxInputTokens(value)
-                    ? Promise.resolve()
-                    : Promise.reject(
-                        new Error(
-                          t("modelProvider.validation.maxInputTokensInvalid"),
-                        ),
-                      ),
-              },
-            ]}
-          >
-            <Input
-              autoComplete="off"
-              maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH}
-              placeholder={t("modelProvider.maxInputTokensPlaceholder")}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+      {catalogProvider && catalogGroup ? <ProviderModelCatalogDrawer
+        open={!!catalogTarget}
+        providerId={catalogProvider.id}
+        providerName={getProviderDisplayName(catalogProvider, currentLanguage)}
+        runtimeIdentity={catalogProvider.runtimeIdentity}
+        providerLogoDataUrl={catalogProvider.logoDataUrl}
+        protocolName={catalogProvider.protocolName || catalogProvider.source}
+        groupId={catalogGroup.id}
+        models={catalogGroup.models}
+        initialRemoteModels={catalogTarget?.remoteModels}
+        initialDiscoveryError={catalogTarget?.discoveryError}
+        modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`] || discoveringGroupIds[`${catalogProvider.id}:${catalogGroup.id}`]}
+        requiresVerification={!catalogGroup.verified && !canDiscoverWithoutApiKey(catalogProvider, catalogGroup)}
+        onCheckConnection={() => {
+          setCatalogTarget(null);
+          void verifyProviderGroup(catalogProvider, catalogGroup, "");
+        }}
+        onClose={() => setCatalogTarget(null)}
+        onRefreshModels={() => void loadGroupModels(catalogProvider.id, catalogGroup.id)}
+        onAdd={(model) => addCatalogModel(catalogProvider.id, catalogGroup.id, model)}
+        onAddMany={(models) => addCatalogModels(catalogProvider.id, catalogGroup.id, models)}
+        onRemove={(model) => deleteCustomModel(catalogProvider.id, catalogGroup.id, model, false)}
+        onChanged={() => void onConfigurationChanged?.()}
+      /> : null}
+
+      <ModelEditorModal
+        model={editModelWindowModal?.model || null}
+        providerName={editModelWindowModal ? getProviderDisplayName(editModelWindowModal.provider, currentLanguage) : ""}
+        providerIdentity={editModelWindowModal?.provider.runtimeIdentity || editModelWindowModal?.provider.name}
+        protocolName={editModelWindowModal?.provider.protocolName || editModelWindowModal?.provider.source}
+        capabilities={editModelWindowModal ? getSelectableModelCapabilities(editModelWindowModal.provider.capabilities, editModelWindowModal.provider.protocolName || editModelWindowModal.provider.source, editModelWindowModal.provider.runtimeIdentity || editModelWindowModal.provider.name) : []}
+        models={editModelWindowModal?.group.models || []}
+        capabilityLabel={getCapabilityLabel}
+        onSave={saveEditedModel}
+        onClose={() => setEditModelWindowModal(null)}
+      />
 
       <Modal
         centered
@@ -1572,15 +1724,20 @@ export default function ModelProviderPage({
         okText={t("modelProvider.add")}
         open={!!customModelModal}
         title={t("modelProvider.addCustomModelTitle", {
-          name: customModelModal?.provider.name || "",
+          name: customModelModal ? getProviderDisplayName(customModelModal.provider, currentLanguage) : "",
         })}
         width={520}
-        onCancel={() => customModelDraft.confirmClose(closeCustomModelModal)}
+        confirmLoading={customModelSaving}
+        closable={!customModelSaving}
+        maskClosable={!customModelSaving}
+        keyboard={!customModelSaving}
+        onCancel={() => { if (!customModelSaving) customModelDraft.confirmClose(closeCustomModelModal); }}
         onOk={() => customModelForm.submit()}
       >
         <Form<CustomModelFormValues>
           autoComplete="off"
           className="model-provider-form"
+          disabled={customModelSaving}
           form={customModelForm}
           layout="vertical"
           onFinish={addCustomModel}
@@ -1598,7 +1755,7 @@ export default function ModelProviderPage({
             <Select disabled>
               {customModelModal ? (
                 <Select.Option value={customModelModal.provider.id}>
-                  {customModelModal.provider.name}
+                  {getProviderDisplayName(customModelModal.provider, currentLanguage)}
                 </Select.Option>
               ) : null}
             </Select>
@@ -1617,7 +1774,8 @@ export default function ModelProviderPage({
                 required: true,
                 message: t("modelProvider.validation.modelNameRequired"),
               },
-              { max: 120, message: t("modelProvider.validation.modelNameMax") },
+              { validator: (_, value?: string) => !value || new TextEncoder().encode(value.trim()).length <= 512
+                ? Promise.resolve() : Promise.reject(new Error(t("modelProvider.editor.nameBytes"))) },
             ]}
           >
             <AutoComplete
@@ -1632,13 +1790,15 @@ export default function ModelProviderPage({
                 allowClear
                 autoComplete="off"
                 autoCorrect="off"
-                maxLength={120}
+                maxLength={512}
                 placeholder={t("modelProvider.modelNamePlaceholder")}
                 spellCheck={false}
                 addonAfter={
                   <Button
                     aria-label={t("modelProvider.fetchAvailableModels")}
                     loading={remoteModelsLoading}
+                    disabled={!customModelModal || (!customModelModal.group.verified && !canDiscoverWithoutApiKey(customModelModal.provider, customModelModal.group))}
+                    title={!customModelModal || (!customModelModal.group.verified && !canDiscoverWithoutApiKey(customModelModal.provider, customModelModal.group)) ? t("modelProvider.catalog.verifyBeforeSync") : undefined}
                     size="small"
                     type="text"
                     icon={<SearchOutlined />}
@@ -1661,32 +1821,28 @@ export default function ModelProviderPage({
           >
             <Select
               onChange={(value) => {
-                if (!isLlmChatCapability(value)) {
+                if (!supportsModelContext(value)) {
                   setContextWindowExpanded(false);
                   setContextWindowMode("auto");
                   customModelForm.setFieldValue("maxInputTokens", undefined);
                 }
               }}
             >
-              {customModelModal?.provider.capabilities.map((capability) => (
+              {getSelectableModelCapabilities(customModelModal?.provider.capabilities || [], customModelModal?.provider.protocolName || customModelModal?.provider.source, customModelModal?.provider.runtimeIdentity || customModelModal?.provider.name).map((capability) => (
                 <Select.Option key={capability} value={capability}>
-                  {getCapabilityLabel(capability)}
+                  <span className="provider-model-task-option">
+                    <ModelTypeIcon type={getModelTaskType(capability)} size={16} />
+                    {getCapabilityLabel(capability)}
+                  </span>
                 </Select.Option>
               ))}
             </Select>
           </Form.Item>
 
-          {watchedCustomCapability === "LLM_CHAT" ? (
-            <Form.Item
-              name="vision"
-              valuePropName="checked"
-              initialValue={false}
-            >
-              <Checkbox>{t("modelProvider.vision")}</Checkbox>
-            </Form.Item>
-          ) : null}
+          {supportsModelContext(watchedCustomCapability) ? <ModelFeaturesEditor disabled={customModelSaving} visualModel={watchedCustomCapability === "VLM"} /> : null}
+          {watchedCustomCapability === "EMBEDDING" ? <EmbeddingOptionsEditor disabled={customModelSaving} /> : null}
 
-          {isLlmChatCapability(watchedCustomCapability) ? (
+          {supportsModelContext(watchedCustomCapability) ? (
             <div className="model-provider-context-window">
               <button
                 aria-expanded={contextWindowExpanded}

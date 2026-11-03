@@ -157,7 +157,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		}
 	} else {
 		var err error
-		provider, err = restoredSupplier(tx, sink.localUserID, restored.Provider, resolution, now)
+		provider, err = restoredSupplier(tx, sink.localUserID, restored.Provider, resolution, now, sink.keys)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return credentialvault.ErrLocalConflict
@@ -246,8 +246,22 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 	binding.VaultID, binding.CloudRecordID, binding.LocalProviderGroupID = restored.VaultID, restored.RecordID, groupID
 	binding.LastCloudRevision, binding.LastLocalCredentialRevision = restored.Revision, localRevision
 	binding.LastETag, binding.BackupState, binding.UpdatedAt = restored.ETag, string(credentialvault.BackupSucceeded), now
-	if err := reconcileProviderActiveKey(tx, &provider); err != nil {
-		return err
+	if hasSharedProviderEndpoint(provider) && restored.Provider.ActiveKeyIndex != nil {
+		groupID, keyID := "", ""
+		if index := *restored.Provider.ActiveKeyIndex; index >= 0 {
+			keys := splitAPIKeys(string(restored.Provider.APIKey))
+			if index >= len(keys) {
+				return credentialvault.ErrInvalidContract
+			}
+			groupID, keyID = group.ID, groupKeyID(group.ID, keys[index])
+		}
+		if err := saveActiveProviderKey(tx, &provider, groupID, keyID, verified && keyID != "", now); err != nil {
+			return err
+		}
+	} else {
+		if err := reconcileProviderActiveKey(tx, &provider); err != nil {
+			return err
+		}
 	}
 	if err := tx.Save(&binding).Error; err != nil {
 		return err
@@ -356,7 +370,23 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 			return credentialvault.ProviderCredential{}, false
 		}
 		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
-		result.APIKey = append([]byte(nil), value.provider.APIKey...)
+		result.RequestConfig, err = portableProviderRequestConfig(provider)
+		if err != nil {
+			return credentialvault.ProviderCredential{}, false
+		}
+		index := 0
+		if value.provider.ActiveKeyIndex != nil {
+			index = *value.provider.ActiveKeyIndex
+		}
+		keys := splitAPIKeys(string(value.provider.APIKey))
+		if index < 0 || index >= len(keys) {
+			return credentialvault.ProviderCredential{}, false
+		}
+		result.APIKey = []byte(keys[index])
+		if result.ActiveKeyIndex != nil {
+			selected := 0
+			result.ActiveKeyIndex = &selected
+		}
 		found = true
 	}
 	return result, found
@@ -366,7 +396,7 @@ func validRestoredCredential(restored credentialvault.RestoredCredential) bool {
 	valid := restoreSinkUUID.MatchString(restored.RecordID) && restored.Revision > 0 && restoreSinkUUID.MatchString(restored.VaultID) &&
 		regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(restored.ETag) && strings.TrimSpace(restored.Provider.ProviderCatalogKey) != "" &&
 		len(restored.Provider.ProviderCatalogKey) <= 128 && strings.TrimSpace(restored.Provider.DisplayName) != "" && len(restored.Provider.DisplayName) <= 255 &&
-		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && credentialvault.ValidAPIKeyPool(restored.Provider.APIKey)
+		strings.TrimSpace(restored.Provider.BaseURL) != "" && len(restored.Provider.BaseURL) <= 1024 && credentialvault.ValidAPIKeyPool(restored.Provider.APIKey) && credentialvault.ValidProviderRequestConfig(restored.Provider.RequestConfig)
 	if !valid {
 		return false
 	}

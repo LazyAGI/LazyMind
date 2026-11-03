@@ -218,3 +218,34 @@ async def test_agent_executor_drains_runtime_event_before_future_exception():
     assert len(received) == 1
     assert received[0][0] == 'event'
     assert received[0][1]['runtime_event']['type'] == 'model_call_finished'
+
+
+@pytest.mark.parametrize('tool_result', [
+    {'status': 'succeeded'},
+    {'error': 'Knowledge management confirmation rejected'},
+    {'error': 'resources changed; prepare and confirm again'},
+])
+def test_knowledge_confirmation_finishes_in_same_run_without_waiting_terminal(tool_result):
+    translator = AgentEventFrameTranslator(query='manage fixture', run_id='run-confirmation')
+    card = {'tag': 'ask_pending', 'ask_id': 'confirmation',
+            'knowledge_management': {'confirmation_id': 'confirmation',
+                                     'arguments_digest': 'arguments', 'snapshot': 'snapshot'},
+            'questions': [{'text': 'Delete fixture?', 'type': 'boolean'}]}
+    frames = translator.feed(card)
+    assert frames[0]['ask_pending']['knowledge_management']['confirmation_id'] == 'confirmation'
+    # The management tool blocks until Core returns the decision or rejects the
+    # snapshot, then produces its result within this same run (real SSE order).
+    translator.feed({'tag': 'tool_results', 'tool_results': [
+        {'id': 'call', 'name': 'knowledge_resource_delete', 'content': json.dumps(tool_result)}]})
+    assert translator.ask_pending_emitted is False
+    assert translator.run.ask_pending is False
+    assert translator.finish_run(outcome=RunOutcome.SUCCEEDED)['runtime_event']['data']['reason'] == 'normal'
+
+
+def test_business_confirmation_does_not_clear_a_separate_ordinary_question():
+    translator = AgentEventFrameTranslator(query='q', run_id='run-confirmation')
+    translator.feed({'tag': 'ask_pending', 'ask_id': 'question',
+                     'questions': [{'text': 'Which library?', 'type': 'text'}]})
+    translator.feed({'tag': 'ask_pending', 'ask_id': 'confirmation',
+                     'knowledge_management': {'confirmation_id': 'confirmation'}})
+    assert translator.finish_run(outcome=RunOutcome.SUCCEEDED)['runtime_event']['data']['reason'] == 'awaiting_user_input'

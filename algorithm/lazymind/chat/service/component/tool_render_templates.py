@@ -13,6 +13,40 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                            'zh': 'kb_search 完成，共找到 {result.total} 条相关内容。'},
                'failure': {'en': 'kb_search failed for {value}.',
                            'zh': 'kb_search 检索失败：{value}。'}},
+ 'search_tools': {
+     'argument': 'query',
+     'call': {'en': 'Searching for tools related to {value}…', 'zh': '正在检索与 {value} 相关的工具…'},
+     'success': {'en': 'Found {count} relevant tools.', 'zh': '检索到 {count} 个相关工具。'},
+     'empty': {'en': 'No relevant tools found.', 'zh': '未检索到相关工具。'},
+     'failure': {'en': 'Tool search failed: {result.reason}.', 'zh': '工具检索失败：{result.reason}。'}},
+ 'load_tools': {
+     'argument': 'tool_names / unload_tool_names',
+     'call': {'en': 'Updating tool loading state…', 'zh': '正在更新工具加载状态…'},
+     'success': {'en': 'Tool loading state unchanged.', 'zh': '工具加载状态未变更。'},
+     'failure': {
+         'en': 'Tool loading state update failed: {result.reason}.',
+         'zh': '工具加载状态更新失败：{result.reason}。',
+     },
+     'variants': {
+         'load': {
+             'call': {'en': 'Loading tools: {result.loaded}…', 'zh': '正在加载工具：{result.loaded}…'},
+             'success': {'en': 'Tools {result.loaded} loaded.', 'zh': '工具 {result.loaded} 加载完成。'},
+         },
+         'unload': {
+             'call': {'en': 'Unloading tools: {result.unloaded}…', 'zh': '正在卸载工具：{result.unloaded}…'},
+             'success': {'en': 'Tools {result.unloaded} unloaded.', 'zh': '工具 {result.unloaded} 已卸载。'},
+         },
+         'mixed': {
+             'call': {
+                 'en': 'Loading tools: {result.loaded}; unloading tools: {result.unloaded}…',
+                 'zh': '正在加载工具：{result.loaded}；卸载工具：{result.unloaded}…',
+             },
+             'success': {
+                 'en': 'Tools {result.loaded} loaded; tools {result.unloaded} unloaded.',
+                 'zh': '工具 {result.loaded} 加载完成；工具 {result.unloaded} 已卸载。',
+             },
+         },
+     }},
  'kb_tmp_search': {'argument': 'semantic_query',
                    'call': {'en': 'Using kb_tmp_search for {value}.',
                             'zh': '正在用 kb_tmp_search 检索 {value}。'},
@@ -1159,6 +1193,9 @@ TOOL_RENDER_PROFILES.update({
         'failure': {'en': 'Could not inspect file or directory {value}.', 'zh': '未能获取文件或目录 {value} 的信息。'},
     },
 })
+
+# Both Drive read entry points use a path and share the same preview.
+TOOL_RENDER_PROFILES['GoogleDriveFS_read_file'] = TOOL_RENDER_PROFILES['GoogleDriveFS_read']
 
 TOOL_RENDER_FALLBACKS: dict[str, dict[str, str]] = (
 {'call': {'en': 'Calling {tool_name} to handle the request.',  # noqa: E122

@@ -9,7 +9,7 @@ import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
-import type { ChatModelRoute, ConversationHistoryItem } from "@/api/generated/core-client";
+import type { ChatModelOutput, ChatModelRoute, ChatModelSwitchRecord, ConversationHistoryItem } from "@/api/generated/core-client";
 import type { RunPerformanceMetrics } from "@/modules/chat/utils/performanceStats";
 
 export interface ChatImperativeProps {
@@ -113,6 +113,7 @@ export interface ChatMessage {
   role?: string;
   delta?: string;
   raw_delta?: string;
+  raw_reasoning_content?: string;
   delta_mode?: "append" | "replace";
   images?: {
     base64?: string;
@@ -129,6 +130,8 @@ export interface ChatMessage {
     max_attempts: number;
   };
   model_route?: ChatModelRoute;
+  model_switches?: ChatModelSwitchRecord[];
+  model_output?: ChatModelOutput;
   run_terminal?: {
     status: "completed" | "interrupted" | "failed" | "cancelled";
     reason:
@@ -197,6 +200,7 @@ export interface ChatMessage {
     scope: "conversation";
     intent_context: Record<string, unknown>;
   };
+  knowledge_operations?: import("../../utils/knowledgeOperations").KnowledgeOperation[];
   ask_pending?: {
     env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;

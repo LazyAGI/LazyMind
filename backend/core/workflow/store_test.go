@@ -30,6 +30,8 @@ func newTestDB(t *testing.T) *orm.DB {
 		&orm.WorkflowBlob{},
 		&orm.WorkflowSession{},
 		&orm.WorkflowSessionStep{},
+		&orm.WorkflowApprovalPreference{},
+		&orm.WorkflowReviewCheckpoint{},
 		&orm.WorkflowSlotRevision{},
 		&orm.WorkflowAttemptInputBinding{},
 		&orm.WorkflowOutbox{},

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const caddyInstallAttempts = 3
@@ -251,9 +253,15 @@ func frontendNodeModulesReady(paths RuntimePaths, frontendDir string) (bool, str
 		}
 		return false, "", fmt.Errorf("read frontend pnpm metadata: %w", err)
 	}
+	var layout struct {
+		NodeLinker string `yaml:"nodeLinker"`
+	}
+	if err := yaml.Unmarshal(content, &layout); err != nil {
+		return false, "invalid pnpm metadata", nil
+	}
 	metadata := filepath.ToSlash(string(content))
 	virtualStoreDir := filepath.ToSlash(filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm"))
-	if !metadataContainsAnyPath(metadata, virtualStoreDir, relativePathOrEmpty(nodeModules, filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm")), relativePathOrEmpty(frontendRuntimeNodeModules(paths), filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm"))) {
+	if layout.NodeLinker != "hoisted" && !metadataContainsAnyPath(metadata, virtualStoreDir, relativePathOrEmpty(nodeModules, filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm")), relativePathOrEmpty(frontendRuntimeNodeModules(paths), filepath.Join(frontendRuntimeNodeModules(paths), ".pnpm"))) {
 		return false, "pnpm virtualStoreDir does not point at frontend runtime node_modules", nil
 	}
 	for _, required := range []string{

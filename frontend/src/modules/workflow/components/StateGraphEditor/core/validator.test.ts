@@ -36,4 +36,35 @@ describe.each([
     expect(getWorkflowDiagnosticMessage(t, { code: '2000102' })).toBe(t('errors.2000102'));
     expect(getWorkflowDiagnosticMessage(t, { code: 'UNRECOGNIZED_WORKFLOW_TEST_CODE', message: 'private backend detail' })).toBe(t('errors.2000509'));
   });
+
+  it('shows actionable integration failures and the exact missing user input', async () => {
+    await ready;
+    const t = i18n.getFixedT(language);
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_NODE_REMOVED', node_id: 'review' })).toContain('review');
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_NEEDS_INPUT', message: 'Where should a rejected review go?' })).toContain('Where should a rejected review go?');
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_MODEL_FAILED', message: 'private provider detail' })).not.toContain('private provider detail');
+  });
+
+  it('shows the original protected branch and actual candidate edges', async () => {
+    await ready;
+    const text = getWorkflowDiagnosticMessage(i18n.getFixedT(language), {
+      code: 'E_REPAIR_BRANCH_CHANGED', node_id: 'write_copy',
+      details: { expected_when: 'copy ready', expected_target: 'compose_report',
+        candidate_edges: [{ when: 'new condition', to: 'review' }] },
+    });
+    for (const value of ['write_copy', 'copy ready', 'compose_report', 'new condition', 'review']) expect(text).toContain(value);
+    expect(text).not.toContain('selfEvolutionRun.');
+  });
+
+  it('localizes model failure categories and includes only safe diagnostic identifiers', async () => {
+    await ready;
+    const t = i18n.getFixedT(language);
+    for (const code of ['E_REPAIR_MODEL_TIMEOUT', 'E_REPAIR_MODEL_TRANSPORT', 'E_REPAIR_MODEL_CONFIG', 'E_REPAIR_MODEL_LIMIT', 'E_REPAIR_MODEL_OUTPUT']) {
+      const text = getWorkflowDiagnosticMessage(t, { code, message: 'private provider body', details: { diagnostic_id: 'diag-123' } });
+      expect(text).toContain('diag-123');
+      expect(text).not.toContain('private provider body');
+      expect(text).not.toContain('selfEvolutionRun.');
+    }
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_MODEL_TIMEOUT', details: { diagnostic_id: 'https://private.invalid/key' } })).not.toContain('private.invalid');
+  });
 });

@@ -56,6 +56,23 @@
   white-space: nowrap;
 }
 
+.chat-model-selector-trigger-icon {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+
+  img {
+    object-fit: contain;
+  }
+
+  .anticon {
+    font-size: 14px;
+  }
+}
+
 .chat-model-thinking-panel,
 .chat-model-selector-trigger.is-combined {
   --thinking-accent: #2563c5;

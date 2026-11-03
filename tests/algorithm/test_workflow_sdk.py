@@ -557,3 +557,53 @@ def test_advance_inherits_retrieval_snapshot_only_when_host_provides_it():
         else:
             restored = _build_agentic_config({'conversation_id': 'c'}, payload, 'workflow_step')
             assert restored['enable_tool_retrieval'] is enabled
+
+
+def test_sdk_reorders_linked_slots_in_one_request():
+    from lazymind.workflow_sdk import WorkflowClient
+    transport = MagicMock()
+    transport.patch.return_value = MagicMock(
+        status_code=200, json=lambda: {'ok': True, 'data': {'order_version': 5}},
+    )
+    changes = [
+        {'slot_id': 'preview/html', 'order': [9, 3], 'version': 4},
+        {'slot_id': 'briefs', 'order': [2, 8], 'version': 1},
+    ]
+    result = WorkflowClient('http://core/api/core', 'u1', transport=transport).reorder_slot_orders(
+        'session 1', changes)
+    assert result.result['order_version'] == 5
+    transport.patch.assert_called_once()
+    call = transport.patch.call_args
+    assert call.args[0].endswith('/workflow-sessions/session%201/slots/preview%2Fhtml/order')
+    assert call.kwargs['json'] == {'order': [9, 3], 'version': 4, 'linked_orders': changes[1:]}
+
+
+def test_artifact_listing_follows_visual_order_after_move_and_delete():
+    from lazymind.workflow_sdk import WorkflowClient
+    transport = MagicMock()
+    artifacts = [
+        {'slot': 'slides', 'list_index': 2, 'artifact_id': 'second'},
+        {'slot': 'slides', 'list_index': 8, 'artifact_id': 'first'},
+    ]
+
+    def response(url, **kwargs):
+        data = {'order_list': [8, 2], 'order_version': 4} if url.endswith('/order') else {'artifacts': artifacts}
+        return MagicMock(status_code=200, json=lambda: {'ok': True, 'data': data})
+    transport.get.side_effect = response
+    result = WorkflowClient('http://core/api/core', 'u1', transport=transport).list_artifacts('session')
+    assert [item['artifact_id'] for item in result.result['artifacts']] == ['first', 'second']
+    assert [item['sort_order'] for item in result.result['artifacts']] == [1, 2]
+    assert [item['list_index'] for item in result.result['artifacts']] == [8, 2]
+
+
+@pytest.mark.parametrize('history_id', ['', 'foreground-history'])
+def test_prepare_preserves_explicit_host_chat_turn(history_id):
+    from lazymind.workflow_sdk import WorkflowClient
+
+    transport = MagicMock()
+    transport.post.return_value = httpx.Response(200, json={'result': {}})
+    client = WorkflowClient('http://core', 'user', transport=transport, trigger_history_id=history_id)
+    client.prepare_workflow('writer', fields={'conversation_id': 'chat'})
+    payload = transport.post.call_args.kwargs['json']
+    assert payload.get('trigger_history_id', '') == history_id
+    assert ('trigger_history_id' in payload) == bool(history_id)

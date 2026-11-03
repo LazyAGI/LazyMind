@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/subagent"
@@ -63,6 +64,7 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 		WorkflowStepParams{
 			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
 			IsColdStart: true, WorkflowMode: "dynamic", Capabilities: []string{"web_search"},
+			UserInput: "生成赛博朋克 PPT", LaunchUserInput: "生成赛博朋克 PPT", CurrentUserInput: "生成赛博朋克 PPT",
 		},
 		nil, nil, nil, nil, false, false,
 	)
@@ -89,6 +91,11 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 		t.Fatalf("decode params: %v", err)
 	}
 	capabilities, _ := params["capabilities"].([]any)
+	for _, key := range []string{"user_input", "launch_user_input", "current_user_input"} {
+		if params[key] != "生成赛博朋克 PPT" {
+			t.Fatalf("cold-start request field %q not persisted: %#v", key, params)
+		}
+	}
 	if len(capabilities) != 1 || capabilities[0] != "web_search" {
 		t.Fatalf("capabilities not persisted: %#v", params)
 	}
@@ -216,6 +223,62 @@ func seedEventLoopRevision(t *testing.T, db *orm.DB, revisionID string) (string,
 // ──────────────────────────────────────────────
 // OnSubAgentDone — status routing
 // ──────────────────────────────────────────────
+
+func TestOnSubAgentDonePublishesCompletedStateForDomainProjection(t *testing.T) {
+	db := newTestDB(t)
+	hash, schema := seedEventLoopRevision(t, db, "terminal-revision")
+	graph := graphengine.CompiledStateGraph{
+		SchemaVersion: schema, GraphHash: hash, StartRoute: "compose_result",
+		Nodes:        map[string]graphengine.CompiledNode{"compose_result": {ID: "compose_result"}},
+		ControlEdges: []graphengine.CompiledEdge{{From: "__start__", To: "compose_result"}, {From: "compose_result", To: "__end__"}},
+	}
+	if err := db.Model(&orm.WorkflowRevision{}).Where("id=?", "terminal-revision").Update("compiled_graph", graph.JSON()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateSession(t.Context(), db.DB, CreateSessionInput{SessionID: "terminal-session", ConversationID: "terminal-chat", WorkflowID: "paper_expansion", WorkflowRevisionID: "terminal-revision", GraphHash: hash, GraphSchemaVersion: schema}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateSessionStep(t.Context(), db.DB, "terminal-session", "compose_result", "terminal-task", 2); err != nil {
+		t.Fatal(err)
+	}
+	old := OnAcademicRuntimeChanged
+	t.Cleanup(func() { OnAcademicRuntimeChanged = old })
+	observed := ""
+	OnAcademicRuntimeChanged = func(ctx context.Context, db *gorm.DB, sessionID string) {
+		var session orm.WorkflowSession
+		if err := db.WithContext(ctx).Where("id=?", sessionID).Take(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+		observed = session.Status
+	}
+	OnSubAgentDone(t.Context(), db.DB, nil, "terminal-task", subagent.StatusSucceeded, "saved result", func(string, map[string]any) {}, &WorkflowChatContext{SessionID: "terminal-session", StepID: "compose_result", WorkflowID: "paper_expansion", ConvID: "terminal-chat"})
+	if observed != SessionStatusCompleted {
+		t.Fatalf("domain projection saw %q instead of the committed completion", observed)
+	}
+}
+
+func TestIdleFailurePublishesCommittedStateForDomainProjection(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.Create(&orm.WorkflowSession{ID: "idle-session", Status: SessionStatusActive}).Error; err != nil {
+		t.Fatal(err)
+	}
+	old := OnAcademicRuntimeChanged
+	t.Cleanup(func() { OnAcademicRuntimeChanged = old })
+	observed := ""
+	OnAcademicRuntimeChanged = func(ctx context.Context, db *gorm.DB, sessionID string) {
+		var session orm.WorkflowSession
+		if err := db.WithContext(ctx).Where("id=?", sessionID).Take(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+		observed = session.Status
+	}
+	if err := failIdleSession(t.Context(), db.DB, "idle-session"); err != nil {
+		t.Fatal(err)
+	}
+	if observed != SessionStatusFailed {
+		t.Fatalf("domain projection saw %q instead of the committed failure", observed)
+	}
+}
 
 func TestConversationPreflightMustBeReadyAndIsConsumed(t *testing.T) {
 	db := newTestDB(t)
@@ -610,7 +673,7 @@ func TestCheckAndFallbackIfStuck_SkipsWhenSubAgentRunning(t *testing.T) {
 	}
 }
 
-func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
+func TestCheckAndFallbackIfStuck_FailsWhenIdle(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -641,11 +704,11 @@ func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if s.Status != SessionStatusWaiting {
-		t.Fatalf("expected waiting when idle, got %q", s.Status)
+	if s.Status != SessionStatusFailed {
+		t.Fatalf("expected failed when idle, got %q", s.Status)
 	}
-	if gotEvent != "step_waiting" {
-		t.Fatalf("expected step_waiting event, got %q", gotEvent)
+	if gotEvent != "" {
+		t.Fatalf("must use the durable workflow event rather than manufacture an approval: %q", gotEvent)
 	}
 }
 
@@ -783,8 +846,12 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		if step.LeaseExpiresAt != nil {
 			t.Errorf("step %s retained a lease after stop", taskID)
 		}
-		if step.TerminalCode != "WORKFLOW_STOPPED" {
-			t.Errorf("step %s terminal code = %q, want WORKFLOW_STOPPED", taskID, step.TerminalCode)
+		expectedCode := "WORKFLOW_STOPPED"
+		if taskID == "stop-task-running" || step.LeaseToken != "" {
+			expectedCode = "WORKFLOW_STOP_REQUESTED"
+		}
+		if step.TerminalCode != expectedCode {
+			t.Errorf("step %s terminal code = %q, want %s", taskID, step.TerminalCode, expectedCode)
 		}
 		mu.Lock()
 		wasCancelled := cancelled[taskID]
@@ -796,6 +863,11 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 			func(string, map[string]any) { t.Error("stopped attempt emitted a retry/advance event") },
 			&WorkflowChatContext{SessionID: "stop-sess-parallel", StepID: step.StepID,
 				ConvID: "stop-conv-parallel", WorkflowMode: "auto"})
+		if step.LeaseToken != "" {
+			if err := ConfirmNativeStop(ctx, db.DB, step.ID, step.LeaseToken); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	session, err := GetSession(ctx, db.DB, "stop-sess-parallel")
 	if err != nil || session.Status != SessionStatusWaiting {

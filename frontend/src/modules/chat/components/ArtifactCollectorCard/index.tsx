@@ -1,5 +1,5 @@
 import { getLocalizedErrorMessage } from "@/components/request";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button, Checkbox, Tabs, message } from "antd";
 import {
   DownloadOutlined,
@@ -13,23 +13,12 @@ import {
   useTaskCenterStore,
   type ConversationArtifact,
 } from "@/modules/chat/store/taskCenter";
-import {
-  basenameFromPath,
-  resolveCoreAssetUrl,
-} from "@/modules/knowledge/utils/imageUrl";
+import { toArtifactFiles, extractTextContent, formatFileSize, type ArtifactFile } from './artifactFiles';
+import { useArtifactPreview } from '../ArtifactPreview/context';
+import { filePreviewTarget } from '../ArtifactPreview/target';
 import "./index.scss";
 
 const encoder = new TextEncoder();
-
-interface ArtifactFile {
-  id: string;
-  triggerHistoryId?: string;
-  filename: string;
-  size?: number;
-  url?: string;
-  /** Original artifact reference for text-type blob downloads. */
-  artifact: ConversationArtifact;
-}
 
 type ArtifactScope = "turn" | "conversation";
 
@@ -38,98 +27,13 @@ interface Props {
   historyId: string;
   currentExportIds?: string[];
   previewArtifactId?: string;
-  onPreview?: (artifact: ConversationArtifact) => void;
+  onPreview?: (artifact: ConversationArtifact, file: ArtifactFile) => void;
   onClose?: () => void;
   onLayoutChange?: () => void;
 }
 
-function formatFileSize(bytes?: number): string {
-  if (bytes == null || bytes <= 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function extractTextContent(a: ConversationArtifact): string {
-  const v = a.value;
-  if (!v) return "";
-  if (a.content_type === "json") {
-    try {
-      return JSON.stringify(v.data ?? v, null, 2);
-    } catch {
-      return String(v.data ?? v ?? "");
-    }
-  }
-  return v.text ?? "";
-}
-
-function artifactFileKey(file: ArtifactFile): string {
-  return file.id;
-}
-
-function toArtifactFiles(artifacts: ConversationArtifact[]): ArtifactFile[] {
-  return artifacts.flatMap<ArtifactFile>((artifact): ArtifactFile[] => {
-    const common = {
-      id: artifact.artifact_id,
-      triggerHistoryId: artifact.history_id,
-      artifact,
-    };
-    if (artifact.content_type === "file") {
-      const url = resolveCoreAssetUrl(artifact.value?.url || "");
-      return url
-        ? [{
-            ...common,
-            filename:
-              artifact.filename || artifact.value?.filename || artifact.slot || "file",
-            size: artifact.value?.size,
-            url,
-          }]
-        : [];
-    }
-    if (artifact.content_type === "image") {
-      const source = artifact.value?.url || artifact.value?.path || "";
-      const url = resolveCoreAssetUrl(source);
-      return url
-        ? [{
-            ...common,
-            filename: basenameFromPath(source || artifact.slot),
-            url,
-          }]
-        : [];
-    }
-    if (artifact.content_type === "file_list") {
-      const paths: string[] = Array.isArray(artifact.value?.paths)
-        ? artifact.value.paths.filter(
-            (path: unknown): path is string => typeof path === "string",
-          )
-        : [];
-      return paths.flatMap((path, pathIndex) => {
-        const url = resolveCoreAssetUrl(path);
-        return url
-          ? [{
-              ...common,
-              id: `${artifact.artifact_id}:${pathIndex}`,
-              filename: basenameFromPath(path),
-              url,
-            }]
-          : [];
-      });
-    }
-    if (artifact.content_type === "text" || artifact.content_type === "json") {
-      const filename = artifact.filename || (
-        artifact.slot?.includes(".")
-          ? artifact.slot
-          : `${artifact.slot || "artifact"}.txt`
-      );
-      return [{
-        ...common,
-        filename,
-        size: new Blob([extractTextContent(artifact)]).size,
-      }];
-    }
-    return [];
-  });
-}
+const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
+const artifactFileKey = (file: ArtifactFile) => file.id;
 
 export default function ArtifactCollectorCard({
   sessionId,
@@ -141,13 +45,14 @@ export default function ArtifactCollectorCard({
   onLayoutChange,
 }: Props) {
   const { t } = useTranslation();
+  const preview = useArtifactPreview();
   const title = t("chat.artifactCollectorTitle");
   const description = t("chat.artifactCollectorDescription");
   const [scope, setScope] = useState<ArtifactScope>("turn");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
   const artifacts = useTaskCenterStore(
-    (state) => state.artifactsByConversation[sessionId] ?? [],
+    (state) => state.artifactsByConversation[sessionId] ?? EMPTY_ARTIFACTS,
   );
   const loadConversationArtifacts = useTaskCenterStore(
     (state) => state.loadConversationArtifacts,
@@ -155,7 +60,7 @@ export default function ArtifactCollectorCard({
   const allFiles = useMemo(() => toArtifactFiles(artifacts), [artifacts]);
 
   const turnFiles = useMemo(
-    () => allFiles.filter((file) => file.triggerHistoryId === historyId),
+    () => allFiles.filter((file) => file.artifact.history_id === historyId),
     [allFiles, historyId],
   );
   const files = scope === "turn" ? turnFiles : allFiles;
@@ -164,9 +69,15 @@ export default function ArtifactCollectorCard({
     setScope("turn");
   }, [historyId]);
 
+  const selectionScope = `${sessionId}:${historyId}:${scope}`;
+  const previousFiles = useRef<{ scope: string; ids: Set<string> }>({ scope: '', ids: new Set() });
   useEffect(() => {
-    setSelected(new Set(files.map(artifactFileKey)));
-  }, [files]);
+    const ids = new Set(files.map(artifactFileKey));
+    const previous = previousFiles.current;
+    setSelected(current => new Set([...ids].filter(id =>
+      previous.scope !== selectionScope || !previous.ids.has(id) || current.has(id))));
+    previousFiles.current = { scope: selectionScope, ids };
+  }, [files, selectionScope]);
 
   // Switching from an empty turn to a populated conversation changes the popup
   // height substantially. Ask the Popover to realign after the new layout lands.
@@ -373,6 +284,12 @@ export default function ArtifactCollectorCard({
                     onChange={() => toggleSelect(key)}
                     className="artifact-collector__checkbox"
                   />
+                  <button type="button" className="artifact-collector__preview-main" aria-label={file.filename}
+                    onClick={() => {
+                      if (window.getSelection()?.toString()) return;
+                      if (onPreview) onPreview(file.artifact, file);
+                      else preview?.open(filePreviewTarget(file));
+                    }}>
                   <span
                     className="artifact-collector__file-icon"
                     aria-hidden="true"
@@ -380,19 +297,11 @@ export default function ArtifactCollectorCard({
                     <FileTextOutlined />
                   </span>
                   <div className="artifact-collector__file-info">
-                    {onPreview && ["text", "json"].includes(file.artifact.content_type) ? (
-                      <button type="button" className="artifact-collector__preview-link"
-                        aria-pressed={previewArtifactId === file.artifact.artifact_id}
-                        title={file.filename} onClick={() => onPreview(file.artifact)}>
-                        {file.filename}
-                      </button>
-                    ) : <span className="artifact-collector__file-name" title={file.filename}>
-                      {file.filename}
-                    </span>}
+                    <span className="artifact-collector__file-name" title={file.filename}>{file.filename}</span>
                     {previewArtifactId === file.artifact.artifact_id && (
                       <span className="artifact-collector__preview-label">{t("chat.exportPreviewing")}</span>
                     )}
-                    {file.artifact.value?.chat_export === true && file.triggerHistoryId === historyId && currentExportIds !== undefined && (
+                    {file.artifact.value?.chat_export === true && file.artifact.history_id === historyId && currentExportIds !== undefined && (
                       <span className="artifact-collector__file-size">
                         {t(currentExportIds.includes(file.artifact.artifact_id)
                           ? "chat.exportCurrentGeneration"
@@ -410,6 +319,7 @@ export default function ArtifactCollectorCard({
                       </span>
                     )}
                   </div>
+                  </button>
                   <Button
                     type="link"
                     size="small"

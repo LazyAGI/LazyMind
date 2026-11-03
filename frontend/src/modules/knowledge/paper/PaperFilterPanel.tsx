@@ -1,11 +1,11 @@
 import { useId } from "react";
 import { Slider } from "antd";
-import type { PaperItem } from "./model";
+import type { PaperRecord } from "./model";
 import { DEFAULT_PAPER_FILTERS, getFilterBounds, hasPaperFilters, type PaperFilters } from "./paperFilters";
 import "./PaperFilterPanel.scss";
 
 interface Props {
-  papers: PaperItem[];
+  papers: PaperRecord[];
   value: PaperFilters;
   onChange: (value: PaperFilters) => void;
 }
@@ -30,7 +30,7 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
   const years = value.yearRange || bounds.years;
   const minYear = Math.min(bounds.years?.[0] ?? years?.[0] ?? 0, years?.[0] ?? Number.POSITIVE_INFINITY);
   const maxYear = Math.max(bounds.years?.[1] ?? 0, years?.[1] ?? 0);
-  const citationMax = Math.max(bounds.maxCitations, value.minCitations, 1);
+  const citationMax = Math.max(bounds.maxCitations, value.minCitations || 0, 1);
   const update = <K extends keyof PaperFilters>(key: K, next: PaperFilters[K]) => onChange({ ...value, [key]: next });
   const updateYear = (range: number[]) => {
     const next: [number, number] = [range[0], range[1]];
@@ -41,8 +41,8 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
       <strong>筛选</strong>
       <button type="button" className="paper-filter-clear" aria-label="清除筛选" disabled={!hasPaperFilters(value)} onClick={() => onChange({ ...DEFAULT_PAPER_FILTERS })}>清除</button>
     </div>
-    <Choices label="星标" value={value.star} onChange={(next) => update("star", next)} options={[
-      { value: "all", label: "全部" }, { value: "starred", label: "已星标" }, { value: "unstarred", label: "未星标" },
+    <Choices label="收藏" value={value.star} onChange={(next) => update("star", next)} options={[
+      { value: "all", label: "全部" }, { value: "starred", label: "已收藏" }, { value: "unstarred", label: "未收藏" },
     ]} />
     <Choices label="PDF" value={value.pdf} onChange={(next) => update("pdf", next)} options={[
       { value: "all", label: "全部" }, { value: "has-pdf", label: "有 PDF" }, { value: "needs-pdf", label: "无 PDF" }, { value: "uploaded", label: "已上传" },
@@ -62,10 +62,10 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
     </div>
     <div className="paper-filter-range-group paper-filter-citations">
       <div className="paper-filter-range-title" id={`${id}-citations`}>引用量</div>
-      <Slider min={0} max={citationMax} value={value.minCitations} disabled={bounds.maxCitations === 0 && value.minCitations === 0} onChange={(next: number) => update("minCitations", next)} ariaLabelForHandle="最低引用量滑块" tooltip={{ formatter: (count: number | undefined) => `至少 ${count} 次` }} />
+      <Slider min={0} max={citationMax} value={(value.minCitations || 0)} disabled={bounds.maxCitations === 0 && (value.minCitations || 0) === 0} onChange={(next: number) => update("minCitations", next)} ariaLabelForHandle="最低引用量滑块" tooltip={{ formatter: (count: number | undefined) => `至少 ${count} 次` }} />
       <label className="paper-filter-citation-input">
         <span>至少</span>
-        <input aria-label="最低引用量" type="number" min={0} step={1} value={value.minCitations} onChange={(event) => {
+        <input aria-label="最低引用量" type="number" min={0} step={1} value={(value.minCitations || 0)} onChange={(event) => {
           const next = Number(event.target.value);
           if (Number.isSafeInteger(next) && next >= 0) update("minCitations", next);
         }} />

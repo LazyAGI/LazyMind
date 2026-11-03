@@ -105,46 +105,76 @@ func (c *Client) Lookup(ctx context.Context, input string) (Metadata, error) {
 	if err != nil {
 		return Metadata{}, err
 	}
+	body, err := c.query(ctx, url.Values{"id_list": {id.ID()}, "max_results": {"1"}})
+	if err != nil {
+		return Metadata{}, err
+	}
+	return decodeMetadata(body, id)
+}
+
+// Search discovers candidates only from the official provider; an empty feed is
+// a successful empty result, never an invitation to substitute local papers.
+func (c *Client) Search(ctx context.Context, query string, limit int) ([]Metadata, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 2000 || limit < 1 || limit > 20 {
+		return nil, &LookupError{Code: "invalid_input", Message: "invalid search query or result limit"}
+	}
+	body, err := c.query(ctx, url.Values{"search_query": {query}, "max_results": {fmt.Sprint(limit)}, "sortBy": {"relevance"}})
+	if err != nil {
+		return nil, err
+	}
+	feed, err := decodeFeed(body)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Metadata, 0, len(feed.Entries))
+	for _, entry := range feed.Entries {
+		paper, err := metadataForEntry(entry, Identifier{})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, paper)
+	}
+	return result, nil
+}
+
+func (c *Client) query(ctx context.Context, values url.Values) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	endpoint, err := url.Parse(c.apiBaseURL)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
-		return Metadata{}, &LookupError{Code: "network_error", Message: "arXiv API 地址配置无效", Err: err}
+		return nil, &LookupError{Code: "network_error", Message: "arXiv API 地址配置无效", Err: err}
 	}
-	query := endpoint.Query()
-	query.Set("id_list", id.ID())
-	query.Set("max_results", "1")
-	query.Del("search_query")
-	endpoint.RawQuery = query.Encode()
+	endpoint.RawQuery = values.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return Metadata{}, networkError(err)
+		return nil, networkError(err)
 	}
 	request.Header.Set("Accept", "application/atom+xml, application/xml")
 	request.Header.Set("User-Agent", "LazyMind/1.0 (arXiv metadata importer)")
 	if err = c.gate.acquire(ctx); err != nil {
-		return Metadata{}, networkError(err)
+		return nil, networkError(err)
 	}
 	defer c.gate.release()
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return Metadata{}, networkError(err)
+		return nil, networkError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return Metadata{}, &LookupError{Code: "http_error", Message: fmt.Sprintf("arXiv 元数据服务返回 HTTP %d，查询失败", response.StatusCode), StatusCode: response.StatusCode}
+		return nil, &LookupError{Code: "http_error", Message: fmt.Sprintf("arXiv 元数据服务返回 HTTP %d，查询失败", response.StatusCode), StatusCode: response.StatusCode}
 	}
 	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "html") {
-		return Metadata{}, invalidResponse("arXiv 查询返回了 HTML 网页，而非论文元数据；请检查服务或代理配置", nil)
+		return nil, invalidResponse("arXiv 查询返回了 HTML 网页，而非论文元数据；请检查服务或代理配置", nil)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return Metadata{}, networkError(err)
+		return nil, networkError(err)
 	}
 	if len(body) > maxResponseBytes {
-		return Metadata{}, invalidResponse("arXiv 元数据响应过大", nil)
+		return nil, invalidResponse("arXiv 元数据响应过大", nil)
 	}
-	return decodeMetadata(body, id)
+	return body, nil
 }
 
 type atomFeed struct {
@@ -164,11 +194,11 @@ type atomEntry struct {
 	DOI string `xml:"http://arxiv.org/schemas/atom doi"`
 }
 
-func decodeMetadata(body []byte, requested Identifier) (Metadata, error) {
+func decodeFeed(body []byte) (atomFeed, error) {
 	var feed atomFeed
 	decoder := xml.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(&feed); err != nil {
-		return Metadata{}, invalidResponse("arXiv 返回的内容不是有效 Atom 文献数据", err)
+		return atomFeed{}, invalidResponse("arXiv 返回的内容不是有效 Atom 文献数据", err)
 	}
 	for {
 		token, err := decoder.Token()
@@ -176,7 +206,7 @@ func decodeMetadata(body []byte, requested Identifier) (Metadata, error) {
 			break
 		}
 		if err != nil {
-			return Metadata{}, invalidResponse("arXiv Atom 响应不完整", err)
+			return atomFeed{}, invalidResponse("arXiv Atom 响应不完整", err)
 		}
 		if spaces, ok := token.(xml.CharData); ok && strings.TrimSpace(string(spaces)) == "" {
 			continue
@@ -184,15 +214,27 @@ func decodeMetadata(body []byte, requested Identifier) (Metadata, error) {
 		if _, ok := token.(xml.Comment); ok {
 			continue
 		}
-		return Metadata{}, invalidResponse("arXiv Atom 响应包含多余内容", nil)
+		return atomFeed{}, invalidResponse("arXiv Atom 响应包含多余内容", nil)
 	}
+	return feed, nil
+}
+
+func decodeMetadata(body []byte, requested Identifier) (Metadata, error) {
+	feed, err := decodeFeed(body)
+	if err != nil {
+		return Metadata{}, err
+	}
+
 	if len(feed.Entries) == 0 {
 		return Metadata{}, &LookupError{Code: "not_found", Message: "arXiv 未返回这篇论文或指定版本，请核对编号"}
 	}
 	if len(feed.Entries) != 1 {
 		return Metadata{}, invalidResponse("arXiv 返回了多个结果，无法唯一确认论文", nil)
 	}
-	entry := feed.Entries[0]
+	return metadataForEntry(feed.Entries[0], requested)
+}
+
+func metadataForEntry(entry atomEntry, requested Identifier) (Metadata, error) {
 	if strings.EqualFold(cleanText(entry.Title), "error") || strings.Contains(entry.ID, "/api/errors#") {
 		return Metadata{}, invalidResponse("arXiv 元数据服务报错："+cleanText(entry.Summary), nil)
 	}
@@ -203,7 +245,7 @@ func decodeMetadata(body []byte, requested Identifier) (Metadata, error) {
 	if actual.Version == "" {
 		return Metadata{}, invalidResponse("arXiv 响应缺少实际版本号，无法锁定论文版本", nil)
 	}
-	if actual.BaseID != requested.BaseID || (requested.Version != "" && actual.Version != requested.Version) {
+	if requested.BaseID != "" && (actual.BaseID != requested.BaseID || (requested.Version != "" && actual.Version != requested.Version)) {
 		return Metadata{}, &LookupError{Code: "identifier_mismatch", Message: fmt.Sprintf("arXiv 返回的论文或版本不匹配：请求 %s，返回 %s", requested.ID(), actual.ID())}
 	}
 	title := cleanText(entry.Title)

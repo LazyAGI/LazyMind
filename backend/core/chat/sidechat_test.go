@@ -25,7 +25,7 @@ import (
 
 func newSidechatTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db := newPromptTestDB(t)
+	db := newChatExecutionTestDB(t)
 	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "sidechat-state.db"))
 	if err != nil {
 		t.Fatalf("open sidechat state store: %v", err)

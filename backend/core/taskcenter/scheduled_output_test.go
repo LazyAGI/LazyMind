@@ -196,7 +196,7 @@ func TestRunScheduledResultFinalizationCoalescesSameTask(t *testing.T) {
 }
 
 func TestScheduledResultAlreadyFinalizedRequiresSucceededTaskAndStoredOutput(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	task := orm.TaskCenterTask{ID: "task-one", UserID: "owner", ConversationID: "conversation", TaskType: "scheduled", Status: "succeeded"}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestScheduledResultAlreadyFinalizedRequiresSucceededTaskAndStoredOutput(t *
 }
 
 func TestClaimScheduledResultModelSummaryPersistsSingleAttempt(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	progress := orm.RawJSON(`{"existing":"kept"}`)
 	task := orm.TaskCenterTask{ID: "summary-task", UserID: "owner", ConversationID: "conversation", TaskType: "scheduled", Status: "running", ProgressJSON: progress}
 	if err := db.Create(&task).Error; err != nil {
@@ -250,7 +250,7 @@ func TestClaimScheduledResultModelSummaryPersistsSingleAttempt(t *testing.T) {
 }
 
 func TestScheduledSummaryResolutionPersistsAndReloadsModelResult(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	task := orm.TaskCenterTask{ID: "resolved-summary-task", UserID: "owner", ConversationID: "conversation", TaskType: "scheduled", Status: "running"}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestScheduledSummaryResolutionPersistsAndReloadsModelResult(t *testing.T) {
 }
 
 func TestScheduledSummaryResolutionNeverOverwritesModelWithFallback(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	task := orm.TaskCenterTask{ID: "protected-summary-task", UserID: "owner", ConversationID: "conversation", TaskType: "scheduled", Status: "running"}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
@@ -286,7 +286,7 @@ func TestScheduledSummaryResolutionNeverOverwritesModelWithFallback(t *testing.T
 }
 
 func TestWaitForScheduledSummaryResolutionReusesModelResult(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	task := orm.TaskCenterTask{ID: "waiting-summary-task", UserID: "owner", ConversationID: "conversation", TaskType: "scheduled", Status: "running"}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)

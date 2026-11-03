@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { StreamManager } from "./StreamManager";
+import type { ChatModelOutput } from "@/api/generated/core-client";
 
 class FakeSSE {
   readyState = 1;
@@ -41,6 +42,108 @@ const terminal = (
     }[status],
     partial_output: true,
   },
+});
+
+const output = (call_index: number, phase?: ChatModelOutput["phase"], run_id = "output-run"): ChatModelOutput =>
+  ({ run_id, call_index, ...(phase ? { phase } : {}) });
+
+describe("StreamManager Host output projection", () => {
+  it("rejects old calls and repeated boundaries while accepting absolute empty sources", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const message = vi.fn();
+    manager.registerStream("conv", stream as any, { message });
+    const emit = (frame: object) => stream.emit({ conversation_id: "conv", history_id: "h", ...frame });
+    emit({ model_output: output(0, "commit") });
+    emit({ model_output: output(1, "begin") });
+    emit({ model_output: output(1), delta: "committed" });
+    emit({ model_output: output(1, "commit") });
+    emit({ delta: "tool result" });
+    emit({ model_output: output(2, "begin") });
+    emit({ model_output: output(2), delta: "bad", sources: [{ title: "bad" }] });
+    const rollback = { model_output: output(2, "rollback"), delta_mode: "replace", delta: "committed tool result",
+      reasoning_content: "", sources: [], exports: [] };
+    emit(rollback);
+    expect(manager.getStreamState("conv")?.sources).toEqual([]);
+    const accepted = message.mock.calls.length;
+    for (const frame of [rollback, { model_output: output(2, "begin") }, { model_output: output(2), delta: "late" },
+      { model_output: output(2, "commit") }, { model_output: output(3), delta: "missing begin" },
+      { model_output: output(3, "begin", "other-run"), delta: "foreign" }]) emit(frame);
+    expect(message).toHaveBeenCalledTimes(accepted);
+    emit({ model_output: output(3, "begin") });
+    emit({ model_output: output(3), delta: "replacement" });
+    emit({ model_output: output(3, "commit") });
+    emit({ delta_mode: "replace", delta: "final committed export", exports: [] });
+    expect(message).toHaveBeenCalledTimes(accepted + 4);
+  });
+
+  it("hydrates a closed snapshot once per connection and keeps same-SSE callback restores fenced", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const message = vi.fn();
+    manager.registerStream("conv", stream as any, { message });
+    const snapshot = { conversation_id: "conv", history_id: "h", model_output: output(4, "rollback"),
+      delta_mode: "replace", delta: "restored", reasoning_content: "", sources: [], exports: [] };
+    stream.emit({ conversation_id: "conv", model_output: output(0, "commit") });
+    stream.emit(snapshot);
+    stream.emit({ conversation_id: "conv", delta: "true tool result" });
+    const queued = manager.getCallbacks("conv")!;
+    const restoredMessage = vi.fn();
+    manager.restoreStreamCallbacks("conv", { message: restoredMessage });
+    stream.emit(snapshot);
+    expect(restoredMessage).not.toHaveBeenCalled();
+    queued.message?.({ data: JSON.stringify({ result: { conversation_id: "conv", delta: "old callback" } }) } as any);
+    queued.error?.({ type: "error" } as CustomEvent);
+    queued.timeout?.({ type: "timeout" } as CustomEvent);
+    expect(message).toHaveBeenCalledTimes(3);
+    expect(manager.getStreamState("conv")?.connectionState).toBe("connected");
+    const previous = manager.getCallbacks("conv")!;
+    const resumed = new FakeSSE();
+    manager.registerStream("conv", resumed as any, { message: restoredMessage });
+    resumed.emit(snapshot);
+    expect(restoredMessage).toHaveBeenCalledTimes(1);
+    previous.message?.({ data: JSON.stringify({ result: snapshot }) } as any);
+    previous.error?.({ type: "error" } as CustomEvent);
+    previous.timeout?.({ type: "timeout" } as CustomEvent);
+    expect(restoredMessage).toHaveBeenCalledTimes(1);
+    expect(manager.getStreamState("conv")?.connectionState).toBe("connected");
+  });
+
+  it("hydrates an open snapshot and binds the next connection to its new run", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const message = vi.fn();
+    manager.registerStream("conv", stream as any, { message });
+    stream.emit({ conversation_id: "conv", model_output: output(2, "begin"), delta_mode: "replace", delta: "preview", sources: [] });
+    stream.emit({ conversation_id: "conv", model_output: output(2), delta: "more" });
+    expect(message).toHaveBeenCalledTimes(2);
+    const next = new FakeSSE();
+    manager.registerStream("conv", next as any, { message });
+    next.emit({ conversation_id: "conv", model_output: output(0, "commit", "new-run") });
+    next.emit({ conversation_id: "conv", model_output: output(3, "begin"), delta: "old run" });
+    next.emit({ conversation_id: "conv", runtime_event: terminal("output-run") });
+    expect(message).toHaveBeenCalledTimes(3);
+    expect(manager.isStreamFinished("conv")).toBe(false);
+    next.emit({ conversation_id: "conv", model_output: output(1, "begin", "new-run") });
+    next.emit({ conversation_id: "conv", model_output: output(1, undefined, "new-run"), delta: "new" });
+    expect(message).toHaveBeenCalledTimes(5);
+  });
+
+  it("delivers a metadata-less terminal after rollback without replaying projection", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const message = vi.fn();
+    manager.registerStream("conv", stream as any, { message });
+    stream.emit({ conversation_id: "conv", history_id: "h", model_output: output(0, "commit") });
+    stream.emit({ conversation_id: "conv", history_id: "h", model_output: output(1, "begin") });
+    stream.emit({ conversation_id: "conv", history_id: "h", model_output: output(1, "rollback"), delta_mode: "replace", delta: "", sources: [], exports: [] });
+    const frame = { conversation_id: "conv", history_id: "h", runtime_event: terminal("output-run", "failed") };
+    stream.emit(frame);
+    expect(manager.isStreamFinished("conv")).toBe(true);
+    expect(message).toHaveBeenCalledTimes(4);
+    stream.emit({ conversation_id: "conv", history_id: "h", model_output: output(1, "rollback"), delta_mode: "replace", delta: "", sources: [], exports: [] });
+    expect(message).toHaveBeenCalledTimes(4);
+  });
 });
 
 describe("StreamManager runtime terminal", () => {

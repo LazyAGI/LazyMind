@@ -96,18 +96,29 @@ export async function createSearchablePdfJob(datasetId: string, documentId: stri
   return response.data.data;
 }
 
-export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<{ status: "parsed" | "parsing" | "failed"; task_id?: string }> {
-  const response = await axiosInstance.post<Envelope<{ status: "parsed" | "parsing" | "failed"; task_id?: string }>>(
-    `${documentBase(datasetId, documentId)}:ensure-parsed`,
-    {},
-  );
-  return response.data.data || response.data as unknown as { status: "parsed" | "parsing" | "failed"; task_id?: string };
+export interface DocumentParseResult {
+  status: "parsed" | "parsing" | "failed" | "unknown" | "not_requested";
+  task_id?: string;
+  error?: { code: string; message: string; recovery?: string };
+}
+export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<DocumentParseResult> {
+  const response = await axiosInstance.post<Envelope<DocumentParseResult>>(`${documentBase(datasetId, documentId)}:ensure-parsed`, {});
+  return response.data.data || response.data as unknown as DocumentParseResult;
+}
+export async function retryDocumentParsed(datasetId: string, documentId: string): Promise<void> {
+  const response = await axiosInstance.post(`${documentBase(datasetId, documentId)}:reparse`, {}, { headers: { "Idempotency-Key": crypto.randomUUID() } });
+  const result = response.data.data || response.data;
+  const item = result.items?.[0];
+  if (!item || item.resource_status === "failed" || item.processing_status === "failed" || item.resource_status === "unconfirmed") {
+    throw new Error(item?.error?.message || "解析重试未提交，请刷新文档状态后核对。");
+  }
 }
 
 export async function createTranslationPdfJob(datasetId: string, documentId: string, input: {
   target_language: string;
   provider_type: "api" | "llm";
   provider: string;
+  provider_group_id?: string;
   model?: string;
   options_hash?: string;
   force?: boolean;
@@ -123,6 +134,7 @@ export async function createTranslationPdfJob(datasetId: string, documentId: str
   body.append("target_language", input.target_language);
   body.append("provider_type", input.provider_type);
   body.append("provider", input.provider);
+  if (input.provider_group_id) body.append("provider_group_id", input.provider_group_id);
   if (input.model) body.append("model", input.model);
   if (input.options_hash) body.append("options_hash", input.options_hash);
   body.append("force", String(Boolean(input.force)));
@@ -196,18 +208,21 @@ export async function getPdfTranslationDraft(datasetId: string, documentId: stri
 export async function retranslatePdfDraftBlock(datasetId: string, documentId: string, artifactId: string, input: {
   block_id: string;
   provider_type?: "api" | "llm";
-}): Promise<{ block_id: string; translated_text: string }> {
-  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string }>>(
+}): Promise<{ block_id: string; translated_text: string; provider_type: "api" | "llm"; provider: string }> {
+  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string; provider_type: "api" | "llm"; provider: string }>>(
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:retranslate`, input,
     { timeout: 10 * 60 * 1000 },
   );
   return response.data.data;
 }
 
-export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>): Promise<PdfArtifact> {
+export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>, source?: {
+  provider_type: "api" | "llm";
+  provider: string;
+}): Promise<PdfArtifact> {
   const response = await axiosInstance.post<Envelope<PdfArtifact>>(
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:revise`,
-    { overrides },
+    { overrides, ...source },
     { timeout: 20 * 60 * 1000 },
   );
   return response.data.data;
