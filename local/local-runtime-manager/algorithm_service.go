@@ -652,6 +652,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	routerPoolStart, routerPoolEnd := localRouterPortPool(cfg)
 	trustedLocalMode := paths.TrustedLocalMode || envBool("LAZYMIND_TRUSTED_LOCAL_MODE", false)
 	env := []string{
+		runtimeProcessOwnerEnvVar + "=" + paths.RuntimeRoot,
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_TRUSTED_LOCAL_MODE=" + strconv.FormatBool(trustedLocalMode),
 		"PYTHONPATH=" + pythonPath,

@@ -11,6 +11,7 @@ const localHostHomeEnvVar = "LAZYMIND_HOST_HOME"
 
 func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 	return []string{
+		runtimeProcessOwnerEnvVar + "=" + paths.RuntimeRoot,
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + paths.ConfigDir,
 		"XDG_CACHE_HOME=" + paths.XDGCacheDir,
