@@ -1766,12 +1766,15 @@ def string_replace(
 
 
 @fc_register(host_file='NONE')
-def pptx_analyzer(filename: str, page: int = 1, turn: Optional[int] = None) -> Dict[str, Any]:
-    """Read one native PPTX page on demand, without PDF conversion or OCR.
+def pptx_analyzer(filename: str, page: int = 1, turn: Optional[int] = None,
+                  all_pages: bool = False) -> Dict[str, Any]:
+    """Read native PPTX pages in one call, without PDF conversion or OCR.
 
     Args:
         filename: Uploaded attachment filename. Never an arbitrary filesystem path.
-        page: 1-based page; follow next_page until null for whole-deck questions.
+        page: 1-based page for targeted inspection; omit when all_pages is true.
+        all_pages: Read the entire deck internally in one call. Prefer true for templates
+            and whole-deck questions. Returns pages plus shared metadata once.
         turn: Optional attachment turn number, for duplicate filenames.
 
     Returns:
@@ -1787,7 +1790,7 @@ def pptx_analyzer(filename: str, page: int = 1, turn: Optional[int] = None) -> D
     if not os.path.isfile(matched) or not matched.lower().endswith('.pptx'):
         raise ToolExecutionError('pptx_analyzer requires an available .pptx attachment')
     try:
-        return inspect_template(Path(matched), page)
+        return inspect_template(Path(matched), page, all_pages=all_pages)
     except ValueError as exc:
         raise ToolExecutionError(str(exc)) from None
     except Exception as exc:
@@ -1816,6 +1819,7 @@ def edit_presentation(
     slot_ids: Optional[List[str]] = None,
     allow_font_download: bool = False,
     style_edits: Optional[List[Dict[str, Any]]] = None,
+    chart_edits: Optional[List[Dict[str, Any]]] = None,
     template_filename: Optional[str] = None,
     template_turn: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -1839,6 +1843,8 @@ def edit_presentation(
     For font-only edits use replace_fonts; exact inspected slot_ids select text
     runs/table cells, pages select slides. For native_pptx provide source_sha256.
     edit_content can combine target_font with text/notes into one revision.
+    chart_edits=[{page,chart_index,palette}] changes only an inspected chart's colors;
+    palette is blue/teal/orange/purple or distinct #RRGGBB colors. Values stay unchanged.
     prepare_font checks target_font without a file (filename may be empty).
     Only explicitly requested open-font downloads may set allow_font_download.
     format_text (or edit_content) takes style_edits: a list of objects with
@@ -1932,8 +1938,9 @@ def edit_presentation(
         with tempfile.TemporaryDirectory(prefix='content-', dir=draft.root) as temporary:
             candidate = Path(temporary) / 'presentation.pptx'
             stats = {}
-            if text_edits or speaker_notes:
-                stats = edit_content(effective, candidate, source_sha256, text_edits, speaker_notes, require_all_notes)
+            if text_edits or speaker_notes or chart_edits:
+                stats = edit_content(effective, candidate, source_sha256, text_edits, speaker_notes,
+                                     require_all_notes, chart_edits=chart_edits)
             if target_font:
                 from lazymind.chat.engine.tools.file_resources.pptx_font_edit import edit_fonts
                 # Slot indices belong to the inspected source. Do not apply stale

@@ -170,3 +170,55 @@ func TestParallelReviewUsesEffectiveAttemptAndUnstartedSuccessor(t *testing.T) {
 		})
 	}
 }
+
+func TestInputCheckpointDisplayLifecycle(t *testing.T) {
+	for _, sample := range []struct {
+		name, status, payload, want string
+		running, successor, stale   bool
+	}{
+		{"pending card", "active", `{"questions":[{"text":"date?"}],"checkpoint_token":"card"}`, "waiting_input", false, false, false},
+		{"answered", "active", `{"questions":[{}],"checkpoint_token":"card","answer_text":"November 30"}`, "running", false, false, false},
+		{"not emitted", "active", `{"questions":[{}]}`, "running", false, false, false},
+		{"no questions", "active", `{"questions":[],"checkpoint_token":"card"}`, "running", false, false, false},
+		{"parallel work", "active", `{"questions":[{}],"checkpoint_token":"card"}`, "running", true, false, false},
+		{"explicit pause", "stopped", `{"questions":[{}],"checkpoint_token":"card"}`, "paused", false, false, false},
+		{"completed", "completed", `{"questions":[{}],"checkpoint_token":"card"}`, "completed", false, false, false},
+		{"stale checklist", "active", `{"questions":[{}],"checkpoint_token":"card"}`, "running", false, false, true},
+		{"successor started", "active", `{"questions":[{}],"checkpoint_token":"card"}`, "running", false, true, false},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{})
+			now := time.Now().UTC()
+			session := orm.WorkflowSession{ID: "session", Status: sample.status, WorkflowRevisionID: "revision", ControllerHost: "lazymind"}
+			graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"collect": {ID: "collect", Mode: "auto"}}, Runtime: graphengine.RuntimePolicy{InputCheckpoint: &graphengine.InputCheckpoint{AfterStep: "collect", Slot: "questions", BeforeSteps: []string{"outline"}}}}
+			must := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			must(db.Create(&orm.WorkflowRevision{ID: "revision", WorkflowResourceID: "resource", RevisionNo: 1, CompiledGraph: graph.JSON()}).Error)
+			must(db.Create(&orm.WorkflowSessionStep{ID: "collect", SessionID: "session", StepID: "collect", Status: "succeeded", Validity: "effective", CreatedAt: now}).Error)
+			hid := "questions"
+			must(db.Create(&orm.WorkflowHumanArtifact{ID: hid, SessionID: "session", Slot: "questions", ContentType: "json", Value: json.RawMessage(`{"data":` + sample.payload + `}`)}).Error)
+			validity := "effective"
+			if sample.stale {
+				validity = "stale"
+			}
+			must(db.Create(&orm.WorkflowSlotRevision{ID: "slot", SessionID: "session", SlotID: "questions", Slot: "questions", Selected: true, Revision: 1, Validity: validity, HumanArtifactID: &hid}).Error)
+			if sample.running || sample.successor {
+				status := "running"
+				if sample.successor {
+					status = "succeeded"
+				}
+				must(db.Create(&orm.WorkflowSessionStep{ID: "outline", SessionID: "session", StepID: "outline", Status: status, Validity: "effective", CreatedAt: now.Add(time.Second)}).Error)
+			}
+			for i := 0; i < 2; i++ {
+				view, err := Read(db.DB, session)
+				if err != nil || view.Status != sample.want {
+					t.Fatalf("view=%+v err=%v want=%s", view, err, sample.want)
+				}
+			}
+		})
+	}
+}

@@ -114,6 +114,24 @@ def test_typography_batch_is_forwarded_without_dropping_false(context, monkeypat
               {'slot_ids': ['4:2'], 'bold': False, 'italic': True, 'underline': False}]
     pptx_edit.publish_pptx_edit('hash', style_edits=styles)
     assert edit.call_args.kwargs['style_edits'] == styles
+
+
+def test_chart_inspection_and_targeted_palette_publication(context, monkeypatch):
+    edit = MagicMock(return_value={
+        'sha256': 'hash', 'slide_count': 5,
+        'pages': [{'page': 5, 'slots': [], 'speaker_notes': '保持原讲稿',
+                   'charts': [{'chart_index': 1, 'colors': ['FF0000']}]}],
+    })
+    monkeypatch.setattr(pptx_edit.tools, 'edit_presentation', edit)
+    view = pptx_edit.inspect_current_pptx(5)
+    assert view['pages'][0]['charts'][0]['chart_index'] == 1
+    assert edit.call_args.kwargs['pages'] == 5
+    edit.return_value = {'status': 'ok', 'workflow_artifact': {'id': 'revision-2'}}
+    changes = [{'page': 5, 'chart_index': 1, 'palette': 'teal'}]
+    pptx_edit.publish_pptx_edit('hash', chart_edits=changes)
+    assert edit.call_args.kwargs['chart_edits'] == changes
+    assert edit.call_args.kwargs['text_edits'] is None
+    assert edit.call_args.kwargs['speaker_notes'] is None
     assert len(context.local_artifacts()) == 1
 
 

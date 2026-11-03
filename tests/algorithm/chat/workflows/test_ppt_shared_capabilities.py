@@ -23,6 +23,28 @@ def tools():
     return module.TOOLS
 
 
+def test_talk_timing_is_weighted_contiguous_and_matches_exact_budget(tools):
+    result = tools.ppt_plan_timing(10, json.dumps([
+        {'title': '开场', 'weight': .4}, {'title': '方法', 'weight': 2},
+        {'title': '结果', 'weight': 2}, {'title': '总结', 'weight': .6},
+    ]))
+    pages = result['pages']
+    assert result['total_seconds'] == sum(p['seconds'] for p in pages) == 600
+    assert pages[1]['seconds'] > pages[0]['seconds']
+    assert pages[0]['start_seconds'] == 0 and pages[-1]['end_seconds'] == 600
+    assert all(a['end_seconds'] == b['start_seconds'] for a, b in zip(pages, pages[1:]))
+    assert '10:00' in pages[-1]['notes_prefix']
+
+
+@pytest.mark.parametrize('minutes,pages', [
+    (0, [{'title': 'A'}]), (float('nan'), [{'title': 'A'}]),
+    (10, [{'title': 'A', 'weight': -1}]), (.01, [{'title': 'A'}]),
+])
+def test_invalid_timing_is_rejected(tools, minutes, pages):
+    with pytest.raises(ValueError):
+        tools.ppt_plan_timing(minutes, json.dumps(pages))
+
+
 def test_multiple_attachments_read_to_eof_and_keep_distinct_sources(tools, tmp_path, monkeypatch):
     reader = types.ModuleType('lazymind.chat.engine.tools.file_resources.tools')
     reader.read_file_resource = mock.Mock(side_effect=lambda path, offset, limit: {
@@ -251,3 +273,35 @@ def test_nonpaper_or_unavailable_uploads_do_not_satisfy_paper_question(tmp_path)
         path.write_text('not a paper')
     runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
     assert paper_attachment_context({'files': list(map(str, paths))}, runtime) == ('', [])
+
+
+def test_paper_order_places_transitive_prerequisites_before_dependents(tools):
+    papers = [{'source_id': key, 'title': f'Paper {key}'} for key in ['A', 'C', 'B', 'D']]
+    edges = [
+        {'prerequisite': 'B', 'dependent': 'A', 'evidence': 'A §3 extends the encoder in B §2'},
+        {'prerequisite': 'C', 'dependent': 'B', 'evidence': 'B §2 uses the representation in C §4'},
+    ]
+    result = tools.ppt_plan_paper_order(json.dumps(papers), json.dumps(edges))
+    assert [paper['source_id'] for paper in result['paper_order']] == ['C', 'B', 'A', 'D']
+    assert result['dependencies'] == edges
+    assert result['paper_count'] == 4
+
+
+def test_independent_papers_keep_narrative_order_without_invented_dependencies(tools):
+    papers = [{'source_id': key, 'title': f'Paper {key}'} for key in ['B', 'A', 'C']]
+    result = tools.ppt_plan_paper_order(json.dumps(papers))
+    assert result['paper_order'] == papers
+    assert result['dependencies'] == []
+
+
+@pytest.mark.parametrize('edges,reason', [
+    ([{'prerequisite': 'B', 'dependent': 'A', 'evidence': ''}], 'require source evidence'),
+    ([{'prerequisite': 'missing', 'dependent': 'A', 'evidence': 'A §3'}], 'selected source_ids'),
+    ([{'prerequisite': 'A', 'dependent': 'A', 'evidence': 'A §3'}], 'depend on itself'),
+    ([{'prerequisite': 'B', 'dependent': 'A', 'evidence': 'A §3'},
+      {'prerequisite': 'A', 'dependent': 'B', 'evidence': 'B §2'}], 'Cyclic dependencies'),
+])
+def test_paper_order_rejects_unsupported_or_inconsistent_graph(tools, edges, reason):
+    papers = [{'source_id': key, 'title': f'Paper {key}'} for key in ['A', 'B']]
+    with pytest.raises(ValueError, match=reason):
+        tools.ppt_plan_paper_order(json.dumps(papers), json.dumps(edges))

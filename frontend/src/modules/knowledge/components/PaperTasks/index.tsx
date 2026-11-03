@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
-import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import { Alert, Button, Drawer, Dropdown, Input, List, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { BranchesOutlined, DownOutlined, EditOutlined, FundProjectionScreenOutlined, HistoryOutlined, LoadingOutlined, ReadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -62,7 +61,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [params, setParams] = useSearchParams();
     const [launch, setLaunch] = useState<{ kind: PaperTask; direction: boolean }>();
     const [instruction, setInstruction] = useState('');
-    const [reflectionFirst, setReflectionFirst] = useState(false);
     const [busy, setBusy] = useState(false);
     const [history, setHistory] = useState(false);
     const [historyError, setHistoryError] = useState(false);
@@ -93,7 +91,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         }
         setActionError('');
         setInstruction('');
-        setReflectionFirst(false);
         setLaunch({ kind, direction });
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
@@ -222,7 +219,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const body = {
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
-                user_instruction: launch.direction ? undefined : instruction.trim(), reflection_first: reflectionFirst,
+                user_instruction: launch.direction ? undefined : instruction.trim(), reflection_first: false,
             };
             const fingerprint = JSON.stringify(body);
             if (requestInput.current && requestInput.current !== fingerprint) requestKey.current = crypto.randomUUID();
@@ -433,7 +430,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             <Input.TextArea aria-label={t(launch?.direction ? 'paperTasks.topic' : 'paperTasks.additional')}
                 placeholder={t(launch?.direction ? 'paperTasks.topicPlaceholder' : `paperTasks.placeholder.${launch?.kind || 'expansion'}`)}
                 value={instruction} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInstruction(event.target.value)} />
-            {launch?.kind === 'ppt' && <Checkbox style={{ marginTop: 12 }} checked={reflectionFirst} onChange={(event: CheckboxChangeEvent) => setReflectionFirst(event.target.checked)}>{t('paperTasks.reflectionFirst')}</Checkbox>}
         </Modal>
         <Drawer open={history} title={t('paperTasks.personalRecords')} width={780} onClose={() => setHistory(false)}>
             <Button onClick={() => void refreshHistory()}>{t('paperTasks.refresh')}</Button>

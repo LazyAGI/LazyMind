@@ -1299,7 +1299,8 @@ class PartialEditTests(unittest.TestCase):
             page_two = deck / 'pages' / 'page_002.html'
             page_two.write_text(PAGE_HTML.replace('Old title', 'Page two'), encoding='utf-8')
             with mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]):
-                with mock.patch.object(TOOLS, 'require_context'):
+                with mock.patch.object(TOOLS, 'require_context'), \
+                        mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=(None, 'text')):
                     with mock.patch.object(
                         TOOLS, '_save_artifact', return_value={'status': 'ok'},
                     ) as save:

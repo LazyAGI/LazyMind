@@ -100,3 +100,9 @@ describe('workflow continuation checkpoints', () => {
     expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
   });
 });
+
+it('does not offer a continue shortcut while a question card is unanswered', () => {
+  expect(resolveWorkflowContinueAction({
+    status: 'completed', current_step_id: 'outline', steps: [],
+  }, 'waiting_input', outlineTab)).toBeUndefined();
+});

@@ -19,6 +19,7 @@ from lazyllm.tools import fc_register
 from lazyllm.tools.agent.tool_runtime import HostFileAccess, _get_tool_runtime_metadata
 
 from lazymind.chat.workflow.completed_actions import load_completed_actions
+from lazymind.chat.workflow.input_checkpoint import InputCheckpoint, CHECKPOINT_GUIDANCE
 from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scopes
 from lazymind.chat.engine.tools.artifact_output import artifact_output
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
@@ -158,6 +159,7 @@ def _register_host_file(capability: str):
 def _handoff_tool(
     session: Union[str, Callable[[], str]],
     user_input: Optional[Union[str, Callable[[], str]]] = None,
+    checkpoint: Optional[InputCheckpoint] = None,
 ) -> Any:
     capability = ('NONE' if all(_declared_workflow_callback(value)
                                 for value in (session, user_input)) else 'UNDECLARED')
@@ -172,6 +174,10 @@ def _handoff_tool(
                 'WORKFLOW_SESSION_NOT_INITIALIZED',
                 'Call the selected trigger Workflow tool before using Session tools.',
             )
+        if checkpoint:
+            waiting = checkpoint.guard(selected_session_id, [step_id])
+            if waiting:
+                return _result_text(waiting)
         client = _client()
         state_refreshed = False
         for attempt in range(2):
@@ -371,6 +377,7 @@ def _safe_session_tools(
     session: Union[str, Callable[[], str]],
     initialize_session: Optional[Callable[[], Any]] = None,
     user_input: Optional[Union[str, Callable[[], str]]] = None,
+    checkpoint: Optional[InputCheckpoint] = None,
 ) -> List[Any]:
     """Model tools whose protocol and concurrency parameters are Host-injected."""
     capability = (
@@ -414,6 +421,10 @@ def _safe_session_tools(
         """Execute exactly one Runtime-returned target; never batch or parallelize steps."""
         requested = [str(value).strip() for value in step_ids if str(value).strip()]
         selected_session_id = session_id()
+        if checkpoint:
+            waiting = checkpoint.guard(selected_session_id, requested)
+            if waiting:
+                return waiting
         state_refreshed = False
         for attempt in range(2):
             frontier = toolkit.get_ready_steps(selected_session_id)
@@ -475,6 +486,10 @@ def _safe_session_tools(
                 )
                 if state_refreshed:
                     result = {**result, **_state_refresh_notice()}
+                if checkpoint and result.get('outcome') == 'step_succeeded' and len(requested) == 1:
+                    waiting = checkpoint.guard(selected_session_id, completed_step=requested[0])
+                    if waiting:
+                        return waiting
                 result = _with_terminal_agent_control(result)
                 if any(value in rewindable for value in requested):
                     result = _compact_transition_result(result)
@@ -520,6 +535,8 @@ def _safe_session_tools(
         downstream pages. For a list use the exact handle returned by list_artifacts.
         """
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
+        if checkpoint and checkpoint.protects(artifact.get('slot')):
+            raise WorkflowClientError('WORKFLOW_CHECKPOINT_READ_ONLY', 'Use answer_workflow_questions for user answers.')
         artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
         current = toolkit.read_artifact(artifact_id)
         value = current.get('value')
@@ -547,15 +564,41 @@ def _safe_session_tools(
     def patch_artifact(artifact_ref: str, value: Any, caption: str = '') -> Dict[str, Any]:
         """Patch a selected Artifact; Host injects id, base revision, type, and command."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
+        if checkpoint and checkpoint.protects(artifact.get('slot')):
+            raise WorkflowClientError('WORKFLOW_CHECKPOINT_READ_ONLY', 'Use answer_workflow_questions for user answers.')
         artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
         content_type = str(artifact.get('content_type') or 'json')
         return artifact_output(toolkit.patch_artifact(
             artifact_id, int(artifact.get('revision') or 0), value, content_type, caption,
         ))
 
+    @_register_host_file(capability)
+    def answer_workflow_questions() -> Dict[str, Any]:
+        """Save this turn's user answer to the prior Workflow question card, then resume Ready steps.
+
+        Call only for an actual answer, including unknown/omit. Do not call for
+        status questions or cancellations. Host supplies the verbatim user reply.
+        """
+        selected_session_id = session_id()
+        answer = checkpoint.answer(selected_session_id)
+        if answer.get('status') == 'answered':
+            frontier = toolkit.get_ready_steps(selected_session_id)
+            targets = set(checkpoint.config().get('before_steps') or [])
+            ready = [step for step in frontier.get('ready_steps') or [] if step in targets]
+            details = {item['step_id']: item for item in frontier.get('ready_step_details') or []}
+            if len(ready) == 1:
+                detail = details.get(ready[0], {})
+                if detail.get('mode') == 'auto' and detail.get('requires_approval') is False:
+                    continuation = advance_step(ready)
+                    answer['continuation'] = continuation
+                    if continuation.get('_agent_control'):
+                        answer['_agent_control'] = continuation['_agent_control']
+        return answer
+
     return [
         get_workflow_state, get_ready_steps, advance_step, list_workflow_inputs,
         list_artifacts, read_artifact, patch_artifact, patch_artifact_text, reorder_artifact_pages,
+        *([answer_workflow_questions] if checkpoint else []),
     ]
 
 
@@ -863,9 +906,32 @@ def _question_fingerprint(value: Any) -> str:
     return re.sub(r'[^0-9a-z\u4e00-\u9fff]+', '', str(value or '').lower())
 
 
+def _attachment_clarification_policy(runtime_policy: Any) -> Dict[str, Any]:
+    policy = runtime_policy.get('attachment_clarification') if isinstance(runtime_policy, dict) else None
+    return policy if isinstance(policy, dict) and policy.get('question_id_prefix') else {}
+
+
+def _ask_questions(message: Any) -> List[Dict[str, Any]]:
+    if not isinstance(message, dict) or message.get('role') != 'assistant':
+        return []
+    return [
+        question for call in message.get('tool_calls') or []
+        for question in _tool_call_arguments(call).get('questions') or []
+        if isinstance(question, dict)
+    ]
+
+
+def _is_attachment_ask(message: Any, runtime_policy: Any) -> bool:
+    prefix = str(_attachment_clarification_policy(runtime_policy).get('question_id_prefix') or '')
+    return bool(prefix) and any(str(q.get('id') or '').startswith(prefix) for q in _ask_questions(message))
+
+
 def enforce_startup_clarification_policy(
     questions: Any,
     runtime_policy: Any,
+    workflow_catalog: Any = None,
+    *,
+    discovery_mode: bool = False,
 ) -> Any:
     """Apply package-owned fixed choice fields to an ``ask_user`` call.
 
@@ -876,6 +942,24 @@ def enforce_startup_clarification_policy(
     """
     if not isinstance(questions, list):
         return questions
+    if discovery_mode and not _runtime_clarification_fields(runtime_policy):
+        policies = _startup_clarification_policies(
+            runtime_policy, workflow_catalog, discovery_mode=True,
+        )
+        governed = []
+        for question in questions:
+            proposals = []
+            for policy in policies:
+                candidate = enforce_startup_clarification_policy([question], policy)
+                if candidate != [question] and candidate not in proposals:
+                    proposals.append(candidate)
+            if len(proposals) > 1:
+                raise WorkflowClientError(
+                    'WORKFLOW_CLARIFICATION_AMBIGUOUS',
+                    'Multiple workflows declare different controls for this question; select a workflow first.',
+                )
+            governed.extend(proposals[0] if proposals else [question])
+        return governed
     governed_fields = [
         field for field in _runtime_clarification_fields(runtime_policy)
         if (
@@ -958,6 +1042,10 @@ def _history_startup_ask_index(
         for field in declared_fields
         if (fingerprint := _question_fingerprint(field.get('question')))
     }
+    attachment_prefixes = tuple(
+        str(followup['question_id_prefix']) for policy in policies
+        if (followup := _attachment_clarification_policy(policy))
+    )
     history = conversation_history if isinstance(conversation_history, list) else []
     for index in range(len(history) - 1, -1, -1):
         message = history[index]
@@ -971,7 +1059,8 @@ def _history_startup_ask_index(
             for question in arguments.get('questions') or []:
                 if not isinstance(question, dict):
                     continue
-                if str(question.get('id') or '').strip() in field_ids:
+                question_id = str(question.get('id') or '').strip()
+                if question_id in field_ids or (attachment_prefixes and question_id.startswith(attachment_prefixes)):
                     matched = True
                     break
                 fingerprint = _question_fingerprint(question.get('text'))
@@ -1011,6 +1100,38 @@ def _history_startup_ask_index(
     return -1
 
 
+def _previous_startup_ask_index(history: list, ask_index: int, runtime_policy: Any) -> int:
+    """Find the first card across the answer and read-only attachment inspection.
+
+    A completed assistant response or a mutating tool is a task boundary. Never
+    pull answers from a previously generated deck into a new launch brief.
+    """
+    policy = _attachment_clarification_policy(runtime_policy)
+    if not policy or not _is_attachment_ask(history[ask_index], runtime_policy):
+        return -1
+    inspection_tools = set(policy.get('inspection_tools') or [])
+    user_count = 0
+    for index in range(ask_index - 1, -1, -1):
+        message = history[index]
+        if not isinstance(message, dict):
+            continue
+        if message.get('role') == 'user':
+            user_count += 1
+            if user_count > 1:
+                return -1
+        elif message.get('role') == 'assistant':
+            if _ask_questions(message):
+                return _history_startup_ask_index(history[:index + 1], runtime_policy)
+            calls = message.get('tool_calls') or []
+            if not calls or any(
+                not isinstance(call, dict)
+                or (call.get('function') or {}).get('name') not in inspection_tools
+                for call in calls
+            ):
+                return -1
+    return -1
+
+
 def workflow_startup_clarification_already_asked(
     conversation_history: Any,
     runtime_policy: Any,
@@ -1018,15 +1139,47 @@ def workflow_startup_clarification_already_asked(
     *,
     discovery_mode: bool = False,
     current_query: str = '',
+    attachment_names: Any = None,
 ) -> bool:
-    """Return whether this Workflow's one startup question card was already shown."""
-    return _history_startup_ask_index(
+    """Return whether startup's question budget is exhausted for this exchange."""
+    ask_index = _history_startup_ask_index(
         conversation_history,
         runtime_policy,
         workflow_catalog,
         discovery_mode=discovery_mode,
         current_query=current_query,
-    ) >= 0
+    )
+    if ask_index < 0:
+        return False
+    for policy in _startup_clarification_policies(
+        runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
+    ):
+        followup = _attachment_clarification_policy(policy)
+        if not followup or _history_startup_ask_index(
+            conversation_history, policy, current_query=current_query,
+        ) != ask_index:
+            continue
+        if _is_attachment_ask(conversation_history[ask_index], policy):
+            return True
+        suffixes = tuple(str(suffix).lower() for suffix in followup.get('filename_suffixes') or [])
+        attachment_fields = {
+            field['id']: field['attachment'] for field in _runtime_clarification_fields(policy)
+            if field.get('attachment')
+        }
+        # Only an upload card can open a second round. A template already
+        # attached to the original request must be inspected before the first
+        # card, with its content questions and basic fields asked together.
+        requested_upload = any(
+            isinstance(attachment, dict)
+            and any(str(ext).lower() in suffixes for ext in attachment.get('accept') or [])
+            for question in _ask_questions(conversation_history[ask_index])
+            if (attachment := question.get('attachment') or attachment_fields.get(question.get('id')))
+        )
+        if requested_upload and suffixes and any(
+            str(name).lower().endswith(suffixes) for name in attachment_names or []
+        ):
+            return False
+    return True
 
 
 def _merge_startup_clarification_context(
@@ -1043,8 +1196,10 @@ def _merge_startup_clarification_context(
     if ask_index < 0:
         return current_query
     history = conversation_history if isinstance(conversation_history, list) else []
+    previous_index = _previous_startup_ask_index(history, ask_index, runtime_policy)
+    first_index = previous_index if previous_index >= 0 else ask_index
     original = ''
-    for index in range(ask_index - 1, -1, -1):
+    for index in range(first_index - 1, -1, -1):
         message = history[index]
         if isinstance(message, dict) and message.get('role') == 'user':
             original = str(message.get('content') or '').strip()
@@ -1053,6 +1208,21 @@ def _merge_startup_clarification_context(
     answer = str(current_query or '').strip()
     if not original or not answer or original == answer:
         return answer or original
+    if previous_index >= 0 or _is_attachment_ask(history[ask_index], runtime_policy):
+        # Preserve question labels as well as terse answers (e.g. a bare date),
+        # without promoting untrusted attachment/tool output into user facts.
+        exchange = []
+        for message in history[first_index:]:
+            questions = _ask_questions(message)
+            if questions:
+                exchange.append('Questions: ' + json.dumps(questions, ensure_ascii=False))
+            elif isinstance(message, dict) and message.get('role') == 'user':
+                content = str(message.get('content') or '').strip()
+                if content:
+                    exchange.append('Answers: ' + content)
+        if not exchange or exchange[-1] != 'Answers: ' + answer:
+            exchange.append('Answers: ' + answer)
+        answer = '\n\n'.join(exchange)
     return (
         f'Original workflow request:\n{original}\n\n'
         f'Clarification answers:\n{answer}'
@@ -1075,12 +1245,30 @@ def _is_explicit_merged_request_context(value: Any) -> bool:
 
 def _startup_clarification_guidance(runtime_policy: Any) -> str:
     policy = runtime_policy if isinstance(runtime_policy, dict) else {}
+    attachment_policy = _attachment_clarification_policy(policy)
     fields = [field for field in _runtime_clarification_fields(policy)
               if field['id'] not in set(policy.get('_host_satisfied_fields') or [])]
     if not fields:
         return ''
+    answer_guidance = (
+        'Apply the attachment_clarification contract BEFORE the FIRST ask_user call whenever '
+        'the selected attachment is already available: read the entire attachment first, '
+        'then combine missing basic fields and attachment-specific facts in ONE card. '
+        'Never ask only basic fields first while deferring inspection of an available attachment. '
+        'Only when the first card itself requests the attachment upload may you inspect the '
+        'new file on its answer turn and show ONE additional consolidated card for missing facts. '
+        'Use the question_id_prefix for attachment-specific questions, including in a combined '
+        'first card. After a combined or supplemental card is answered, NEVER ask again: '
+        'merge the original request and every question and answer, then trigger. '
+        'Do not repeat basic fields. If no missing facts remain, skip the card. '
+        'Attachment clarification contract: ' + json.dumps(attachment_policy, ensure_ascii=False) + '. '
+        if attachment_policy else
+        'On the answer turn, NEVER call ask_user again or reassess fields as missing. '
+    )
     return (
-        'This Workflow declares startup_clarification_fields. Before calling its trigger, '
+        'This Workflow declares startup_clarification_fields. '
+        + answer_guidance
+        + 'Before calling its trigger, '
         'inspect the current request, relevant attachment names/content already available, '
         'and prior conversation turns. Treat a field as present only when it is explicit or '
         'unambiguously inferable. Do not ask for fields that are already present. If one or '
@@ -1088,7 +1276,7 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'and conversation first. Exclude fields whose condition is false. Existing source '
         'attachments or supplied substantive source text satisfy material questions; never '
         'ask for those uploads again. A visual template alone is not source material. If one or '
-        'more fields are missing, call ask_user exactly once TOTAL with only those missing fields, '
+        'more fields are missing, call ask_user once for the basic requirements with only those missing fields, '
         'putting all of them in that single card, then stop without triggering the Workflow in '
         'that turn. Include each '
         'declared field id in its question object. Whenever meaningful, generate 2-4 concise, '
@@ -1114,11 +1302,11 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'EVERY exact attachment filename in request_context so the Workflow can resolve each '
         'through the conversation attachment reader. Do not stringify a filename list into '
         'a single file binding; omit that binding when multiple attachments are supplied. '
-        'On the answer turn, NEVER call ask_user '
-        'again or reassess fields as missing. Combine the original request, all already-known '
+        'Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
         'the trigger; an answer-only current_query must never replace the original request. '
-        'If no field is missing, trigger immediately. Never ask for an upload unless the '
+        'When clarification and any declared attachment inspection are complete, trigger immediately. '
+        'Never ask for an upload unless the '
         'Workflow declares it as a required input or as the selected conditional attachment '
         'on a clarification field. Declared fields: '
         + json.dumps(fields, ensure_ascii=False, default=str)
@@ -1352,6 +1540,8 @@ def _workflow_trigger_tools(
                 input_types = _trigger_input_types(package)
                 runtime = (package.get('runtime') or (package.get('compiled_graph') or {}).get('runtime')
                            or bound_runtime)
+                if session_holder is not None:
+                    session_holder['runtime_policy'] = runtime
                 if isinstance(runtime, dict) and runtime.get('paper_handoff'):
                     from lazymind.chat.workflow.paper_handoff import resolve_paper_handoff
                     trusted_bindings, _ = resolve_paper_handoff(client, conversation_id, runtime)
@@ -1678,7 +1868,7 @@ def resolve_workflow_injection(
                 if str(item.get('tool_name') or '') not in activation_names
             ],
         ]
-    session_holder: Dict[str, str] = {'session_id': session_id}
+    session_holder: Dict[str, Any] = {'session_id': session_id, 'runtime_policy': runtime_policy}
 
     def bind_successor(result: Dict[str, Any]) -> None:
         target = str(result.get('session_id') or '')
@@ -1712,6 +1902,11 @@ def resolve_workflow_injection(
     toolkit = HostWorkflowToolkit(
         _client, allowed_workflow_ids=allowed_ids, origin_ref=conversation_id,
     )
+    checkpoint = InputCheckpoint(
+        toolkit, lambda: session_holder.get('runtime_policy'), conversation_history, current_query,
+    ) if runtime_policy.get('input_checkpoint') or (not session_id and any(
+        (item.get('runtime') or {}).get('input_checkpoint') for item in catalog if isinstance(item, dict)
+    )) else None
     candidate_tools = [
         *trigger_tools,
         *toolkit.tools(),
@@ -1752,6 +1947,7 @@ def resolve_workflow_injection(
         handoff = _handoff_tool(
             selected_session_id,
             user_input=launch_user_input,
+            checkpoint=checkpoint,
         )
         tools = [
             *[tool for tool in tools if _is_bound_workflow_trigger(tool.__name__)],
@@ -1760,6 +1956,7 @@ def resolve_workflow_injection(
                 selected_session_id,
                 initialize_session=initialize_selected_session,
                 user_input=launch_user_input,
+                checkpoint=checkpoint,
             ),
             handoff,
         ]
@@ -1785,17 +1982,19 @@ def resolve_workflow_injection(
                     toolkit,
                     selected_session_id,
                     user_input=selected_request_context,
+                    checkpoint=checkpoint,
                 ),
                 _handoff_tool(
                     selected_session_id,
                     user_input=selected_request_context,
+                    checkpoint=checkpoint,
                 ),
                 authoring_group,
             ]
         else:
             tools = [authoring_group]
     if session_id:
-        tools = _safe_session_tools(toolkit, selected_session_id)
+        tools = _safe_session_tools(toolkit, selected_session_id, checkpoint=checkpoint)
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,
@@ -1805,7 +2004,7 @@ def resolve_workflow_injection(
             'focused_tab': context.get('focused_tab') or '',
             'focused_sort_order': context.get('focused_sort_order'),
         })
-        tools.append(_handoff_tool(selected_session_id))
+        tools.append(_handoff_tool(selected_session_id, checkpoint=checkpoint))
         session_projection = (
             projection.get('projection')
             if isinstance(projection.get('projection'), dict) else {}
@@ -1870,6 +2069,7 @@ def resolve_workflow_injection(
             )
         runtime_context = (
             '## Workflow Runtime [AUTHORITATIVE]\n'
+            + CHECKPOINT_GUIDANCE
             + 'The Host owns session/version concurrency fields. Never ask the user for '
             + 'state_version or expected_state_version. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
@@ -1949,6 +2149,7 @@ def resolve_workflow_injection(
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
             + _WORKFLOW_EDIT_SCOPE_POLICY
             + entry_instruction
+            + CHECKPOINT_GUIDANCE
             + 'Conversation attachments are optional unless the selected Workflow Runtime '
             + 'explicitly returns a required-input result. Never infer that an upload is '
             + 'required merely because the Workflow supports uploaded materials. A non-empty '

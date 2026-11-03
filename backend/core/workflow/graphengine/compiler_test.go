@@ -1,6 +1,7 @@
 package graphengine
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,11 @@ runtime:
   completed_edit_routing: Route insertions to b before using the fallback.
   completed_continue_steps: [f]
   exclusive_tool_capabilities: [writer.create]
+  attachment_clarification:
+    filename_suffixes: [.PPTX]
+    question_id_prefix: template_detail_
+    inspection_tools: [pptx_analyzer]
+    instructions: Read every page before asking for missing dates.
   post_step_checks:
     - step_id: b
       tool: check_ready
@@ -125,6 +131,20 @@ runtime:
 		t.Fatalf("expected valid runtime policy, diagnostics=%#v", result.Diagnostics)
 	}
 	policy := result.Graph.Runtime
+	if policy.AttachmentClarification == nil || policy.AttachmentClarification.FilenameSuffixes[0] != ".pptx" || policy.AttachmentClarification.QuestionIDPrefix != "template_detail_" {
+		t.Fatalf("attachment clarification was lost during compilation: %#v", policy)
+	}
+	encoded, err := json.Marshal(result.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded CompiledStateGraph
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Runtime.AttachmentClarification.Instructions != "Read every page before asking for missing dates." || decoded.Runtime.AttachmentClarification.InspectionTools[0] != "pptx_analyzer" {
+		t.Fatal("published graph lost the host attachment inspection contract")
+	}
 	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
 		t.Fatalf("runtime policy was not compiled: %#v", policy)
 	}
@@ -136,6 +156,60 @@ runtime:
 	}
 	if len(policy.PostStepChecks) != 1 || policy.PostStepChecks[0].StepID != "b" || policy.PostStepChecks[0].Tool != "check_ready" || policy.PostStepChecks[0].Arguments["brief"] != "b_result" {
 		t.Fatalf("runtime post-step checks were not compiled: %#v", policy.PostStepChecks)
+	}
+}
+
+func TestCompileRejectsIncompleteAttachmentClarification(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  attachment_clarification:
+    filename_suffixes: [pptx, .]
+`, 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	codes := map[string]bool{}
+	for _, diagnostic := range result.Diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	if result.Valid || !codes["E_RUNTIME_ATTACHMENT_CLARIFICATION_INVALID"] || !codes["E_RUNTIME_ATTACHMENT_CLARIFICATION_SUFFIX_INVALID"] {
+		t.Fatalf("expected actionable attachment policy diagnostics, got %#v", result.Diagnostics)
+	}
+}
+
+func TestCompileInputCheckpointContract(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  input_checkpoint:
+    after_step: b
+    slot: b_result
+    before_steps: [f]
+    title: Confirm missing information
+`, 1)
+	workflowYAML = strings.Replace(workflowYAML, "{id: b_result}", "{id: b_result, type: json}", 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("checkpoint should compile: %#v", result.Diagnostics)
+	}
+	encoded, err := json.Marshal(result.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded CompiledStateGraph
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := decoded.Runtime.InputCheckpoint
+	if checkpoint == nil || checkpoint.Slot != "b_result" || checkpoint.AfterStep != "b" || checkpoint.BeforeSteps[0] != "f" {
+		t.Fatalf("checkpoint lost on publication: %#v", checkpoint)
+	}
+	for _, invalid := range []string{
+		strings.Replace(workflowYAML, "after_step: b", "after_step: missing", 1),
+		strings.Replace(workflowYAML, "slot: b_result", "slot: final", 1),
+		strings.Replace(workflowYAML, "before_steps: [f]", "before_steps: [missing]", 1),
+		strings.Replace(workflowYAML, "before_steps: [f]", "before_steps: [b]", 1),
+	} {
+		if Compile(invalid, validState, "", ProfilePublish).Valid {
+			t.Fatal("invalid checkpoint contract was accepted")
+		}
 	}
 }
 

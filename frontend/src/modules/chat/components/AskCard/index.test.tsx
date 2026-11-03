@@ -109,6 +109,11 @@ describe("AskCard read-only history", () => {
       }],
     }} onSubmit={onSubmit} />);
 
+    expect(screen.queryByRole("button", { name: /chat\.askCardUploadFile/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Upload template" }));
+    expect(screen.getByRole("button", { name: /chat\.askCardUploadFile/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "No template" }));
+    expect(screen.queryByRole("button", { name: /chat\.askCardUploadFile/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Upload template" }));
     expect(screen.getByRole("button", { name: /chat\.askCardUploadFile/ })).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });

@@ -127,9 +127,10 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'auto')
         self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'auto')
         self.assertEqual(state['steps']['generate_ppt']['mode'], 'auto')
-        self.assertEqual(state['steps']['analyze_academic_sources']['mode'], 'auto')
-        self.assertEqual(state['steps']['analyze_academic_sources']['skip_if'],
-                         {'material': 'skip_academic_sources'})
+        self.assertNotIn('analyze_academic_sources', state['steps'])
+        self.assertNotIn('prepare_paper_reflection', state['steps'])
+        self.assertIn('academic_brief', state['steps']['collect_materials']['prompt'])
+        self.assertIn('academic_brief', {item['material'] for item in state['steps']['collect_materials']['outputs']})
         collection_inputs = {item['material']: item for item in state['steps']['collect_materials']['inputs']}
         self.assertTrue(collection_inputs['presentation_scenario']['required'])
 
@@ -157,19 +158,17 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         materials = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
         self.assertEqual(materials['hide_when_material'], 'skip_material_collection')
         self.assertEqual(materials['status_step_ids'],
-                         ['collect_materials', 'analyze_academic_sources', 'prepare_paper_reflection'])
-        self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary', 'reflection_markdown'])
+                         ['collect_materials'])
+        self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary', 'academic_brief'])
         self.assertNotIn('choose_style', {step['id'] for step in workflow['steps']})
         self.assertEqual(slots['background_prompts']['cardinality'], 'list')
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['collect_materials']],
-            ['analyze_academic_sources', 'plan_background_prompts', 'build_outline'],
+            ['plan_background_prompts', 'build_outline'],
         )
-        self.assertEqual(state['transitions']['analyze_academic_sources'], [{'to': 'prepare_paper_reflection'}])
-        self.assertEqual(state['steps']['prepare_paper_reflection']['skip_if'], {'material': 'skip_paper_reflection'})
-        self.assertEqual([edge['to'] for edge in state['transitions']['prepare_paper_reflection']],
-                         ['plan_background_prompts', 'build_outline'])
+        self.assertNotIn('analyze_academic_sources', state['transitions'])
+        self.assertNotIn('prepare_paper_reflection', state['transitions'])
         self.assertEqual(state['steps']['analyze_requirements']['route'], 'choice')
         self.assertEqual(state['steps']['collect_materials']['route'], 'choice')
         self.assertNotIn('skip_if', state['steps']['collect_materials'])

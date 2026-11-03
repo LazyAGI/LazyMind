@@ -57,3 +57,17 @@ it('keeps the source accessible without revealing a disabled Markdown download a
   expect(await screen.findByRole('button', { name: '展示源码' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /下载/ })).not.toBeInTheDocument();
 });
+
+it('displays PPT prompt text literally even with a legacy Markdown descriptor', async () => {
+  const prompt = 'HTML <i>/<sub>/<sup>，参数 {"color":"#FFFFFF"}';
+  const slot = { slot_id: 'slide_outline', slot: 'slide_outline', selected: false,
+    revision: 1, created_at: '2026-10-29', content_type: 'text', artifact_value: { text: prompt },
+    artifact_id: 'legacy-prompt', document: { representation: 'markdown' },
+  } as SlotRevision;
+  const { container } = render(<SlotRenderer slot={slot} readOnly widget={{ widgetType: 'ppt-prompt' }} />);
+  expect(await screen.findByText(prompt)).toBeVisible();
+  expect(container.querySelector('.writer-markdown-editor')).toBeNull();
+  expect(container.querySelector('i, sub, sup')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
+  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(prompt);
+});

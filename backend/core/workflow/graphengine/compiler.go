@@ -233,6 +233,24 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			))
 		}
 	}
+	if checkpoint := graph.Runtime.InputCheckpoint; checkpoint != nil {
+		node, exists := graph.Nodes[checkpoint.AfterStep]
+		produced := false
+		for _, slot := range node.Outputs {
+			produced = produced || slot == checkpoint.Slot
+		}
+		valid := exists && produced && graph.MaterialTypes[checkpoint.Slot] == "json" && len(checkpoint.BeforeSteps) > 0
+		for _, step := range checkpoint.BeforeSteps {
+			_, exists := graph.Nodes[step]
+			valid = valid && exists && step != checkpoint.AfterStep
+		}
+		if !valid {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_INPUT_CHECKPOINT_INVALID", "error", "workflow.yaml.runtime.input_checkpoint",
+				"input checkpoint requires a JSON output from after_step and distinct declared before_steps",
+			))
+		}
+	}
 	for i := range graph.Runtime.PostStepChecks {
 		check := &graph.Runtime.PostStepChecks[i]
 		path := fmt.Sprintf("workflow.yaml.runtime.post_step_checks[%d]", i)
@@ -287,6 +305,26 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 					"runtime post-step check may only consume an artifact produced by its step",
 				))
 			}
+		}
+	}
+	if followup := graph.Runtime.AttachmentClarification; followup != nil {
+		followup.QuestionIDPrefix = strings.TrimSpace(followup.QuestionIDPrefix)
+		followup.Instructions = strings.TrimSpace(followup.Instructions)
+		if followup.QuestionIDPrefix == "" || followup.Instructions == "" || len(followup.FilenameSuffixes) == 0 || len(followup.InspectionTools) == 0 || len(graph.Runtime.ClarificationFields) == 0 {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_ATTACHMENT_CLARIFICATION_INVALID", "error", "workflow.yaml.runtime.attachment_clarification",
+				"attachment clarification requires a question id prefix, instructions, filename suffixes, inspection tools and basic clarification fields",
+			))
+		}
+		for i, suffix := range followup.FilenameSuffixes {
+			suffix = strings.ToLower(strings.TrimSpace(suffix))
+			if len(suffix) < 2 || !strings.HasPrefix(suffix, ".") || strings.ContainsAny(suffix, "/\\") {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_ATTACHMENT_CLARIFICATION_SUFFIX_INVALID", "error", "workflow.yaml.runtime.attachment_clarification.filename_suffixes",
+					"attachment clarification suffixes must be file extensions beginning with a dot",
+				))
+			}
+			followup.FilenameSuffixes[i] = suffix
 		}
 	}
 	clarificationIDs := map[string]bool{}

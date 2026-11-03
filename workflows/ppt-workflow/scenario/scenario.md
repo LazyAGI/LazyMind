@@ -54,11 +54,17 @@ skip material analysis or page prompt planning. Charts (including proportions),
 icons and formulas use the shared HTML renderer in every scenario. Native
 PPTX template filling retains its existing visual-editing limitations.
 
-Academic scenarios always collect materials, then run the automatic
-`analyze_academic_sources` branch before rejoining style/background/outline
-planning. Its `academic_brief` preserves per-paper attribution, formulas,
+Academic scenarios collect and analyze sources in the same `collect_materials`
+step, then continue to background/outline planning without a separate analysis
+or reading-reflection step. The Materials tab displays `academic_brief`, preserving per-paper attribution, formulas,
 figures, findings and limitations. Multiple attachments are parsed independently
 to EOF and retain source IDs through comparison, synthesis and page prompts.
+Before writing a multi-paper outline, collection records evidenced methodological
+prerequisites and calls `ppt_plan_paper_order` to put prerequisite methods first.
+The result and rationale live in `academic_brief`; citations or benchmark relations
+alone do not establish dependencies. Each paper retains problem/motivation,
+method/process, and experiments/limitations, including when the user requests a
+compressed deck. Page prompts and native PPTX composition follow that order.
 General self-contained decks in either mode may
 skip material collection according to the declared state transitions.
 The collection step must use

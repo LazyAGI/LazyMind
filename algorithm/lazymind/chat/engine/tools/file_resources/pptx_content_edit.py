@@ -14,6 +14,24 @@ OFFICE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
 CT = 'http://schemas.openxmlformats.org/package/2006/content-types'
 
 
+def _charts(data, slide_name, root):
+    rel_name = posixpath.join(posixpath.dirname(slide_name), '_rels', posixpath.basename(slide_name) + '.rels')
+    if rel_name not in data:
+        return []
+    rels = {r.get('Id'): r for r in _xml(data[rel_name])}
+    charts = []
+    for node in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/chart}chart'):
+        rel = rels.get(node.get('{%s}id' % NS['r']))
+        if rel is None or rel.get('TargetMode') == 'External':
+            continue
+        target = rel.get('Target', '')
+        name = (target.lstrip('/') if target.startswith('/') else
+                posixpath.normpath(posixpath.join(posixpath.dirname(slide_name), target)))
+        if name in data:
+            charts.append((name, _xml(data[name])))
+    return charts
+
+
 def inspect_content(source, pages=None):
     source = Path(source)
     loaded = _load(source)
@@ -28,6 +46,12 @@ def inspect_content(source, pages=None):
         info.pop('quality_contract', None)
         info['speaker_notes'] = '\n'.join(''.join(p.itertext())
                                           for p in body.findall('a:p', NS)) if body is not None else ''
+        from .pptx_chart_style import C
+        info['charts'] = [
+            {'chart_index': index, 'series_count': len(root.findall(f'.//{{{C}}}ser')),
+             'colors': root.xpath('.//a:srgbClr/@val', namespaces=NS)}
+            for index, (_, root) in enumerate(_charts(loaded[1], loaded[2][page - 1][0], loaded[2][page - 1][1]), 1)
+        ]
         results.append(info)
     return {'sha256': hashlib.sha256(source.read_bytes()).hexdigest(), 'slide_count': len(loaded[2]),
             'pages': results, 'instruction': 'Edit this generated deck, not the original template. '
@@ -77,7 +101,8 @@ def _serialized(root):
     return etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
 
 
-def edit_content(source, output, source_sha256, text_edits=None, speaker_notes=None, require_all_notes=False):
+def edit_content(source, output, source_sha256, text_edits=None, speaker_notes=None, require_all_notes=False,
+                 chart_edits=None):
     source, output = Path(source), Path(output)
     if source.resolve() == output.resolve():
         raise ValueError('Output must not overwrite source')
@@ -86,9 +111,11 @@ def edit_content(source, output, source_sha256, text_edits=None, speaker_notes=N
     infos, data, slides = _load(source)
     text_edits = [] if text_edits is None else text_edits
     speaker_notes = [] if speaker_notes is None else speaker_notes
+    chart_edits = [] if chart_edits is None else chart_edits
     if not isinstance(text_edits, (list, tuple)) or not isinstance(
-            speaker_notes, (list, tuple)) or not (text_edits or speaker_notes):
-        raise ValueError('Provide text_edits and/or speaker_notes lists')
+            speaker_notes, (list, tuple)) or not isinstance(chart_edits, list) or not (
+            text_edits or speaker_notes or chart_edits):
+        raise ValueError('Provide text_edits, speaker_notes and/or chart_edits lists')
     notes = {}
     for item in speaker_notes:
         if not isinstance(item, Mapping) or type(item.get('page')) is not int or not 1 <= item['page'] <= len(slides):
@@ -183,11 +210,31 @@ def edit_content(source, output, source_sha256, text_edits=None, speaker_notes=N
             run = etree.SubElement(p, '{%s}r' % NS['a'])
             etree.SubElement(run, '{%s}t' % NS['a']).text = line
         data[note_name] = _serialized(root)
+    chart_pages, targets = set(), set()
+    for edit in chart_edits:
+        if not isinstance(edit, dict):
+            raise ValueError('Each chart edit must be an object')
+        page, index = edit.get('page'), edit.get('chart_index')
+        if type(page) is not int or not 1 <= page <= len(slides) or type(index) is not int:
+            raise ValueError('Chart edits require an inspected 1-based page and chart_index')
+        charts = _charts(data, slides[page - 1][0], slides[page - 1][1])
+        if not 1 <= index <= len(charts) or (page, index) in targets or 'palette' not in edit:
+            raise ValueError('Unknown/duplicate chart or missing palette; inspect the target page first')
+        from .pptx_chart_style import style_chart
+        name, root = charts[index - 1]
+        if any(other != page - 1 and any(n == name for n, _ in _charts(data, slide_name, slide_root))
+               for other, (slide_name, slide_root) in enumerate(slides)):
+            raise ValueError('This chart is shared with another slide; a page-only recolor would affect both')
+        style_chart(root, edit['palette'])
+        data[name] = _serialized(root)
+        targets.add((page, index))
+        chart_pages.add(page)
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
         originals = {i.filename: i for i in infos}
         for name, raw in data.items():
             archive.writestr(originals.get(name, name), raw)
     return {'slide_count': len(slides), 'updated_text_pages': changed_pages,
+            'updated_chart_pages': sorted(chart_pages),
             'updated_notes_pages': sorted(notes), 'original_unchanged': True,
             'representation': 'native_pptx', 'generation_status': 'completed'}

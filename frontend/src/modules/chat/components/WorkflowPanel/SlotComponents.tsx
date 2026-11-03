@@ -5420,6 +5420,15 @@ export function SlotRenderer({
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
 
+  // PPT page prompts are literal text, including HTML examples. Historical
+  // sessions may still carry a Markdown document descriptor for this slot.
+  if (widget?.widgetType === 'ppt-prompt') {
+    return <SlotText slot={slot} widget={widget} sessionId={sessionId} slotId={slotId ?? slot.slot}
+      revisionCount={revisionCount} onRefresh={onRefresh}
+      readOnly={readOnly || widget.readOnly || !slot.selected
+        || Boolean(slot.document && (!slot.document.editable || !slot.document.capabilities.includes('save')))} />;
+  }
+
   if (slot.artifact_id && slot.document) {
     return <DocumentArtifactEditor slot={slot} sessionId={sessionId ?? ''} readOnly={readOnly || widget?.readOnly} onRefresh={onRefresh}
       revisionCount={revisionCount} VersionHistory={SlotVersionPopover} />;

@@ -5,6 +5,7 @@ package displaystate
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -101,6 +102,15 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 	if approval != "" {
 		return View{Status: "waiting", Reason: "approval_required", ApprovalStepID: approval}, nil
 	}
+	if session.Status == "active" || session.Status == "waiting" {
+		pending, err := pendingInput(db, session, latest)
+		if err != nil {
+			return View{}, err
+		}
+		if pending {
+			return View{Status: "waiting_input", Reason: "user_input_required"}, nil
+		}
+	}
 	if session.Status == "completed" {
 		return View{Status: "completed", Reason: "completed"}, nil
 	}
@@ -129,6 +139,67 @@ func readState(db *gorm.DB, session orm.WorkflowSession) (View, error) {
 		return View{Status: "failed", Reason: step.Status}, nil
 	}
 	return View{Status: "failed", Reason: "no_advance"}, nil
+}
+
+// A checkpoint is waiting only after its producer finished and the host persisted
+// a question-card token. Answers clear this state without reopening the producer.
+func pendingInput(db *gorm.DB, session orm.WorkflowSession, latest map[string]orm.WorkflowSessionStep) (bool, error) {
+	if session.WorkflowRevisionID == "" || session.ControllerHost != "lazymind" {
+		return false, nil
+	}
+	var revision orm.WorkflowRevision
+	if err := db.Where("id = ?", session.WorkflowRevisionID).First(&revision).Error; err != nil {
+		return false, err
+	}
+	var graph graphengine.CompiledStateGraph
+	if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
+		return false, err
+	}
+	checkpoint := graph.Runtime.InputCheckpoint
+	if checkpoint == nil || latest[checkpoint.AfterStep].Status != "succeeded" {
+		return false, nil
+	}
+	for _, id := range checkpoint.BeforeSteps {
+		if step, ok := latest[id]; ok && !step.CreatedAt.Before(latest[checkpoint.AfterStep].CreatedAt) {
+			return false, nil
+		}
+	}
+	var rows []orm.WorkflowSlotRevision
+	if err := db.Where("session_id = ? AND slot_id = ? AND selected = ? AND validity <> ?", session.ID, checkpoint.Slot, true, "stale").Order("revision DESC").Limit(1).Find(&rows).Error; err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		return false, nil
+	}
+	raw := rows[0].ContentSnapshot
+	if rows[0].HumanArtifactID != nil {
+		var artifact orm.WorkflowHumanArtifact
+		if err := db.Where("id = ?", *rows[0].HumanArtifactID).First(&artifact).Error; err != nil {
+			return false, err
+		}
+		raw = artifact.Value
+	}
+	if len(raw) == 0 {
+		return false, nil
+	}
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return false, err
+	}
+	if len(envelope.Data) > 0 {
+		raw = envelope.Data
+	}
+	var value struct {
+		Token     string            `json:"checkpoint_token"`
+		Answer    string            `json:"answer_text"`
+		Questions []json.RawMessage `json:"questions"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, err
+	}
+	return value.Token != "" && strings.TrimSpace(value.Answer) == "" && len(value.Questions) > 0, nil
 }
 
 func pendingApproval(db *gorm.DB, session orm.WorkflowSession, current []orm.WorkflowSessionStep) (string, error) {

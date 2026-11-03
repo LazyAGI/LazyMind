@@ -29,11 +29,13 @@ def test_template_is_read_before_material_collection():
     assert 'read_template' not in state['steps']
     read = state['steps']['analyze_requirements']
     assert read['tools'] == ['pptx_analyzer', 'ppt_paper_handoff_context']
-    assert 'following next_page until null' in read['prompt']
+    assert 'all_pages=true' in read['prompt']
     assert {'material': 'template_content_brief', 'required': False} in read['outputs']
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     analysis = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'analysis')
-    assert {'id': 'template_content_brief'} in analysis['slots']
+    assert analysis['slots'] == [{'id': 'requirement_analysis'}]
+    brief_slot = next(slot for slot in workflow['slots'] if slot['id'] == 'template_content_brief')
+    assert brief_slot['exposed'] is False and brief_slot['user_visible'] is False
     for name in ('collect_materials', 'build_outline', 'generate_ppt'):
         assert {'material': 'template_content_brief', 'required': False} in state['steps'][name]['inputs']
 
@@ -67,7 +69,7 @@ def test_material_stage_only_displays_summary():
     root = Path(__file__).resolve().parents[4]
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     tab = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
-    assert tab['slots'] == [{'id': 'material_summary'}, {'id': 'reflection_markdown'}]
+    assert tab['slots'] == [{'id': 'material_summary'}, {'id': 'academic_brief'}]
     slots = {slot['id']: slot for slot in workflow['slots']}
     for name in ('template_pptx', 'uploaded_materials', 'material_images'):
         assert slots[name]['exposed'] is False

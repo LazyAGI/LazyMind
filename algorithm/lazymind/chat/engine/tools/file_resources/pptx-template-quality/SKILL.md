@@ -14,7 +14,11 @@ images again. If evidence is insufficient, report the missing material and retur
 to collection only with the user's agreement. Template analysis is local reading,
 not a new research step. Cache hits still require reading the returned content.
 
-- Keep the template's original page count, coordinates, typography and artwork.
+- Use ppt_fill_template pages to plan output order and count. Repeat source_page
+  when content needs more room; honor an explicit user page count. Keep each
+  reused page's layout, coordinates, typography, backgrounds and branding.
+  Remove unused placeholders, sample charts/pictures/text boxes with explicit
+  remove_shape_ids from inspection; never infer that all artwork is disposable.
   Resolve content against each box's effective layout, including inherited
   placeholder geometry and fonts. Unknown capacity is not permission to fill freely.
 - Allocate content by whole text box before assigning text slots. A short styled
@@ -30,7 +34,11 @@ not a new research step. Cache hits still require reading the returned content.
   detailed evidence in material_summary; do not pretend notes were updated.
 - Before ppt_fill_template, compare all resulting text against layout_checks.
   Shorten over-budget content while retaining its meaning. Do not arbitrarily
-  shrink fonts, widen boxes, add slides, or remove required evidence to pass.
+  shrink fonts or remove required evidence to pass. Reposition or widen body
+  boxes explicitly using shape_boxes when the slide has free space; keep brand
+  artwork/title/footer intact. For balanced multi-column layouts, remove obsolete
+  body shapes and use editable text_boxes with explicit bounds. Split supported
+  content across repeated source pages when needed.
 - The tool rejects clearly over-capacity changed boxes before writing a file.
   Use its page/shape diagnostics to repair only affected text and resubmit the
   complete action list against the ORIGINAL template hash. At most two repairs;
@@ -43,3 +51,32 @@ not a new research step. Cache hits still require reading the returned content.
   neither the subagent nor parent chat should launch post-generation inspection.
   Report any returned limitations briefly without reopening the workflow or
   claiming native visual verification. A disclosure is not a pending task.
+
+- For composition, use ORIGINAL template slot IDs in each page's edits, including
+  repeated pages. Omit slots belonging to removed shapes. Review every remaining
+  sample value; do not keep fictitious achievements. Supply fresh notes per page;
+  composition clears sample notes and internal slide navigation.
+- Use editable column/bar/line charts for supported performance comparisons;
+  use pie/doughnut only for mutually exclusive parts of one known whole, with
+  one nonnegative series and a positive total. Never turn unrelated improvements
+  into pie slices or invent time-series observations. A key quantitative claim
+  with complete evidence should have a chart, not only a large KPI number.
+  Supply categories, named numeric series, unit, title, evidence source and box
+  in inches. Delete the sample chart/body placeholder occupying the target area
+  first. Preserve measurement scope, baseline and conditions in notes; never
+  invent measurements or mix percentages with milliseconds. Chart citations are
+  retained in notes. Use an available layout with sufficient space.
+- Technical/research slides must preserve substantive on-slide explanations of
+  root cause, concrete mechanism/steps, results and boundaries. Speaker notes
+  expand these; do not hide all implementation detail there. Rebalance text and
+  visual regions before deleting core technical copy. Keep evidence images and
+  chart labels readable, preserve aspect ratio, and remove repeated/decorative
+  content first when space is tight. Do not shrink text to bypass capacity checks.
+- Native charts coexist with template artwork, icons and backgrounds. New icon
+  artwork and formulas are not supported by this composition API; report those
+  gaps precisely without discarding supported charts and registered pictures.
+- Insert selected PDF/KB assets with pages.images [{material_index, box}] using
+  the registered conversation pool. Remove obsolete picture placeholders first.
+  Preserve the complete figure and labels; images fit without cropping/stretching.
+  Use a repeated layout if necessary. Citations and PDF page metadata go into notes.
+  PDF chart pictures are not editable numeric charts. Rebuild only with verified data.

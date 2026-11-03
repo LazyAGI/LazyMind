@@ -24,8 +24,9 @@ const BROWSER_EXTRACT_FN = () => {
     'border-radius', 'box-shadow',
     'border-top', 'border-right', 'border-bottom', 'border-left',
     'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+    'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
     'opacity', 'text-align', 'line-height', 'letter-spacing',
-    'text-decoration', 'display', 'overflow',
+    'text-decoration', 'display', 'overflow', 'align-items', 'flex-direction',
     'object-fit', 'vertical-align',
     'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
     'filter', 'backdrop-filter', 'text-shadow',
@@ -300,7 +301,12 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
         const text = node.innerText || '';
         if (!text) return;
 
-        const isBlock = ['block', 'flex', 'grid', 'table', 'list-item'].includes(display);
+        // Flex items are blockified by computed style even in a horizontal
+        // row. That must not turn an inline formula into a new paragraph.
+        const parentStyle = window.getComputedStyle(node.parentElement || el);
+        const inFlexRow = ['flex', 'inline-flex'].includes(parentStyle.display)
+          && !parentStyle.flexDirection.startsWith('column');
+        const isBlock = !inFlexRow && ['block', 'flex', 'grid', 'table', 'list-item'].includes(display);
 
         runs.push({
           text,

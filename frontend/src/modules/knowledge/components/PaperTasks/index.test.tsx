@@ -141,14 +141,10 @@ describe('paper task startup routes', () => {
         expect(dialog.getByText('已选 2 篇库中论文')).toBeInTheDocument();
         expect(dialog.getByText('A · B')).toBeInTheDocument();
         fireEvent.change(dialog.getByLabelText('补充要求（选填）'), { target: { value: 'Focus on the main contributions' } });
-        if (kind === 'ppt') {
-            const reflection = dialog.getByRole('checkbox', { name: '先生成阅读心得，再生成汇报 PPT' });
-            expect(reflection).not.toBeChecked();
-            fireEvent.click(reflection);
-        }
+        expect(dialog.queryByRole('checkbox', { name: '先生成阅读心得，再生成汇报 PPT' })).not.toBeInTheDocument();
         await submit();
         expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a', 'b'], false);
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a', 'b'], direction: undefined, user_instruction: 'Focus on the main contributions', reflection_first: kind === 'ppt' }), false);
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a', 'b'], direction: undefined, user_instruction: 'Focus on the main contributions', reflection_first: false }), false);
     });
     it.each(['阅读心得', '汇报 PPT'])('shows the selection hint only while hovering disabled %s', async label => {
         mount([]);

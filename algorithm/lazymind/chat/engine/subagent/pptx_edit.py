@@ -65,7 +65,7 @@ def _session() -> str:
 
 @fc_register(host_file='NONE')
 def inspect_current_pptx(page: int = 1) -> Dict[str, Any]:
-    """Read ONE page's editable text and speaker notes. Pages are 1-based.
+    """Read ONE page's editable text, chart indices/colors and speaker notes. Pages are 1-based.
 
     Copy exact slot IDs, never guess. For all-page speeches read each page using
     next_page until null. Layout/font diagnostics are intentionally omitted.
@@ -78,14 +78,15 @@ def inspect_current_pptx(page: int = 1) -> Dict[str, Any]:
                        'slots': [{'id': s['id'], 'text': s['text'],
                                   **{k: s[k] for k in ('shape_name', 'shape_id') if s.get(k) is not None}}
                                  for s in p['slots']],
-                       'speaker_notes': p['speaker_notes']} for p in result['pages']]}
+                       'speaker_notes': p['speaker_notes'],
+                       'charts': p.get('charts', [])} for p in result['pages']]}
 
 
 @fc_register(host_file='NONE')
 def read_pptx_edit_material(slot: str = 'material_summary') -> Dict[str, Any]:
-    """Read existing evidence only: material_summary or requirement_analysis; no research."""
-    if slot not in {'material_summary', 'requirement_analysis'}:
-        raise ToolExecutionError('Only saved material_summary and requirement_analysis may be read')
+    """Read saved material_summary, requirement_analysis or presentation_timing; no research."""
+    if slot not in {'material_summary', 'requirement_analysis', 'presentation_timing'}:
+        raise ToolExecutionError('Only saved evidence, requirements and presentation timing may be read')
     rows = tools._public_workflow_artifacts(_session(), slot)
     rows = [row for row in rows if row.get('selected') and row.get('validity') == 'effective'
             and not row.get('deleted')]
@@ -108,7 +109,8 @@ def publish_pptx_edit(source_sha256: str,
                       slot_ids: Optional[List[str]] = None,
                       text_scope: str = 'all',
                       allow_font_download: bool = False,
-                      style_edits: Optional[List[StyleEdit]] = None) -> Dict[str, Any]:
+                      style_edits: Optional[List[StyleEdit]] = None,
+                      chart_edits: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Publish sparse text edits and/or notes once, then finish the task.
 
     Use the inspected source_sha256. text_edits: [{id,expected_text,text}],
@@ -128,6 +130,9 @@ def publish_pptx_edit(source_sha256: str,
     to preserve it; false explicitly cancels bold/italic/underline. PPTX sizes
     are points (pt), never pixels. Inspect exact slots for custom titles/parts.
     Do not regenerate text or resize boxes to satisfy a formatting-only request.
+    chart_edits: [{page, chart_index, palette}] recolors only an inspected chart.
+    palette is blue/teal/orange/purple or a list of distinct #RRGGBB colors.
+    It preserves chart values, workbook, labels, positions and other pages.
     """
     session = _session()
     ctx = require_context()
@@ -140,6 +145,7 @@ def publish_pptx_edit(source_sha256: str,
         target_font=target_font, pages=pages, slot_ids=slot_ids,
         text_scope=text_scope, allow_font_download=allow_font_download,
         style_edits=style_edits,
+        chart_edits=chart_edits,
     )
     if result.get('status') != 'ok' or not result.get('workflow_artifact'):
         raise ToolExecutionError('PPTX publication did not return a successful artifact revision')

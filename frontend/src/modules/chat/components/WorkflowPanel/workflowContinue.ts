@@ -9,7 +9,7 @@ export function resolveWorkflowContinueAction(
   displayStatus: string,
   activeTab?: TabDef,
 ): WorkflowContinueAction | undefined {
-  if (displayStatus === 'active') return undefined;
+  if (displayStatus === 'active' || displayStatus === 'waiting_input') return undefined;
   const completedStep = resolveCompletedContinueStep(session, activeTab);
   if (completedStep) return { kind: 'completed', stepId: completedStep };
   const approvalStep = resolvePendingApprovalStep(session, displayStatus);

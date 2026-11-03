@@ -1563,3 +1563,26 @@ def test_direct_chat_papers_and_description_launch_without_library_handoff(tmp_p
         for index in range(paper_count):
             assert f'paper-{index}.pdf' in result['request_context']
         assert '"turn": 1' in result['request_context']
+
+
+def test_paper_budget_ask_keeps_concrete_counts_and_merges_user_override():
+    from lazymind.chat.workflow.workflow_manager import (
+        enforce_startup_clarification_policy, _merge_startup_clarification_context,
+    )
+    runtime = _ppt_completed_action_policy()
+    questions = [{
+        'id': 'academic_page_budget', 'type': 'single',
+        'text': '选了 3 篇论文，建议 9 页；你要求 5 页，是否调整？',
+        'choices': ['采用建议的 9 页', '保留 5 页，压缩内容'],
+    }]
+    assert enforce_startup_clarification_policy(questions, runtime) == questions
+    history = [
+        {'role': 'user', 'content': '请把这三篇论文做成 5 页 PPT'},
+        {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'id': 'budget-ask', 'type': 'function',
+            'function': {'name': 'ask_user', 'arguments': json.dumps({'questions': questions}, ensure_ascii=False)},
+        }]},
+    ]
+    merged = _merge_startup_clarification_context('保留 5 页，压缩内容', history, runtime)
+    assert '三篇论文' in merged
+    assert '保留 5 页，压缩内容' in merged

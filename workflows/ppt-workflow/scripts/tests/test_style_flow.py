@@ -48,6 +48,10 @@ def _import_stubs() -> dict[str, types.ModuleType]:
     static_file.local_path_from_static_file_url = lambda value: value
     model_config = types.ModuleType('lazymind.model_config')
     model_config.is_model_role_available = lambda _role: True
+    model_config.get_model_role_runtime_identity = lambda role: {'role': role, 'source': 'test', 'model': 'test'}
+    vision_model = types.ModuleType('lazymind.vision_model')
+    vision_model.select_vision_model_role = lambda: 'vlm'
+    vision_model.VisionModelUnavailable = RuntimeError
     requests = types.ModuleType('requests')
     requests.RequestException = RuntimeError
     requests.exceptions = types.SimpleNamespace(Timeout=TimeoutError)
@@ -73,6 +77,7 @@ def _import_stubs() -> dict[str, types.ModuleType]:
         'lazymind.chat.service.utils': types.ModuleType('lazymind.chat.service.utils'),
         'lazymind.chat.service.utils.static_file_url': static_file,
         'lazymind.model_config': model_config,
+        'lazymind.vision_model': vision_model,
         'requests': requests,
     }
     return modules
@@ -373,7 +378,7 @@ class StyleFlowCombinationTest(unittest.TestCase):
                                    return_value={'published_count': 1}) as publish:
                 result = TOOLS.ppt_publish_outline(page_prompts=['红金配色，标题置顶，左右习俗插画，正文大字'])
             self.assertEqual(result['published_count'], 1)
-            publish.assert_called_once_with(deck, None, ['红金配色，标题置顶，左右习俗插画，正文大字'])
+            publish.assert_called_once_with(deck, None, ['红金配色，标题置顶，左右习俗插画，正文大字'], None)
             find.assert_not_called()
 
     def test_publish_outline_reports_missing_binding_without_search(self):

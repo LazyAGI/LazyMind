@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 
 import yaml
+import pytest
 
 
 def _repo_root() -> Path:
@@ -37,7 +38,7 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
 
     materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
     assert materials_tab['layout'] == 'list'
-    assert materials_tab['slots'] == [{'id': 'material_summary'}]
+    assert materials_tab['slots'] == [{'id': 'material_summary'}, {'id': 'academic_brief'}]
 
 
 def test_ppt_analysis_and_material_summary_share_markdown_widget():
@@ -84,6 +85,8 @@ def test_ppt_material_images_are_optional_and_search_failure_can_continue():
     assert outputs == {
         'material_summary': True,
         'material_images': False,
+        'material_clarification': True,
+        'academic_brief': False,
     }
 
 
@@ -91,6 +94,10 @@ def test_register_material_images_publishes_one_previewable_image_per_new_file(
     monkeypatch, tmp_path,
 ):
     tools = _load_ppt_tools()
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, '_inspect_material_image', lambda path, role: {
+        'status': 'inspected', 'description': 'A relevant figure', 'role': role,
+    })
     old = {
         'path': str(tmp_path / 'old.png'),
         'caption': 'old',
@@ -136,6 +143,10 @@ def test_replace_material_images_overwrites_cards_and_removes_stale_tail(
     monkeypatch, tmp_path,
 ):
     tools = _load_ppt_tools()
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: 'vlm')
+    monkeypatch.setattr(tools, '_inspect_material_image', lambda path, role: {
+        'status': 'inspected', 'description': 'A relevant figure', 'role': role,
+    })
     saved: list[dict] = []
     deleted: list[int] = []
 
@@ -168,3 +179,36 @@ def test_replace_material_images_overwrites_cards_and_removes_stale_tail(
     assert deleted == [4, 3]
     assert [item['sort_order'] for item in saved] == [1, 2]
     assert result['ui_deleted'] == [{'ok': True}, {'ok': True}]
+
+
+@pytest.mark.parametrize('role', ['llm', 'vlm'])
+def test_visual_call_sends_actual_image_to_selected_role(monkeypatch, tmp_path, role):
+    import lazyllm
+    from unittest.mock import Mock
+    tools = _load_ppt_tools()
+    picture = tmp_path / 'figure.png'
+    picture.write_bytes(b'image')
+    model = Mock(return_value='Visible flow diagram')
+    factory = Mock(return_value=model)
+    monkeypatch.setattr(lazyllm, 'AutoModel', factory)
+    monkeypatch.setattr(tools, 'select_vision_model_role', lambda: role)
+    assert tools._agent_vlm_call('Inspect', 'Explain the flow', [str(picture)]) == 'Visible flow diagram'
+    factory.assert_called_once_with(model=role, type='vlm')
+    query = model.call_args.args[0]
+    assert str(picture.resolve()) in query
+    assert model.call_args.kwargs['llm_chat_history'] == []
+
+
+@pytest.mark.parametrize('vision, expected_role', [(True, 'llm'), (False, '')])
+def test_ppt_uses_existing_request_vision_flag_without_vlm_alias(monkeypatch, vision, expected_role):
+    import lazyllm
+    from lazymind import vision_model
+    from lazymind.model_config import inject_model_config
+    tools = _load_ppt_tools()
+    monkeypatch.setattr(vision_model, 'load_model_config', lambda: {'llm': {'source': 'dynamic'}})
+    monkeypatch.setattr(vision_model, 'is_model_role_available', lambda role: role == 'llm')
+    with lazyllm.new_session():
+        inject_model_config({'llm': {'source': 'openai', 'model': 'private-visual', 'vision': vision}})
+        assert tools._material_vision_role() == expected_role
+        # The original request remains LLM-only; no second role is synthesized.
+        assert 'vlm' not in lazyllm.globals['config']['dynamic_model_configs']
