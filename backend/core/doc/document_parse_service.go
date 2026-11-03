@@ -11,6 +11,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/readingpolicy"
 )
 
 const RootNodeGroup = "lazyllm_root"
@@ -24,10 +25,11 @@ const (
 )
 
 type EnsureDocumentParsedRequest struct {
-	UserID     string
-	DatasetID  string
-	DocumentID string
-	Caller     DatasetCatalogCaller
+	ObserveOnly bool
+	UserID      string
+	DatasetID   string
+	DocumentID  string
+	Caller      DatasetCatalogCaller
 }
 
 type EnsureDocumentParsedResult struct {
@@ -136,7 +138,9 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 				}
 				return s.parseResultWithoutRoots(r.Context(), rec)
 			}
-			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
+			if !req.ObserveOnly {
+				_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
+			}
 			return EnsureDocumentParsedResult{Status: "parsed"}, nil
 		}
 	}
@@ -183,6 +187,14 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 		}
 	}
 
+	if req.ObserveOnly {
+		return EnsureDocumentParsedResult{Status: "not_requested"}, nil
+	}
+	if rec.dataset.Scene == "academic_papers" {
+		if err := readingpolicy.Check(r.Context(), s.db, req.UserID, readingpolicy.ChatPrepare); err != nil {
+			return EnsureDocumentParsedResult{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: err.Error()}
+		}
+	}
 	now := time.Now().UTC()
 	taskID := newTaskID()
 	filename := firstNonEmpty(rec.row.DisplayName, rec.ext.OriginalFilename, req.DocumentID)

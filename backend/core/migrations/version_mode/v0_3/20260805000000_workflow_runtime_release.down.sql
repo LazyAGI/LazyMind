@@ -946,3 +946,7 @@ DROP TABLE IF EXISTS document_observations;
 DROP TABLE IF EXISTS document_directory_entries;
 DROP TABLE IF EXISTS document_directory_groups;
 DROP TABLE IF EXISTS document_directories;
+
+-- Personal AI reading preparation policy.
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS user_reading_policies;

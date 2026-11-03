@@ -12,6 +12,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/modelconfig"
 	"lazymind/core/pdfir"
+	"lazymind/core/readingpolicy"
 	"lazymind/core/store"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ const pdfIRTooLargeMessage = "PDF reading structure exceeds the 32 MiB limit. Us
 var errPDFIRTooLarge = errors.New("PDF reading structure exceeds the 32 MiB limit. Use a smaller PDF or split the original PDF into smaller documents.")
 
 type pdfIRPayload struct {
+	Automatic    bool   `json:"automatic,omitempty"`
 	Revision     string `json:"revision"`
 	DatasetID    string `json:"dataset_id"`
 	DocumentID   string `json:"document_id"`
@@ -166,6 +168,10 @@ func CreatePDFIR(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, s)
 		return
 	}
+	if err := readingpolicy.Check(r.Context(), store.DB(), store.UserID(r), readingpolicy.PDFParse); err != nil {
+		common.ReplyErr(w, err.Error(), 403)
+		return
+	}
 	cfg, e := modelconfig.LoadOCRConfig(r.Context(), store.DB(), store.UserID(r))
 	if e != nil {
 		common.ReplyOK(w, pdfIRResponse{Status: "unavailable", SourceSHA256: hash, ErrorMessage: "MinerU configuration unavailable"})
@@ -199,6 +205,9 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 	if json.Unmarshal(job.PayloadJSON, &p) != nil || p.DocumentID == "" || p.DatasetID == "" {
 		return asyncjob.Result{Permanent: true}, errors.New("invalid PDF IR job")
 	}
+	if p.Automatic {
+		ctx = readingpolicy.AutomaticContext(ctx)
+	}
 	// Durable jobs have no gateway request headers. Resolve the current account
 	// rather than persisting tenant claims that can become stale after enqueue.
 	identity, identityErr := common.GetCurrentIdentity(ctx, job.CreateUserID)
@@ -219,6 +228,9 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 	hash, e := pdfIRHash(ext)
 	if e != nil || hash != p.SourceSHA256 {
 		return asyncjob.Result{Permanent: true}, errors.New("PDF source changed; request parsing again")
+	}
+	if err := readingpolicy.Check(ctx, store.DB(), job.CreateUserID, readingpolicy.PDFParse); err != nil {
+		return asyncjob.Result{Permanent: true}, err
 	}
 	cfg, e := modelconfig.LoadOCRConfig(ctx, store.DB(), job.CreateUserID)
 	if e != nil {

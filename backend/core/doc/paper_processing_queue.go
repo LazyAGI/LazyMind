@@ -7,13 +7,17 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
+	"lazymind/core/readingpolicy"
 	"lazymind/core/store"
 )
 
 const paperProcessingJob = "document.paper_processing"
 
 type paperProcessingWorker struct{}
-type paperProcessingPayload struct{ DatasetID, TaskID, UserID, Level string }
+type paperProcessingPayload struct {
+	DatasetID, TaskID, UserID, Level string
+	Automatic                        bool
+}
 
 func init() { asyncjob.Register(paperProcessingJob, runPaperProcessing) }
 
@@ -42,7 +46,7 @@ func queuePaperProcessing(ctx context.Context, db *gorm.DB, user, dataset string
 			_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{
 				JobType: paperProcessingJob, ResourceType: "document", ResourceID: task.DocID,
 				IdempotencyKey: "paper-processing:" + id, MaxAttempts: 1, SkipSucceeded: true,
-				Payload: paperProcessingPayload{dataset, id, user, level}, CreateUserID: user,
+				Payload: paperProcessingPayload{DatasetID: dataset, TaskID: id, UserID: user, Level: level, Automatic: readingpolicy.IsAutomatic(ctx)}, CreateUserID: user,
 			})
 			if err != nil {
 				return err
@@ -56,6 +60,12 @@ func queuePaperProcessing(ctx context.Context, db *gorm.DB, user, dataset string
 func runPaperProcessing(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
 	var p paperProcessingPayload
 	if err := json.Unmarshal(job.PayloadJSON, &p); err != nil {
+		return asyncjob.Result{Permanent: true}, err
+	}
+	if p.Automatic {
+		ctx = readingpolicy.AutomaticContext(ctx)
+	}
+	if _, err := preparationRequest(ctx, p.UserID, readingPreparationPayload{DatasetID: p.DatasetID}); err != nil {
 		return asyncjob.Result{Permanent: true}, err
 	}
 	results, err := startParseTasksAtLevel(context.WithValue(ctx, paperProcessingWorker{}, true), p.UserID, p.DatasetID, []string{p.TaskID}, p.Level)

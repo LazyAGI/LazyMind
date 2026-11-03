@@ -29,6 +29,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
+	"lazymind/core/readingpolicy"
 	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/systemdeps"
@@ -1595,6 +1596,9 @@ func parseSubmissionKey(datasetID string, tasks []orm.Task) string {
 }
 
 func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
+	if err := checkPaperChatPreparation(ctx, userID, datasetID); err != nil {
+		return nil, err
+	}
 	if ctx.Value(paperProcessingWorker{}) != true {
 		var ds orm.Dataset
 		if err := store.DB().WithContext(ctx).Select("id,scene,processing_level").Where("id=? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
@@ -2888,6 +2892,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 }
 
 func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
+	if err := checkPaperChatPreparation(r.Context(), store.UserID(r), datasetID); err != nil {
+		return nil, err
+	}
 	kbID := datasetKbIDByID(datasetID)
 	var dataset orm.Dataset
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
@@ -3772,4 +3779,15 @@ func existingDocumentTask(baseDoc orm.Document, datasetID, kbID, algoID, userID,
 	now := time.Now().UTC()
 	taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: baseDoc.ID, KbID: kbID, AlgoID: algoID, DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	return taskRow
+}
+
+func checkPaperChatPreparation(ctx context.Context, user, dataset string) error {
+	var ds orm.Dataset
+	if err := store.DB().WithContext(ctx).Where("id=? AND deleted_at IS NULL", dataset).Take(&ds).Error; err != nil {
+		return err
+	}
+	if ds.Scene == "academic_papers" {
+		return readingpolicy.Check(ctx, store.DB(), user, readingpolicy.ChatPrepare)
+	}
+	return nil
 }

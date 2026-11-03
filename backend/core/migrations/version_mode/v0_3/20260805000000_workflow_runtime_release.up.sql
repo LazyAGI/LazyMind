@@ -3706,3 +3706,11 @@ ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT 
 -- Per-model capability declarations and runtime options.
 ALTER TABLE user_model_provider_group_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE user_model_provider_group_models ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Personal AI reading preparation policy.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE user_reading_policies (
+ user_id VARCHAR(255) PRIMARY KEY,
+ policy_json TEXT NOT NULL,
+ updated_at TIMESTAMP NOT NULL
+);

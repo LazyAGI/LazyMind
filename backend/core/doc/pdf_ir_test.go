@@ -99,6 +99,12 @@ func TestPDFIRWorkerRehydratesNondefaultTenantAndRejectsRevokedIdentity(t *testi
 	if err == nil || err.Error() != "PDF source changed; request parsing again" || identityCalls != 1 || scanCalls != 1 {
 		t.Fatalf("worker denied legitimate tenant before validating source: identity=%d scan=%d err=%v", identityCalls, scanCalls, err)
 	}
+	hash, _ := pdfir.SourceHash(path)
+	stopped := job
+	stopped.PayloadJSON = mustJSON(pdfIRPayload{DatasetID: "tenant-dataset", DocumentID: "tenant-doc", SourceSHA256: hash, Revision: pdfir.Revision, Automatic: true})
+	if _, err := handlePDFIRJob(t.Context(), stopped, nil); err == nil || !strings.Contains(err.Error(), "自动准备已停止") {
+		t.Fatalf("queued automatic parser reached configuration after policy stopped: %v", err)
+	}
 	for _, test := range []struct {
 		tenant string
 		status int

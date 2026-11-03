@@ -284,6 +284,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteDataset))
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDataset))
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/parse-status", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:reparse", []string{"document.write"}, doc.ReparseDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
@@ -668,6 +669,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/user/env-vars/{id}", []string{"qa.write"}, chat.DeleteUserEnvironmentVariable)
 	// Legal consent is a login prerequisite and must not depend on optional QA permissions.
 	// The handlers still require the gateway-injected X-User-Id identity.
+	handleAPI(r, "GET", "/user/reading-preferences", []string{}, doc.ReadingPreferences)
+	handleAPI(r, "PUT", "/user/reading-preferences", []string{}, doc.ReadingPreferences)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:prepare-reading", []string{"document.write"}, doc.PrepareReading)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/reading-preparation", []string{"document.read"}, doc.GetReadingPreparation)
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
 	handleAPI(r, "PATCH", "/user/ui-preferences", []string{}, userprefs.PatchUIPreferences)
 	handleAPI(r, "GET", "/settings/overview", []string{}, userprefs.GetSettingsOverview)

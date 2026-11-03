@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/modelconfig"
 	"lazymind/core/pdfir"
+	"lazymind/core/readingpolicy"
 	"lazymind/core/store"
 )
 
@@ -92,9 +93,7 @@ func (group *formulaExplanationFlightGroup) do(ctx context.Context, key string, 
 // ExplainPDFFormula uses the selected chat model only. It never initializes
 // embedding, retrieval, translation, or the document ingestion pipeline.
 func ExplainPDFFormula(w http.ResponseWriter, r *http.Request) {
-	formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, config map[string]any) (string, error) {
-		return generateStructuredPaperResult(ctx, content, algo.FormulaExplanationTask, algo.FormulaExplanationTaskVersion, formulaExplanationGenerationConfig(config))
-	}}.ServeHTTP(w, r)
+	defaultFormulaHandler().ServeHTTP(w, r)
 }
 func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]any, string, string, error) {
 	// LoadChatRuntimeConfig/LoadLLMConfig also resolve non-chat roles. This path
@@ -133,21 +132,12 @@ func formulaExplanationError(w http.ResponseWriter, status int, message string) 
 
 func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
-	reply := func(result formulaExplanation, cache string) {
-		w.Header().Set("X-LazyMind-Formula-Cache", cache)
-		w.Header().Set("Server-Timing", fmt.Sprintf("formula;dur=%d", time.Since(started).Milliseconds()))
-		common.ReplyOK(w, result)
-	}
-	row, ext, _, ok := loadPDFDocument(r, false)
+	_, _, _, ok := loadPDFDocument(r, false)
 	if !ok {
 		formulaExplanationError(w, 404, "Document not found or access denied.")
 		return
 	}
-	var request struct {
-		Force       bool    `json:"force"`
-		Language    string  `json:"language"`
-		FocusSymbol *string `json:"focus_symbol"`
-	}
+	request := formulaReadingRequest{}
 	if r.Body != nil {
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 		if err := decoder.Decode(&request); err != nil && err != io.EOF {
@@ -167,36 +157,50 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		formulaExplanationError(w, 400, "Explanation language must be zh or en.")
 		return
 	}
+	result, cache, err := h.explain(r, request)
+	if err != nil {
+		replyReadingServiceError(w, err)
+		return
+	}
+	w.Header().Set("Server-Timing", fmt.Sprintf("formula;dur=%d", time.Since(started).Milliseconds()))
+	w.Header().Set("X-LazyMind-Formula-Cache", cache)
+	common.ReplyOK(w, result)
+}
+
+type formulaReadingRequest struct {
+	Force       bool    `json:"force"`
+	Language    string  `json:"language"`
+	FocusSymbol *string `json:"focus_symbol"`
+}
+
+func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadingRequest) (formulaExplanation, string, error) {
+	row, ext, _, ok := loadPDFDocument(r, false)
+	if !ok {
+		return formulaExplanation{}, "", formulaExplanationFailure{404, "Document not found or access denied."}
+	}
 	hash, err := pdfIRHash(ext)
 	if err != nil {
-		formulaExplanationError(w, 409, "The original PDF is unavailable. Reopen the document before requesting an explanation.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{409, "The original PDF is unavailable. Reopen the document before requesting an explanation."}
 	}
 	state, err := pdfIRStatus(r.Context(), row, hash)
 	if err != nil {
-		formulaExplanationError(w, 500, "Cannot read the PDF structure. Retry later.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{500, "Cannot read the PDF structure. Retry later."}
 	}
 	if state.Status != "ready" || state.Document == nil {
-		formulaExplanationError(w, 409, "Parse the original PDF before requesting a formula explanation.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{409, "Parse the original PDF before requesting a formula explanation."}
 	}
 	if state.Document.Version != 1 || state.Document.CoordinateSpace != "normalized_top_left" {
-		formulaExplanationError(w, 409, "Reparse this PDF to refresh its reading structure.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{409, "Reparse this PDF to refresh its reading structure."}
 	}
 	formula, evidence, err := formulaExplanationContext(*state.Document, mux.Vars(r)["block"])
 	if err != nil {
-		formulaExplanationError(w, 404, "Formula not found in the current PDF structure. Reopen the formula.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{404, "Formula not found in the current PDF structure. Reopen the formula."}
 	}
 	if len([]rune(formula.Latex)) > 8000 {
-		formulaExplanationError(w, 422, "This formula exceeds the explanation size limit.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{422, "This formula exceeds the explanation size limit."}
 	}
 	if request.FocusSymbol != nil && (strings.TrimSpace(*request.FocusSymbol) == "" || utf8.RuneCountInString(*request.FocusSymbol) > 500 || !strings.Contains(formula.Latex, *request.FocusSymbol)) {
-		formulaExplanationError(w, 400, "The focus symbol must be a nonblank exact part of the target formula, at most 500 characters.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{400, "The focus symbol must be a nonblank exact part of the target formula, at most 500 characters."}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
@@ -229,14 +233,15 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 	if !request.Force {
 		if cached, ok := readCache(); ok {
-			reply(cached, "hit")
-			return
+			return cached, "hit", nil
 		}
+	}
+	if err := readingpolicy.Check(ctx, store.DB(), store.UserID(r), readingpolicy.Formula); err != nil {
+		return formulaExplanation{}, "", formulaExplanationFailure{403, err.Error()}
 	}
 	config, modelID, modelName, err := h.loadModel(ctx, store.UserID(r))
 	if err != nil {
-		formulaExplanationError(w, 422, "Select an available chat model in model settings before explaining formulas.")
-		return
+		return formulaExplanation{}, "", formulaExplanationFailure{422, "Select an available chat model in model settings before explaining formulas."}
 	}
 	legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
 	if request.FocusSymbol != nil {
@@ -246,8 +251,7 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	cachePaths = append(cachePaths, filepath.Join(cacheDir, legacyKey+".json"))
 	if !request.Force {
 		if cached, ok := readCache(); ok {
-			reply(cached, "hit")
-			return
+			return cached, "hit", nil
 		}
 	}
 	flightKey := cachePath
@@ -278,6 +282,17 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		timer := time.NewTimer(formulaBackupDelay)
 		defer timer.Stop()
 		result, err := runFormulaGeneration(runCtx, func(attemptCtx context.Context) (formulaExplanation, error) {
+			if err := readingpolicy.Check(attemptCtx, store.DB(), store.UserID(r), readingpolicy.Formula); err != nil {
+				return formulaExplanation{}, formulaExplanationFailure{403, err.Error()}
+			}
+			_, currentExt, _, authorized := loadPDFDocument(r.WithContext(attemptCtx), false)
+			if !authorized {
+				return formulaExplanation{}, formulaExplanationFailure{404, "Document not found or access denied."}
+			}
+			currentHash, sourceErr := pdfIRHash(currentExt)
+			if sourceErr != nil || currentHash != hash {
+				return formulaExplanation{}, formulaExplanationFailure{409, "The PDF changed before generation."}
+			}
 			raw, err := h.generate(attemptCtx, string(input), task, config)
 			if err != nil {
 				return formulaExplanation{}, formulaExplanationFailure{502, "The selected model could not explain this formula. Check the model connection and retry."}
@@ -314,21 +329,12 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		return result, nil
 	})
 	if flightErr != nil {
-		var failure formulaExplanationFailure
-		if errors.As(flightErr, &failure) {
-			formulaExplanationError(w, failure.status, failure.message)
-		} else if errors.Is(flightErr, context.Canceled) || errors.Is(flightErr, context.DeadlineExceeded) {
-			formulaExplanationError(w, 504, "Formula explanation timed out. Retry later.")
-		} else {
-			formulaExplanationError(w, 502, "The selected model could not explain this formula. Check the model connection and retry.")
-		}
-		return
+		return formulaExplanation{}, "", flightErr
 	}
 	if shared {
-		reply(result, "shared")
-	} else {
-		reply(result, "miss")
+		return result, "shared", nil
 	}
+	return result, "miss", nil
 }
 
 func saveFormulaExplanation(dir, path string, result formulaExplanation) error {

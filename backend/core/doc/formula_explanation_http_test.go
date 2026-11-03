@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/pdfir"
+	"lazymind/core/readingpolicy"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -177,6 +178,23 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	}
 	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 || w.Header().Get("X-LazyMind-Formula-Cache") != "hit" {
 		t.Fatal("cache miss")
+	}
+	policy := readingpolicy.Defaults()
+	policy.Preset = "custom"
+	policy.Modes[readingpolicy.Formula] = readingpolicy.Disabled
+	if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
+		t.Fatal(err)
+	}
+	failModel = true
+	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 {
+		t.Fatal("disabled policy hid cached explanation")
+	}
+	if w := call("owner", "f", `{"force":true}`); w.Code != 403 || calls != 1 {
+		t.Fatalf("disabled force reached model: %d %s", w.Code, w.Body)
+	}
+	policy.Preset = "demand"
+	if _, err := readingpolicy.Save(context.Background(), db.DB, "owner", policy); err != nil {
+		t.Fatal(err)
 	}
 	failModel = true
 	cachedResponse := call("owner", "f", `{}`)

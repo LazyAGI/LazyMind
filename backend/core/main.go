@@ -919,7 +919,7 @@ func run(ctx context.Context) error {
 		// History samples have already been downloaded and imported above.
 		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
+		excludedJobs := append([]string{doc.ReadingPreparationJob, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {
 			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 				doc.MarketUpdateAllJobType, "document_pdf_translation")
@@ -931,6 +931,8 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+		readingRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{doc.ReadingPreparationJob}, Concurrency: 1, SerializeResources: true, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		backgroundDone = append(backgroundDone, readingRunner.Done(), doc.StartReadingPreparation(runtimeCtx, store.DB()))
 		paperChatRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 		backgroundDone = append(backgroundDone, paperChatRunner.Done())
 		academic.RecoverPaperExpansions(runtimeCtx, store.DB())
