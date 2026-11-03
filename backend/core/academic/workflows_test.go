@@ -942,3 +942,39 @@ func testListExpansionPublication(t *testing.T, stepID, resultSlot, readySlot st
 		t.Fatalf("finishing a list must not prepare full text: %d, %v", fetched, err)
 	}
 }
+
+func TestExpansionLaunchDirectionSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, selection, want string
+		status                      int
+	}{
+		{"standard default", "balanced", "", "all", 200},
+		{"deep default", "deep", "", "all", 200},
+		{"manual", "balanced", "manual", "manual", 200},
+		{"fast", "fast", "", "", 200},
+		{"invalid", "balanced", "unknown", "", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := paperFixture(t)
+			w := httptest.NewRecorder()
+			LaunchPaperWorkflow(w, paperRequest(string(marshal(map[string]any{"kind": "expansion", "dataset_id": "papers", "direction": "agents", "request_key": "directions", "budget_mode": tc.mode, "direction_selection": tc.selection}))))
+			if w.Code != tc.status {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			if w.Code != 200 {
+				return
+			}
+			var record orm.AcademicExpansion
+			if err := db.Where("request_key=?", "directions").Take(&record).Error; err != nil {
+				t.Fatal(err)
+			}
+			var preparation expansionPreparation
+			if err := json.Unmarshal(record.PreparationJSON, &preparation); err != nil {
+				t.Fatal(err)
+			}
+			if preparation.DirectionSelection != tc.want {
+				t.Fatalf("selection not saved: %+v", preparation)
+			}
+		})
+	}
+}

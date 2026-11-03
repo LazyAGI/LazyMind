@@ -37,6 +37,7 @@ export interface ReviewWorkflowInput extends PaperInvestigation {
   selected_directions: string[];
   papers: WorkflowPaper[];
 }
+export type DirectionSelection = 'all' | 'manual';
 export type BudgetMode = 'fast' | 'balanced' | 'deep';
 export type PaperRecommendation = AcademicExpansionReportRecommendationsInner;
 export type PaperResearchStructure = AcademicExpansionReportResearchStructure;
@@ -89,6 +90,7 @@ export interface ExpansionReport extends PaperInvestigation {
  preparation_attempts?: Array<{revision: number; model: string; metrics?: unknown}>;
 }
 export interface ExpansionPreparation {
+ direction_selection?: DirectionSelection;
  skipped?: boolean;
  original_instruction?: string;
  user_instruction: string; summary: string; error?: string;
@@ -152,6 +154,7 @@ export interface DocumentAcademic {
 }
 export type PaperTask = 'expansion' | 'review' | 'reflection' | 'ppt';
 export interface PaperLaunch {
+  direction_selection?: DirectionSelection;
   skip_expansion?: boolean;
   review_scope?: 'selected' | 'direct_references';
   budget_mode?: BudgetMode;

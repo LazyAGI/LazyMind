@@ -134,7 +134,7 @@ describe('paper task startup routes', () => {
         expect(within(seedAnalysis).queryByRole('heading', { name: '与种子论文的关系' })).not.toBeInTheDocument();
     });
 
-    it.each([{}, { currency_cost: null, stage_timing: [], source_queries: [] }, { currency_cost: 1, stage_metrics: { model: 'test-model', provider_usage_records: [{ prompt_tokens: 100 }] } }])('hides execution details when the report only contains no data or internal metrics: %j', async report => {
+    it.each([{}, { currency_cost: null, stage_timing: [], source_queries: [] }, { currency_cost: 1, stage_metrics: { research: { model: 'test-model', provider_usage_records: [{ prompt_tokens: 100 }] } } }])('hides execution details when the report only contains no data or internal metrics: %j', async report => {
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, report } });
         mount(undefined, '?expansion_id=r');
         await screen.findByText('原始研究要求');
@@ -196,25 +196,27 @@ describe('paper task startup routes', () => {
         expect(screen.getByLabelText('补充要求（选填）')).toBeInTheDocument();
         await submit();
         expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a'], false);
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: ['a'] }), false);
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: ['a'], direction_selection: 'all' }), false);
     });
     it('chooses research depth at launch and resets it for a new task', async () => {
         mount(['a']);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
         fireEvent.click(screen.getByRole('radio', { name: /深入/ }));
+        fireEvent.click(screen.getByRole('radio', { name: '人工选择' }));
         await submit();
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep' }), false);
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep', direction_selection: 'manual' }), false);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
         expect(screen.getByRole('radio', { name: /^标准扩展/ })).toBeChecked();
+        expect(screen.getByRole('radio', { name: '默认全选' })).toBeChecked();
     });
-    it('uses the same expansion action across tiers and marks manual direction selection', async () => {
+    it('defaults to all directions and omits direction selection for fast expansion', async () => {
         mount(['a']);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
-        expect(screen.getAllByText('你来选择*')).toHaveLength(2);
-        expect(screen.getByText(/只有一个方向时自动继续/)).toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: '默认全选' })).toBeChecked();
+        expect(screen.getByText('调研完成后，按全部方向自动继续。')).toBeInTheDocument();
         for (const tier of [/^标准扩展/, /^深入分析/, /^快速扩展/]) {
             fireEvent.click(screen.getByRole('radio', { name: tier }));
             expect(screen.getByRole('button', { name: '开始扩展' })).toBeInTheDocument();
@@ -222,6 +224,8 @@ describe('paper task startup routes', () => {
         }
         fireEvent.click(screen.getByRole('button', { name: '开始扩展' }));
         await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'fast' }), false));
+        expect(screen.queryByRole('radio', { name: '人工选择' })).not.toBeInTheDocument();
+        expect(vi.mocked(launchPaperTask).mock.calls[0][0]).not.toHaveProperty('direction_selection');
     });
     it('starts direction expansion with one topic input and no papers', async () => {
         mount([]);

@@ -151,7 +151,7 @@ export default function PreparationPanel({ detail, onRefresh, onStart }: {
     {compact && confirmedDirections}
     {!review && !compact && <Steps className="paper-preparation-steps" size="small" current={preparationPhase}
       items={[{ title: '初步调研' }, { title: preparation.auto_confirmed ? '方向已确定' : '确认方向' }, { title: '正式拓展' }]} />}
-    {record.status === 'preparing' && <div className="paper-preparation-working" role="status"><Spin size="small" /><div><strong>正在调研研究问题</strong><p>{review ? t('paperTasks.reviewFlow.researchingHint') : '你可以离开此页面，需要补充信息或选择方向时会通知你。只有一个方向时将自动继续拓展。'}</p></div></div>}
+    {record.status === 'preparing' && <div className="paper-preparation-working" role="status"><Spin size="small" /><div><strong>正在调研研究问题</strong><p>{review ? t('paperTasks.reviewFlow.researchingHint') : t(`paperTasks.expansionDepth.${preparation.direction_selection === 'manual' ? 'preparingManual' : 'preparingAll'}`)}</p></div></div>}
     {preparation.summary && !compact && <section className="paper-preparation-findings">
       <h3><ReadOutlined />{record.status === 'preparing' ? '已有调研材料' : '初步调研成果'}</h3>
       <Typography.Paragraph ellipsis={{ rows: 2 }}>{summaryPreview}</Typography.Paragraph>

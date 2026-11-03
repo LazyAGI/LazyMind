@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { BudgetMode } from '../../api/paperWorkflows';
+import type { BudgetMode, DirectionSelection } from '../../api/paperWorkflows';
 
 const researchDepthOptions: Array<{ value: BudgetMode; label: string; description: string[] }> = [
   { value: 'fast', label: '快速', description: ['聚焦核心问题', '代表论文与关键结论'] },
@@ -16,7 +16,7 @@ const expansionSteps = {
   deep: [...sharedExpansionSteps, 'report'],
 } as const;
 
-export default function ResearchDepth({ value, onChange, expansion = false }: { value: BudgetMode; onChange: (value: BudgetMode) => void; expansion?: boolean }) {
+export default function ResearchDepth({ value, onChange, expansion = false, directionSelection = 'all' }: { value: BudgetMode; onChange: (value: BudgetMode) => void; expansion?: boolean; directionSelection?: DirectionSelection }) {
   const name = useId();
   const { t } = useTranslation();
   const title = t(expansion ? 'paperTasks.expansionDepth.title' : 'paperTasks.reviewFlow.depthTitle');
@@ -35,11 +35,10 @@ export default function ResearchDepth({ value, onChange, expansion = false }: { 
           {expansionSteps[option.value].map(step => <span key={step} role="listitem"
             className={`paper-expansion-mode-step step-${step}`}>
             {t(`paperTasks.expansionDepth.steps.${step}`)}
-            {step === 'chooseDirection' && <span className="paper-expansion-mode-human">{t('paperTasks.expansionDepth.yourChoice')}*</span>}
+            {step === 'chooseDirection' && <span className="paper-expansion-mode-human">{t(`paperTasks.expansionDepth.${directionSelection === 'manual' ? 'yourChoice' : 'allDirections'}`)}</span>}
           </span>)}
         </span>}
       </label>)}
     </div>
-    {expansion && <p className="paper-expansion-mode-hint">* {t('paperTasks.expansionDepth.directionsHint')}</p>}
   </section>;
 }

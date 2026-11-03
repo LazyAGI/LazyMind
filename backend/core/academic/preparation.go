@@ -128,6 +128,7 @@ type preparationAttempt struct {
 	Error      string          `json:"error,omitempty"`
 }
 type expansionPreparation struct {
+	DirectionSelection  string               `json:"direction_selection,omitempty"`
 	Skipped             bool                 `json:"skipped,omitempty"`
 	OriginalInstruction string               `json:"original_instruction"`
 	Updates             []string             `json:"updates,omitempty"`
@@ -248,6 +249,8 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 			}
 		}
 	}
+	// Selection policy belongs to the launch request, never to the model response.
+	result.DirectionSelection = preparation.DirectionSelection
 	result.Answers = preparation.Answers
 	result.RequestKey = preparation.RequestKey
 	result.Model = ""
@@ -270,8 +273,13 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 		if e := tx.Model(&record).Updates(map[string]any{"preparation_json": record.PreparationJSON, "status": status, "title": record.Title, "updated_at": finished}).Error; e != nil {
 			return e
 		}
-		if status == "awaiting_confirmation" && len(result.Directions) == 1 {
-			return confirmPreparedExpansion(ctx, tx, &record, []string{result.Directions[0].Name}, fmt.Sprintf("auto:%d", payload.Revision), true)
+		if status == "awaiting_confirmation" && (result.DirectionSelection == "all" ||
+			(result.DirectionSelection == "" && len(result.Directions) == 1)) {
+			selected := make([]string, 0, len(result.Directions))
+			for _, direction := range result.Directions {
+				selected = append(selected, direction.Name)
+			}
+			return confirmPreparedExpansion(ctx, tx, &record, selected, fmt.Sprintf("auto:%d", payload.Revision), true)
 		}
 		return taskcenter.NotifyAcademicExpansion(ctx, tx, record.UserID, record.DatasetID, record.ID, payload.Revision, status)
 	})

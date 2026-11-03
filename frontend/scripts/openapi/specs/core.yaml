@@ -467,6 +467,11 @@ components:
                             type: object
                         auto_confirmed:
                             type: boolean
+                        direction_selection:
+                            enum:
+                                - all
+                                - manual
+                            type: string
                         directions:
                             items:
                                 properties:
@@ -1967,6 +1972,11 @@ components:
                 dataset_id:
                     type: string
                 direction:
+                    type: string
+                direction_selection:
+                    enum:
+                        - all
+                        - manual
                     type: string
                 document_ids:
                     items:

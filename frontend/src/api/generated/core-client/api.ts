@@ -347,6 +347,7 @@ export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscove
 export interface AcademicExpansionPreparation {
     'answers'?: { [key: string]: string; };
     'auto_confirmed'?: boolean;
+    'direction_selection'?: AcademicExpansionPreparationDirectionSelectionEnum;
     'directions'?: Array<AcademicExpansionPreparationDirectionsInner>;
     'error'?: string;
     'metrics'?: object;
@@ -358,6 +359,14 @@ export interface AcademicExpansionPreparation {
     'summary'?: string;
     'user_instruction'?: string;
 }
+
+export const AcademicExpansionPreparationDirectionSelectionEnum = {
+    All: 'all',
+    Manual: 'manual'
+} as const;
+
+export type AcademicExpansionPreparationDirectionSelectionEnum = typeof AcademicExpansionPreparationDirectionSelectionEnum[keyof typeof AcademicExpansionPreparationDirectionSelectionEnum];
+
 export interface AcademicExpansionPreparationDirectionsInner {
     'difference': string;
     'name': string;
@@ -978,6 +987,7 @@ export interface AcademicTaskLaunch {
     'budget_mode'?: AcademicTaskLaunchBudgetModeEnum;
     'dataset_id'?: string;
     'direction'?: string;
+    'direction_selection'?: AcademicTaskLaunchDirectionSelectionEnum;
     'document_ids'?: Array<string>;
     'expansion_id'?: string;
     'expansion_version'?: number;
@@ -997,6 +1007,12 @@ export const AcademicTaskLaunchBudgetModeEnum = {
 } as const;
 
 export type AcademicTaskLaunchBudgetModeEnum = typeof AcademicTaskLaunchBudgetModeEnum[keyof typeof AcademicTaskLaunchBudgetModeEnum];
+export const AcademicTaskLaunchDirectionSelectionEnum = {
+    All: 'all',
+    Manual: 'manual'
+} as const;
+
+export type AcademicTaskLaunchDirectionSelectionEnum = typeof AcademicTaskLaunchDirectionSelectionEnum[keyof typeof AcademicTaskLaunchDirectionSelectionEnum];
 export const AcademicTaskLaunchKindEnum = {
     Expansion: 'expansion',
     Review: 'review',

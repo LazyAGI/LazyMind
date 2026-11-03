@@ -1,13 +1,13 @@
 # 论文 Workflow 对接
 
-面向接入综述、阅读心得和科研 PPT 的同事。基于 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863) 的论文能力，增加准备确认、四步拓展与独立报告。
+面向接入综述、阅读心得和科研 PPT 的同事。基于 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863) 的论文能力，增加准备确认、多阶段拓展与独立报告。
 
-论文流程提供主题/种子初步调研、明确确认方向后的四步多来源拓展、分层阅读与质量检查、版本化材料交接和全文读取。**综述、心得、PPT 目前接 Mock，只返回材料接收结果，正式生成能力由下游 Workflow 接入。**
+论文流程提供主题/种子初步调研、按选定方向开展多来源拓展、分层阅读与质量检查、版本化材料交接和全文读取。**综述、心得、PPT 目前接 Mock，只返回材料接收结果，正式生成能力由下游 Workflow 接入。**
 
 ## 1. 接入流程
 
 ```text
-论文集选文 / 输入研究方向 → 后台初步调研 → 回答必要问题 → 多方向选择（单方向自动继续） → 四步论文拓展 → 冻结所选轮次 → 新 Chat 接收综述任务
+论文集选文 / 输入研究方向 → 后台初步调研 → 回答必要问题 → 按启动设置全选方向或人工选择 → 论文拓展 → 冻结所选轮次 → 新 Chat 接收综述任务
 论文集选文 → 新 Chat 接收阅读心得 / PPT 任务
 PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT 步骤
 ```
@@ -21,7 +21,9 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 
 业务启动统一使用 `POST /api/core/academic/workflow-launches`，`kind` 为 `expansion / review / reflection / ppt`，`request_key` 为同次请求的稳定幂等键。从论文集启动时传 `dataset_id`、`document_ids` 和 `user_instruction`；PPT 可传 `reflection_first: true`。
 
-新建 expansion 或“先拓展后综述”返回 `expansion_id` 和准备状态，尚无 `conversation_id`。通过 `POST /academic/expansions/{id}/preparation` 提交 `action=answer/revise/retry`、准备 `revision` 和稳定 `request_key`；通过 `POST /academic/expansions/{id}:confirm` 提交同版本、方向选择和预算才启动正式 Chat。过期版本拒绝，重复确认返回同一正式任务。快速、标准、深入通过执行轮次和工具调用次数限制调研范围，具体限额见服务端返回的执行策略。
+独立标准或深入扩展支持启动参数 `direction_selection: "all" | "manual"`，默认为 `all`：初步调研完成且没有待补充问题时，按全部有效方向自动继续；`manual` 始终等待人工选择并确认，单方向也不跳过。快速扩展不经过方向选择。该设置随准备记录保存，补充信息和重试时沿用。
+
+新建 expansion 或“先拓展后综述”返回 `expansion_id` 和准备状态，尚无 `conversation_id`。通过 `POST /academic/expansions/{id}/preparation` 提交 `action=answer/revise/retry`、准备 `revision` 和稳定 `request_key`；通过 `POST /academic/expansions/{id}:confirm` 提交同版本和方向选择，人工确认后启动正式 Chat。过期版本拒绝，重复确认返回同一正式任务。快速、标准、深入通过执行轮次和工具调用次数限制调研范围，具体限额见服务端返回的执行策略。
 
 正式步骤为检索与拓展、筛选与补充、关系分析与证据核验。核验提交时直接生成并发布研究报告与论文关系，不另启模型阶段。独立快速拓展在检索后交付清单；标准拓展在筛选后交付按方向分组的清单；深入拓展继续生成关系图和报告。综述目标跳过独立筛选，继续核验与材料准备。结果仍是四字段 `ReviewWorkflowInput`，证据/阅读覆盖/质量/复核/用量独立在 `expansion_report` 和历史轮次报告。普通拓展按需取文，综述目标为最终清单补取；下载、解析、身份匹配和实际已读分别统计。关系分析先通过 `academic_check_relations` 核验，再以最新 `check_id` 调用 `academic_submit_relations` 保存；报告绑定同一 `analysis_version`，来源内容变更后须重新核验。分析不自动入库。
 
@@ -164,4 +166,4 @@ HTTP 200 也可能处于 `processing`，应同时检查 `status`。读取正文�
 
 完整接口定义见 [academic OpenAPI](../../backend/core/openapi_academic_workflows.go)，通用 Workflow 写法见 [格式规范](../workflow-format.md)。
 
-调研深度（快速／标准／深入）在启动任务时固定，补充范围、重试和确认方向时沿用。深度控制检索广度、阅读和证据核验程度，不承诺整轮耗时，也不按分钟截断研究；单次请求仍有超时及有限重试，调查保留轮次和工具调用上限。候选方向根据真实材料确定，最多 5 个、不设数量下限。只有一个有效方向且没有待补充问题时自动开始正式拓展；多个方向等待用户选择，没有有效方向时说明材料缺口。
+调研深度（快速／标准／深入）在启动任务时固定，补充范围、重试和确认方向时沿用。深度控制检索广度、阅读和证据核验程度，不承诺整轮耗时，也不按分钟截断研究；单次请求仍有超时及有限重试，调查保留轮次和工具调用上限。候选方向根据真实材料确定，最多 5 个、不设数量下限。独立扩展按启动时的方向选择模式继续；“先拓展后综述”保持单方向自动继续、多方向等待选择。没有有效方向时说明材料缺口。

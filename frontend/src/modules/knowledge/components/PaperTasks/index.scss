@@ -377,7 +377,6 @@
   background: var(--color-warning-bg, #fff3d9);
 }
 .paper-expansion-mode-human { border: 1px solid currentColor; border-radius: 3px; padding-inline: 3px; font-size: 11px; }
-.paper-expansion-mode-hint { margin: 8px 0 0; font-size: 12px; color: var(--color-text-secondary, #687589); }
 .paper-task-launch-flow-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--color-text-secondary, #687589); }
 .paper-task-launch-flow-hint > .anticon { margin-top: 3px; }
 .paper-task-launch-modal .paper-task-launch-selection { margin: 18px 0; padding: 14px 16px; background: var(--color-fill-quaternary, #f7f9fc); border-radius: 8px; }
@@ -474,3 +473,5 @@
 .paper-expansion-stage-content { flex: 1; min-width: 0; > p { margin: 3px 0; } }
 
 .paper-preparation-all-directions.ant-btn { justify-self: start; padding-left: 0; font-size: 12px; }
+
+.paper-direction-selection { display: grid; gap: 8px; padding: 12px 0 4px; }

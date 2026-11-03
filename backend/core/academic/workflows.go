@@ -47,19 +47,20 @@ type ReviewWorkflowInput struct {
 const ChatLaunchJobType = "academic.chat_launch"
 
 type paperLaunch struct {
-	SkipExpansion    bool     `json:"skip_expansion"`
-	ReviewScope      string   `json:"review_scope,omitempty"`
-	Kind             string   `json:"kind"`
-	DatasetID        string   `json:"dataset_id"`
-	DocumentIDs      []string `json:"document_ids"`
-	PaperIDs         []string `json:"paper_ids,omitempty"`
-	Direction        string   `json:"direction"`
-	UserInstruction  string   `json:"user_instruction"`
-	RequestKey       string   `json:"request_key"`
-	ExpansionID      string   `json:"expansion_id,omitempty"`
-	ExpansionVersion *int64   `json:"expansion_version,omitempty"`
-	ReflectionFirst  bool     `json:"reflection_first"`
-	BudgetMode       string   `json:"budget_mode"`
+	SkipExpansion      bool     `json:"skip_expansion"`
+	ReviewScope        string   `json:"review_scope,omitempty"`
+	Kind               string   `json:"kind"`
+	DatasetID          string   `json:"dataset_id"`
+	DocumentIDs        []string `json:"document_ids"`
+	PaperIDs           []string `json:"paper_ids,omitempty"`
+	Direction          string   `json:"direction"`
+	UserInstruction    string   `json:"user_instruction"`
+	RequestKey         string   `json:"request_key"`
+	ExpansionID        string   `json:"expansion_id,omitempty"`
+	ExpansionVersion   *int64   `json:"expansion_version,omitempty"`
+	ReflectionFirst    bool     `json:"reflection_first"`
+	BudgetMode         string   `json:"budget_mode"`
+	DirectionSelection string   `json:"direction_selection,omitempty"`
 }
 
 func marshal(value any) json.RawMessage { b, _ := json.Marshal(value); return b }
@@ -197,6 +198,11 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_KIND", "invalid paper task")
 		return
 	}
+	if req.DirectionSelection != "" && (req.Kind != "expansion" || req.BudgetMode == "fast" ||
+		(req.DirectionSelection != "all" && req.DirectionSelection != "manual")) {
+		replyError(w, 400, "INVALID_REQUEST", "direction_selection must be all or manual for standard or deep expansion")
+		return
+	}
 	if req.SkipExpansion && (req.Kind != "review" || req.ExpansionID != "" || strings.TrimSpace(req.Direction) != "" || len(req.DocumentIDs) == 0) {
 		replyError(w, 400, "INVALID_REQUEST", "skip_expansion requires a review of selected library papers")
 		return
@@ -271,6 +277,9 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			}
 			mode := firstNonEmpty(req.BudgetMode, "balanced")
 			preparation := expansionPreparation{OriginalInstruction: instruction, UserInstruction: instruction, Answers: map[string]string{}, Questions: []preparationQuestion{}, Directions: []preparationDirection{}}
+			if req.Kind == "expansion" && mode != "fast" {
+				preparation.DirectionSelection = firstNonEmpty(req.DirectionSelection, "all")
+			}
 			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, Title: truncateTitle(instruction), Goal: req.Kind, Status: "preparing", ResultJSON: marshal(input), PreparationRevision: 1, PreparationJSON: marshal(preparation), BudgetMode: mode, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if req.Kind == "expansion" && mode == "fast" {
 				scope := firstNonEmpty(strings.TrimSpace(req.Direction), "围绕所选论文")

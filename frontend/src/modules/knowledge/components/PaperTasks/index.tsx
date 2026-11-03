@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
-import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Radio, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
+import type { RadioChangeEvent } from 'antd/es/radio';
 import { BranchesOutlined, DownOutlined, EditOutlined, FundProjectionScreenOutlined, HistoryOutlined, ReadOutlined, ReloadOutlined, CheckOutlined, MinusOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
@@ -18,7 +19,7 @@ import ReviewFlow from './ReviewFlow';
 import ReviewTopic from './ReviewTopic';
 import ResearchDepth from './ResearchDepth';
 import PaperTaskStatus from './PaperTaskStatus';
-import { getExpansionCapabilities, type BudgetMode } from '../../api/paperWorkflows';
+import { getExpansionCapabilities, type BudgetMode, type DirectionSelection } from '../../api/paperWorkflows';
 import type { PaperNotification } from '../../paper/usePaperNotifications';
 
 interface Props {
@@ -115,6 +116,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         return () => { active = false; clearTimeout(timer); };
     }, [directReview, dataset, JSON.stringify(selected), selectionRetry, t]);
     const [budgetMode, setBudgetMode] = useState<BudgetMode>('balanced');
+    const [directionSelection, setDirectionSelection] = useState<DirectionSelection>('all');
     const [capabilities, setCapabilities] = useState<{openalex_key: boolean; sciverse: boolean; web_search: boolean}>();
     useEffect(() => { if (launch) void getExpansionCapabilities().then(setCapabilities).catch(() => setCapabilities(undefined)); }, [launch]);
     const [busy, setBusy] = useState(false);
@@ -158,6 +160,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         setReviewTopic('');
         setReviewPapersExpanded(false);
         setBudgetMode('balanced');
+        setDirectionSelection('all');
         setLaunch({ kind, direction });
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
@@ -315,6 +318,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
                 user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: reflectionFirst, budget_mode: budgetMode,
+                ...(launch.kind === 'expansion' && budgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
                 ...(directReview ? { skip_expansion: true, review_scope: 'selected' as const, paper_ids: eligibleReviewPapers.map(item => item.paper.paper_id) } : {}),
             };
             const fingerprint = JSON.stringify(body);
@@ -616,7 +620,15 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <Switch checked={expansionEnabled} onChange={setExpansionEnabled} disabled={busy || topicBusy} aria-label={t('paperTasks.enableExpansion')} />
             </div>}
             {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'} />
+                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'} directionSelection={directionSelection} />
+                {launch.kind === 'expansion' && budgetMode !== 'fast' && <section className="paper-direction-selection">
+                    <Typography.Text strong>{t('paperTasks.expansionDepth.directionSelection')}</Typography.Text>
+                    <Radio.Group aria-label={t('paperTasks.expansionDepth.directionSelection')} value={directionSelection} onChange={(event: RadioChangeEvent) => setDirectionSelection(event.target.value)} disabled={busy}>
+                        <Radio value="all">{t('paperTasks.expansionDepth.allDirections')}</Radio>
+                        <Radio value="manual">{t('paperTasks.expansionDepth.yourChoice')}</Radio>
+                    </Radio.Group>
+                    <Typography.Text type="secondary">{t(`paperTasks.expansionDepth.${directionSelection === 'all' ? 'allDirectionsHint' : 'manualDirectionsHint'}`)}</Typography.Text>
+                </section>}
                 {launch.kind === 'review' && <p className="paper-task-launch-flow-hint"><BranchesOutlined />{t('paperTasks.reviewFlow.directionsHint')}</p>}
                 {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message={t(capabilities.openalex_key ? 'paperTasks.expansionDepth.searchConfiguration' : 'paperTasks.expansionDepth.basicSearch')} description={<>
                   {!capabilities.openalex_key && <div>{t('paperTasks.expansionDepth.openalexBenefits')} <Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">{t('paperTasks.expansionDepth.configureOpenalex')}</Link></div>}

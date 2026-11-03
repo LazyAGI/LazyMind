@@ -78,7 +78,7 @@ func TestPreparationCreatesRecordsWithoutChatsAndConfirmsOnce(t *testing.T) {
 
 func TestPreparationAnswersFenceOldAttempt(t *testing.T) {
 	db := paperFixture(t)
-	p := expansionPreparation{UserInstruction: "agents", Summary: "need scope", Questions: []preparationQuestion{{ID: "scope", Question: "Which setting?"}}, Answers: map[string]string{}}
+	p := expansionPreparation{DirectionSelection: "manual", UserInstruction: "agents", Summary: "need scope", Questions: []preparationQuestion{{ID: "scope", Question: "Which setting?"}}, Answers: map[string]string{}}
 	record := orm.AcademicExpansion{ID: "preparing", UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: "prep", Status: "awaiting_info", PreparationRevision: 1, PreparationJSON: marshal(p), ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{}})}
 	if err := db.Create(&record).Error; err != nil {
 		t.Fatal(err)
@@ -98,6 +98,10 @@ func TestPreparationAnswersFenceOldAttempt(t *testing.T) {
 	}
 	if _, err := runPreparation(t.Context(), asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(map[string]int{"revision": 1})}, nil); err != nil {
 		t.Fatal("stale attempt should stop before model call", err)
+	}
+	var saved expansionPreparation
+	if err := json.Unmarshal(record.PreparationJSON, &saved); err != nil || saved.DirectionSelection != "manual" {
+		t.Fatalf("answering changed direction selection: %+v %v", saved, err)
 	}
 }
 
@@ -237,14 +241,17 @@ func TestPreparationDepthCannotChangeAfterLaunch(t *testing.T) {
 	}
 }
 
-func TestPreparationAutomaticallyContinuesOnlyOneGroundedDirection(t *testing.T) {
+func TestPreparationRespectsDirectionSelection(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		count    int
-		question bool
-		status   string
+		name      string
+		count     int
+		question  bool
+		status    string
+		selection string
 	}{
-		{"single", 1, false, "pending"}, {"multiple", 2, false, "awaiting_confirmation"}, {"needs information", 1, true, "awaiting_info"}, {"no directions", 0, false, "preparation_failed"}, {"too many directions", 6, false, "preparation_failed"},
+		{"legacy single", 1, false, "pending", ""}, {"legacy multiple", 2, false, "awaiting_confirmation", ""},
+		{"all directions", 2, false, "pending", "all"}, {"manual single", 1, false, "awaiting_confirmation", "manual"}, {"manual multiple", 2, false, "awaiting_confirmation", "manual"},
+		{"needs information", 1, true, "awaiting_info", "all"}, {"no directions", 0, false, "preparation_failed", "all"}, {"too many directions", 6, false, "preparation_failed", "all"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := paperFixture(t)
@@ -259,7 +266,10 @@ func TestPreparationAutomaticallyContinuesOnlyOneGroundedDirection(t *testing.T)
 					t.Fatal(err)
 				}
 			}
-			prepared := expansionPreparation{Summary: "Grounded research", UserInstruction: "agents"}
+			prepared := expansionPreparation{Summary: "Grounded research", UserInstruction: "agents", DirectionSelection: "all"}
+			if tc.selection == "all" {
+				prepared.DirectionSelection = "manual"
+			}
 			for i := 0; i < tc.count; i++ {
 				prepared.Directions = append(prepared.Directions, preparationDirection{Name: fmt.Sprintf("direction-%d", i), Question: "Which evidence?", Reason: "Distinct evidence", PaperIDs: []string{"a"}})
 			}
@@ -290,7 +300,7 @@ func TestPreparationAutomaticallyContinuesOnlyOneGroundedDirection(t *testing.T)
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "fixture-token")
 			old := time.Now().Add(-24 * time.Hour)
-			record := orm.AcademicExpansion{ID: "prepared", UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: "prepared", Status: "preparing", BudgetMode: "deep", PreparationRevision: 1, PreparationJSON: marshal(expansionPreparation{UserInstruction: "agents", StartedAt: &old}), ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{}}), DiscoveryJSON: marshal([]paperDiscovery{{Papers: []PaperRef{{PaperID: "a", Title: "Actual paper"}}}})}
+			record := orm.AcademicExpansion{ID: "prepared", UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: "prepared", Status: "preparing", BudgetMode: "deep", PreparationRevision: 1, PreparationJSON: marshal(expansionPreparation{UserInstruction: "agents", StartedAt: &old, DirectionSelection: tc.selection}), ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{}}), DiscoveryJSON: marshal([]paperDiscovery{{Papers: []PaperRef{{PaperID: "a", Title: "Actual paper"}}}})}
 			if err := db.Create(&record).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -313,9 +323,12 @@ func TestPreparationAutomaticallyContinuesOnlyOneGroundedDirection(t *testing.T)
 			if err := json.Unmarshal(record.PreparationJSON, &saved); err != nil {
 				t.Fatal(err)
 			}
+			if saved.DirectionSelection != tc.selection {
+				t.Fatalf("model changed launch selection: %+v", saved)
+			}
 			if tc.status == "pending" {
-				if chats != 1 || jobs != 1 || !saved.AutoConfirmed || len(saved.Selected) != 1 {
-					t.Fatalf("single direction did not start exactly once: chats %d, jobs %d, preparation %+v", chats, jobs, saved)
+				if chats != 1 || jobs != 1 || !saved.AutoConfirmed || len(saved.Selected) != tc.count {
+					t.Fatalf("selected directions did not start exactly once: chats %d, jobs %d, preparation %+v", chats, jobs, saved)
 				}
 			} else if chats != 0 || jobs != 0 {
 				t.Fatal("unconfirmed or invalid preparation started a Chat")
