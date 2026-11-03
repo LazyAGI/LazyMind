@@ -113,7 +113,9 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
   expect(publishedSource(onSave.mock.calls[0][0])).toBe(source.replace('Original paragraph.', 'Unsaved paragraph.'));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(onSave.mock.calls[0][0]);
+  // Invoking onSave precedes its receipt and the subsequent React commit.
+  // Wait for the persisted source (including repaired anchors) to reach the UI.
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(onSave.mock.calls[0][0]));
   expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
 }, 15000);
 
