@@ -53,7 +53,15 @@ export interface BaseAsset {
   autoEvoError?: string;
 }
 
-export interface StructuredAsset extends BaseAsset {
+export interface MarketPresentation {
+  search_text?: string;
+  display_name?: string;
+  display_description?: string;
+  display_locale?: string;
+  tag_labels?: Record<string, string>;
+}
+
+export interface StructuredAsset extends BaseAsset, MarketPresentation {
   cloudResourceId?: string;
   cloudDownloadable?: boolean;
   name: string;
@@ -143,7 +151,7 @@ export interface GlossaryConflictResolution {
   mergedGroupContent?: string;
 }
 
-export interface AssetDraft {
+export interface AssetDraft extends MarketPresentation {
   id?: string;
   field?: string;
   keywords?: string[];
@@ -291,6 +299,10 @@ export const createStructuredDraft = (
     : item.content;
 
   return {
+    display_name: item.display_name,
+    display_description: item.display_description,
+    display_locale: item.display_locale,
+    tag_labels: item.tag_labels,
     id: item.id,
     name: item.name,
     description: item.description,

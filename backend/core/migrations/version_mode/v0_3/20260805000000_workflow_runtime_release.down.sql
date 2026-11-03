@@ -1,3 +1,6 @@
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE skill_market_items DROP COLUMN display_i18n;
+
 ALTER TABLE user_model_provider_group_models DROP COLUMN enabled;
 ALTER TABLE user_model_provider_group_models DROP COLUMN model_settings;
 ALTER TABLE default_models DROP COLUMN model_settings;

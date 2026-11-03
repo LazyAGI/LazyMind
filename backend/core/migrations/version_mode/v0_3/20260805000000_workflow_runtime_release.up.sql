@@ -3706,3 +3706,6 @@ ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT 
 -- Per-model capability declarations and runtime options.
 ALTER TABLE user_model_provider_group_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE user_model_provider_group_models ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE skill_market_items ADD COLUMN display_i18n JSON NOT NULL DEFAULT '{}';

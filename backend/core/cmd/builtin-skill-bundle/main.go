@@ -53,6 +53,7 @@ type sourceList struct {
 }
 
 type remoteSource struct {
+	PresentationID  string `yaml:"presentation_id,omitempty"`
 	SourceURL       string `yaml:"source_url"`
 	UID             string `yaml:"uid,omitempty"`
 	Category        string `yaml:"category,omitempty"`
@@ -71,7 +72,7 @@ func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
-		case "source_url", "uid", "category", "provider", "version", "required_version":
+		case "presentation_id", "source_url", "uid", "category", "provider", "version", "required_version":
 		default:
 			return bundleFailure("skill source field %s is not supported", node.Content[index].Value)
 		}
@@ -81,11 +82,12 @@ func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
 }
 
 type bundledSource struct {
-	UID      string `yaml:"uid"`
-	Path     string `yaml:"path"`
-	Category string `yaml:"category"`
-	Version  string `yaml:"version"`
-	Provider string `yaml:"provider,omitempty"`
+	PresentationID string `yaml:"presentation_id,omitempty"`
+	UID            string `yaml:"uid"`
+	Path           string `yaml:"path"`
+	Category       string `yaml:"category"`
+	Version        string `yaml:"version"`
+	Provider       string `yaml:"provider,omitempty"`
 }
 
 type sourceSpec struct {
@@ -107,6 +109,7 @@ type sourceSpec struct {
 }
 
 type sourceInput struct {
+	PresentationID  string
 	URL             string
 	Bundled         *bundledSource
 	MarketVisible   bool
@@ -194,12 +197,13 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	seenSources := make(map[string]struct{}, len(ordinarySources.Skills)+len(ordinarySources.BundledSkills))
 	for index := range ordinarySources.BundledSkills {
 		source := &ordinarySources.BundledSkills[index]
-		sources = append(sources, sourceInput{Bundled: source, MarketVisible: true})
+		sources = append(sources, sourceInput{Bundled: source, MarketVisible: true, PresentationID: source.PresentationID})
 		seenSources[bundledSourceURL(source.Path)] = struct{}{}
 	}
 	for _, source := range ordinarySources.Skills {
 		sources = append(sources, sourceInput{
 			URL:             source.SourceURL,
+			PresentationID:  source.PresentationID,
 			MarketVisible:   true,
 			UID:             source.UID,
 			Category:        source.Category,
@@ -335,6 +339,9 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	if err := patchCatalog.ValidateApplied(appliedPatchCounts); err != nil {
 		return err
 	}
+	if err := writePresentation(opts.Sources, opts.Output, sources, entriesBySource); err != nil {
+		return err
+	}
 	if err := writeJSONAtomic(filepath.Join(opts.Output, "catalog.json"), catalog); err != nil {
 		return err
 	}
@@ -429,6 +436,9 @@ func materializeLockedCatalog(ctx context.Context, opts options, client *http.Cl
 		entriesBySource[entry.SourceURL] = entry
 	}
 	if err := patchCatalog.ValidateApplied(appliedPatchCounts); err != nil {
+		return err
+	}
+	if err := writePresentation(opts.Sources, opts.Output, sources, entriesBySource); err != nil {
 		return err
 	}
 	if err := writeJSONAtomic(filepath.Join(opts.Output, "catalog.json"), catalog); err != nil {

@@ -318,3 +318,11 @@
     .memory-skill-installed-filters { padding-inline: 16px; }
   }
 }
+
+// Keep toolbar and cards on the same gutters at intermediate viewport widths.
+.memory-skill-management .memory-skill-toolbar { padding-inline: var(--market-gutter, 24px); }
+.memory-skill-management .memory-skill-market { padding-inline: var(--market-gutter, 24px); }
+@container skill-market (max-width: 560px) {
+  .memory-skill-management .memory-skill-toolbar,
+  .memory-skill-management .memory-skill-market { padding-inline: 16px; }
+}

@@ -2055,14 +2055,20 @@ type builtinSkillPathParams struct {
 }
 
 type builtinSkillOpenAPIResponse struct {
-	BuiltinSkillUID  string `json:"builtin_skill_uid"`
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	Category         string `json:"category"`
-	Provider         string `json:"provider,omitempty"`
-	Content          string `json:"content"`
-	Installed        bool   `json:"installed"`
-	InstalledSkillID string `json:"installed_skill_id,omitempty"`
+	BuiltinSkillUID    string            `json:"builtin_skill_uid"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Category           string            `json:"category"`
+	Provider           string            `json:"provider,omitempty"`
+	Content            string            `json:"content"`
+	Installed          bool              `json:"installed"`
+	InstalledSkillID   string            `json:"installed_skill_id,omitempty"`
+	Tags               []string          `json:"tags"`
+	DisplayName        string            `json:"display_name,omitempty" desc:"Localized marketplace title; canonical name remains unchanged."`
+	DisplayDescription string            `json:"display_description,omitempty" desc:"Localized marketplace introduction, independent of SKILL.md."`
+	DisplayLocale      string            `json:"display_locale,omitempty"`
+	TagLabels          map[string]string `json:"tag_labels,omitempty"`
+	SearchText         string            `json:"search_text,omitempty" desc:"Marketplace search text across all localized names and introductions, independent of display locale."`
 }
 
 type builtinSkillListOpenAPIResponse struct {
@@ -2378,10 +2384,13 @@ type marketInstallOpenAPIResponse struct {
 }
 
 type marketPublishOpenAPIRequest struct {
-	Name     string                    `json:"name,omitempty" desc:"Deprecated and ignored; the skill name is read from SKILL.md."`
-	Tags     []string                  `json:"tags" desc:"Marketplace discovery tags."`
-	Category string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is empty."`
-	Source   skillSourceOpenAPIRequest `json:"source"`
+	Name               string                    `json:"name,omitempty" desc:"Deprecated and ignored; the skill name is read from SKILL.md."`
+	Tags               []string                  `json:"tags" desc:"Marketplace discovery tags."`
+	Category           string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is empty."`
+	Source             skillSourceOpenAPIRequest `json:"source"`
+	DisplayName        string                    `json:"display_name,omitempty" desc:"Chinese marketplace title; does not rename the source skill."`
+	DisplayDescription string                    `json:"display_description,omitempty" desc:"Chinese marketplace introduction; does not modify the source package."`
+	TagLabels          map[string]string         `json:"tag_labels,omitempty" desc:"Chinese labels keyed by canonical marketplace tag value."`
 }
 
 type marketPublishOpenAPIResponse struct {
@@ -2390,29 +2399,41 @@ type marketPublishOpenAPIResponse struct {
 }
 
 type marketEditOpenAPIRequest struct {
-	Name        *string                    `json:"name,omitempty"`
-	Tags        []string                   `json:"tags,omitempty" desc:"Marketplace discovery tags."`
-	Category    *string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is omitted."`
-	Description *string                    `json:"description,omitempty"`
-	Source      *skillSourceOpenAPIRequest `json:"source,omitempty"`
-	VersionNote *string                    `json:"version_note,omitempty"`
+	Name               *string                    `json:"name,omitempty"`
+	Tags               []string                   `json:"tags,omitempty" desc:"Marketplace discovery tags."`
+	Category           *string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is omitted."`
+	Description        *string                    `json:"description,omitempty"`
+	Source             *skillSourceOpenAPIRequest `json:"source,omitempty"`
+	VersionNote        *string                    `json:"version_note,omitempty"`
+	DisplayName        *string                    `json:"display_name,omitempty"`
+	DisplayDescription *string                    `json:"display_description,omitempty"`
+	TagLabels          map[string]string          `json:"tag_labels,omitempty"`
 }
 
 type marketItemOpenAPIResponse struct {
-	ID               string                      `json:"id,omitempty"`
-	MarketItemID     string                      `json:"market_item_id"`
-	SourceSkillID    string                      `json:"source_skill_id,omitempty"`
-	Status           string                      `json:"status,omitempty"`
-	Tags             []string                    `json:"tags"`
-	Installed        bool                        `json:"installed,omitempty"`
-	InstalledSkillID string                      `json:"installed_skill_id,omitempty"`
-	Icon             string                      `json:"icon,omitempty"`
-	SortOrder        int                         `json:"sort_order,omitempty"`
-	VersionNote      string                      `json:"version_note,omitempty"`
-	PublishedAt      string                      `json:"published_at,omitempty"`
-	CreatedAt        string                      `json:"created_at,omitempty"`
-	UpdatedAt        string                      `json:"updated_at,omitempty"`
-	Source           *skillDetailOpenAPIResponse `json:"source,omitempty"`
+	ID                 string                      `json:"id,omitempty"`
+	MarketItemID       string                      `json:"market_item_id"`
+	SourceSkillID      string                      `json:"source_skill_id,omitempty"`
+	Status             string                      `json:"status,omitempty"`
+	Tags               []string                    `json:"tags"`
+	Installed          bool                        `json:"installed,omitempty"`
+	InstalledSkillID   string                      `json:"installed_skill_id,omitempty"`
+	Icon               string                      `json:"icon,omitempty"`
+	SortOrder          int                         `json:"sort_order,omitempty"`
+	VersionNote        string                      `json:"version_note,omitempty"`
+	PublishedAt        string                      `json:"published_at,omitempty"`
+	CreatedAt          string                      `json:"created_at,omitempty"`
+	UpdatedAt          string                      `json:"updated_at,omitempty"`
+	Source             *skillDetailOpenAPIResponse `json:"source,omitempty"`
+	DisplayName        string                      `json:"display_name,omitempty"`
+	DisplayDescription string                      `json:"display_description,omitempty"`
+	DisplayLocale      string                      `json:"display_locale,omitempty"`
+	TagLabels          map[string]string           `json:"tag_labels,omitempty"`
+}
+
+type marketTagsOpenAPIResponse struct {
+	Tags      []string          `json:"tags"`
+	TagLabels map[string]string `json:"tag_labels,omitempty"`
 }
 
 type marketListOpenAPIResponse struct {
@@ -4244,7 +4265,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:      "/skill-market/tags",
 			Summary:   "List published market skill tags",
 			Tags:      []string{"skill-market"},
-			Responses: map[int]openAPIResponse{200: resp("Market skill tag list", skillTagsOpenAPIResponse{})},
+			Responses: map[int]openAPIResponse{200: resp("Market skill tag list", marketTagsOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",

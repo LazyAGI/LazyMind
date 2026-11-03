@@ -83,7 +83,10 @@ export const filterMarketSkills = (
 
     return (
       item.name.toLowerCase().includes(keyword) ||
-      item.description.toLowerCase().includes(keyword)
+      item.description.toLowerCase().includes(keyword) ||
+      Boolean(item.display_name?.toLowerCase().includes(keyword)) ||
+      Boolean(item.display_description?.toLowerCase().includes(keyword)) ||
+      Boolean(item.search_text?.toLowerCase().includes(keyword))
     );
   });
 };

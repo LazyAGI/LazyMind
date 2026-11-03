@@ -1,65 +1,5 @@
 components:
     schemas:
-        publicationTargetCheckResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/PublicationTargetCheck'
-            required:
-                - code
-                - data
-            type: object
-        publicationPreflightResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/PublicationPreflightResult'
-            required:
-                - code
-                - data
-            type: object
-        PublicationVault:
-            properties:
-                id:
-                    type: string
-                name:
-                    type: string
-                writable:
-                    type: boolean
-            required:
-                - id
-                - name
-                - writable
-            type: object
-        PublicationTargetCheck:
-            properties:
-                code:
-                    type: string
-                provider:
-                    type: string
-                state:
-                    type: string
-                target_document: {}
-                vaults:
-                    items:
-                        $ref: '#/components/schemas/PublicationVault'
-                    type: array
-            required:
-                - provider
-                - state
-                - vaults
-            type: object
-        PublicationPreflightResult:
-            properties:
-                targets:
-                    items:
-                        $ref: '#/components/schemas/PublicationTargetCheck'
-                    type: array
-            required:
-                - targets
-            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -9883,6 +9823,46 @@ components:
                 - artifact
                 - execution_handle
             type: object
+        PublicationPreflightResult:
+            properties:
+                targets:
+                    items:
+                        $ref: '#/components/schemas/PublicationTargetCheck'
+                    type: array
+            required:
+                - targets
+            type: object
+        PublicationTargetCheck:
+            properties:
+                code:
+                    type: string
+                provider:
+                    type: string
+                state:
+                    type: string
+                target_document: {}
+                vaults:
+                    items:
+                        $ref: '#/components/schemas/PublicationVault'
+                    type: array
+            required:
+                - provider
+                - state
+                - vaults
+            type: object
+        PublicationVault:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                writable:
+                    type: boolean
+            required:
+                - id
+                - name
+                - writable
+            type: object
         QuestionTypeOption:
             properties:
                 label:
@@ -12810,6 +12790,14 @@ components:
                     type: string
                 description:
                     type: string
+                display_description:
+                    description: Localized marketplace introduction, independent of SKILL.md.
+                    type: string
+                display_locale:
+                    type: string
+                display_name:
+                    description: Localized marketplace title; canonical name remains unchanged.
+                    type: string
                 installed:
                     type: boolean
                 installed_skill_id:
@@ -12818,6 +12806,17 @@ components:
                     type: string
                 provider:
                     type: string
+                search_text:
+                    description: Marketplace search text across all localized names and introductions, independent of display locale.
+                    type: string
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
+                tags:
+                    items:
+                        type: string
+                    type: array
             required:
                 - builtin_skill_uid
                 - category
@@ -14369,10 +14368,18 @@ components:
                     type: string
                 description:
                     type: string
+                display_description:
+                    type: string
+                display_name:
+                    type: string
                 name:
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
                 tags:
                     description: Marketplace discovery tags.
                     items:
@@ -14397,6 +14404,12 @@ components:
             properties:
                 created_at:
                     type: string
+                display_description:
+                    type: string
+                display_locale:
+                    type: string
+                display_name:
+                    type: string
                 icon:
                     type: string
                 id:
@@ -14417,6 +14430,10 @@ components:
                     type: string
                 status:
                     type: string
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
                 tags:
                     items:
                         type: string
@@ -14450,11 +14467,22 @@ components:
                 category:
                     description: Deprecated compatibility field; converted to one marketplace tag when tags is empty.
                     type: string
+                display_description:
+                    description: Chinese marketplace introduction; does not modify the source package.
+                    type: string
+                display_name:
+                    description: Chinese marketplace title; does not rename the source skill.
+                    type: string
                 name:
                     description: Deprecated and ignored; the skill name is read from SKILL.md.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    description: Chinese labels keyed by canonical marketplace tag value.
+                    type: object
                 tags:
                     description: Marketplace discovery tags.
                     items:
@@ -14472,6 +14500,17 @@ components:
             required:
                 - market_item_id
                 - source_skill_id
+            type: object
+        marketTagsOpenAPIResponse:
+            properties:
+                tag_labels:
+                    additionalProperties:
+                        type: string
+                    type: object
+                tags:
+                    items:
+                        type: string
+                    type: array
             type: object
         mcpDeleteServerOpenAPIResponse:
             properties:
@@ -14882,6 +14921,26 @@ components:
                 - protocol
                 - runtime_supported
                 - supported
+            type: object
+        publicationPreflightResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/PublicationPreflightResult'
+            required:
+                - code
+                - data
+            type: object
+        publicationTargetCheckResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/PublicationTargetCheck'
+            required:
+                - code
+                - data
             type: object
         replaceModelProviderKeyOpenAPIRequest:
             properties:
@@ -17574,60 +17633,6 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
-    /api/core/workflow-artifacts/{artifact_id}/publications:preflight:
-        post:
-            parameters:
-                - in: path
-                  name: artifact_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/DocumentPublicationGroupRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/publicationPreflightResponse'
-                    description: Target checks
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Document changed
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Target invalid
-            summary: Check saved document destinations without writing documents
-            tags:
-                - workflow
-    /api/core/document-providers/obsidian/status:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/publicationTargetCheckResponse'
-                    description: Obsidian availability
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Executor unavailable
-            summary: Inspect configured Obsidian vault availability on the executor
-            tags:
-                - workflow
     /api/core/academic/chat-context:
         get:
             parameters:
@@ -25498,6 +25503,24 @@ paths:
             summary: List current document provider IDs and declared capabilities
             tags:
                 - workflow
+    /api/core/document-providers/obsidian/status:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/publicationTargetCheckResponse'
+                    description: Obsidian availability
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Executor unavailable
+            summary: Inspect configured Obsidian vault availability on the executor
+            tags:
+                - workflow
     /api/core/document-publications/{operation_id}:
         get:
             parameters:
@@ -31218,7 +31241,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillTagsOpenAPIResponse'
+                                $ref: '#/components/schemas/marketTagsOpenAPIResponse'
                     description: Market skill tag list
             summary: List published market skill tags
             tags:
@@ -35027,6 +35050,42 @@ paths:
                                 $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
                     description: Target unsupported
             summary: Confirm publication of the current saved document to independent targets
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/publications:preflight:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentPublicationGroupRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/publicationPreflightResponse'
+                    description: Target checks
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Target invalid
+            summary: Check saved document destinations without writing documents
             tags:
                 - workflow
     /api/core/workflow-authoring/v1/drafts:

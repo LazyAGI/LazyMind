@@ -7525,6 +7525,9 @@ const enUS = {
     memorySkillUploadAlreadyExistsNamed:
       'Skill name "{{name}}" already exists and cannot be created',
     memorySkillAdminPublishButton: "Publish skill (admin)",
+    memorySkillMarketDisplayName: 'Chinese display name',
+    memorySkillMarketDisplayDescription: 'Chinese display description',
+    memorySkillMarketDisplayRequired: 'Enter a Chinese display name and description (product names may remain unchanged)',
     memorySkillAdminPublishTitle: "Publish skill to plaza",
     memorySkillAdminPublishDesc:
       "Publish to the skill plaza so team members can browse and install it.",

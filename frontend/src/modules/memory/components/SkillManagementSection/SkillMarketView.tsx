@@ -1,6 +1,7 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button, Empty, Pagination, Tooltip } from "antd";
 import type { StructuredAsset } from "../../shared";
-import { getMarketSource } from "./skillMarketMockData";
+import { getMarketDisplayName, getMarketDisplayDescription, getMarketSource } from "./skillMarketMockData";
 import { isMarketSkillInstalled } from "./skillHelpers";
 import { renderSkillCategoryIcon } from "./skillCategoryIcon";
 import SkillModuleState from "./SkillModuleState";
@@ -40,15 +41,40 @@ export default function SkillMarketView({
   total,
   onPageChange,
 }: SkillMarketViewProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    // Stable gutters differ across browsers, OS settings and overlay scrollbars.
+    // Extend only the scroll viewport so card edges retain the toolbar gutters.
+    const measureScrollbar = () => setScrollbarWidth(Math.max(0, scroll.offsetWidth - scroll.clientWidth));
+    measureScrollbar();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measureScrollbar);
+    observer?.observe(scroll);
+    window.addEventListener("resize", measureScrollbar);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureScrollbar);
+    };
+  }, []);
+
   return (
     <div className="memory-skill-market">
-      <div className="memory-skill-market-scroll">
+      <div ref={scrollRef} className="memory-skill-market-scroll" style={{ marginInlineEnd: -scrollbarWidth }}>
         {loading ? (
           <div className="memory-skill-market-loading">
             <SkillModuleState tone="loading">{t("common.loading")}</SkillModuleState>
           </div>
         ) : skillAssets.length ? (
           <section className="memory-skill-section">
+            <div className="memory-skill-section-head">
+              <div className="memory-skill-section-title">
+                <h3>{t("admin.memorySkillMarketRecommendTitle")}</h3>
+                <span className="memory-skill-section-count">{t("admin.memorySkillMarketRecommendCount", { count: total })}</span>
+              </div>
+            </div>
             <div className="memory-skill-recommend-grid">
               {skillAssets.map((item) => {
                 const installed = isMarketSkillInstalled(installedSkills, item);
@@ -79,9 +105,9 @@ export default function SkillMarketView({
                         {sourceLabel}
                       </span>
                     </div>
-                    <strong className="memory-skill-tile-name">{item.name}</strong>
-                    <Tooltip title={item.description}>
-                      <p className="memory-skill-tile-desc">{item.description}</p>
+                    <strong className="memory-skill-tile-name">{getMarketDisplayName(item)}</strong>
+                    <Tooltip title={getMarketDisplayDescription(item)}>
+                      <p className="memory-skill-tile-desc">{getMarketDisplayDescription(item)}</p>
                     </Tooltip>
                     <div className="memory-skill-tile-foot">
                       <div className="memory-skill-tile-actions">

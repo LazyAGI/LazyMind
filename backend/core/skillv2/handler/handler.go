@@ -1188,9 +1188,12 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Tags     []string           `json:"tags"`
-		Category string             `json:"category"`
-		Source   skillSourceRequest `json:"source"`
+		Tags               []string           `json:"tags"`
+		Category           string             `json:"category"`
+		Source             skillSourceRequest `json:"source"`
+		DisplayName        string             `json:"display_name"`
+		DisplayDescription string             `json:"display_description"`
+		TagLabels          map[string]string  `json:"tag_labels"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -1218,9 +1221,12 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 		source.Filename = session.Filename
 	}
 	resp, err := newMarketService(db).Publish(r.Context(), skillmarket.PublishRequest{
-		AdminUserID: userID,
-		Tags:        marketRequestTags(req.Tags, req.Category),
-		Source:      source,
+		AdminUserID:        userID,
+		Tags:               marketRequestTags(req.Tags, req.Category),
+		Source:             source,
+		DisplayName:        req.DisplayName,
+		DisplayDescription: req.DisplayDescription,
+		TagLabels:          req.TagLabels,
 	})
 	if err != nil {
 		replyServiceError(w, err)
@@ -1239,12 +1245,15 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name        *string             `json:"name"`
-		Tags        *[]string           `json:"tags"`
-		Category    *string             `json:"category"`
-		Description *string             `json:"description"`
-		Source      *skillSourceRequest `json:"source"`
-		VersionNote *string             `json:"version_note"`
+		Name               *string             `json:"name"`
+		Tags               *[]string           `json:"tags"`
+		Category           *string             `json:"category"`
+		Description        *string             `json:"description"`
+		Source             *skillSourceRequest `json:"source"`
+		VersionNote        *string             `json:"version_note"`
+		DisplayName        *string             `json:"display_name"`
+		DisplayDescription *string             `json:"display_description"`
+		TagLabels          *map[string]string  `json:"tag_labels"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -1303,8 +1312,11 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 		legacyTags := []string{legacyCategory}
 		tags = &legacyTags
 	}
-	if req.VersionNote != nil || tags != nil {
-		resp, err := newMarketService(db).Edit(r.Context(), skillmarket.EditRequest{AdminUserID: userID, MarketItemID: marketItemID, VersionNote: req.VersionNote, Tags: tags})
+	if req.VersionNote != nil || tags != nil || req.DisplayName != nil || req.DisplayDescription != nil || req.TagLabels != nil {
+		resp, err := newMarketService(db).Edit(r.Context(), skillmarket.EditRequest{
+			AdminUserID: userID, MarketItemID: marketItemID, VersionNote: req.VersionNote, Tags: tags,
+			DisplayName: req.DisplayName, DisplayDescription: req.DisplayDescription, TagLabels: req.TagLabels,
+		})
 		if err != nil {
 			replyServiceError(w, err)
 			return

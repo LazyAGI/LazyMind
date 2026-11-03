@@ -1,0 +1,351 @@
+schema_version: 1
+locales:
+  zh-CN:
+    tags:
+      research: 研究调研
+      review: 文档评审
+      search: 搜索检索
+      chat: 对话交流
+      writing: 写作
+      productivity: 办公效率
+      learning: 学习
+      design: 设计
+      automation: 自动化
+      marketing: 市场营销
+      data: 数据处理
+      finance: 金融财务
+      development: 软件开发
+      security: 安全
+      education: 教育
+      project-management: 项目管理
+      external: 扩展技能
+      career: 职业发展
+      long-form-writing: 长文写作
+      report: 报告
+      proposal: 方案
+      feishu: 飞书
+      lark: Lark 文档
+      cloud-document: 云文档
+      thinking: 思考
+      brainstorming: 头脑风暴
+      exploration: 探索
+      problem-solving: 问题解决
+      language: 语言
+      tutor: 辅导
+      vocabulary: 词汇
+      grammar: 语法
+      flashcards: 记忆卡
+      conversation: 会话练习
+      translation: 翻译
+      polyglot: 多语言
+      spanish: 西班牙语
+      french: 法语
+      german: 德语
+      japanese: 日语
+      chinese: 中文
+      korean: 韩语
+      arabic: 阿拉伯语
+      hindi: 印地语
+      bangla: 孟加拉语
+      portuguese: 葡萄牙语
+      russian: 俄语
+      italian: 意大利语
+      duolingo-alternative: 多邻国替代方案
+      spaced-repetition: 间隔重复
+      immersion: 沉浸学习
+      travel: 旅行
+      culture: 文化
+      pronunciation: 发音
+      idioms: 习语
+      slang: 俚语
+      OPC: 一人公司
+      web: 网页
+      internet: 互联网
+      baidu: 百度
+      bing: 必应
+      skill优化: 技能优化
+      一人公司: 一人公司
+      个人提效: 个人提效
+      中文: 中文
+      产品研发: 产品研发
+      内容创作: 内容创作
+      商业运营: 商业运营
+      客户服务: 客户服务
+      工作流编排: 工作流编排
+      工具: 工具
+      工具调用: 工具调用
+      提示词优化: 提示词优化
+      效率: 效率
+      整理: 整理
+      文件: 文件
+      智能体: 智能体
+      独立创业: 独立创业
+      自由职业: 自由职业
+    skills:
+      personal-document-search:
+        name: 个人文档检索
+        description: 跨本地文件、云文档、邮件和智能体会话检索资料，按需读取证据并汇总带引用的回答。
+      deep-research:
+        name: 深度调研
+        description: 针对明确的深度研究需求开展多来源调查、系统比较和综合分析，整理可追溯的研究结论。
+      single-document-review:
+        name: 单篇文档评审
+        description: 分析单篇论文、报告、方案或网页文章，评估方法与逻辑、优缺点，并给出结构化反馈。
+      systematic-document-and-literature-review:
+        name: 系统性文献综述
+        description: 跨多篇论文或文档梳理主题、比较研究发现与局限，生成结构化的综合综述。
+      paper-search:
+        name: arXiv 论文检索
+        description: 从 arXiv 搜索、获取和阅读学术论文，辅助整理论文信息与引用。
+      sciverse-paper-search:
+        name: Sciverse 论文检索
+        description: 通过 Sciverse 检索文献、筛选论文元数据并读取正文，形成有引用依据的研究综述。
+      humanizer:
+        name: 去除 AI 写作痕迹
+        description: 识别并改写中英文文本中的机器腔和模板化表达，尽量保留原意与语气，专注于去除 AI 写作痕迹。
+      structured-longform-writing:
+        name: 结构化长文写作
+        description: 将笔记、附件和参考资料组织为博客、报告、方案或技术文档，兼顾结构、读者与证据。
+      feishu:
+        name: 飞书文档
+        description: 在 LazyMind 中读取、总结、创建和修改飞书/Lark 文档与 Wiki 页面。
+      vocabulary-learning:
+        name: 单词学习与复习
+        description: 查询 LazyMind 单词本，按复习计划开展词汇测验、互动复习并记录结果。
+      find-skill-skillhub:
+        name: SkillHub 技能查找
+        description: 在 SkillHub 按关键词和分类查找技能，结合需求扩展搜索词并整理候选结果。
+      beatra-ai-video-studio:
+        name: Beatra AI 视频工作室
+        description: 根据文字、图片、参考素材或已有视频制作短视频，支持生成、编辑与延长，并检查镜头效果。
+      superpowers-skill:
+        name: Superpowers 开发流程
+        description: 以需求探索、设计、计划、测试驱动开发和代码审查等环节，组织可重复的软件开发流程。
+      wechat-channels-cover-maker:
+        name: 微信视频号封面制作
+        description: 根据选题、脚本、关键帧或参考图片制作、精修视频号封面，突出主体并预留标题空间。
+      self-evolving-skill:
+        name: 技能自学习与演化
+        description: 通过认知缺口分析、反思、经验回放和价值评估，支持技能自学习与持续改进。
+      capability-evolver-pro:
+        name: 智能体能力诊断
+        description: 在本地分析 OpenClaw 运行日志，识别错误与低效模式，评估健康状态并生成结构化改进建议。
+      video-clip-assistant:
+        name: 视频自动剪辑
+        description: 使用 FFmpeg 按时间或关键词剪切视频、提取精彩片段、烧录字幕，并导出多种画幅。
+      agent-orchestrator:
+        name: 多智能体任务编排
+        description: 将复杂任务拆分为子任务，协调专门的子智能体与文件通信，并汇总工作结果。
+      seo-content-writer:
+        name: SEO 内容写作
+        description: 围绕搜索意图与目标关键词撰写文章、博客和落地页，组织标题、摘要与证据边界。
+      self-evolution-v2:
+        name: 智能体自我改进
+        description: 通过会话回顾、纠错记录和经验沉淀，帮助智能体持续审视并改进工作方式。
+      translate:
+        name: 文本翻译
+        description: 准确翻译文本并保留格式、占位符和专有名词，根据目标语言调整语气与文化表达。
+      govwriter-pro:
+        name: GovWriter-Pro 公文写作
+        description: 重构已有材料或按主题与提纲创作政企公文，组织汇报逻辑并生成规范的 Word 文档。
+      ws-agent-browser:
+        name: 浏览器操作助手
+        description: 自动操作网页、截图、填写表单和抓取数据，辅助批量操作与界面测试。
+      social-media-scheduler:
+        name: 社交媒体内容排期
+        description: 规划跨平台内容日历、起草适合各平台的帖子，并组织持续的发布节奏。
+      adaptive-reasoning:
+        name: 自适应推理
+        description: 评估任务复杂度，根据问题需要调整推理深度与回答方式。
+      brandgeo:
+        name: 品牌 GEO 体检
+        description: 查询品牌在主流 AI 模型中的 ABI 指数与六维表现，整理可见度、负面归因和改善建议。
+      bilibili-hot-monitor:
+        name: B站热门视频日报
+        description: 汇总 B站热门视频并生成日报，支持通过配置的邮件服务发送。
+      crypto-self-learning:
+        name: 加密交易复盘
+        description: 记录交易指标与市场背景，分析盈亏模式并更新交易规则，辅助交易复盘与策略改进。
+      product-marketing-context:
+        name: 产品营销背景文档
+        description: 整理产品定位、目标受众和核心信息，维护供后续营销任务复用的背景文档。
+      openclaw-cli:
+        name: OpenClaw 命令行助手
+        description: 辅助 OpenClaw 安装配置、网关与节点管理、渠道登录、模型插件操作和故障排查。
+      social-media-agent:
+        name: X 社交媒体运营
+        description: 通过 OpenClaw 原生浏览器工具管理 X/Twitter 内容、互动与增长，辅助内容规划和效果跟踪。
+      ssh-essentials:
+        name: SSH 实用工具
+        description: 提供安全远程连接、密钥管理、隧道和文件传输的 SSH 命令与操作指导。
+      pdf-generator:
+        name: PDF 文档生成
+        description: 从 Markdown、HTML、数据或模板生成 PDF，支持报告、发票与合同的排版和批量处理。
+      xlsx-cn:
+        name: Excel 表格处理
+        description: 创建、读取和编辑 Excel 文件，处理公式、图表与数据分析，并检查公式结果。
+      thinking-partner:
+        name: 思考伙伴
+        description: 通过提问与共同探索梳理复杂问题，帮助澄清假设、拓展思路和形成判断。
+      system-info:
+        name: 系统信息诊断
+        description: 使用 Linux 系统工具快速查看 CPU、内存、磁盘和运行时长等诊断信息。
+      language-learning:
+        name: 多语言学习导师
+        description: 通过会话、词汇练习、语法、记忆卡和沉浸式练习学习语言，按学习水平与目标调整教学。
+      one-person-company-plus:
+        name: 一人公司运营助手
+        description: 面向独立创业者与自由职业者，辅助内容创作、商业运营、产品研发、客户服务和个人提效。
+      financial-calculator:
+        name: 财务计算器
+        description: 计算现值、终值、复利、折扣与加价，并比较不同利率和期限下的财务情景。
+      file-organizer-zh:
+        name: 文件分类整理
+        description: 按文件类型或内容整理文件，辅助识别重复项，提供中文文件管理流程。
+      paperdown:
+        name: 中文学术改写
+        description: 润色与重构中文论文，保留原意、术语、数据和引用，改善逻辑与表达，不以绕过 AI 检测为目标。
+      web-search-ex-skill:
+        name: 多引擎网页搜索
+        description: 结合百度、必应和 DuckDuckGo 搜索网页，通过浏览器与网页抓取获取信息，无需搜索 API 密钥。
+      browsh:
+        name: Browsh 终端浏览器
+        description: 借助无头 Firefox 在终端渲染网页，适合以文本界面浏览现代网站；需安装 Browsh 与 Firefox。
+      duplicate-file-cleaner:
+        name: 重复文件清理
+        description: 扫描重复文件、评估清理风险并提供分类整理建议，结合备份、确认和撤销流程进行清理。
+      competitive-intelligence-market-research:
+        name: B2B SaaS 竞争情报
+        description: 面向销售、人力、金融和运营科技等 B2B SaaS 场景，开展多维度竞争情报与市场研究。
+      task-decomposer:
+        name: 任务拆解与技能匹配
+        description: 将复杂请求拆分为可执行步骤，识别所需能力、查找现成技能，并在缺少方案时辅助创建技能。
+      api-tester:
+        name: API 接口测试
+        description: 发送带自定义请求头和 JSON 正文的 HTTP/HTTPS 请求，辅助 REST 接口测试与健康检查。
+      critical-code-reviewer:
+        name: 严格代码审查
+        description: 检查代码或 PR 的安全、边界条件、类型、性能与可访问性问题，按严重程度给出具体修改建议。
+      devops:
+        name: DevOps 运维
+        description: 辅助自动化部署、基础设施管理和 CI/CD 流水线建设，提高交付与运行可靠性。
+      receiving-code-review:
+        name: 代码评审反馈处理
+        description: 核验代码评审意见的技术依据，在理解问题与验证建议后组织修改。
+      safe-exec:
+        name: SafeExec 命令安全执行
+        description: 为 OpenClaw Shell 命令检测危险模式、评估风险，结合人工审批与审计日志管理执行。
+      data-analyst-cn:
+        name: 中文数据分析
+        description: 辅助数据清洗、描述统计和相关分析，提供可视化建议、图表代码与分析报告。
+      scrape:
+        name: 合规网页抓取
+        description: 在遵守 robots.txt、网站条款和限速要求的前提下抓取网页，并注意个人数据处理要求。
+      academic-paper-assistant:
+        name: 学术论文写作
+        description: 辅助论文结构规划、撰写与润色，规范学术用语并整理参考文献格式。
+      blog-writer:
+        name: 个人风格博客写作
+        description: 参考作者作品与观点撰写博客和长文，覆盖资料研究、草稿迭代与 Notion 发布流程。
+      novel-evaluator:
+        name: 小说质量评估
+        description: 从情节、人物、文笔、世界观、情感和创新六个维度评分，给出小说质量反馈。
+      learning:
+        name: 自适应学习辅导
+        description: 根据学习反馈调整教学风格、内容形式与深度，逐步适应个人学习偏好。
+      creator-account-teardown:
+        name: 创作者账号拆解
+        description: 分析账号定位、受众、内容矩阵与作品表现，形成起号模板和选题清单，并制作首条作品素材。
+      web-animation-design:
+        name: 网页动画设计
+        description: 设计与实现自然的网页动效，覆盖缓动、时序、转场和交互反馈，并考虑性能与减少动态效果的需求。
+      superdesign:
+        name: 前端设计指南
+        description: 围绕布局、视觉风格和组件结构设计现代前端界面，适用于落地页与仪表板等页面。
+      baidu-search:
+        name: 百度 AI 搜索
+        description: 通过百度 AI 搜索检索实时信息、文档和研究资料，需配置 BAIDU_API_KEY。
+      lskj-recommend:
+        name: 招投标商机推荐
+        description: 按企业业务匹配招投标与拟在建项目，结合阶段、时效、地区和金额评分，提供可追溯的商机清单；需数据 API 密钥。
+      bid-query-analysis-workbench:
+        name: 招中标查询分析工作台
+        description: 使用世舶科技 API 查询招标、中标、合同和拟在建项目，整理筛选结果、企业画像与统计分析；需 API Key。
+      code:
+        name: 编码工作流
+        description: 组织代码实现的规划、执行、验证与测试流程，辅助清晰、可维护的软件开发。
+      copywriting:
+        name: 营销文案写作
+        description: 撰写落地页、广告、邮件与产品介绍，运用标题、行动号召和说服结构辅助转化。
+      frontend-design-3:
+        name: 高品质前端界面
+        description: 设计并实现具有鲜明视觉风格的网页组件、页面和应用，注重细节与可用性。
+      gongwenformat-pro:
+        name: 公文标准排版 Pro
+        description: 将 Markdown、TXT 或 DOCX 内容排版为符合 GB/T 9704-2012 的 Word 公文。
+      hot-topic-content-maker:
+        name: 热点内容制作
+        description: 从热点与节日节点提炼选题，制作封面、正文和话题标签，并可扩展为分镜与口播短视频。
+      luban-skill-pro:
+        name: 鲁班.Skill 技能优化
+        description: 评估技能质量，采用轻量或完整迭代流程改进技能，结合独立评分、确认与回滚保留有效修改。
+      market-research:
+        name: 市场调研
+        description: 开展市场规模、细分人群、竞品、定价和需求验证研究，为进入市场与增长决策整理证据。
+      self-reflection:
+        name: 结构化自我反思
+        description: 记录错误、经验和改进措施，通过周期性反思与持久化记忆支持持续改进。
+      using-superpowers:
+        name: Superpowers 技能使用指南
+        description: 提供技能发现、选择与调用的工作规范，帮助在任务开始时识别适用技能。
+      gzh-explosive-content-detector:
+        name: 公众号热门文章搜索
+        description: 按关键词检索公众号文章，结合相关性、热度与时效推荐内容，辅助选题与创作研究。
+      official-project:
+        name: 拟在建项目商机挖掘
+        description: 检索规划、备案、环评和建设准备阶段的项目，识别工程、设备与材料销售的前置机会；需招投标数据 API 密钥。
+      swift-testing-expert:
+        name: Swift Testing 专家
+        description: 指导 Swift 测试编写、参数化、并发与异步等待，辅助排查不稳定测试并从 XCTest 迁移。
+      marketing-os:
+        name: Marketing OS 营销工作台
+        description: 辅助营销审计、文案、广告、邮件、社交内容、定位与发布计划，结合评分和证据生成可交付材料。
+      yupi-skill:
+        name: 程序员鱼皮风格顾问
+        description: 以程序员鱼皮的表达风格与思考框架，提供编程学习、求职、项目选择、创业和自媒体建议。
+      konnect:
+        name: Konnect KiCAD 助手
+        description: 通过 Konnect MCP 工具操作 KiCAD 原理图、PCB 与项目文件，维护对象关系并避免直接文本修改。
+      simplify-codebase:
+        name: 代码库简化
+        description: 以证据审查冗余代码、重复状态和多余抽象，在获得修改授权后删除或整合不必要的复杂性。
+      high-stakes-analytics-decision-lab:
+        name: 重要决策分析实验室
+        description: 围绕真实数据和可追溯来源开展描述、诊断、预测与决策分析，处理不确定性并形成可复现报告。
+      compose-skill:
+        name: Compose 架构指南
+        description: 提供 Jetpack Compose 与 Compose Multiplatform 的架构、状态、界面及跨平台开发指导；仅在明确指定该技能时使用。
+      prompt-architect:
+        name: 提示词架构师
+        description: 分析提示词意图与质量，从多种框架中选择适用方法，通过澄清和重构改善提示词。
+      socrates-skill:
+        name: 苏格拉底式教学
+        description: 通过连续提问引导学习者自行发现答案，适用于代码、文档及其他知识材料，不直接给出答案。
+      email-marketing-bible:
+        name: 邮件营销指南
+        description: 辅助邮件自动化、受众分群、送达诊断、文案设计与平台选择，涵盖合规检查和行业实践。
+      torvalds-doctrine:
+        name: Torvalds 编码准则
+        description: 以数据结构、简洁实现和可验证证据为核心，指导 AI 编码与代码评审。
+      design-harness:
+        name: 证据决策看板
+        description: 将来源、观点与输出组织为 Markdown 和可视化看板，支持选型、尽调与综述，由人作出最终判断。
+      extract-design-system:
+        name: 设计系统提取
+        description: 从公开网站提取色彩、字体等设计基础元素，生成项目初始设计令牌文件，不包含完整组件库。
+      ultracode:
+        name: Ultracode 开发编排
+        description: 在宿主能力与授权范围内组织计划、任务拆分、委派、集成与验证，辅助复杂编码任务。
+      skill-conductor:
+        name: Skill Conductor 技能管理
+        description: 创建、编辑、评估、优化和打包智能体技能，覆盖从草稿、测试到迭代发布的生命周期。

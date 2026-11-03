@@ -817,7 +817,7 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0;
-  padding: 0 24px 16px;
+  padding: 0 var(--market-gutter, 24px) 16px;
 }
 
 .memory-skill-market-scroll {
@@ -826,6 +826,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .memory-skill-market-pagination {
@@ -1361,3 +1362,22 @@
 }
 
 @import "./embedded.scss";
+
+// Marketplace responds to its available panel width, including embedded sidebars.
+.memory-skill-management {
+  --market-gutter: 24px;
+}
+.memory-skill-workspace-main { container-type: inline-size; container-name: skill-market; }
+.memory-skill-market .memory-skill-recommend-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.memory-skill-tile-name, .memory-skill-tile-desc { overflow-wrap: anywhere; }
+.memory-skill-tile-desc { text-align: justify; text-align-last: start; }
+.memory-skill-tile-actions { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
+.memory-skill-tile-actions .ant-btn { max-width: 100%; height: auto; min-height: 24px; white-space: normal; overflow-wrap: anywhere; }
+.memory-skill-tile-top .memory-skill-badge { height: auto; min-height: 22px; padding-block: 4px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+@container skill-market (max-width: 1100px) {
+  .memory-skill-market .memory-skill-recommend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container skill-market (max-width: 560px) {
+  .memory-skill-market .memory-skill-recommend-grid { grid-template-columns: minmax(0, 1fr); }
+  .memory-skill-market { padding-inline: 16px; }
+}
