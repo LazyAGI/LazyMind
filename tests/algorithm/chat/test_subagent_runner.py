@@ -2486,3 +2486,108 @@ async def test_workflow_terminal_delivery_uses_saved_result_summary(
         assert completion['status'] == 'succeeded'
         assert completion['summary'] == ('本步骤结果已保存。' if terminal else final)
     model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('step_id,slot,contract', [
+    ('normalize_metrics', 'metrics_table',
+     'Normalize the supplied values in {{user_input}}; save only metrics_table.'),
+    ('assemble_report', 'final_report',
+     'Deliver the final report required by {{user_input}}, including recommendations.'),
+])
+async def test_completion_review_receives_pinned_step_scope_with_global_request(
+    monkeypatch, tmp_path, step_id, slot, contract,
+):
+    # Reproduces the live hosted case: template expansion embeds the final
+    # report request in an intermediate objective before completion review.
+    request = 'Compute CPM before rounding, then deliver a report with recommendations.'
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': True, 'requires_artifact': True,
+        'artifact_keys': [slot], 'reason': 'Assigned deliverable is present.',
+    })
+    _, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        objective=contract.replace('{{user_input}}', request),
+        params={
+            'step_id': step_id, 'launch_user_input': request,
+            'required_output_artifact_keys': [slot],
+            'output_slot_types': {slot: 'text'},
+            '_display_plan_scope': {
+                'prompt': contract,
+                'acceptance_criteria': ['Compute CPM before rounding.'],
+            },
+        },
+        output_slots=[slot],
+        artifacts=[{'slot': slot, 'content_type': 'text', 'seq': 1,
+                    'value': {'text': 'The assigned output, with CPM change 0.95.'}}],
+        final='The first attempt failed; the assigned output has now been saved.',
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    prompt = model.share.return_value.call_args.args[0]
+    marker = 'Current Workflow step scope: '
+    assert marker in prompt, 'Completion review lost the pinned step boundary'
+    scope = json.loads(next(line[len(marker):] for line in prompt.splitlines()
+                            if line.startswith(marker)))
+    assert scope == {
+        'step_id': step_id, 'prompt': contract,
+        'acceptance_criteria': ['Compute CPM before rounding.'],
+        'declared_outputs': [slot], 'required_outputs': [slot],
+    }
+    assert request in prompt  # Final/user content requirements must not disappear.
+    assert 'not a requirement to produce downstream deliverables in this step' in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('artifact_type,expected_phase', [
+    (None, 'missing_required_artifacts'),
+    ('json', 'missing_required_artifacts'),
+    ('text', 'objective_incomplete'),
+])
+async def test_pinned_completion_scope_preserves_artifact_and_negative_verdict_gates(
+    monkeypatch, tmp_path, artifact_type, expected_phase,
+):
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': False, 'requires_artifact': True,
+        'artifact_keys': ['final_report'], 'reason': 'Required recommendations are missing.',
+    })
+    _, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={
+            'step_id': 'assemble_report',
+            'legacy_tools': ['save_artifacts'],
+            'required_output_artifact_keys': ['final_report'],
+            'output_slot_types': {'final_report': 'text'},
+            '_display_plan_scope': {
+                'prompt': 'Deliver the final report with recommendations.',
+                'acceptance_criteria': ['Include recommendations.'],
+            },
+        },
+        output_slots=['final_report'],
+        artifacts=([{'slot': 'final_report', 'content_type': artifact_type, 'seq': 1,
+                     'value': {'text': 'Incomplete report.', 'data': {'incomplete': True}}}]
+                   if artifact_type else []),
+        final='Failed to include the recommendations.',
+    )
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == expected_phase
+    if artifact_type != 'text':
+        model.share.assert_not_called()
+    else:
+        assert 'Required recommendations are missing.' in _terminal(events)['summary']
+
+
+@pytest.mark.parametrize('agent_type,scope', [
+    ('research', {'prompt': 'Unrelated scope'}),
+    ('workflow_step', None),
+    ('workflow_step', {}),
+])
+def test_completion_scope_preserves_legacy_objective(agent_type, scope):
+    from types import SimpleNamespace
+
+    params = {'launch_user_input': 'Use English.', '_display_plan_scope': scope}
+    ctx = SimpleNamespace(agent_type=agent_type, params=params, objective='Analyze.', output_slots=[])
+    assert runner_mod._completion_review_objective(ctx, []) == (
+        ctx.objective + '\n'.join(runner_mod._build_intent_context_section(params))
+    )

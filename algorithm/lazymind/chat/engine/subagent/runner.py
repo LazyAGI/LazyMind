@@ -582,6 +582,25 @@ def _build_intent_context_section(params: Dict[str, Any]) -> List[str]:
     return lines
 
 
+def _completion_review_objective(ctx: 'SubAgentContext', required_outputs: List[str]) -> str:
+    """Keep the pinned step boundary alongside the expanded runtime request."""
+    objective = ctx.objective + '\n'.join(_build_intent_context_section(ctx.params))
+    scope = ctx.params.get('_display_plan_scope')
+    if ctx.agent_type != 'workflow_step' or not isinstance(scope, dict) or not scope.get('prompt'):
+        return objective
+    # RemoteExecutor copies this scope from the immutable Attempt Context before
+    # template expansion; the expanded objective alone can include future work.
+    return (
+        '\nCurrent Workflow step scope: ' + json.dumps({
+            'step_id': ctx.params.get('step_id') or '',
+            'prompt': scope['prompt'],
+            'acceptance_criteria': scope.get('acceptance_criteria') or [],
+            'declared_outputs': ctx.output_slots,
+            'required_outputs': required_outputs,
+        }, ensure_ascii=False) + '\n\nExpanded objective and runtime content requirements:\n' + objective
+    )
+
+
 _STRUCTURED_PARAM_KEYS = {
     '_display_plan_scope',
     # These values are rendered by dedicated sections below. Excluding only these
@@ -1870,7 +1889,7 @@ async def run_subagent_stream(
         if not required_output_keys or (not workflow_terminal_completed and _has_completion_concern(final_result)):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=(agent._model_fallback_state.raw_llm if agent is not None else llm),
-                objective=ctx.objective + '\n'.join(_build_intent_context_section(ctx.params)),
+                objective=_completion_review_objective(ctx, required_output_keys),
                 steps=db.load_steps(task_id),
                 artifacts=deliverable_artifacts,
                 force_result=final_result,
@@ -2099,6 +2118,11 @@ def _evaluate_completion(
         '- Pure text analysis or summaries can complete without a saved artifact.',
         '- Apply explicit runtime content requirements over conflicting step defaults, '
         'without changing the assigned step or its output/tool/approval boundaries.',
+        '- When a Current Workflow step scope is supplied, assess its prompt, acceptance '
+        'criteria and outputs. The expanded request is not a requirement to produce downstream '
+        'deliverables in this step. Preserve all runtime content requirements applicable to '
+        'the assigned work; a final delivery step must still satisfy its final deliverable '
+        'and applicable overall request requirements.',
         '- Producing a requested audit or review with negative findings (for example '
         'passed=false) is completed review work, not an execution failure. Distinguish '
         'the review verdict from failure to perform the review itself.',
