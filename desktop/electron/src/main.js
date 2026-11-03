@@ -57,6 +57,7 @@ const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
+const { registerNotificationSettingsIPC } = require("./notification-settings.js");
 const {
   desktopNotificationAPIOrigin,
   desktopNotificationInstanceID,
@@ -178,6 +179,7 @@ const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
 const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
+const agentConnectorCodexInstallTimeoutMs = 90 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
@@ -709,7 +711,7 @@ function runSidecar(command, extra = [], options = {}) {
   });
 }
 
-function runAgentConnector(agent, action) {
+function runAgentConnector(agent, action, refreshInstallations = false) {
   const allowedActions = {
     all: new Set(["status"]),
     codex: new Set(["connect", "status", "disconnect", "login"]),
@@ -727,8 +729,9 @@ function runAgentConnector(agent, action) {
   }
   const installWorkflow = ["deepseek-harness", "workbuddy", "codex"].includes(agent) && action === "connect";
   const run = () => runConnectorJSON(
-    ["internal", "agent", agent, action],
-    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs : agentConnectorInstallTimeoutMs)
+    ["internal", "agent", agent, action, ...(action === "status" && refreshInstallations === true ? ["--refresh-installations"] : [])],
+    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs
+      : agent === "codex" ? agentConnectorCodexInstallTimeoutMs : agentConnectorInstallTimeoutMs)
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
@@ -2450,7 +2453,7 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
-ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all", "status"));
+ipcMain.handle("lazymind:agentIntegrationStatuses", (_event, refreshInstallations) => runAgentConnector("all", "status", refreshInstallations === true));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
@@ -2600,6 +2603,11 @@ ipcMain.handle("lazymind:browserOpen", async (event, url) => {
 });
 app.on("will-quit", () => { void managedBrowser.clear(); });
 
+registerNotificationSettingsIPC({
+  ipcMain,
+  shell,
+  isTrustedSender: (event) => !isQuitting && isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin()),
+});
 ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   if (isQuitting || !isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");

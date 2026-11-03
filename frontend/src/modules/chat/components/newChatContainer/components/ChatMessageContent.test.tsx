@@ -170,19 +170,19 @@ describe("ChatMessageContent thinking terminal", () => {
     }
   });
 
-  it("restores an exhausted tool-only history without an active thinking title", () => {
+  it.each(["", "KEPT TEXT"])("restores exhausted history while preserving partial text %j without an active thinking title", (partialText) => {
     const messages = buildChatMessageListFromHistory([{
       id: "exhausted-history", query: "save once", run_id: "exhausted-run", run_status: "failed",
       run_terminal: failedTerminal, thinking_time_s: 1,
       model_output: { run_id: "exhausted-run", call_index: 4, phase: "rollback" },
       reasoning_content: "KEPT SDK THINK",
-      result: 'KEPT TEXT<tp>KEPT TOOL</tp><tool_call>{"name":"save_chat_artifact"}</tool_call><trp>KEPT FILE</trp><tool_result>{"saved_count":1}</tool_result>',
+      result: partialText + '<tp>KEPT TOOL</tp><tool_call>{"name":"save_chat_artifact"}</tool_call><trp>KEPT FILE</trp><tool_result>{"saved_count":1}</tool_result>',
     }]);
-    expect(messages[1].delta).toBe("");
+    expect(messages[1].delta).toBe(partialText);
     render(<ChatMessageContent item={messages[1]} isThinkingCollapsed={() => false} onToggleThinkingCollapse={vi.fn()} />);
     expect(screen.getByText("chat.runStatus.failed (1s)")).toBeInTheDocument();
     expect(screen.queryByText(/chat.thinking/)).not.toBeInTheDocument();
-    for (const text of ["KEPT TEXT", "KEPT TOOL", "KEPT FILE", "KEPT SDK THINK"]) {
+    for (const text of [partialText, "KEPT TOOL", "KEPT FILE", "KEPT SDK THINK"].filter(Boolean)) {
       expect(screen.getAllByText(new RegExp(text))).toHaveLength(1);
     }
     expect(screen.queryByText(/saved_count/)).not.toBeInTheDocument();

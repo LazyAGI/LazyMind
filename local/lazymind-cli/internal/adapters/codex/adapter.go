@@ -28,7 +28,7 @@ const (
 	interactiveTimeout = 2 * time.Minute
 )
 
-var prepareCodexDesktop = codexhost.PrepareDesktop
+var prepareCodexDesktop = codexhost.PrepareDesktopForInstallation
 
 type Adapter struct {
 	binary         string
@@ -142,8 +142,8 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 				if current, statusErr := codexhost.ReadStatus(a.home, scope); statusErr == nil {
 					ready = current.Ready
 					presentation = current.Presentation.Status
-					if current.Issue == "cdp_unavailable" {
-						issue = "cdp_unavailable"
+					if current.Issue == "cdp_unavailable" || current.Issue == "capability_unavailable" {
+						issue = current.Issue
 					}
 				}
 			}

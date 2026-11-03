@@ -7,8 +7,6 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 import os
 
-import httpx
-
 from lazymind.config import config
 
 
@@ -62,6 +60,8 @@ class MCPOAuthAdapter:
         if rejected_token_version is not None:
             payload['rejected_token_version'] = rejected_token_version
         try:
+            import httpx
+
             async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False) as client:
                 response = await client.post(
                     base_url + '/v1/mcp-oauth/token', json=payload,

@@ -9,6 +9,7 @@ import { RoleTypes } from "@/modules/chat/constants/common";
 import { userMessageEditDraftStore } from "@/modules/chat/store/userMessageEditDraft";
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
+import { copyMessage } from "@/modules/chat/utils/copyMessage";
 import {
   buildCitedMessageText,
   findLastUserMessageIndex,
@@ -268,40 +269,7 @@ export function useUserMessageEdit({
   }
 
   async function handleCopyUserMessage(item: any) {
-    const text = (item?.display_delta || item?.delta || "").trim();
-    if (!text) {
-      return;
-    }
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        message.success(t("chat.copySuccess"));
-        return;
-      }
-    } catch {
-      // fall through to legacy copy
-    }
-
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.top = "0";
-    textarea.style.left = "0";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    try {
-      const copied = document.execCommand("copy");
-      if (copied) {
-        message.success(t("chat.copySuccess"));
-      } else {
-        message.error(t("chat.copyFailedManual"));
-      }
-    } finally {
-      document.body.removeChild(textarea);
-    }
+    await copyMessage(item?.display_delta || item?.delta || "", t);
   }
 
   return {

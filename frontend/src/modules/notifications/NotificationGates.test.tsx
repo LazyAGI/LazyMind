@@ -1,22 +1,23 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Modal } from 'antd';
+import { message, Modal } from 'antd';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ScheduleNotificationPanel from './ScheduleNotificationPanel';
 import NotificationSettings from './NotificationSettings';
 import RuleEditor from './RuleEditor';
-import { emptyRule, type NotificationConfig, type Preferences } from './api';
+import { emptyRule, NOTIFICATION_PREFERENCES_CHANGED_EVENT, type NotificationConfig, type Preferences } from './api';
 
 const mocks = vi.hoisted(() => ({ prefs: vi.fn(), patch: vi.fn(), schedule: vi.fn(), put: vi.fn(), accounts: vi.fn(), targets: vi.fn(), groups: vi.fn(), tasks: vi.fn(), runs: vi.fn(), execution: vi.fn(), detail: vi.fn(), desktop: vi.fn() }));
 vi.mock('@/modules/channelGateway/api', async original => ({ ...await original<typeof import('@/modules/channelGateway/api')>(), listChannelAccounts: mocks.accounts }));
 vi.mock('@/modules/taskCenter/api', () => ({ listTasks: mocks.tasks, listScheduleTasks: mocks.runs }));
 vi.mock('./api', async original => ({ ...await original<typeof import('./api')>(), getPreferences: mocks.prefs, patchPreferences: mocks.patch, getScheduleNotifications: mocks.schedule, putScheduleNotifications: mocks.put, getExecutionNotifications: mocks.execution, getTargets: mocks.targets, getGroups: mocks.groups, getAccountDetail: mocks.detail }));
-vi.mock('react-i18next', async original => ({ ...await original<typeof import('react-i18next')>(), useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('react-i18next', async original => ({ ...await original<typeof import('react-i18next')>(), useTranslation: () => ({ t: (key: string, values?: { enabled?: number; count?: number }) => key === 'notifications.channelCount' ? `${key}:${values?.enabled}/${values?.count}` : key }) }));
 vi.mock('@/runtime/mode', async original => ({ ...await original<typeof import('@/runtime/mode')>(), isDesktopRuntime: mocks.desktop }));
 
 let preferences: Preferences;
 let taskConfig: NotificationConfig;
 const realConfirm = Modal.confirm;
+const realInfo = Modal.info;
 const mount = (ui: React.ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>);
 const channelBlock = () => within(document.querySelector<HTMLElement>('.notification-rules.is-task .is-feishu')!);
 const taskEditor = () => within(document.querySelector<HTMLElement>('.notification-rules.is-task')!);
@@ -58,15 +59,42 @@ beforeEach(() => {
   mocks.desktop.mockReturnValue(true);
   Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'granted', requestPermission: vi.fn() } });
   vi.spyOn(Modal, 'confirm').mockImplementation((options: Parameters<typeof Modal.confirm>[0]) => realConfirm({ ...options, transitionName: '', maskTransitionName: '' }));
+  vi.spyOn(Modal, 'info').mockImplementation((options: Parameters<typeof Modal.info>[0]) => realInfo({ ...options, transitionName: '', maskTransitionName: '' }));
 });
 afterEach(async () => {
   cleanup();
   await act(async () => Modal.destroyAll());
+  message.destroy();
   await waitFor(() => expect(document.querySelector('.ant-modal-root')).toBeNull());
   vi.restoreAllMocks();
 });
 
 describe('task notification global channel gates', () => {
+  it('refreshes the effective summary count without changing the saved task channels or recipients', async () => {
+    preferences.defaults.channels.feishu = { enabled: true };
+    const originalConfig = structuredClone(taskConfig);
+    await openTask();
+    const overview = () => within(document.querySelector<HTMLElement>('.notification-task-overview')!);
+    expect(overview().getByText(/notifications.channelCount:2\/2/)).toBeInTheDocument();
+
+    preferences = { ...preferences, enabled: false, revision: 4 };
+    await act(async () => { window.dispatchEvent(new Event(NOTIFICATION_PREFERENCES_CHANGED_EVENT)); });
+    await waitFor(() => expect(overview().getByText(/notifications.channelCount:0\/2/)).toBeInTheDocument());
+    expect(channelBlock().getByRole('switch', { name: 'notifications.feishu' })).toBeChecked();
+    expect(channelBlock().getByRole('switch', { name: 'notifications.feishu' })).toBeDisabled();
+
+    preferences = { ...preferences, enabled: true, revision: 5, defaults: { ...preferences.defaults, channels: { ...preferences.defaults.channels, feishu: { enabled: false } } } };
+    await act(async () => { window.dispatchEvent(new Event(NOTIFICATION_PREFERENCES_CHANGED_EVENT)); });
+    await waitFor(() => expect(overview().getByText(/notifications.channelCount:1\/2/)).toBeInTheDocument());
+
+    preferences = { ...preferences, revision: 6, defaults: { ...preferences.defaults, channels: { ...preferences.defaults.channels, feishu: { enabled: true } } } };
+    await act(async () => { window.dispatchEvent(new Event(NOTIFICATION_PREFERENCES_CHANGED_EVENT)); });
+    await waitFor(() => expect(overview().getByText(/notifications.channelCount:2\/2/)).toBeInTheDocument());
+    expect(taskConfig).toEqual(originalConfig);
+    expect(mocks.patch).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+  });
+
   it.each(['channel', 'master'])('saves other event changes after the %s gate pauses an inherited channel without a target', async gate => {
     preferences.defaults.channels.feishu = { enabled: true };
     const changed = vi.fn();
@@ -383,7 +411,7 @@ describe('task notification global channel gates', () => {
 describe('settings notification scopes', () => {
   it.each(['desktop', 'global'])('includes ordinary and legacy scheduled runs in the %s close review', async channel => {
     mocks.tasks.mockResolvedValue({ items: [
-      { id: 'ordinary', title: 'Workflow in progress', status: 'running', task_type: 'workflow' },
+      { id: 'ordinary', title: 'Workflow in progress', status: 'running', task_type: 'workflow_run' },
       { id: 'legacy', title: 'Legacy scheduled run', status: 'running', task_type: 'scheduled', schedule_id: 'old' },
       { id: 'disabled', title: 'No channels selected', status: 'running', task_type: 'scheduled', schedule_id: 'disabled-plan' },
     ], total: 3 });

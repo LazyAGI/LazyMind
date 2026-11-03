@@ -326,7 +326,7 @@ describe("CloudDocumentsPage onboarding", () => {
     expect(await screen.findByText("1 / 9")).toBeInTheDocument();
   });
 
-  it("includes Obsidian in all environments but counts it ready only after Desktop detection", async () => {
+  it("counts server-verified Obsidian readiness in web and Desktop environments", async () => {
     window.localStorage.setItem(
       "lazymind.cloud-documents.onboarding.v2",
       "seen",
@@ -335,7 +335,7 @@ describe("CloudDocumentsPage onboarding", () => {
     mocks.vm.obsidianConfig = { configured: true, available: true };
 
     const { unmount } = renderPage();
-    expect(await screen.findByText("0 / 8")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 8")).toBeInTheDocument();
     unmount();
 
     mocks.vm.isDesktopRuntime = true;

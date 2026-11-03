@@ -180,15 +180,28 @@ func directoryExists(path string) bool {
 }
 
 func queryWindowsAppPackages(names []string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), desktopPackageQueryTimeout)
+	defer cancel()
+	directory, err := desktopPackageCacheDirectory()
+	if err != nil {
+		return nil, err
+	}
+	return (desktopPackageCache{directory: directory, now: time.Now}).query(ctx, names, runWindowsAppPackageQuery)
+}
+
+func windowsAppPackageCommand(ctx context.Context, system string, names []string) *exec.Cmd {
+	command := exec.CommandContext(ctx, filepath.Join(system, "WindowsPowerShell", "v1.0", "powershell.exe"),
+		"-NoProfile", "-NonInteractive", "-Command", windowsAppPackageQuery(names))
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	command.WaitDelay = 250 * time.Millisecond
+	return command
+}
+
+func runWindowsAppPackageQuery(ctx context.Context, names []string) ([]byte, error) {
 	system, err := windows.GetSystemDirectory()
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
 	// Use Windows PowerShell's Appx module, not a PATH shim or redirected AppData.
-	command := exec.CommandContext(ctx, filepath.Join(system, "WindowsPowerShell", "v1.0", "powershell.exe"),
-		"-NoProfile", "-NonInteractive", "-Command", windowsAppPackageQuery(names))
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return command.Output()
+	return windowsAppPackageCommand(ctx, system, names).Output()
 }

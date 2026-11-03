@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { message, Modal } from 'antd';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -143,6 +143,7 @@ describe('notification settings and task UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'notifications.confirmClose' }));
     await waitFor(() => expect(mocks.patch).toHaveBeenLastCalledWith({ revision: 3, enabled: false, confirm_running_task_ids: [] }));
     expect(await screen.findByText('notifications.paused')).toBeInTheDocument();
+    expect(within(document.querySelector('.notification-settings') as HTMLElement).queryByText('notifications.paused')).not.toBeInTheDocument();
   });
   it('retains a conflicting draft without silently overwriting it', async () => {
     mocks.patch.mockRejectedValue({ response: { data: { data: { detail: { reason: 'NOTIFICATION_CONFIG_CONFLICT' } } } } });

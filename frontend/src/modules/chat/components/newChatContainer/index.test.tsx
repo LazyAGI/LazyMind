@@ -278,6 +278,26 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(mocks.latestChatInputProps.onStopGeneration).toEqual(expect.any(Function));
   });
 
+  it('counts cumulative tool turns once across steering segments while keeping other histories independent', () => {
+    mocks.messageList = [
+      { role: "User", delta: "question", history_id: "h" },
+      { role: "Assistant", history_id: "steering-segment:h:a", original_history_id: "h", steering_segment: true, tool_call_turns: 2 },
+      { role: "User", delta: "guide", history_id: "h", is_resumed: true },
+      { role: "Assistant", history_id: "h", tool_call_turns: 5 },
+      { role: "User", delta: "next question", history_id: "other" },
+      { role: "Assistant", history_id: "other", tool_call_turns: 3 },
+      { role: "Assistant", original_history_id: "h", tool_call_turns: 10, archived_failure: true },
+    ];
+    const props = { sessionId: "chat", setIsChatContent: vi.fn(), onOpenSSE: vi.fn(),
+      parseErrorData: vi.fn(), setChatConfigFn: vi.fn() };
+    const view = render(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 2, toolCallTurns: 8 });
+    // A continuation starts empty while the already observed count remains.
+    mocks.messageList = mocks.messageList.slice(0, 3).concat({ role: "Assistant", history_id: "h" });
+    view.rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 2 });
+  });
+
   it.each(['loading', 'isStreaming', 'runtimeWaiting'] as const)('guards workflow controls during %s without changing composer streaming', (phase) => {
     mocks[phase] = true;
     const props = { sessionId: 'conversation-1', onOpenSSE: vi.fn(), parseErrorData: (data: string) => data,

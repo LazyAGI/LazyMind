@@ -229,6 +229,21 @@ describe("stripAskUserReceipt", () => {
   it("handles undefined input", () => {
     expect(stripAskUserReceipt(undefined, true)).toBe("");
   });
+
+  it("renders ask_user protocol content without leaking internal tags", () => {
+    expect(
+      stripAskUserReceipt(
+        "<ask_user>\n请问您更偏好哪个目的地？\n</ask_user>",
+        false,
+      ),
+    ).toBe("请问您更偏好哪个目的地？");
+  });
+
+  it("hides an unfinished ask_user opening tag while streaming", () => {
+    expect(stripAskUserReceipt("<ask_user>正在确认需求", false)).toBe(
+      "正在确认需求",
+    );
+  });
 });
 
 describe("normalizeMessageInputs", () => {
@@ -631,6 +646,124 @@ describe("mergeConversationTrailIntoMessageList", () => {
     const merged = mergeConversationTrailIntoMessageList(list, trail as never);
 
     expect(merged[1]).toEqual({ history_id: "h2", role: RoleTypes.USER });
+  });
+});
+
+it("restores accepted steering messages from durable conversation history", () => {
+  const list = buildChatMessageListFromHistory(
+    [{
+      id: "history-1",
+      seq: 1,
+      query: "original request",
+      result: "adjusted answer",
+      create_time: "2026-10-22T10:00:00Z",
+      steering_messages: [{
+        id: "follow-up-1",
+        text: "focus on the budget",
+        target_history_id: "history-1",
+        accepted_at: "2026-10-22T10:00:01Z",
+      }],
+    }],
+    { reverseHistory: false },
+  );
+
+  expect(list.map((item) => item.role)).toEqual([
+    RoleTypes.USER,
+    RoleTypes.USER,
+    RoleTypes.ASSISTANT,
+  ]);
+  expect(list[1]).toMatchObject({
+    id: "steering:follow-up-1",
+    history_id: "history-1",
+    delta: "focus on the budget",
+    display_delta: "focus on the budget",
+    create_time: "2026-10-22T10:00:01Z",
+    steering_message: true,
+    steering_follow_up_id: "follow-up-1",
+  });
+});
+
+it("omits a reasoning-only assistant placeholder before an early steering message", () => {
+  const list = buildChatMessageListFromHistory(
+    [{
+      id: "history-early-steer",
+      seq: 1,
+      query: "compare four cities",
+      result: "<think>planning the comparison</think>final answer",
+      assistant_remainder: "final answer",
+      reasoning_content: "",
+      create_time: "2026-10-22T10:00:00Z",
+      steering_messages: [{
+        id: "follow-up-early",
+        text: "only compare Tianjin and Jinan",
+        target_history_id: "history-early-steer",
+        assistant_segment: "",
+        reasoning_content: "planning the comparison",
+        accepted_at: "2026-10-22T10:00:01Z",
+      }],
+    }],
+    { reverseHistory: false },
+  );
+
+  expect(list.map((item) => [item.role, item.delta])).toEqual([
+    [RoleTypes.USER, "compare four cities"],
+    [RoleTypes.USER, "only compare Tianjin and Jinan"],
+    [RoleTypes.ASSISTANT, "final answer"],
+  ]);
+  expect(list.some((item) => item.reasoning_content === "planning the comparison")).toBe(false);
+});
+
+it("restores every partial assistant segment around multiple steering messages", () => {
+  const list = buildChatMessageListFromHistory(
+    [{
+      id: "history-1",
+      seq: 1,
+      query: "compare seven cities",
+      result: "first partialsecond partialfinal answer",
+      create_time: "2026-10-22T10:00:00Z",
+      steering_messages: [
+        {
+          id: "follow-up-1",
+          text: "only compare Tianjin and Jinan",
+          target_history_id: "history-1",
+          assistant_snapshot: "first partial",
+          accepted_at: "2026-10-22T10:00:01Z",
+        },
+        {
+          id: "follow-up-2",
+          text: "budget under 2000",
+          target_history_id: "history-1",
+          assistant_snapshot: "first partialsecond partial",
+          accepted_at: "2026-10-22T10:00:02Z",
+        },
+      ],
+    }],
+    { reverseHistory: false },
+  );
+
+  expect(list.map((item) => [item.role, item.delta])).toEqual([
+    [RoleTypes.USER, "compare seven cities"],
+    [RoleTypes.ASSISTANT, "first partial"],
+    [RoleTypes.USER, "only compare Tianjin and Jinan"],
+    [RoleTypes.ASSISTANT, "second partial"],
+    [RoleTypes.USER, "budget under 2000"],
+    [RoleTypes.ASSISTANT, "final answer"],
+  ]);
+  expect(list[1]).toMatchObject({
+    history_id: "steering-segment:history-1:follow-up-1",
+    original_history_id: "history-1",
+    steering_segment: true,
+    steering_follow_up_id: "follow-up-1",
+  });
+  expect(list[3]).toMatchObject({
+    history_id: "steering-segment:history-1:follow-up-2",
+    original_history_id: "history-1",
+    steering_segment: true,
+    steering_follow_up_id: "follow-up-2",
+  });
+  expect(list[5]).toMatchObject({
+    history_id: "history-1",
+    run_status: undefined,
   });
 });
 

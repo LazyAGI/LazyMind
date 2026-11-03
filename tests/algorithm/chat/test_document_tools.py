@@ -75,6 +75,7 @@ REVISION_CHAT_APIS = {
     "apply_revision",
 }
 RESOURCE_CHAT_APIS = {
+    "obsidian_status",
     "load_document",
     "create_document",
     "publish_revision",
@@ -204,9 +205,9 @@ def test_chat_tool_calls_work_without_a_workflow_context():
 
 
 @pytest.mark.parametrize('response', [
-    '# Title\n\nRevised.',
-    '```markdown\n# Title\n\nRevised.\n```',
-    'Here is the revision:\n# Title\n\nRevised.',
+    '# Title\n\n## 1. Revised\n\nRevised.',
+    '```markdown\n# Title\n\n## 2. Revised\n\nRevised.\n```',
+    'Here is the revision:\n# Title\n\n## 1.1. Revised\n\nRevised.',
 ])
 def test_complete_markdown_revision_uses_shared_tool_once(monkeypatch, tmp_path, response):
     from lazymind.document_tools import revision
@@ -227,7 +228,7 @@ def test_complete_markdown_revision_uses_shared_tool_once(monkeypatch, tmp_path,
         '# Title\n\nOriginal.', 'Polish',
         constraints='Only use SRC-001.', artifact_store=str(tmp_path),
     )
-    assert result == '# Title\n\nRevised.'
+    assert result == '# Title\n\n## Revised\n\nRevised.'
     assert len(calls) == 1
     assert 'SRC-001' in calls[0]
     assert 'Original.' in calls[0]
@@ -277,7 +278,7 @@ def test_concrete_toolkits_own_disjoint_capability_sets():
     assert not issubclass(WriterResourceToolkit, WriterRevisionCapabilities)
 
 
-def test_all_45_capabilities_have_one_physical_owner():
+def test_all_46_capabilities_have_one_physical_owner():
     owners = (
         WriterWritingCapabilities,
         WriterArtifactCapabilities,
@@ -305,10 +306,10 @@ def test_all_45_capabilities_have_one_physical_owner():
     assert owned[WriterResourceCapabilities] == (
         RESOURCE_CHAT_APIS | resource_workflow_apis
     )
-    assert sum(len(names) for names in owned.values()) == 45
+    assert sum(len(names) for names in owned.values()) == 46
 
 
-def test_chat_toolkit_exposure_remains_the_36_tool_snapshot():
+def test_chat_toolkit_exposure_remains_the_37_tool_snapshot():
     assert set(WriterCreateToolkit.__public_apis__) == WRITING_CHAT_APIS
     assert set(WriterRevisionToolkit.__public_apis__) == REVISION_CHAT_APIS
     assert set(WriterResourceToolkit.__public_apis__) == RESOURCE_CHAT_APIS
@@ -323,7 +324,7 @@ def test_chat_toolkit_exposure_remains_the_36_tool_snapshot():
                 ),
             )
         )
-        == 36
+        == 37
     )
     assert WORKFLOW_ONLY_APIS.isdisjoint(WriterCreateToolkit.__public_apis__)
     assert WORKFLOW_ONLY_APIS.isdisjoint(WriterResourceToolkit.__public_apis__)

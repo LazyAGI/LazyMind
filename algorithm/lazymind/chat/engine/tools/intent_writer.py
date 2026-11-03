@@ -173,6 +173,11 @@ def build_intentwrite_tool(
     return intentwrite
 
 
+def append_intentwrite_guidance(tool: Any, messages: List[str]) -> None:
+    """Extend evidence with accepted user guidance, never assistant/tool output."""
+    tool._intentwriter_config['current_query'] += '\n' + '\n'.join(messages)
+
+
 def enable_workflow_intent_scopes(tool: Any, *, session_id: str, workflow_id: str,
                                   valid_step_ids: List[str]) -> Any:
     config = getattr(tool, '_intentwriter_config', None)

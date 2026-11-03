@@ -104,7 +104,8 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   expect(capture.editor!.getRootElement()).toHaveTextContent('Unsaved paragraph.');
   // A read-only source view must not crash the editor or expose a silently
   // reformatted replacement when its mapping is unavailable.
-  document.querySelector<HTMLDetailsElement>('.writer-document-options')!.open = true;
+  const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
+  act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
   fireEvent.click(screen.getByRole('button', { name: '源码' }));
   expect(onSave).not.toHaveBeenCalled();
   expect(screen.queryByRole('textbox', { name: '源码' })).not.toBeInTheDocument();
