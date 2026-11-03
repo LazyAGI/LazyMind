@@ -218,7 +218,7 @@
 
   .pdf-temporary-chat__body { display: flex; flex-direction: column; }
   .chat-chat-container { flex: 1; min-height: 0; }
-  .paper-chat-composer { border-color: #e5e5e3; box-shadow: 0 2px 10px #26262606; }
+  .paper-chat-composer { box-shadow: none; }
   .chat-chat-container .chat-box .input-wrapper { padding: 12px 14px 16px; }
   .ant-btn:focus-visible, button:focus-visible { outline: 2px solid var(--color-primary, #006ae6); outline-offset: 3px; }
 }

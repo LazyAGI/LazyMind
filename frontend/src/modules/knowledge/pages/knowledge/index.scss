@@ -397,6 +397,8 @@
 .paper-chat-pane .pdf-processing-card{margin:8px 10px;font-size:12px;}
 .paper-chat-pane .chat-chat-container .chat-box .input-wrapper{padding:10px;}
 .paper-chat-pane .chat-input-surface{border:1px solid var(--color-border,#dfe6ef)!important;background:#fff;border-radius:12px;box-shadow:0 3px 12px #26262608;}
+.paper-chat-pane .chat-input-surface > .input-top{border:0;box-shadow:none;border-radius:inherit;background:transparent;}
+.paper-chat-pane .chat-input-surface:focus-within{border-color:var(--color-primary,#006ae6)!important;}
 .paper-chat-pane .input-bottom-actions{padding-top:5px;}
 .paper-chat-pane .input-bottom-actions-left{gap:4px;min-width:0;}
 .paper-chat-pane .input-bottom-actions-left>.chat-add-resource:has(>.chat-add-resource-hidden-upload:only-child){display:none;}
