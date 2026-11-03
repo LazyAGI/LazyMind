@@ -244,7 +244,7 @@ def test_preparation_requires_actually_read_excerpt_anchors_and_allows_correctio
     assert result['named_clues'] == grounded_result()['named_clues']
 
 
-def test_preparation_cursor_accepts_only_known_matching_paper_and_explains_conflicts(
+def test_preparation_cursor_is_exclusive_and_read_limits_remain_scoped(
         monkeypatch, preparation_session):
     payload, requests = preparation_session
 
@@ -256,9 +256,9 @@ def test_preparation_cursor_accepts_only_known_matching_paper_and_explains_confl
         with pytest.raises(ToolExecutionError, match='omit these conflicting fields: paper_id'):
             read('another-paper', cursor=cursor)
         with pytest.raises(ToolExecutionError, match='omit these conflicting fields: keywords, max_results'):
-            read('seed', cursor=cursor, keywords=['Methods'], max_results=2)
+            read(cursor=cursor, keywords=['Methods'], max_results=2)
         assert len(requests) == 1
-        assert read('seed', cursor=cursor, positions=[])['positions'] == [2]
+        assert read(cursor=cursor, positions=[])['positions'] == [2]
         assert requests[-1][2]['json'] == {'cursor': cursor, 'expansion_id': 'exp', 'preparation_revision': 3}
         read('seed', view='references', max_results=20)
         assert requests[-1][2]['json']['max_results'] == 5

@@ -17,11 +17,9 @@ runtime:
   - academic-paper-chat-v1
   trigger_inputs:
   - expansion_id
-  completed_edit_step: compose_result
   completed_continue_steps:
   - expand_and_screen
-  completed_edit_routing: 同一范围继续查找或调整论文清单回到 expand_and_screen；仅调整已有报告的表达回到 compose_result；实质改变主题或方向时返回拓展记录准备并确认，不在正式
-    Workflow 内决策方向。
+  completed_edit_routing: 同一范围继续查找回到 expand_and_screen；报告由已核验结果直接生成，不支持独立改写保存的报告。实质改变主题或方向时返回拓展记录准备并确认。
   execution_limits:
     expand_and_screen:
       rounds: 32
@@ -38,8 +36,6 @@ runtime:
         academic_read_paper: 48
         academic_search_papers: 8
         academic_check_relations: 6
-    compose_result:
-      rounds: 8
   post_step_checks:
   - step_id: expand_and_screen
     tool: academic_validate_stage
@@ -53,7 +49,7 @@ runtime:
     tool: academic_validate_relations
     arguments:
       result: relation_analysis
-  - step_id: compose_result
+  - step_id: analyze_relations
     tool: academic_validate_result
     arguments:
       result: expansion_result
@@ -65,7 +61,6 @@ tool_scripts:
   - academic_read_paper
   - academic_publish_stage
   - academic_submit_relations
-  - academic_publish_expansion_result
   - academic_validate_stage
   - academic_validate_result
   - academic_check_relations
@@ -77,8 +72,6 @@ steps:
   label: 筛选与补充
 - id: analyze_relations
   label: 关系分析与证据核验
-- id: compose_result
-  label: 研究报告与论文关系
 slots:
 - id: expansion_id
   label: 任务定位
@@ -165,8 +158,8 @@ ui:
     layout: list
     slots:
     - id: relation_analysis
-  - id: compose_result
-    step_id: compose_result
+  - id: report
+    step_id: analyze_relations
     hide_when_material: expansion_list_ready
     label: 研究报告与论文关系
     layout: list

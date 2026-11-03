@@ -146,77 +146,81 @@ func TestReportPreservesItsAuthoritativeResearchOutcome(t *testing.T) {
 }
 
 func TestIncompleteExpansionKeepsCompletedVersionWithoutAutomaticReview(t *testing.T) {
-	db := paperFixture(t)
-	conversation, err := newAcademicConversation(db.DB, "u", "papers", "research", "expansion")
-	if err != nil {
-		t.Fatal(err)
-	}
-	papers := []WorkflowPaper{}
-	for _, id := range []string{"a", "b"} {
-		if err := db.Create(&orm.AcademicWorkDocument{AcademicWorkID: id, DatasetID: "papers", DocumentID: id, SourceProvider: "openalex", SourceVersion: "publishedVersion"}).Error; err != nil {
-			t.Fatal(err)
-		}
-		papers = append(papers, WorkflowPaper{Paper: PaperRef{PaperID: id, SourceDocumentID: id, SourceProvider: "openalex", SourceVersion: "publishedVersion"}, IsSeed: true})
-	}
-	seeds, err := seedSources(db.DB, "papers", papers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	versions := []any{}
-	for _, source := range seeds {
-		content := orm.AcademicPaperContent{ID: "partial-" + source.Paper.PaperID, UserID: "u", PaperID: source.Paper.PaperID,
-			ParserVersion: orm.AcademicPaperParserVersion, SourceKey: source.key(), SourceKind: "kb", SourceDatasetID: "papers", SourceDocumentID: source.Paper.SourceDocumentID,
-			SourceHash: source.Hash, SourceProvider: source.Paper.SourceProvider, SourceVersion: source.Paper.SourceVersion, Status: "ready", ContentHash: "body-" + source.Paper.PaperID,
-			PagesJSON: marshal([]ContentPage{{Page: 1, Text: "Body available for review."}}), QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"})}
-		if err := db.Create(&content).Error; err != nil {
-			t.Fatal(err)
-		}
-		versions = append(versions, map[string]any{"paper_id": content.PaperID, "status": content.Status, "content_hash": content.ContentHash, "source_version": content.SourceVersion})
-	}
-	input := ReviewWorkflowInput{UserInstruction: "Trace the actual sources.", CandidateDirections: []string{"method"}, SelectedDirections: []string{"method"}, Papers: papers}
-	record := orm.AcademicExpansion{ID: "partial-review", UserID: "u", RequestOwner: "u", RequestKey: "partial-review", DatasetID: "papers", ConversationID: conversation,
-		Title: input.UserInstruction, Goal: "review", Status: "running", ResultJSON: marshal(input), SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: marshal([]paperDiscovery{}), PreparationJSON: marshal(expansionPreparation{})}
-	session := orm.WorkflowSession{ID: "partial-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
-	step := orm.WorkflowSessionStep{ID: "partial-compose", SessionID: session.ID, StepID: "compose_result", Status: "succeeded", Validity: "effective", Attempt: 1}
-	for _, row := range []any{&record, &session, &step} {
-		if err := db.Create(row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	gaps := []any{map[string]any{"direction": "method", "kind": "predecessor", "reason": "Verification stopped at the shared deadline."}}
-	outcome := checkedResearchOutcome("partial-version", false, "budget_exhausted", gaps)
-	outcome["source_versions"] = versions
-	artifacts := []workflowstore.Artifact{}
-	for slot, value := range map[string]any{"relation_analysis": outcome, "expansion_result": input, "expansion_report": outcome} {
-		artifacts = append(artifacts, workflowstore.Artifact{ID: "partial-" + slot, Slot: slot, Attempt: 1, Revision: 1, ProducerAttemptID: step.ID, CreatedAt: time.Now().UTC(), Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": value})})
-	}
-	job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: artifacts})}
-	for i := 0; i < 2; i++ {
-		if _, err := projectAcademicResult(t.Context(), job, nil); err != nil {
-			t.Fatalf("partial publication did not settle: %v", err)
-		}
-	}
-	if err := db.Where("id=?", record.ID).Take(&record).Error; err != nil {
-		t.Fatal(err)
-	}
-	var round orm.AcademicExpansionRound
-	if err := db.Where("expansion_id=?", record.ID).Take(&round).Error; err != nil || round.Status != "completed" || record.Status != "completed" || record.Version != 1 || record.AutoReviewID != "" {
-		t.Fatalf("partial research changed execution status or launched an automatic review: %+v %+v %v", record, round, err)
-	}
-	var handoffs int64
-	if err := db.Model(&orm.AcademicHandoff{}).Where("expansion_id=?", record.ID).Count(&handoffs).Error; err != nil || handoffs != 0 {
-		t.Fatalf("partial result was automatically handed off: %d %v", handoffs, err)
-	}
-	if input, err := completedExpansionInput(db.DB, record, record.Version); err != nil || len(input.Papers) != 2 {
-		t.Fatalf("partial version was unavailable for explicit continuation: %+v %v", input, err)
-	}
-	r := paperRequest("")
-	r.URL.RawQuery = url.Values{"conversation_id": {conversation}, "view": {"summary"}}.Encode()
-	w := httptest.NewRecorder()
-	AcademicChatContext(w, r)
-	var summary academicChatSummary
-	if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil || w.Code != 200 || summary.Status != "completed" || summary.Completion == nil || summary.Completion.Reason != "budget_exhausted" || summary.ResearchComplete == nil || *summary.ResearchComplete || len(summary.CoverageGaps) == 0 {
-		t.Fatalf("summary lost the distinction between execution and research completion: %d %s %v", w.Code, w.Body.String(), err)
+	for _, producer := range []string{"compose_result", "analyze_relations"} {
+		t.Run(producer, func(t *testing.T) {
+			db := paperFixture(t)
+			conversation, err := newAcademicConversation(db.DB, "u", "papers", "research", "expansion")
+			if err != nil {
+				t.Fatal(err)
+			}
+			papers := []WorkflowPaper{}
+			for _, id := range []string{"a", "b"} {
+				if err := db.Create(&orm.AcademicWorkDocument{AcademicWorkID: id, DatasetID: "papers", DocumentID: id, SourceProvider: "openalex", SourceVersion: "publishedVersion"}).Error; err != nil {
+					t.Fatal(err)
+				}
+				papers = append(papers, WorkflowPaper{Paper: PaperRef{PaperID: id, SourceDocumentID: id, SourceProvider: "openalex", SourceVersion: "publishedVersion"}, IsSeed: true})
+			}
+			seeds, err := seedSources(db.DB, "papers", papers)
+			if err != nil {
+				t.Fatal(err)
+			}
+			versions := []any{}
+			for _, source := range seeds {
+				content := orm.AcademicPaperContent{ID: "partial-" + source.Paper.PaperID, UserID: "u", PaperID: source.Paper.PaperID,
+					ParserVersion: orm.AcademicPaperParserVersion, SourceKey: source.key(), SourceKind: "kb", SourceDatasetID: "papers", SourceDocumentID: source.Paper.SourceDocumentID,
+					SourceHash: source.Hash, SourceProvider: source.Paper.SourceProvider, SourceVersion: source.Paper.SourceVersion, Status: "ready", ContentHash: "body-" + source.Paper.PaperID,
+					PagesJSON: marshal([]ContentPage{{Page: 1, Text: "Body available for review."}}), QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"})}
+				if err := db.Create(&content).Error; err != nil {
+					t.Fatal(err)
+				}
+				versions = append(versions, map[string]any{"paper_id": content.PaperID, "status": content.Status, "content_hash": content.ContentHash, "source_version": content.SourceVersion})
+			}
+			input := ReviewWorkflowInput{UserInstruction: "Trace the actual sources.", CandidateDirections: []string{"method"}, SelectedDirections: []string{"method"}, Papers: papers}
+			record := orm.AcademicExpansion{ID: "partial-review", UserID: "u", RequestOwner: "u", RequestKey: "partial-review", DatasetID: "papers", ConversationID: conversation,
+				Title: input.UserInstruction, Goal: "review", Status: "running", ResultJSON: marshal(input), SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: marshal([]paperDiscovery{}), PreparationJSON: marshal(expansionPreparation{})}
+			session := orm.WorkflowSession{ID: "partial-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
+			step := orm.WorkflowSessionStep{ID: "partial-compose", SessionID: session.ID, StepID: producer, Status: "succeeded", Validity: "effective", Attempt: 1}
+			for _, row := range []any{&record, &session, &step} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			gaps := []any{map[string]any{"direction": "method", "kind": "predecessor", "reason": "Verification stopped at the shared deadline."}}
+			outcome := checkedResearchOutcome("partial-version", false, "budget_exhausted", gaps)
+			outcome["source_versions"] = versions
+			artifacts := []workflowstore.Artifact{}
+			for slot, value := range map[string]any{"relation_analysis": outcome, "expansion_result": input, "expansion_report": outcome} {
+				artifacts = append(artifacts, workflowstore.Artifact{ID: "partial-" + slot, Slot: slot, StepID: producer, Attempt: 1, Revision: 1, ProducerAttemptID: step.ID, CreatedAt: time.Now().UTC(), Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": value})})
+			}
+			job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: artifacts})}
+			for i := 0; i < 2; i++ {
+				if _, err := projectAcademicResult(t.Context(), job, nil); err != nil {
+					t.Fatalf("partial publication did not settle: %v", err)
+				}
+			}
+			if err := db.Where("id=?", record.ID).Take(&record).Error; err != nil {
+				t.Fatal(err)
+			}
+			var round orm.AcademicExpansionRound
+			if err := db.Where("expansion_id=?", record.ID).Take(&round).Error; err != nil || round.Status != "completed" || record.Status != "completed" || record.Version != 1 || record.AutoReviewID != "" {
+				t.Fatalf("partial research changed execution status or launched an automatic review: %+v %+v %v", record, round, err)
+			}
+			var handoffs int64
+			if err := db.Model(&orm.AcademicHandoff{}).Where("expansion_id=?", record.ID).Count(&handoffs).Error; err != nil || handoffs != 0 {
+				t.Fatalf("partial result was automatically handed off: %d %v", handoffs, err)
+			}
+			if input, err := completedExpansionInput(db.DB, record, record.Version); err != nil || len(input.Papers) != 2 {
+				t.Fatalf("partial version was unavailable for explicit continuation: %+v %v", input, err)
+			}
+			r := paperRequest("")
+			r.URL.RawQuery = url.Values{"conversation_id": {conversation}, "view": {"summary"}}.Encode()
+			w := httptest.NewRecorder()
+			AcademicChatContext(w, r)
+			var summary academicChatSummary
+			if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil || w.Code != 200 || summary.Status != "completed" || summary.Completion == nil || summary.Completion.Reason != "budget_exhausted" || summary.ResearchComplete == nil || *summary.ResearchComplete || len(summary.CoverageGaps) == 0 {
+				t.Fatalf("summary lost the distinction between execution and research completion: %d %s %v", w.Code, w.Body.String(), err)
+			}
+		})
 	}
 }
 

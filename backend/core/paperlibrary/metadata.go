@@ -6,6 +6,11 @@ import (
 	"lazymind/core/common/orm"
 )
 
+type documentSource struct {
+	PaperID, DocumentID, LinkedWorkID, StateWorkID, Kind, Status, SourceProvider, SourceVersion string
+	MetadataJSON                                                                                orm.RawJSON `gorm:"type:json"`
+}
+
 // EffectiveMetadata uses the same primary-source and local-override rules as Load.
 func EffectiveMetadata(db *gorm.DB, entry orm.PaperLibraryEntry, work orm.AcademicWork) (Metadata, error) {
 	sources, err := automaticMetadata(db, entry.DatasetID, []orm.PaperLibraryEntry{entry})
@@ -18,19 +23,12 @@ func EffectiveMetadata(db *gorm.DB, entry orm.PaperLibraryEntry, work orm.Academ
 // Automatic metadata belongs to active members or server-owned import snapshots.
 // An unverified primary never borrows another PDF's metadata.
 func automaticMetadata(db *gorm.DB, dataset string, entries []orm.PaperLibraryEntry) (map[string]json.RawMessage, error) {
-	result := map[string]json.RawMessage{}
 	ids := make([]string, 0, len(entries))
-	workIDs := map[string]string{}
 	for _, entry := range entries {
 		ids = append(ids, entry.ID)
-		workIDs[entry.ID] = entry.AcademicWorkID
 	}
 	if len(ids) == 0 {
-		return result, nil
-	}
-	type documentSource struct {
-		PaperID, DocumentID, LinkedWorkID, StateWorkID, Kind, Status, SourceProvider, SourceVersion string
-		MetadataJSON                                                                                orm.RawJSON `gorm:"type:json"`
+		return map[string]json.RawMessage{}, nil
 	}
 	var documents []documentSource
 	err := db.Table("paper_library_attachments a").Select("a.paper_id,a.document_id,l.academic_work_id AS linked_work_id,s.paper_id AS state_work_id,s.kind,s.status,s.metadata_json,l.source_provider,l.source_version").
@@ -40,6 +38,17 @@ func automaticMetadata(db *gorm.DB, dataset string, entries []orm.PaperLibraryEn
 		Where("a.dataset_id=? AND a.paper_id IN ? AND a.detached_at IS NULL AND a.kind='pdf'", dataset, ids).Order("a.is_primary DESC,a.created_at,a.id").Scan(&documents).Error
 	if err != nil {
 		return nil, err
+	}
+	return metadataFromSources(db, dataset, entries, documents)
+}
+
+func metadataFromSources(db *gorm.DB, dataset string, entries []orm.PaperLibraryEntry, documents []documentSource) (map[string]json.RawMessage, error) {
+	result := map[string]json.RawMessage{}
+	ids := make([]string, 0, len(entries))
+	workIDs := map[string]string{}
+	for _, entry := range entries {
+		ids = append(ids, entry.ID)
+		workIDs[entry.ID] = entry.AcademicWorkID
 	}
 	primary := map[string]documentSource{}
 	for _, source := range documents {

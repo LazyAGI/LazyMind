@@ -22,7 +22,6 @@ it.each(['awaiting_confirmation', 'running', 'completed'])('keeps direction refe
   ] };
   const prepared = { ...detail, record: { ...detail.record, status, preparation: { ...detail.record.preparation!, directions: [direction] } } };
   render(<PreparationPanel detail={prepared} onRefresh={vi.fn()} onStart={vi.fn()} />);
-  if (status === 'completed') fireEvent.click(screen.getByText('初步调研与方向确认'));
   expect(screen.getByText('3 篇参考论文')).toBeVisible();
   expect(screen.getByText('LoRA')).not.toBeVisible();
   fireEvent.click(screen.getByText('查看依据'));
@@ -146,11 +145,11 @@ it('keeps failed answers editable and retries with the same key, then only refre
 it('shows the server-started single direction without a selection or confirmation', () => {
   const started = { ...detail, record: { ...detail.record, status: 'pending', conversation_id: 'chat', preparation: { ...detail.record.preparation!, auto_confirmed: true, directions: [detail.record.preparation!.directions[0]] } } };
   render(<PreparationPanel detail={started} onRefresh={vi.fn()} onStart={vi.fn()} />);
-  expect(screen.getByText('仅有一个研究方向，已自动继续拓展')).toBeVisible();
+  expect(screen.getByRole('region', { name: '本次研究方向' })).toBeVisible();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '确认方向并开始拓展' })).not.toBeInTheDocument();
   expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
-  expect(screen.getByText('标准调研')).toBeVisible();
+
   expect(confirmExpansion).not.toHaveBeenCalled();
 });
 

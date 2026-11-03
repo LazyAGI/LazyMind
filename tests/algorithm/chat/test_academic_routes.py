@@ -140,7 +140,7 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
     module.academic_read_paper('owned-expansion', 'discovered-paper', positions=[], page_start=3, page_end=4)
     assert 'positions' not in requests[-1][2]['json'] and requests[-1][2]['json']['page_start'] == 3
     before = len(requests)
-    with pytest.raises(ToolExecutionError, match='omit cursor'):
+    with pytest.raises(ToolExecutionError, match='only its cursor'):
         module.academic_read_paper('owned-expansion', 'different-paper', cursor='bound-cursor', positions=[1])
     with pytest.raises(ToolExecutionError, match='max_results must be 1..5'):
         module.academic_read_paper('owned-expansion', 'discovered-paper', max_results=20)
@@ -194,6 +194,7 @@ def test_search_tool_validates_search_contract_before_sending_requests(monkeypat
     ('paper_ppt_with_reflection_mock', 'ppt_request', 'ppt'),
 ])
 def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, slot, kind):
+    from lazyllm.tools.agent import ToolExecutionError
     from lazymind.chat.engine.subagent import tools
     from lazymind.chat.service import academic_handoff
     from lazymind.workflow_toolkit import load_workflow_package_tools
@@ -219,6 +220,8 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
         requests.append((method, url, kwargs))
         data = ({'handoff_id': 'owned-handoff', 'input': frozen['input']}
                 if method == 'GET' else frozen)
+        if url.endswith('/paper-contents:read'):
+            data = {'paper': paper, 'status': 'ready', 'positions': [0], 'pages': [{'page': 1, 'text': 'Original evidence'}]}
         if method == 'GET' and kwargs['params'].get('view') == 'summary':
             data = {'handoff_id': 'owned-handoff'}
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: data)
@@ -251,13 +254,13 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
     assert requests[1][1] == 'http://core/academic/mock-handoffs/owned-handoff:submit'
     assert requests[1][2]['json'] == {} and requests[1][2]['timeout'] == 30
     functions['academic_read_paper']('original-paper')
-    assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'paper_id': 'original-paper'}
+    assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'paper_id': 'original-paper', 'view': 'content', 'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5}
     functions['academic_read_paper'](cursor='saved-cursor')
     assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'cursor': 'saved-cursor'}
     assert requests[-2][2]['params'] == {'conversation_id': 'owned-chat', 'view': 'summary'}
     assert requests[-1][2]['timeout'] == 90
     assert all(request[2]['headers'] == {'X-User-Id': 'owner'} for request in requests)
-    with pytest.raises(ValueError, match='but not both'):
+    with pytest.raises(ToolExecutionError, match='only its cursor'):
         functions['academic_read_paper']('original-paper', cursor='saved-cursor')
 
 

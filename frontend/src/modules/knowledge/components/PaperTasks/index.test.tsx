@@ -134,7 +134,7 @@ describe('paper task startup routes', () => {
         expect(within(seedAnalysis).queryByRole('heading', { name: '与种子论文的关系' })).not.toBeInTheDocument();
     });
 
-    it.each([{}, { currency_cost: null, stage_timing: [], source_queries: [] }, { currency_cost: 1, compose_metrics: { model: 'test-model', provider_usage_records: [{ prompt_tokens: 100 }] } }])('hides execution details when the report only contains no data or internal metrics: %j', async report => {
+    it.each([{}, { currency_cost: null, stage_timing: [], source_queries: [] }, { currency_cost: 1, stage_metrics: { model: 'test-model', provider_usage_records: [{ prompt_tokens: 100 }] } }])('hides execution details when the report only contains no data or internal metrics: %j', async report => {
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, report } });
         mount(undefined, '?expansion_id=r');
         await screen.findByText('原始研究要求');
@@ -565,7 +565,7 @@ describe('result list actions', () => {
     });
     it.each(['pending', 'running', 'active', 'failed', 'cancelled'])('hides intermediate papers and actions while expansion is %s', async status => {
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status, report: { narrative: '尚未完成的研究解读' },
-            progress: { candidate_set: { input }, relation_analysis: { input }, expansion_result: { input } },
+            progress: { candidate_set: { input } },
         } });
         mount(undefined, '?expansion_id=r');
         await screen.findByRole('region', { name: '拓展进展' });
@@ -578,8 +578,7 @@ describe('result list actions', () => {
         fireEvent.click(screen.getByRole('button', { name: '查看过程' }));
         expect(screen.getByText('检索与拓展')).toBeVisible();
         expect(screen.getByText('筛选与补充')).toBeVisible();
-        expect(screen.getByText('研究报告与论文关系')).toBeVisible();
-        expect(screen.getByText('研究报告与论文关系').closest('li')).toHaveAttribute('data-status', ['running', 'active'].includes(status) ? 'running' : 'pending');
+        expect(screen.getByText('筛选与补充').closest('li')).toHaveAttribute('data-status', ['running', 'active'].includes(status) ? 'running' : 'pending');
         expect(screen.queryByText('准备参考论文与检索计划')).not.toBeInTheDocument();
         expect(screen.queryByText('检索工具调用训练信号')).not.toBeInTheDocument();
         expect(previewPaperImport).not.toHaveBeenCalled();

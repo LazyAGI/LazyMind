@@ -425,13 +425,11 @@ export interface AcademicExpansionReport {
     'analysis_version'?: string;
     'claims'?: Array<AcademicVerifiedClaim>;
     'completion'?: AcademicResearchCompletion;
-    'compose_metrics'?: AcademicExpansionReportComposeMetrics;
     'coverage_gaps'?: Array<AcademicCoverageGap>;
     'currency_cost'?: number | null;
     'execution_elapsed_ms'?: number;
     'input'?: AcademicReviewInput;
     'investigation'?: Array<AcademicInvestigation>;
-    'limitations'?: Array<string>;
     'list_mode'?: AcademicExpansionReportListModeEnum;
     'materials'?: Array<object>;
     'narrative'?: string;
@@ -447,7 +445,7 @@ export interface AcademicExpansionReport {
     'selection'?: AcademicPaperSelection;
     'source_queries'?: Array<AcademicDiscoveryQuery>;
     'source_versions'?: Array<AcademicSourceVersion>;
-    'stage_metrics'?: { [key: string]: AcademicExpansionReportComposeMetrics; };
+    'stage_metrics'?: { [key: string]: AcademicExpansionReportStageMetricsValue; };
     'stage_timing'?: Array<AcademicExpansionReportStageTimingInner>;
 }
 
@@ -458,22 +456,6 @@ export const AcademicExpansionReportListModeEnum = {
 
 export type AcademicExpansionReportListModeEnum = typeof AcademicExpansionReportListModeEnum[keyof typeof AcademicExpansionReportListModeEnum];
 
-export interface AcademicExpansionReportComposeMetrics {
-    'currency_cost'?: number | null;
-    'model'?: string;
-    'provider_usage_records'?: Array<object>;
-    'verification'?: AcademicExpansionReportComposeMetricsVerification;
-}
-export interface AcademicExpansionReportComposeMetricsVerification {
-    'batches'?: Array<object>;
-    'completed_fields'?: number;
-    'elapsed_seconds'?: number;
-    'failed_fields'?: number;
-    'model_calls'?: number;
-    'reused_fields'?: number;
-    'semantic_rounds'?: number;
-    'submitted_fields'?: number;
-}
 export interface AcademicExpansionReportRecommendationsInner {
     'direction'?: string;
     'paper_id': string;
@@ -541,8 +523,8 @@ export const AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEn
 export type AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum = typeof AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum[keyof typeof AcademicExpansionReportRelationsInnerVerificationPartsInnerStatusEnum];
 
 export interface AcademicExpansionReportResearchStructure {
-    'directions'?: Array<AcademicExpansionReportResearchStructureDirectionsInner>;
-    'nodes'?: Array<AcademicExpansionReportResearchStructureNodesInner>;
+    'directions': Array<AcademicExpansionReportResearchStructureDirectionsInner>;
+    'nodes': Array<AcademicExpansionReportResearchStructureNodesInner>;
 }
 export interface AcademicExpansionReportResearchStructureDirectionsInner {
     'id'?: string;
@@ -554,6 +536,22 @@ export interface AcademicExpansionReportResearchStructureNodesInner {
     'direction_id'?: string;
     'paper_id'?: string;
     'reason'?: string;
+}
+export interface AcademicExpansionReportStageMetricsValue {
+    'currency_cost'?: number | null;
+    'model'?: string;
+    'provider_usage_records'?: Array<object>;
+    'verification'?: AcademicExpansionReportStageMetricsValueVerification;
+}
+export interface AcademicExpansionReportStageMetricsValueVerification {
+    'batches'?: Array<object>;
+    'completed_fields'?: number;
+    'elapsed_seconds'?: number;
+    'failed_fields'?: number;
+    'model_calls'?: number;
+    'reused_fields'?: number;
+    'semantic_rounds'?: number;
+    'submitted_fields'?: number;
 }
 export interface AcademicExpansionReportStageTimingInner {
     'attempt'?: number;
@@ -753,7 +751,7 @@ export interface AcademicModelMetrics {
     'currency_cost'?: number | null;
     'model'?: string;
     'provider_usage_records'?: Array<object>;
-    'verification'?: AcademicExpansionReportComposeMetricsVerification;
+    'verification'?: AcademicExpansionReportStageMetricsValueVerification;
 }
 export interface AcademicPaperRef {
     'abstract': string | null;
@@ -832,7 +830,7 @@ export interface AcademicRelationAnalysis {
     'coverage_gaps': Array<AcademicCoverageGap>;
     'input': AcademicReviewInput;
     'investigation': Array<AcademicInvestigation>;
-    'metrics': AcademicExpansionReportComposeMetrics;
+    'metrics': AcademicExpansionReportStageMetricsValue;
     'reading': { [key: string]: AcademicExpansionReadingValue; };
     'relations': Array<AcademicExpansionReportRelationsInner>;
     'research_complete': boolean;

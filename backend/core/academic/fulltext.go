@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/net/html"
 	"io"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
@@ -71,7 +70,7 @@ func doiFulltextCandidates(ctx context.Context, user, doi string) ([]FulltextCan
 
 // Page acquisition uses OriginalService's DNS, IP, redirect and byte validation.
 // Only explicit PDF links are followed; every resulting file is checked again.
-func publicPagePDFs(ctx context.Context, user, address string) ([]string, error) {
+func publicPagePDFs(ctx context.Context, user, address, doi string) ([]string, error) {
 	svc, err := doc.NewOriginalService(doc.OriginalServiceDeps{DB: store.DB()})
 	if err != nil {
 		return nil, err
@@ -94,47 +93,13 @@ func publicPagePDFs(ctx context.Context, user, address string) ([]string, error)
 	if strings.HasPrefix(string(data), "%PDF-") {
 		return []string{address}, nil
 	}
-	document, err := html.Parse(strings.NewReader(string(data)))
-	if err != nil {
-		return nil, err
-	}
 	base, err := url.Parse(ref.FinalURL)
 	if err != nil {
 		return nil, err
 	}
-	links := []string{}
-	seen := map[string]bool{}
-	var visit func(*html.Node)
-	visit = func(node *html.Node) {
-		if node.Type == html.ElementNode && (node.Data == "meta" || node.Data == "a") {
-			attrs := map[string]string{}
-			for _, a := range node.Attr {
-				attrs[strings.ToLower(a.Key)] = a.Val
-			}
-			candidate := ""
-			if node.Data == "meta" && strings.EqualFold(attrs["name"], "citation_pdf_url") {
-				candidate = attrs["content"]
-			}
-			if node.Data == "a" && strings.Contains(strings.ToLower(attrs["href"]), ".pdf") {
-				candidate = attrs["href"]
-			}
-			if candidate != "" {
-				if u, e := url.Parse(candidate); e == nil {
-					resolved := base.ResolveReference(u)
-					if (resolved.Scheme == "http" || resolved.Scheme == "https") && resolved.User == nil && !seen[resolved.String()] && len(links) < 5 {
-						seen[resolved.String()] = true
-						links = append(links, resolved.String())
-					}
-				}
-			}
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			visit(child)
-		}
-	}
-	visit(document)
-	return links, nil
+	return publicLandingPDFURLs(data, base, doi, true)
 }
+
 func readExternalCopies(ctx context.Context, user string, source paperSource, content orm.AcademicPaperContent, originals *doc.OriginalService) ([]ContentPage, string, string, string, error) {
 	acquisition := paperContentAcquisition(content.QualityJSON)
 	acquisition.StartedAt = time.Now().UTC()
@@ -180,7 +145,7 @@ func readExternalCopies(ctx context.Context, user string, source paperSource, co
 		if index >= len(candidates) && !webSearched {
 			webSearched = true
 			started := time.Now()
-			_, leads, err := externalPaperSearch(runCtx, user, "web", "\""+source.Paper.Title+"\" paper PDF", 5)
+			leads, err := searchPublicPDFs(runCtx, user, source.Paper.Title)
 			attempt := contentAttempt{Status: "web_search", ElapsedMS: time.Since(started).Milliseconds()}
 			if err != nil {
 				attempt.Status, attempt.Error = "search_failed", err.Error()
@@ -217,7 +182,7 @@ func readExternalCopies(ctx context.Context, user string, source paperSource, co
 		seen[candidate.SourceType+":"+candidate.URL] = true
 		started := time.Now()
 		if candidate.SourceType == "reference_page" {
-			links, err := publicPagePDFs(runCtx, user, candidate.URL)
+			links, err := publicPagePDFs(runCtx, user, candidate.URL, source.Paper.DOI)
 			attempt := contentAttempt{URL: candidate.URL, Status: "page_read", ElapsedMS: time.Since(started).Milliseconds()}
 			if err != nil {
 				attempt.Status, attempt.Error = "page_failed", err.Error()

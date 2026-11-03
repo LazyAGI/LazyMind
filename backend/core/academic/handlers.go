@@ -1402,6 +1402,32 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 // Shared identities only gain missing metadata; document-specific corrections
 // live in AcademicDocumentState and never overwrite another file's metadata.
 func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, in WorkInput) error {
+	// Provider identities may acquire strong identifiers on a later lookup.
+	// Never attach an identifier already owned by another scholarly work.
+	doi := NormalizeDOI(in.DOI)
+	arxiv, _ := NormalizeArxivID(in.ArxivID)
+	identifiers := map[string]any{}
+	for _, identity := range []struct{ column, incoming, current string }{
+		{"doi_normalized", doi, row.DOINormalized}, {"arxiv_id_base", arxiv, row.ArxivIDBase},
+	} {
+		if identity.incoming == "" {
+			continue
+		}
+		if identity.current != "" && identity.current != identity.incoming {
+			return errConflictingPaperIdentifiers
+		}
+		if identity.current != "" {
+			continue
+		}
+		var owners int64
+		if err := tx.WithContext(ctx).Model(&orm.AcademicWork{}).Where(identity.column+"=? AND id<>?", identity.incoming, row.ID).Count(&owners).Error; err != nil {
+			return err
+		}
+		if owners > 0 {
+			return errConflictingPaperIdentifiers
+		}
+		identifiers[identity.column] = identity.incoming
+	}
 	if in.Provider != "" && in.ProviderWorkID != "" {
 		ids := map[string]string{}
 		_ = json.Unmarshal(row.ExternalIDsJSON, &ids)
@@ -1411,7 +1437,13 @@ func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, 
 			return err
 		}
 	}
-	updates := map[string]any{}
+	updates := identifiers
+	if value, ok := identifiers["doi_normalized"]; ok {
+		row.DOINormalized = value.(string)
+	}
+	if value, ok := identifiers["arxiv_id_base"]; ok {
+		row.ArxivIDBase = value.(string)
+	}
 	var provenance map[string]any
 	_ = json.Unmarshal(row.ProvenanceJSON, &provenance)
 	if provenance == nil {

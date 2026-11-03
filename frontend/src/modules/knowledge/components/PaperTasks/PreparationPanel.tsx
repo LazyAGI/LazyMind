@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState, type ChangeEvent } from 'react';
 import { Alert, Button, Input, Spin, Steps, Tag, Typography } from 'antd';
-import { ArrowRightOutlined, BellOutlined, ExportOutlined, FileTextOutlined, LockOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined, ExportOutlined, FileTextOutlined, LockOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { confirmExpansion, submitPreparation, type Expansion, type ExpansionDetail, type ExpansionPreparation, type PaperRef } from '../../api/paperWorkflows';
 import { safePaperUrl } from '../../paper/model';
 import MarkdownViewer from '../MarkdownViewer';
 import { researchDepthLabels } from './ResearchDepth';
 
-const expansionStages = ['candidate_set', 'relation_analysis', 'expansion_result'] as const;
+const expansionStages = ['candidate_set', 'relation_analysis'] as const;
 
 export function expansionProgressStages(record: Expansion) {
   const candidate = record.progress?.candidate_set;
@@ -16,7 +16,7 @@ export function expansionProgressStages(record: Expansion) {
     || (!candidate && record.status !== 'completed' && record.goal === 'expansion' && ['balanced', 'deep'].includes(record.budget_mode || ''));
   if (split) {
     return record.budget_mode === 'deep'
-      ? ['candidate_set', 'screened_candidates', 'relation_analysis', 'expansion_result'] as const
+      ? ['candidate_set', 'screened_candidates', 'relation_analysis'] as const
       : ['candidate_set', 'screened_candidates'] as const;
   }
   return record.preparation?.skipped || mode === 'fast' || mode === 'balanced' || record.report?.list_mode
@@ -79,8 +79,8 @@ function DirectionEvidence({ direction }: { direction: ExpansionPreparation['dir
   </div>;
 }
 
-export default function PreparationPanel({ detail, onRefresh, onStart, embedded = false }: {
-  detail: ExpansionDetail; onRefresh: () => Promise<void>; onStart: (conversation: string) => void; embedded?: boolean;
+export default function PreparationPanel({ detail, onRefresh, onStart }: {
+  detail: ExpansionDetail; onRefresh: () => Promise<void>; onStart: (conversation: string) => void;
 }) {
   const { t } = useTranslation();
   const record = detail.record;
@@ -131,14 +131,10 @@ export default function PreparationPanel({ detail, onRefresh, onStart, embedded 
   };
   if (!preparation) return null;
   const pending = ['preparing', 'awaiting_info', 'awaiting_confirmation', 'preparation_failed'].includes(record.status);
-  const running = ['pending', 'running', 'active'].includes(record.status);
-  const compact = embedded && !pending;
+  const compact = !pending;
   const choices = preparation.directions || [];
   const confirmed = preparation.selected_directions || [];
   const summaryPreview = preparation.summary?.split('\n').find(line => line.trim() && !/^#{1,6}\s/.test(line)) || preparation.summary;
-  const stages = expansionProgressStages(record);
-  const stageDone = (index: number) => record.status === 'completed' || (index < stages.length - 1 && !!record.progress?.[stages[index]]);
-  const currentStage = stages.findIndex((_, index) => !stageDone(index));
   const preparationPhase = record.status === 'completed' ? 3 : record.status === 'awaiting_confirmation' ? 1 : pending ? 0 : 2;
   const confirmedChoices = choices.filter(direction => confirmed.includes(direction.name));
   const visibleChoices = compact && !directionsExpanded ? confirmedChoices.slice(0, 1) : confirmedChoices;
@@ -184,15 +180,6 @@ export default function PreparationPanel({ detail, onRefresh, onStart, embedded 
         <DirectionEvidence direction={direction} />
       </article>)}</div>
     </>}
-    {running && !compact && preparation.auto_confirmed && <Alert className="paper-preparation-auto" type="info" showIcon icon={<ArrowRightOutlined />} message={review ? t('paperTasks.reviewFlow.autoConfirmed') : '仅有一个研究方向，已自动继续拓展'} description="初步调研已完成，无需再次选择或确认。" />}
-    {!pending && !compact && confirmedDirections}
-    {running && !embedded && <>
-      <div className="paper-preparation-section-heading"><h3>{review ? t('paperTasks.reviewFlow.stage.read') : '拓展进展'}</h3><span>{record.status === 'pending' ? '等待开始' : '后台执行中'}</span></div>
-      <ol className="paper-preparation-progress">{stages.map((slot, index) => <li key={slot} data-status={stageDone(index) ? 'done' : record.status !== 'pending' && index === currentStage ? 'running' : 'pending'}>
-        <span className="paper-preparation-progress-index">{index + 1}</span><span>{t(`paperTasks.stage.${record.goal === 'expansion' && record.budget_mode === 'deep' && slot === 'relation_analysis' ? 'deep_analysis' : slot}`)}</span><span className="paper-preparation-progress-status">{stageDone(index) ? '已完成' : record.status !== 'pending' && index === currentStage ? '进行中' : '待开始'}</span>
-      </li>)}</ol>
-      <div className="paper-preparation-running-footer"><span><BellOutlined />需要你处理或完成时会通知你。</span>{detail.chat_status === 'available' && <Button onClick={() => onStart(record.conversation_id)}>{review ? t('paperTasks.reviewFlow.openChat') : '打开拓展会话'}</Button>}</div>
-    </>}
     {record.status === 'preparation_failed' && <Button loading={busy} onClick={() => void perform('retry')}>在原记录中重试初步调研</Button>}
     {['awaiting_confirmation', 'preparation_failed'].includes(record.status) && <details className="paper-preparation-adjust"><summary>调整研究范围</summary><div>
       <Input.TextArea aria-label="调整研究范围" placeholder="补充你更关心的问题，系统会先完成补充调研。" autoSize={{ minRows: 3, maxRows: 8 }} value={instruction} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInstruction(event.target.value)} />
@@ -203,5 +190,5 @@ export default function PreparationPanel({ detail, onRefresh, onStart, embedded 
       <Button aria-label={review ? t('paperTasks.reviewFlow.confirmButton') : '确认方向并开始拓展'} type="primary" loading={busy} disabled={!selected.length || !!instruction.trim()} onClick={() => void perform('confirm')}>{review ? t('paperTasks.reviewFlow.confirmButton') : '确认并开始拓展'}<ArrowRightOutlined /></Button>
     </footer>}
   </section>;
-  return embedded || pending || running ? content : <details className="paper-preparation-history"><summary>初步调研与方向确认</summary>{content}</details>;
+  return content;
 }

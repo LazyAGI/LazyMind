@@ -9,6 +9,7 @@ from typing import Literal
 from typing_extensions import NotRequired, TypedDict
 from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.workflow.workflow_manager import _client
+from lazymind.chat.service.academic_reading import academic_request, paper_read_payload, reading_observation
 
 
 class PaperAnalysis(TypedDict):
@@ -232,20 +233,7 @@ def _call(method, path, payload=None):
             return {'status': 'stage_timeout'}
         # A bounded final metadata read still permits saving the partial checked result.
         timeout = min(timeout, remaining if remaining > 0 else 5)
-    api = _client()
-    response = api.transport.request(method, api.base_url + '/academic' + path,
-                                     headers=api._headers(), json=payload, timeout=timeout)
-    import httpx
-    from lazyllm.tools.agent import ToolExecutionError
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        if response.status_code not in {400, 422}:
-            raise
-        error = response.json()
-        raise ToolExecutionError(f"{error['code']}: {error['message']}") from exc
-    data = response.json()
-    return data.get('data', data)
+    return academic_request(_client(), method, path, payload=payload, timeout=timeout)
 
 
 def _read_expansion_context(expansion_id):
@@ -279,13 +267,6 @@ def academic_expansion_context(expansion_id: str):
                             'paper_id', 'title', 'doi', 'arxiv_id', 'published_at', 'source_version_date',
                             'source_provider', 'source_version', 'year'} or (screening and key == 'abstract')}}
                        for row in candidate['papers']]}
-    elif ctx.params.get('step_id') == 'compose_result':
-        relation = _result_body(_bound('relation_analysis'))
-        bound_paper_ids.update(row['paper']['paper_id'] for row in relation['input']['papers'])
-        bound_inputs['relation_analysis'] = {
-            'analysis_version': relation['analysis_version'], 'research_complete': relation['research_complete'],
-            'completion': relation['completion'], 'paper_count': len(relation['input']['papers']),
-            'claim_count': len(relation['claims']), 'relation_count': len(relation['relations'])}
     if bound_inputs:
         full['bound_inputs'] = bound_inputs
     if ctx.params.get('step_id') == 'analyze_relations' and getattr(ctx, 'execution_deadline', None) is not None:
@@ -308,7 +289,7 @@ def academic_expansion_context(expansion_id: str):
     record['preparation']['directions'] = [
         {key: value for key, value in direction.items() if key != 'papers'}
         for direction in preparation.get('directions', [])]
-    record['report'] = {'limitations': (full['record'].get('report') or {}).get('limitations', [])}
+    record.pop('report', None)
     paper_ids = {entry['paper']['paper_id'] for entry in result['papers']} | bound_paper_ids
     return {
         'record': record, 'research_guidance': full.get('research_guidance', ''),
@@ -358,39 +339,11 @@ def academic_read_paper(expansion_id: str, paper_id: str = '', cursor: str = '',
     positions are zero-based block positions, not PDF page numbers. References do not count as full-text reading.
     max_results bounds each response (content 1..5, default 5; references 1..20, default 5).
     """
-    from lazyllm.tools.agent import ToolExecutionError
-
     _check_expansion(expansion_id)
-    if cursor:
-        if paper_id or keywords or page_start or page_end or positions or reference_keys or max_results:
-            raise ToolExecutionError('Use only expansion_id and the exact returned next_cursor to continue. '
-                                     'For a different paper or explicit positions, omit cursor; '
-                                     'never supply a placeholder cursor.')
-        payload = {'expansion_id': expansion_id, 'cursor': cursor}
-    else:
-        maximum = 20 if view == 'references' else 5
-        if max_results < 0 or max_results > maximum:
-            raise ToolExecutionError(f'max_results must be 1..{maximum}, or omitted for the default')
-        payload = {'expansion_id': expansion_id, 'paper_id': paper_id, 'view': view}
-        if view == 'references':
-            payload.update(keywords=keywords or [], reference_keys=reference_keys or [], max_results=max_results or 5)
-        else:
-            payload.update(keywords=keywords or [], page_start=page_start, page_end=page_end,
-                           max_results=max_results or 5)
-            if positions:
-                payload['positions'] = positions
-    value = _call('POST', '/paper-contents:read', payload)
-    if value.get('status') == 'stage_timeout':
-        return value
-    # Keep prompt space for original evidence, with its text and anchors intact.
-    # Long repeated author lists belong to the canonical metadata, not each reading observation.
-    identity_fields = {'paper_id', 'title', 'doi', 'arxiv_id', 'year', 'published_at', 'source_version_date',
-                       'source_provider', 'source_version', 'source_ref'}
-    value['paper'] = {key: data for key, data in value['paper'].items() if key in identity_fields}
-    for reference in value.get('references', []):
-        if reference.get('paper'):
-            reference['paper'] = {key: data for key, data in reference['paper'].items() if key in identity_fields}
-    return value
+    payload = paper_read_payload(
+        paper_id, cursor, view=view, keywords=keywords, page_start=page_start, page_end=page_end,
+        positions=positions, reference_keys=reference_keys, max_results=max_results)
+    return reading_observation(_call('POST', '/paper-contents:read', {**payload, 'expansion_id': expansion_id}))
 
 
 def _check_expansion(expansion_id):
@@ -450,7 +403,7 @@ def academic_validate_result(result: dict):
         for field in ('seed_relation', 'direction_relation', 'key_contribution'):
             if field in item and not isinstance(item[field], str):
                 raise ValueError(field + ' must be a plain description string, never an object or array; '
-                                 'rewrite this field and retry compose_result')
+                                 'rewrite this field and retry the publication')
     return {'status': 'valid'}
 
 
@@ -527,7 +480,7 @@ def _publish_once(key, result, tool):
             value = _result_body(value.get('data', value))
             previous, incoming = copy.deepcopy(value), copy.deepcopy(result)
             for item in (previous, incoming):
-                for field in ('metrics', 'compose_metrics', 'stage_metrics', 'preparation_metrics'):
+                for field in ('metrics', 'stage_metrics', 'preparation_metrics'):
                     item.pop(field, None)
             if previous != incoming:
                 _invalid(key + ': this attempt already published a different result; retry the step to revise it')
@@ -1006,22 +959,12 @@ def _verify_claims(claims, allowed, checkpoint=None, relation_order=None):
     return evidence
 
 
-def academic_publish_expansion_result(analysis_version: str, limitations: list[str]):
-    """Publish frozen checked findings. Always pass limitations=[]; free-form report additions are not accepted."""
-    from lazymind.chat.engine.subagent.context import require_context
-    if require_context().params.get('step_id') != 'compose_result':
-        raise RuntimeError('academic_publish_expansion_result is only available in compose_result')
-    relation = _result_body(_bound('relation_analysis'))
-    if not relation.get('analysis_version') or analysis_version != relation['analysis_version']:
-        _invalid('analysis_version must match the bound checked relation analysis')
-    if not isinstance(limitations, list) or limitations:
-        _invalid('limitations must be []; report boundaries come from the frozen checked analysis')
-    result, current_contents = _canonical_input(relation['input'])
-    if _source_versions(current_contents) != relation['source_versions']:
-        _invalid('source content changed after analysis; rerun relationship checking before composing the report')
+def _publish_checked_report(relation):
+    """Project the final report from the same receipt as the submitted analysis."""
+    result = relation['input']
     context = _read_expansion_context(_expansion_id())
-    report = {'narrative': _checked_report_narrative(relation), 'limitations': [],
-              'input': copy.deepcopy(relation['input']), 'analysis_version': analysis_version,
+    report = {'narrative': _checked_report_narrative(relation),
+              'input': copy.deepcopy(relation['input']), 'analysis_version': relation['analysis_version'],
               'research_structure': relation['research_structure'], 'relations': relation['relations'],
               'selection': relation.get('selection', {'before_count': len(result['papers']), 'changes': []}),
               'claims': relation.get('claims', []), 'reading': relation.get('reading', {}),
@@ -1030,13 +973,13 @@ def academic_publish_expansion_result(analysis_version: str, limitations: list[s
               'research_complete': relation.get('research_complete', False),
               'completion': copy.deepcopy(relation['completion']),
               'preparation_metrics': context['record'].get('preparation', {}).get('metrics', {}),
-              'stage_metrics': relation.get('metrics', {}), 'compose_metrics': _model_metrics(),
+              'stage_metrics': relation.get('metrics', {}),
               'currency_cost': None}
     if relation.get('list_mode') == 'deep':
         report['recommendations'] = relation['recommendations']
     academic_validate_result(result)
-    _publish_once('expansion_result', result, 'academic_publish_expansion_result')
-    return _publish_once('expansion_report', report, 'academic_publish_expansion_result')
+    _publish_once('expansion_result', result, 'academic_submit_relations')
+    return _publish_once('expansion_report', report, 'academic_submit_relations')
 
 
 def _model_metrics():
@@ -1789,7 +1732,8 @@ def _submit_checked_relations(check_id):
     resolved = _resolve([row['paper']['paper_id'] for row in relation['input']['papers']])
     if _source_versions(resolved['contents']) != relation['source_versions']:
         _invalid('source content changed since checking; check the revised material before submission')
-    return _publish_once('relation_analysis', relation, 'academic_submit_relations')
+    _publish_once('relation_analysis', relation, 'academic_submit_relations')
+    return _publish_checked_report(relation)
 
 
 def _checked_report_narrative(relation):

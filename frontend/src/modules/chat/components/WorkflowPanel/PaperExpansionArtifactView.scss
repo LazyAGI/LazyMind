@@ -84,10 +84,6 @@
   .ant-tag { margin: 0; }
   p { margin: 10px 0 0; }
 }
-.paper-workflow-coverage { margin: 0 0 12px; padding: 10px 14px; background: var(--color-fill-quaternary); color: var(--color-text-secondary); border-left: 2px solid var(--color-primary-border); font-size: 12px; }
-.paper-workflow-aux-error { flex: none; font-size: 12px; color: var(--color-text-secondary); padding: 6px 0;
-  button { margin-left: 8px; border: 0; background: transparent; color: var(--color-primary); cursor: pointer; }
-}
 @container paper-scope (max-width: 420px) { .paper-workflow-directions { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) {
   .workflow-slot--paper-expansion { padding: 12px 12px 0; }

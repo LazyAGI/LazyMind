@@ -545,8 +545,6 @@
 
 .paper-library-status { width: 82px; border-radius: 5px; background: #f5f7fa; }
 .paper-library-status:hover, .paper-library-status.ant-select-focused { background: #edf2fa; }
-.paper-library-status--read .ant-select-selection-item { color: #527568; }
-.paper-library-status--reading .ant-select-selection-item { color: #2858b8; }
 
 .paper-directory-tree .ant-tree-indent-unit { width: 14px; }
 .paper-directory-tree .ant-tree-node-content-wrapper.ant-tree-node-selected { font-weight: 600; box-shadow: inset 2px 0 var(--blue); }

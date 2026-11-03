@@ -1,10 +1,11 @@
 """Research preparation over the shared AgentExecutor, bounded by rounds and tool calls."""
 from __future__ import annotations
 
+from lazymind.chat.service.academic_reading import academic_request, paper_read_payload, reading_observation
+
 import json
 import time
 
-import httpx
 import lazyllm
 from lazyllm import AutoModel
 from lazyllm.tools.agent import ToolExecutionError
@@ -144,27 +145,14 @@ def run_preparation(payload: dict) -> dict:
         calls = 0
         registered_ids = {row['paper']['paper_id'] for row in payload['input'].get('papers', [])}
         read_sources = {}
-        read_cursors = {}
 
         def call(path, data):
             nonlocal calls
             data['expansion_id'] = expansion_id
             data['preparation_revision'] = payload['revision']
-            response = client.transport.request(
-                'POST', client.base_url + '/academic' + path,
-                headers=client._headers(), json=data,
-                timeout=90,
-            )
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                if response.status_code not in {400, 422}:
-                    raise
-                error = response.json()
-                raise ToolExecutionError(f"{error['code']}: {error['message']}") from exc
-            value = response.json()
+            value = academic_request(client, 'POST', path, payload=data)
             calls += 1
-            return value.get('data', value)
+            return value
 
         def remember_read(value):
             identity = (value['paper']['paper_id'], value['source_version'])
@@ -176,22 +164,7 @@ def run_preparation(payload: dict) -> dict:
             else:
                 source['blocks'].update({position: page['text']
                                          for position, page in zip(value['positions'], value['pages'])})
-            if value.get('next_cursor'):
-                read_cursors[value['next_cursor']] = value['paper']['paper_id']
-
-            # Long author lists and repeated abstracts can exceed the tool-result
-            # budget before even one original page reaches the model.
-            def identity(paper):
-                return {key: paper[key] for key in (
-                    'paper_id', 'title', 'doi', 'arxiv_id', 'year', 'published_at', 'source_version_date',
-                    'source_provider', 'source_version', 'source_ref') if key in paper}
-
-            material = {**value, 'paper': identity(value['paper'])}
-            if value.get('view') == 'references':
-                material['references'] = [
-                    {**row, 'paper': identity(row['paper'])} if row.get('paper') else row
-                    for row in value['references']]
-            return material
+            return reading_observation(value)
 
         @fc_register(host_file='NONE')
         def search_papers(query: str = '', sources: list[str] | None = None, max_results: int = 5,
@@ -223,34 +196,10 @@ def run_preparation(payload: dict) -> dict:
                 max_results: Desired maximum results. Preparation returns at most two original content
                     blocks or five reference entries per response; zero uses these limits. Continue via next_cursor.
             """
-            if view not in ('content', 'references'):
-                raise ToolExecutionError('view must be content or references')
-            if cursor:
-                conflicts = [name for name, value in (
-                    ('keywords', keywords), ('page_start', page_start), ('page_end', page_end),
-                    ('positions', positions), ('reference_keys', reference_keys), ('max_results', max_results)) if value]
-                if paper_id and read_cursors.get(cursor) != paper_id:
-                    conflicts.insert(0, 'paper_id')
-                if conflicts:
-                    raise ToolExecutionError('Continue reading with only its cursor; omit these conflicting fields: '
-                                             + ', '.join(conflicts))
-                return remember_read(call('/paper-contents:read', {'cursor': cursor}))
-            if not paper_id:
-                raise ToolExecutionError('paper_id is required without a cursor')
-            if view == 'references' and (page_start or page_end or positions):
-                raise ToolExecutionError('Reference view does not accept content page selectors')
-            if view == 'content' and reference_keys:
-                raise ToolExecutionError('Content view does not accept reference selectors')
-            batch_limit = 2 if view == 'content' else 5
-            data = {
-                'paper_id': paper_id, 'view': view, 'keywords': keywords or [],
-                'page_start': page_start, 'page_end': page_end,
-                'max_results': min(max_results or batch_limit, batch_limit),
-            }
-            if positions:
-                data['positions'] = positions
-            if view == 'references':
-                data['reference_keys'] = reference_keys or []
+            data = paper_read_payload(
+                paper_id, cursor, view=view, keywords=keywords, page_start=page_start, page_end=page_end,
+                positions=positions, reference_keys=reference_keys, max_results=max_results,
+                content_limit=2, reference_limit=5)
             return remember_read(call('/paper-contents:read', data))
 
         @fc_register(host_file='NONE')

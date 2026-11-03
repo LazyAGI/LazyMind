@@ -862,7 +862,10 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			continue
 		}
 		var step orm.WorkflowSessionStep
-		q := db.Where("session_id=? AND step_id=? AND status='succeeded'", session.ID, finalStep)
+		// Artifacts carry the producer from the session's frozen workflow definition.
+		// New research publishes directly from analysis; existing sessions retain their own terminal step.
+		producerStep := firstNonEmpty(artifact.StepID, finalStep)
+		q := db.Where("session_id=? AND step_id=? AND status='succeeded'", session.ID, producerStep)
 		if !completedSnapshot {
 			q = q.Where("validity='effective'")
 		}

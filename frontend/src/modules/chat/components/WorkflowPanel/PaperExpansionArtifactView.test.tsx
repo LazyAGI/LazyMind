@@ -16,7 +16,7 @@ const input = { user_instruction: '研究工具使用', candidate_directions: ['
 const slot = (name: string, data: unknown): SlotRevision => ({ slot_id: name, slot: name, selected: true, revision: 1, revision_count: 1, created_at: '', content_type: 'json', artifact_value: { data } });
 function show(revision: SlotRevision, slots = [revision], workflowId = 'paper_expansion') {
   const session: WorkflowSession = { session_id: 'paper-session', conversation_id: 'paper-chat', workflow_id: workflowId,
-    workflow_mode: 'auto', status: 'completed', current_step_id: 'compose_result', created_at: '', updated_at: '', slots };
+    workflow_mode: 'auto', status: 'completed', current_step_id: 'analyze_relations', created_at: '', updated_at: '', slots };
   return render(<SlotRenderer slot={revision} slotId={revision.slot} sessionId='paper-session' workflowSession={session}
     widget={{ widgetType: 'json-block', readOnly: true }} revisionCount={1} />);
 }
@@ -62,13 +62,6 @@ it('uses saved selection changes rather than the currently selected upstream lis
   expect(screen.getByText('Original abstract')).not.toBeVisible();
 });
 
-it('keeps older selection artifacts readable without inventing changes', async () => {
-  show(slot('relation_analysis', { input }));
-  expect(await screen.findByText('此版本未记录筛选变更，可查看完整论文列表。')).toBeVisible();
-  fireEvent.click(screen.getByText(/完整论文列表/ , { selector: 'summary' }));
-  fireEvent.click(screen.getByText('Toolformer'));
-  expect(screen.getByText('Original abstract')).toBeVisible();
-});
 
 it('shows the frozen relationship network before the report, with pending relationships and evidence access', async () => {
   const report = slot('expansion_report', { input, narrative: '研究正文', analysis_version: 'v2', reading_order: ['paper-a'],
@@ -106,7 +99,7 @@ it('keeps candidate lists compact while allowing every saved paper to be opened'
 });
 
 it('summarizes actual relationship verification timeouts without exposing investigation gaps', async () => {
-  show(slot('expansion_report', { input, narrative: '研究正文', coverage_gaps: [{ reason: '不展示的内部缺口' }], relations: [{
+  show(slot('expansion_report', { analysis_version: 'checked', input, narrative: '研究正文', coverage_gaps: [{ reason: '不展示的内部缺口' }], relations: [{
     id: 'timeout', source_paper_id: 'paper-a', target_paper_id: 'paper-b', relation_type: 'mechanism_comparison', statement: '未完成核验的关系', evidence: [],
     verification: { status: 'uncertain', verification_error: 'stage_timeout' },
   }] }));
@@ -114,26 +107,10 @@ it('summarizes actual relationship verification timeouts without exposing invest
   expect(screen.queryByText('不展示的内部缺口')).not.toBeInTheDocument();
 });
 
-it('keeps mismatched report paper metadata readable without leaking another version’s scientific analysis', async () => {
-  const oldInput = { ...input, papers: [{ ...papers[0], key_contribution: '旧版本贡献不得显示', direction_relation: '旧版本方向关系不得显示', seed_relation: '旧版本起始关系不得显示' }, papers[1]] };
-  const report = slot('expansion_report', { narrative: '新版研究报告', analysis_version: 'new' });
-  show(report, [report, slot('relation_analysis', { input: oldInput, analysis_version: 'old' }), slot('expansion_result', oldInput)]);
-  expect(await screen.findByRole('alert')).toBeVisible();
-  const list = screen.getByText(/完整论文列表/, { selector: 'summary' }).closest('details')!;
-  fireEvent.click(within(list).getByText(/完整论文列表/));
-  fireEvent.click(within(list).getByText('Toolformer'));
-  expect(within(list).getByText('Original abstract')).toBeVisible();
-  expect(screen.queryByText('旧版本贡献不得显示')).not.toBeInTheDocument();
-  expect(screen.queryByText('旧版本方向关系不得显示')).not.toBeInTheDocument();
-  expect(screen.queryByText('旧版本起始关系不得显示')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '查看论文：Toolformer' }));
-  expect(within(screen.getByLabelText('论文详情')).getByText('Original abstract')).toBeVisible();
-  expect(screen.queryByText('旧版本贡献不得显示')).not.toBeInTheDocument();
-});
 
 it('excludes unsupported relationships from the graph while preserving their evidence and count', async () => {
   const relation = (id: string, status: string) => ({ id, source_paper_id: 'paper-a', target_paper_id: 'paper-b', relation_type: 'mechanism_comparison', statement: `${id}关系声明`, evidence: [], verification: { status, scope_status: status } });
-  show(slot('expansion_report', { input, narrative: '研究正文', relations: [relation('verified', 'supported'), relation('pending', 'uncertain'), relation('unsupported', 'unsupported')] }));
+  show(slot('expansion_report', { analysis_version: 'checked', input, narrative: '研究正文', relations: [relation('verified', 'supported'), relation('pending', 'uncertain'), relation('unsupported', 'unsupported')] }));
   expect(await screen.findByLabelText('关系图')).toHaveAttribute('data-edges', 'verified,pending');
   expect(screen.getByText(/证据不支持.*1/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '查看论文：Toolformer' }));

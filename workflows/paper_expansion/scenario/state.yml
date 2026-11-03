@@ -8,8 +8,6 @@ transitions:
   screen_and_supplement:
   - to: analyze_relations
   analyze_relations:
-  - to: compose_result
-  compose_result:
   - to: __end__
 steps:
   expand_and_screen:
@@ -139,7 +137,7 @@ steps:
 
       最多3轮语义检查，共用本步骤截止；技术重试不增加语义轮次，不提高并发或改低思考策略。依据剩余执行预算安排针对性补查和核验，优先解决核心命名来源与可读原文缺口，不把剩余时间耗在重复整包生成。保持未变且已成功核验的结果，新增其他证据不意味着要重写成功内容。
 
-      仅在 can_submit=true 且读完反馈并完成预算内必要补查后调用academic_submit_relations(check_id=最新ID)。除上述允许提交的 budget_exhausted 或有限补核验后仍 technical_failure 收尾外，有科学预算且还有可补查待办时，submit的可恢复错误要求回到补读/检索/修正/核验；不得反复原样提交。仅真实预算耗尽或明确材料障碍时，按工具允许保留部分成果及准确原因，不把技术完成说成研究完整。筛选补充阶段发布自己的全集、方向归属和核验关系，报告阶段只消费同一版本。
+      仅在 can_submit=true 且读完反馈并完成预算内必要补查后调用academic_submit_relations(check_id=最新ID)。除上述允许提交的 budget_exhausted 或有限补核验后仍 technical_failure 收尾外，有科学预算且还有可补查待办时，submit的可恢复错误要求回到补读/检索/修正/核验；不得反复原样提交。仅真实预算耗尽或明确材料障碍时，按工具允许保留部分成果及准确原因，不把技术完成说成研究完整。提交工具从同一核验记录直接发布关系分析、最终论文清单与研究报告，不再调用模型改写报告。
 
 
       不得因只有摘要、全文缺失、核验失败或超时、节省工作量或缩减篇数而删除候选；保持论文并如实标记证据状态。保留全部种子。analyses 的论文 ID 就是最终全集；每个相对于绑定 candidate_set 新增或移除的
@@ -177,37 +175,8 @@ steps:
     outputs:
     - material: relation_analysis
       required: true
-    acceptance_criteria: 保持已确认范围和全部用户种子；事实对应真实版本、已读位置与核验结果；完整读取反馈并针对缺口补查；有预算且可补查时不得终止，仅真实预算耗尽或明确材料障碍允许保留部分成果；不得自动入库。
-  compose_result:
-    skip_if: {any: [{material: expansion_list_ready}, {material: screened_list_ready}]}
-    label: 研究报告与论文关系
-    prompt: '{{runtime_instruction}}
-
-      只消费绑定 relation_analysis 的同一 analysis_version。保持冻结的论文全集、已确认方向、研究问题及核验关系；本阶段不检索、不补查、不改论文集合，不生成阅读计划或阅读顺序。
-
-      报告正文由发布工具从事实与适用范围均获支持的关系及其必要条件生成。不得另外编写科学断言、Mermaid 图、优劣排序或推断新的关系；调查备注不能作为核验事实。
-
-      调用 academic_publish_expansion_result(analysis_version=绑定版本,limitations=[]) 发布研究报告与论文关系。limitations 始终传空数组 []，不添加自由文字；报告边界由冻结的 conditions、verification 和 completion 表达。不展示内部检索过程、调查待办或缺口清单。发布后简短说明完成并提供原拓展记录链接。
-
-
-      大 JSON 绑定通过现有 path transport 提供；先用 academic_expansion_context 读取 bound_inputs 中的冻结候选目录或分析版本摘要。完整元数据与证据保留在绑定文件中，按需用现有文件读取/搜索工具查看；包工具直接消费完整冻结文件，不手工重抄或用可变上游替换绑定。expansion_id
-      始终是原标量值。
-
-      '
-    tools:
-    - academic_expansion_context
-    - academic_publish_expansion_result
-    terminal_tools:
-    - academic_publish_expansion_result
-    inputs:
-    - material: expansion_id
-      required: true
-    - material: relation_analysis
-      required: true
-      transport: path
-    outputs:
     - material: expansion_result
       required: true
     - material: expansion_report
       required: true
-    acceptance_criteria: 保持已确认范围、全部用户种子和实际来源；证据对应真实内容版本及读取范围；异常保留，局部成果可用；不得自动入库。
+    acceptance_criteria: 保持已确认范围和全部用户种子；事实对应真实版本、已读位置与核验结果；完整读取反馈并针对缺口补查；有预算且可补查时不得终止，仅真实预算耗尽或明确材料障碍允许保留部分成果；不得自动入库。

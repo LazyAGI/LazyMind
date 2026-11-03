@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { PaperRecommendation, PaperSelectionChanges, PaperRelation, PaperResearchStructure, WorkflowPaper } from '@/modules/knowledge/api/paperWorkflows';
 import MarkdownViewer from '../MarkdownViewer';
 import PaperLineageView from './PaperLineageView';
-import { paperReportNarrative, paperReportSections, visiblePaperAnalysis } from './paperReport';
+import { paperReportSections, visiblePaperAnalysis } from './paperReport';
 import './PaperExpansionArtifactView.scss';
 
 const paperSlots = new Set(['candidate_set', 'screened_candidates', 'relation_analysis', 'expansion_result', 'expansion_report']);
@@ -32,7 +32,9 @@ function papersIn(value: unknown): WorkflowPaper[] | null {
 export function canDisplayPaperExpansion(slotId: string, value: unknown): boolean {
   const data = parsePaperExpansionArtifact(value);
   if (!data) return false;
-  if (slotId === 'expansion_report') return typeof data.narrative === 'string';
+  if (slotId === 'expansion_report') return typeof data.narrative === 'string' && papersIn(data.input) !== null
+    && typeof data.analysis_version === 'string' && Array.isArray(data.relations);
+  if (slotId === 'relation_analysis' && !record(data.selection)) return false;
   const input = slotId === 'relation_analysis' ? record(data.input) : data;
   return isPaperExpansionSlot(slotId) && typeof input?.user_instruction === 'string' && papersIn(input) !== null;
 }
@@ -99,31 +101,23 @@ function PaperList({ papers, analysis = false, reading, recommendations }: {
 }
 
 /** Render only the saved artifact for this stage; selection changes are bound at publication. */
-export function PaperExpansionArtifactView({ slotId, data, result, relationAnalysis, resultUnavailable = false }: {
-  slotId: string; data: RecordValue; result?: unknown; relationAnalysis?: unknown; resultUnavailable?: boolean;
+export function PaperExpansionArtifactView({ slotId, data }: {
+  slotId: string; data: RecordValue;
 }) {
   const { t } = useTranslation();
   const tr = (key: string) => t(`paperTasks.workflowResult.${key}`);
   const [showAllCandidates, setShowAllCandidates] = useState(false);
   const isReport = slotId === 'expansion_report';
   const isAnalysis = slotId === 'relation_analysis';
-  const frozen = isReport && (record(data.input) || Array.isArray(data.relations)) ? data : record(relationAnalysis);
-  const mismatch = Boolean(isReport && frozen && data.analysis_version && frozen.analysis_version !== data.analysis_version);
-  const matching = mismatch ? null : frozen;
-  const input = isAnalysis ? record(data.input) : isReport ? record(matching?.input) || record(result) : data;
-  // A legacy report may need current paper metadata, but its scientific fields
-  // are valid only when carried by the report or its matching analysis.
-  const metadataOnly = isReport && papersIn(matching?.input) === null;
-  const papers = useMemo(() => [...new Map((papersIn(input) ?? []).map(item => [item.paper.paper_id, metadataOnly
-    ? { paper: item.paper, is_seed: item.is_seed, is_important: item.is_important }
-    : item])).values()], [input, metadataOnly]);
+  const input = isAnalysis || isReport ? record(data.input) : data;
+  const papers = useMemo(() => [...new Map((papersIn(input) ?? []).map(item => [item.paper.paper_id, item])).values()], [input]);
   const seeds = papers.filter(item => item.is_seed);
   const candidates = papers.filter(item => !item.is_seed);
-  const structure = matching?.research_structure as PaperResearchStructure | undefined;
-  const savedRelations = matching?.relations;
+  const structure = data.research_structure as PaperResearchStructure | undefined;
+  const savedRelations = data.relations;
   const relations = useMemo(() => (Array.isArray(savedRelations) ? savedRelations : []) as PaperRelation[], [savedRelations]);
-  const reading = data.reading || matching?.reading;
-  const narrative = useMemo(() => paperReportNarrative(text(data.narrative)), [data.narrative]);
+  const reading = data.reading;
+  const narrative = useMemo(() => text(data.narrative), [data.narrative]);
   const sections = useMemo(() => paperReportSections(narrative), [narrative]);
   const selection = record(data.selection) as unknown as PaperSelectionChanges | null;
   const additions = selection?.changes.filter(change => change.action === 'added') ?? [];
@@ -138,28 +132,25 @@ export function PaperExpansionArtifactView({ slotId, data, result, relationAnaly
   const grouped = directions.map(direction => {
     const group = candidates.filter(item => recommendations.get(item.paper.paper_id)?.direction === direction);
     return <Section key={direction} title={direction} aside={count(group.length)}>
-      <PaperList papers={group} recommendations={recommendations} analysis={isReport && !mismatch} reading={reading} />
+      <PaperList papers={group} recommendations={recommendations} analysis={isReport} reading={reading} />
     </Section>;
   });
-  const seedList = !!seeds.length && <Section title={tr('seedPapers')} aside={count(seeds.length)}><PaperList papers={seeds} analysis={isReport && !mismatch} reading={reading} /></Section>;
+  const seedList = !!seeds.length && <Section title={tr('seedPapers')} aside={count(seeds.length)}><PaperList papers={seeds} analysis={isReport} reading={reading} /></Section>;
   const finalList = <details className='paper-workflow-notes'><summary>{tr('finalPapers')} · {count(papers.length)}<DownOutlined aria-hidden /></summary>
     {isReport && Array.isArray(data.recommendations) ? <>{seedList}{grouped}</> :
-      <PaperList papers={papers} analysis={!mismatch} reading={reading} recommendations={recommendations} />}</details>;
+      <PaperList papers={papers} analysis reading={reading} recommendations={recommendations} />}</details>;
   return <div className='paper-workflow-result'><div className='paper-workflow-scroll'>
     {isReport ? <>
-      {mismatch && <p role='alert' className='paper-workflow-coverage'>{tr('analysisVersionMismatch')}</p>}
       <Section title={tr('relationGraph')}>
         <PaperLineageView papers={papers} structure={structure} relations={relations}
-          renderDetail={item => <PaperDetail item={item} analysis={!mismatch} reading={reading} />} />
-        {resultUnavailable && <p className='paper-workflow-muted'>{tr('resultUnavailable')}</p>}
+          renderDetail={item => <PaperDetail item={item} analysis reading={reading} />} />
       </Section>
       <Section title={tr('narrative')}>{sections.length ? sections.map((section, index) => section.title ? <details className='paper-workflow-report-direction' key={section.title} open={index === 0}><summary>{section.title}<RightOutlined aria-hidden /></summary><MarkdownViewer>{section.body}</MarkdownViewer></details> : <MarkdownViewer key='preface'>{section.body}</MarkdownViewer>) : <MarkdownViewer>{narrative}</MarkdownViewer>}</Section>
       {finalList}
     </> : isAnalysis ? <>
-      {data.list_mode !== 'deep' && <Section title={tr('selectionChanges')} aside={selection ? t('paperTasks.workflowResult.selectionSummary', {
+      {data.list_mode !== 'deep' && selection && <Section title={tr('selectionChanges')} aside={t('paperTasks.workflowResult.selectionSummary', {
         before: selection.before_count, retained: selection.before_count - removals.length, added: additions.length, removed: removals.length,
-      }) : undefined}>
-        {selection ? <>
+      })}>
           {additions.length ? additions.map(change => <div key={change.paper.paper.paper_id} className='paper-workflow-change'>
             <Tag color='blue' bordered={false}>{tr('addedPaper')}</Tag><p>{change.reason}</p>
             <PaperList papers={[change.paper]} analysis reading={reading} />
@@ -167,7 +158,6 @@ export function PaperExpansionArtifactView({ slotId, data, result, relationAnaly
           {!!removals.length && <details className='paper-workflow-notes'><summary>{t('paperTasks.workflowResult.removedPapers', { count: removals.length })}<DownOutlined aria-hidden /></summary>
             {removals.map(change => <div className='paper-workflow-change' key={change.paper.paper.paper_id}><PaperTitle item={change.paper} /><p>{change.reason}</p></div>)}
           </details>}
-        </> : <p className='paper-workflow-muted'>{tr('selectionUnavailable')}</p>}
       </Section>}
       {finalList}
     </> : listMode === 'fast' || listMode === 'balanced' || listMode === 'deep' ? <>

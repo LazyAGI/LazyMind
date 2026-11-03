@@ -632,7 +632,7 @@ func TestPaperExpansionEndsAtThePublishedList(t *testing.T) {
 	fast.Materials = append(append([]MaterialValue(nil), snapshot.Materials...),
 		MaterialValue{MaterialID: "screening_not_required", RevisionID: "skip", Valid: true},
 		MaterialValue{MaterialID: "expansion_list_ready", RevisionID: "list", Valid: true})
-	if projected := Project(compiled.Graph, fast); !projected.Completed || len(projected.Bypassed) != 3 {
+	if projected := Project(compiled.Graph, fast); !projected.Completed || len(projected.Bypassed) != 2 {
 		t.Fatalf("fast should finish at search: %#v", projected)
 	}
 	review := fast
@@ -653,9 +653,18 @@ func TestPaperExpansionEndsAtThePublishedList(t *testing.T) {
 	if deep.Completed || !reflect.DeepEqual(deep.Ready, []string{"analyze_relations"}) {
 		t.Fatalf("deep should continue from screening to analysis: %#v", deep)
 	}
+	completed := snapshot
+	completed.Attempts = append(append([]AttemptFact(nil), snapshot.Attempts...), AttemptFact{StepID: "analyze_relations", Status: "succeeded", Validity: "effective"})
+	completed.Materials = append([]MaterialValue(nil), snapshot.Materials...)
+	for _, slot := range []string{"relation_analysis", "expansion_result", "expansion_report"} {
+		completed.Materials = append(completed.Materials, MaterialValue{MaterialID: slot, RevisionID: slot, Valid: true})
+	}
+	if result := Project(compiled.Graph, completed); !result.Completed || len(result.Ready) != 0 {
+		t.Fatalf("checked analysis must publish the final report and finish: %#v", result)
+	}
 	snapshot.Materials = append(snapshot.Materials, MaterialValue{MaterialID: "screened_list_ready", RevisionID: "list", Valid: true})
 	standard := Project(compiled.Graph, snapshot)
-	if !standard.Completed || len(standard.Bypassed) != 2 || len(standard.Ready) != 0 {
+	if !standard.Completed || len(standard.Bypassed) != 1 || len(standard.Ready) != 0 {
 		t.Fatalf("standard should finish at screening: %#v", standard)
 	}
 }

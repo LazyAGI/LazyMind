@@ -6,7 +6,7 @@ export function paperRelationStatus(relation: PaperRelation): 'verified' | 'pend
   const verification = relation.verification;
   if (verification.verification_error) return verification.verification_error === 'stage_timeout' ? 'timeout' : 'error';
   if (verification.status === 'supported' && verification.scope_status === 'supported') return 'verified';
-  if (verification.status === 'unsupported' || verification.scope_status === 'unsupported') return 'unsupported';
+  if (verification.status === 'unsupported') return 'unsupported';
   return 'pending';
 }
 export const verifiedPaperRelations = (relations: PaperRelation[]) => relations.filter(relation => paperRelationStatus(relation) === 'verified');
@@ -28,8 +28,5 @@ export function paperGraphTitle(title: string): string {
   const explicitAcronym = title.match(/\(([A-Z][A-Z0-9-]{1,14})\)/)?.[1];
   if (explicitAcronym) return explicitAcronym;
   const separator = title.search(/[:：]/);
-  if (/^You Only Cache Once\b/i.test(title)) return 'YOCO';
-  if (/^You Only Index Once\b/i.test(title)) return 'YOIO';
-  if (/\bCross-Layer Attention\b/i.test(title)) return 'CLA';
   return separator > 0 && separator <= 42 ? title.slice(0, separator).trim() : title;
 }

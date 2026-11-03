@@ -1,4 +1,5 @@
 import copy
+import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,13 +10,18 @@ from lazymind.chat.engine.subagent import context, tools
 from lazymind.workflow_toolkit import load_workflow_package_tools
 
 
+def _artifact(events, slot='relation_analysis'):
+    value = next(event['value'] for event in reversed(events) if event.get('slot') == slot)
+    return json.loads(Path(value['path']).read_text()) if 'path' in value else value['data']
+
+
 @pytest.fixture
 def lineage(tmp_path, monkeypatch, request):
     from lazymind.config import config
     previous_workspace = config['agentic_workspace']
     config['agentic_workspace'] = str(tmp_path / 'shared')
     request.addfinalizer(lambda: config.__setitem__('agentic_workspace', previous_workspace))
-    names = ['academic_check_relations', 'academic_submit_relations', 'academic_publish_expansion_result']
+    names = ['academic_check_relations', 'academic_submit_relations']
     path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
     functions = load_workflow_package_tools({'files': {'scripts/tools.py': path.read_bytes()}}, names,
                                             'paper_expansion', 'lineage-test')
@@ -163,16 +169,13 @@ def test_deep_report_reuses_frozen_recommendations_and_prepared_questions(lineag
     checked = module.academic_check_relations(**args)
     assert checked['can_submit']
     module.academic_submit_relations(check_id=checked['check_id'])
-    analysis = events[-1]['value']['data']
+    analysis = _artifact(events)
     assert analysis['recommendations'] == recommendations
     assert analysis['investigation'][0]['question'] == 'predecessor?'
     assert [row['paper_id'] for row in analysis['research_structure']['nodes']] == ['b', 'c']
 
-    ctx.params['step_id'] = 'compose_result'
-    ctx.params['remote_inputs']['relation_analysis'] = analysis
-    module.academic_publish_expansion_result(analysis_version=analysis['analysis_version'], limitations=[])
-    assert events[-1]['value']['data']['recommendations'] == recommendations
-    assert [row['paper']['paper_id'] for row in events[-1]['value']['data']['input']['papers']] == ['a', 'b', 'c']
+    assert _artifact(events)['recommendations'] == recommendations
+    assert [row['paper']['paper_id'] for row in _artifact(events)['input']['papers']] == ['a', 'b', 'c']
 
 
 def test_check_repair_and_submit_binds_only_latest_text_and_reuses_unchanged_checks(lineage, monkeypatch):
@@ -211,11 +214,11 @@ def test_check_repair_and_submit_binds_only_latest_text_and_reuses_unchanged_che
     with pytest.raises(ToolExecutionError, match='latest'):
         module.academic_submit_relations(check_id=first['check_id'])
     module.academic_submit_relations(check_id=second['check_id'])
-    relation = events[-1]['value']['data']
+    relation = _artifact(events)
     assert relation['analysis_version'] == second['check_id']
     assert relation['relations'][0]['statement'].endswith('decoder components')
     assert module.academic_submit_relations(check_id=second['check_id'])['already_published']
-    assert len(events) == 1
+    assert len(events) == 3
 
 
 def test_technical_retry_reuses_successes_and_does_not_consume_semantic_revision(lineage, monkeypatch):
@@ -306,7 +309,7 @@ def test_interrupted_verification_resumes_completed_batches_in_a_new_task(lineag
     assert {row[0] for row in requests} == {'b-c', 'a-b'}
     assert module._lineage_state()[1]['deadline_at'] == first_state['deadline_at']
     module.academic_submit_relations(check_id=checked['check_id'])
-    assert sum(event['type'] == 'artifact' for event in events) == 1
+    assert sum(event['type'] == 'artifact' for event in events) == 3
 
 
 @pytest.mark.parametrize('first_valid_delay,hard_timeout', [(480, 1800), (1500, 1800), (480, None)])
@@ -465,20 +468,9 @@ def test_report_projects_only_checked_facts(lineage, monkeypatch):
     monkeypatch.setattr(module, '_verify_claims', lambda rows, allowed, **kwargs: [_supported(row) for row in rows])
     checked = module.academic_check_relations(**args)
     module.academic_submit_relations(check_id=checked['check_id'])
-    relation = events[-1]['value']['data']
-    ctx.params['step_id'] = 'compose_result'
-    ctx.params['remote_inputs']['relation_analysis'] = relation
-    with pytest.raises(ToolExecutionError, match='analysis_version'):
-        module.academic_publish_expansion_result(analysis_version='older', limitations=[])
-    before_publish = copy.deepcopy(events)
-    with pytest.raises(ToolExecutionError, match=r'limitations must be \[\]'):
-        module.academic_publish_expansion_result(
-            analysis_version=relation['analysis_version'], limitations=['All 17 relations were verified.'])
-    assert events == before_publish
-    module.academic_publish_expansion_result(
-        analysis_version=relation['analysis_version'], limitations=[])
-    report = events[-1]['value']['data']
-    assert report['limitations'] == []
+    relation = _artifact(events)
+    report = _artifact(events, 'expansion_report')
+    assert _artifact(events, 'expansion_result') == relation['input']
     assert report['input'] == relation['input']
     assert report['reading'] == relation['reading']
     assert report['relations'] == relation['relations']
@@ -569,15 +561,10 @@ def test_runtime_source_changes_do_not_consume_semantic_checks_and_report_reject
     versions['b']['content_hash'] = 'newer-b'
     second = module.academic_check_relations(**args)
     assert second['semantic_round'] == first['semantic_round'] == 1
-    module.academic_submit_relations(check_id=second['check_id'])
-    relation = events[-1]['value']['data']
-    ctx.params['step_id'] = 'compose_result'
-    ctx.params['remote_inputs']['relation_analysis'] = relation
     versions['b']['content_hash'] = 'replaced-again'
-    with pytest.raises(ToolExecutionError, match='content changed after analysis'):
-        module.academic_publish_expansion_result(analysis_version=relation['analysis_version'],
-                                                 limitations=[])
-    assert len(events) == 1
+    with pytest.raises(ToolExecutionError, match='source content changed since checking'):
+        module.academic_submit_relations(check_id=second['check_id'])
+    assert not events
 
 
 def test_revised_conclusion_keeps_cached_seed_evidence(lineage, monkeypatch):
@@ -642,7 +629,7 @@ def test_unhandled_named_clue_requires_actual_stopping_reason_before_partial_sub
     assert all(row['status'] == 'supported' for row in checked['checks'])
     assert module._lineage_state()[1]['minimum_seed_context'] == previous_proof
     module.academic_submit_relations(check_id=checked['check_id'])
-    assert events[-1]['value']['data']['coverage_gaps'] == checked['coverage_gaps']
+    assert _artifact(events)['coverage_gaps'] == checked['coverage_gaps']
 
 
 def test_clue_resolution_requires_a_retained_identity_and_supported_original_source_role(lineage, monkeypatch):
@@ -726,7 +713,7 @@ def test_selection_changes_require_exact_reasons_and_preserve_bound_removed_meta
     ctx.execution_deadline = time.monotonic() - 1
     checked = module.academic_check_relations(**args)
     module.academic_submit_relations(check_id=checked['check_id'])
-    relation = events[-1]['value']['data']
+    relation = _artifact(events)
     assert relation['selection'] == {'before_count': 3, 'changes': [{
         'action': 'removed', 'paper': baseline['papers'][2],
         'reason': 'This paper concerns a different research object.'}]}
@@ -766,7 +753,7 @@ def test_report_requires_supported_scope_as_well_as_supported_fact(lineage, monk
     monkeypatch.setattr(module, '_verify_claims', lambda rows, allowed, **kwargs: [_supported(row) for row in rows])
     checked = module.academic_check_relations(**args)
     module.academic_submit_relations(check_id=checked['check_id'])
-    relation = events[-1]['value']['data']
+    relation = _artifact(events)
     assert 'Different sharing scopes' in module._checked_report_narrative(relation)
     relation['relations'][0]['verification']['scope_status'] = 'uncertain'
     narrative = module._checked_report_narrative(relation)
@@ -807,7 +794,7 @@ def test_published_selection_added_paper_has_workflow_paper_json_shape(lineage, 
         {'paper_id': 'c', 'reason': 'Different research object.'}]
     checked = module.academic_check_relations(**args)
     module.academic_submit_relations(check_id=checked['check_id'])
-    receipt = events[-1]['value']['data']
+    receipt = _artifact(events)
     added_change = next(row for row in receipt['selection']['changes'] if row['action'] == 'added')
     removed_change = next(row for row in receipt['selection']['changes'] if row['action'] == 'removed')
     assert added_change == {'action': 'added', 'paper': added, 'reason': 'Original design used by the seed.'}
@@ -842,13 +829,10 @@ def test_checked_completion_is_frozen_in_published_analysis_and_report(lineage, 
     expected = {'status': 'complete' if stopping_reason == 'verified' else 'incomplete', 'reason': stopping_reason}
     assert checked['completion'] == expected and checked['can_submit']
     module.academic_submit_relations(check_id=checked['check_id'])
-    relation = events[-1]['value']['data']
+    relation = _artifact(events)
     assert relation['completion'] == expected
     assert relation['analysis_version'] == checked['analysis_version']
-    ctx.params['step_id'] = 'compose_result'
-    ctx.params['remote_inputs']['relation_analysis'] = relation
-    module.academic_publish_expansion_result(analysis_version=relation['analysis_version'], limitations=[])
-    report = events[-1]['value']['data']
+    report = _artifact(events, 'expansion_report')
     assert report['completion'] == relation['completion']
     assert report['research_complete'] == relation['research_complete']
     assert report['coverage_gaps'] == relation['coverage_gaps']
@@ -908,7 +892,7 @@ def test_real_research_quotas_allow_partial_submission_only_when_both_routes_are
     assert second['completion'] == {'status': 'incomplete', 'reason': 'budget_exhausted'}
     assert first['tool_call_budget'][second_tool]['remaining'] == 1
     module.academic_submit_relations(check_id=second['check_id'])
-    receipt = events[-1]['value']['data']
+    receipt = _artifact(events)
     assert receipt['completion'] == second['completion']
     assert receipt['tool_call_budget'] == second['tool_call_budget']
 
@@ -956,7 +940,7 @@ async def test_large_frozen_inputs_use_existing_path_transport_through_context_c
         'agent_type': 'workflow_step', 'workflow_workspace_path': ctx.workspace_path}})
 
     async def bind(material):
-        step = 'analyze_relations' if material == 'candidate_set' else 'compose_result'
+        step = 'analyze_relations'
         inputs = state['steps'][step]['inputs']
         contract = {'declared_input_types': {row['material']: slot_types[row['material']] for row in inputs},
                     'declared_input_transports': {row['material']: row.get('transport', 'auto') for row in inputs},
@@ -992,21 +976,9 @@ async def test_large_frozen_inputs_use_existing_path_transport_through_context_c
     monkeypatch.setattr(module, '_verify_claims', lambda rows, allowed, **kwargs: [_supported(row) for row in rows])
     checked = module.academic_check_relations(**args)
     module.academic_submit_relations(check_id=checked['check_id'])
-    relation = module._result_body(events[-1]['value'])
+    relation = _artifact(events)
     assert relation['input']['papers'][0]['paper']['abstract'] == candidate['papers'][0]['paper']['abstract']
-    payloads['relation_analysis'] = relation
-    ctx.params['step_id'] = 'compose_result'
-    await bind('relation_analysis')
-    visible = module.academic_expansion_context('exp')
-    assert visible['bound_inputs']['relation_analysis'] == {
-        'analysis_version': relation['analysis_version'], 'research_complete': relation['research_complete'],
-        'completion': relation['completion'], 'paper_count': 3, 'claim_count': 3, 'relation_count': 2}
-    assert visible['record']['result'] == seed_record
-    assert 'full_context_resource' in visible
-    assert {row['paper_id']: row['status'] for row in visible['contents']} == {
-        'a': 'ready', 'b': 'ready', 'c': 'ready'}
-    module.academic_publish_expansion_result(analysis_version=relation['analysis_version'], limitations=[])
-    report = module._result_body(events[-1]['value'])
+    report = _artifact(events, 'expansion_report')
     assert report['input'] == relation['input']
     assert report['relations'] == relation['relations']
     assert report['analysis_version'] == relation['analysis_version']
@@ -1219,7 +1191,7 @@ def test_expired_unverified_seed_context_returns_safe_partial_without_reusing_ol
         assert all(row['status'] == 'supported' for row in state['cache'].values())
     assert clock['monotonic'] < ctx.execution_deadline
     module.academic_submit_relations(check_id=checked['check_id'])
-    assert events[-1]['value']['data']['completion'] == checked['completion']
+    assert _artifact(events)['completion'] == checked['completion']
 
 
 def test_baseline_relations_follow_investigation_topics_without_changing_primary_membership(lineage, monkeypatch):
@@ -1249,14 +1221,11 @@ def test_baseline_relations_follow_investigation_topics_without_changing_primary
     checked = module.academic_check_relations(**args)
     assert checked['complete'] and not checked['coverage_gaps']
     module.academic_submit_relations(check_id=checked['check_id'])
-    relation = events[-1]['value']['data']
+    relation = _artifact(events)
     assert relation['research_structure'] == args['research_structure']
     assert next(row for row in relation['research_structure']['nodes'] if row['paper_id'] == 'b')[
         'direction_id'] == 'method'
-    ctx.params['step_id'] = 'compose_result'
-    ctx.params['remote_inputs']['relation_analysis'] = relation
-    module.academic_publish_expansion_result(analysis_version=relation['analysis_version'], limitations=[])
-    report = events[-1]['value']['data']
+    report = _artifact(events, 'expansion_report')
     method_text, storage_text = report['narrative'].split('## storage', 1)
     assert baseline['statement'] not in method_text and comparison['statement'] not in method_text
     assert baseline['statement'] in storage_text and baseline['conditions'] in storage_text

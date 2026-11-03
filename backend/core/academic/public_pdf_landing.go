@@ -43,36 +43,53 @@ func probePublicPDFCandidate(ctx context.Context, client *http.Client, candidate
 }
 
 func publicLandingPDFURL(body []byte, base *url.URL, doi string) (string, error) {
-	tree, err := html.Parse(bytes.NewReader(body))
+	links, err := publicLandingPDFURLs(body, base, doi, false)
 	if err != nil {
 		return "", err
 	}
-	address := ""
+	if len(links) == 0 {
+		return "", fmt.Errorf("论文页面未提供可用 PDF 地址")
+	}
+	return links[0], nil
+}
+
+// Import probes accept publisher metadata; research can additionally inspect
+// ordinary PDF links, whose downloaded bodies still require identity validation.
+func publicLandingPDFURLs(body []byte, base *url.URL, doi string, includeLinks bool) ([]string, error) {
+	tree, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	links := []string{}
+	seen := map[string]bool{}
 	mismatch := false
 	var visit func(*html.Node)
 	visit = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "meta" {
-			name, value := "", ""
+		if n.Type == html.ElementNode && (n.Data == "meta" || includeLinks && n.Data == "a") {
+			attrs := map[string]string{}
 			for _, a := range n.Attr {
-				if a.Key == "name" || a.Key == "property" {
-					name = strings.ToLower(a.Val)
-				}
-				if a.Key == "content" {
-					value = strings.TrimSpace(a.Val)
-				}
+				attrs[strings.ToLower(a.Key)] = strings.TrimSpace(a.Val)
 			}
-			if name == "citation_doi" || name == "dc.identifier.doi" {
-				if NormalizeDOI(value) != "" && NormalizeDOI(value) != NormalizeDOI(doi) {
+			name := strings.ToLower(firstNonEmpty(attrs["name"], attrs["property"]))
+			if n.Data == "meta" && (name == "citation_doi" || name == "dc.identifier.doi") {
+				if found := NormalizeDOI(attrs["content"]); doi != "" && found != "" && found != NormalizeDOI(doi) {
 					mismatch = true
 				}
 			}
-			if name == "citation_pdf_url" && address == "" {
-				u, e := url.Parse(value)
-				if e == nil {
+			address := ""
+			if n.Data == "meta" && name == "citation_pdf_url" {
+				address = attrs["content"]
+			}
+			if n.Data == "a" && strings.Contains(strings.ToLower(attrs["href"]), ".pdf") {
+				address = attrs["href"]
+			}
+			if address != "" {
+				if u, err := url.Parse(address); err == nil {
 					u = base.ResolveReference(u)
 					u.Fragment = ""
-					if zoteroAllowedURL(u, false) {
-						address = u.String()
+					if zoteroAllowedURL(u, false) && !seen[u.String()] && len(links) < 5 {
+						seen[u.String()] = true
+						links = append(links, u.String())
 					}
 				}
 			}
@@ -83,10 +100,7 @@ func publicLandingPDFURL(body []byte, base *url.URL, doi string) (string, error)
 	}
 	visit(tree)
 	if mismatch {
-		return "", fmt.Errorf("论文页面 DOI 与目标文献不一致")
+		return nil, fmt.Errorf("论文页面 DOI 与目标文献不一致")
 	}
-	if address == "" {
-		return "", fmt.Errorf("论文页面未提供可用 PDF 地址")
-	}
-	return address, nil
+	return links, nil
 }

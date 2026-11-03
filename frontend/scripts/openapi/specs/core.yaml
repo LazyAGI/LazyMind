@@ -669,41 +669,6 @@ components:
                     type: array
                 completion:
                     $ref: '#/components/schemas/AcademicResearchCompletion'
-                compose_metrics:
-                    properties:
-                        currency_cost:
-                            nullable: true
-                            type: number
-                        model:
-                            type: string
-                        provider_usage_records:
-                            items:
-                                properties: {}
-                                type: object
-                            type: array
-                        verification:
-                            properties:
-                                batches:
-                                    items:
-                                        properties: {}
-                                        type: object
-                                    type: array
-                                completed_fields:
-                                    type: integer
-                                elapsed_seconds:
-                                    type: number
-                                failed_fields:
-                                    type: integer
-                                model_calls:
-                                    type: integer
-                                reused_fields:
-                                    type: integer
-                                semantic_rounds:
-                                    type: integer
-                                submitted_fields:
-                                    type: integer
-                            type: object
-                    type: object
                 coverage_gaps:
                     items:
                         $ref: '#/components/schemas/AcademicCoverageGap'
@@ -719,10 +684,6 @@ components:
                 investigation:
                     items:
                         $ref: '#/components/schemas/AcademicInvestigation'
-                    type: array
-                limitations:
-                    items:
-                        type: string
                     type: array
                 list_mode:
                     enum:
@@ -888,6 +849,9 @@ components:
                                         type: string
                                 type: object
                             type: array
+                    required:
+                        - directions
+                        - nodes
                     type: object
                 result_projection_delay_ms:
                     format: int64
@@ -1683,6 +1647,9 @@ components:
                                         type: string
                                 type: object
                             type: array
+                    required:
+                        - directions
+                        - nodes
                     type: object
                 selection:
                     $ref: '#/components/schemas/AcademicPaperSelection'

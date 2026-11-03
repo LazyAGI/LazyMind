@@ -318,3 +318,36 @@ func TestDiscoveryNormalizesArxivDOIAliasesAndRetainsConflictingOwners(t *testin
 		t.Fatal("conflicting work was changed", err)
 	}
 }
+
+func TestProviderIdentityAcquiresStrongIdentifiersWithoutDuplicatingWorks(t *testing.T) {
+	db := paperFixture(t)
+	input := WorkInput{Title: "Provider identity", Provider: "openalex", ProviderWorkID: "W-later-doi"}
+	first, _, err := findOrCreateWork(t.Context(), db.DB, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.DOI, input.ArxivID = "10.1234/later", "2401.12345"
+	enriched, _, err := findOrCreateWork(t.Context(), db.DB, input)
+	if err != nil || enriched.ID != first.ID || enriched.DOINormalized != input.DOI || enriched.ArxivIDBase != input.ArxivID {
+		t.Fatalf("%+v %v", enriched, err)
+	}
+	byDOI, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{DOI: input.DOI})
+	if err != nil || byDOI.ID != first.ID {
+		t.Fatalf("duplicate identity: %+v %v", byDOI, err)
+	}
+	other, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{DOI: "10.1234/other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlinked, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{Title: "Other provider hit", Provider: "openalex", ProviderWorkID: "W-conflict"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = findOrCreateWork(t.Context(), db.DB, WorkInput{Provider: "openalex", ProviderWorkID: "W-conflict", DOI: other.DOINormalized})
+	if !errors.Is(err, errConflictingPaperIdentifiers) {
+		t.Fatalf("conflicting owner accepted: %v", err)
+	}
+	if err := db.First(&unlinked, "id=?", unlinked.ID).Error; err != nil || unlinked.DOINormalized != "" {
+		t.Fatalf("conflict mutated original: %+v %v", unlinked, err)
+	}
+}

@@ -1,3 +1,4 @@
+import type { AcademicExpansionReportRecommendationsInner, AcademicExpansionReportRelationsInner, AcademicExpansionReportResearchStructure, AcademicPaperSelection, AcademicResearchCompletion } from '@/api/generated/core-client/api';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import type { ImportPreviewItem } from './academicReferences';
 const core = `${BASE_URL}/api/core/academic`;
@@ -37,20 +38,9 @@ export interface ReviewWorkflowInput extends PaperInvestigation {
   papers: WorkflowPaper[];
 }
 export type BudgetMode = 'fast' | 'balanced' | 'deep';
-export interface PaperRecommendation {
- paper_id: string;
- reason: string;
- direction?: string;
-}
-export interface PaperResearchStructure {
- directions: Array<{ id: string; name: string; question: string }>;
- nodes: Array<{ paper_id: string; direction_id: string; branch_question?: string; reason?: string }>;
-}
-export interface PaperRelation {
- id: string; source_paper_id: string; target_paper_id: string; relation_type: string; statement: string; conditions?: string;
- evidence: Array<{ paper_id: string; positions: number[]; content_hash?: string; source_version?: string }>;
- verification: { status: string; scope_status?: string; reason?: string; scope_reason?: string; verification_error?: string };
-}
+export type PaperRecommendation = AcademicExpansionReportRecommendationsInner;
+export type PaperResearchStructure = AcademicExpansionReportResearchStructure;
+export type PaperRelation = AcademicExpansionReportRelationsInner;
 export interface PaperInvestigation {
  research_questions?: Array<{ id: string; direction: string; question: string; category: string }>;
  named_clues?: Array<{
@@ -71,13 +61,10 @@ export interface PaperInvestigation {
   }>;
  }>;
  research_complete?: boolean;
- completion?: { status: 'complete' | 'incomplete'; reason: 'verified' | 'budget_exhausted' | 'material_limited' | 'technical_failure' };
+ completion?: AcademicResearchCompletion;
  coverage_gaps?: Array<{ direction: string; kind: string; question_id?: string; clue_name?: string; reason?: string }>;
 }
-export interface PaperSelectionChanges {
- before_count: number;
- changes: Array<{ action: 'added' | 'removed'; paper: WorkflowPaper; reason: string }>;
-}
+export type PaperSelectionChanges = AcademicPaperSelection;
 export interface PaperRelationAnalysis extends PaperInvestigation {
  selection?: PaperSelectionChanges;
  input: ReviewWorkflowInput; research_structure?: PaperResearchStructure; relations?: PaperRelation[];
@@ -90,7 +77,7 @@ export interface ExpansionReport extends PaperInvestigation {
  input?: ReviewWorkflowInput;
  research_structure?: PaperResearchStructure; relations?: PaperRelation[];
  analysis_version?: string;
- narrative?: string; limitations?: string[];
+ narrative?: string;
  claims?: Array<{ paper_id: string; statement: string; status: string; reason: string; content_hash: string; positions: number[] }>;
  reading?: Record<string, { read_level: string; positions: number[]; pages: number[]; total_blocks: number }>;
  currency_cost?: number | null;
@@ -98,7 +85,6 @@ export interface ExpansionReport extends PaperInvestigation {
  result_projection_delay_ms?: number;
  stage_timing?: Array<{step_id: string; attempt: number; status: string; queue_and_execution_ms: number}>;
  stage_metrics?: Record<string, {model?: string; provider_usage_records?: unknown[]}>;
- compose_metrics?: {model?: string; provider_usage_records?: unknown[]};
  source_queries?: Array<{query: string; sources?: Array<{source: string; status: string; count: number; elapsed_ms: number}>}>;
  preparation_attempts?: Array<{revision: number; model: string; metrics?: unknown}>;
 }

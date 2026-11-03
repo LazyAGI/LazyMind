@@ -265,31 +265,6 @@ def test_ambiguous_verification_checks_stay_uncertain_and_record_diagnostics(pub
     assert all(item['verification_error'] == 'invalid_model_output' for item in checked)
 
 
-def test_relationship_verification_keeps_seed_and_own_sources_per_field(publisher, monkeypatch):
-    module, ctx, _, _ = publisher
-    ctx.params['remote_inputs']['candidate_set']['papers'][0]['is_seed'] = True
-    from lazymind.chat.service import llm_task
-    monkeypatch.setattr(module, '_expansion_id', lambda: 'exp')
-    monkeypatch.setattr(module, '_call', lambda method, path, payload: {
-        'status': 'ready', 'positions': [0], 'pages': [{'page': 1, 'text': payload['paper_id']}],
-        'content_hash': 'hash-' + payload['paper_id'],
-    })
-    requests = []
-
-    def verify(request, usage, validate_output, **kwargs):
-        requests.append(request)
-        assert len(request.input.data['evidence']) == 1
-        identity = request.input.data['evidence'][0]['paper_id']
-        assert {page['paper_id'] for page in request.input.data['source_pages_by_key'].values()} == {'a', identity}
-        return validate_output(_verification_output(request)), None, None
-
-    monkeypatch.setattr(llm_task, '_run_task', verify)
-    claims = [{'paper_id': paper, 'field': 'seed_relation',
-               'statement': 'Relationship across both papers.', 'positions': [0]}
-              for paper in ['a', 'b']]
-    assert all(row['status'] == 'supported' for row in module._verify_claims(claims, ['a', 'b']))
-    assert len(requests) == 2
-
 
 def test_verification_covers_all_analysis_fields_in_larger_paper_sets(publisher, monkeypatch):
     module, _, _, _ = publisher
@@ -611,7 +586,7 @@ def test_large_history_keeps_all_current_papers_visible_and_preserves_full_snaps
         key: value for key, value in full['source_queries'][0].items() if key != 'sources'}
     assert query['sources'] == [{'source': 'arxiv', 'status': 'rate_limited', 'retry_at': '2026-11-03',
                                  'count': 1, 'has_more': True}]
-    assert visible['record']['report']['limitations'] == ['partial reading']
+    assert 'report' not in visible['record']
     assert estimate_tokens(json.dumps(visible, ensure_ascii=False)) < 28000
     path = Path(ctx.workspace_path) / visible['full_context_resource'].removeprefix('workspace://')
     assert json.loads(path.read_text()) == {**full, 'bound_inputs': visible['bound_inputs']}
@@ -642,6 +617,8 @@ def test_single_field_requests_preserve_complete_shared_seed_pages(publisher, mo
 
     def verify(request, prompt, **kwargs):
         calls.append(request)
+        identity = request.input.data['evidence'][0]['paper_id']
+        assert {page['paper_id'] for page in request.input.data['source_pages_by_key'].values()} == {'a', identity}
         return _verification_output(request)
 
     monkeypatch.setattr(llm_task, '_call_model', verify)

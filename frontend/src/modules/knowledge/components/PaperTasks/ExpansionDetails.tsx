@@ -44,7 +44,7 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
                 <Typography.Text type="secondary">{t('paperTasks.overview.confirmedDirections')}</Typography.Text>
                 {directions.map(direction => <Typography.Paragraph key={direction}>{direction}</Typography.Paragraph>)}
             </div>}
-            {!record.preparation?.skipped && <PreparationPanel embedded detail={detail} onRefresh={onRefresh} onStart={onStart} />}
+            {!record.preparation?.skipped && <PreparationPanel detail={detail} onRefresh={onRefresh} onStart={onStart} />}
             {record.result.user_instruction && record.result.user_instruction !== originalInstruction && <details className="paper-expansion-current-request">
                 <summary>{t('paperTasks.currentRequest')}</summary>
                 <Typography.Paragraph>{record.result.user_instruction}</Typography.Paragraph>

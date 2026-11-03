@@ -185,7 +185,25 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			origins[r.ItemID] = r.PaperImportBatch
 		}
 	}
-	metadataSources, err := automaticMetadata(db, dataset, entries)
+	metadataDocuments := []documentSource{}
+	for _, primary := range []bool{true, false} {
+		for _, member := range members {
+			if member.Kind != "pdf" || member.IsPrimary != primary {
+				continue
+			}
+			if _, exists := docByID[member.DocumentID]; !exists {
+				continue
+			}
+			link, state := linkByID[member.DocumentID], stateByID[member.DocumentID]
+			metadataDocuments = append(metadataDocuments, documentSource{
+				PaperID: member.PaperID, DocumentID: member.DocumentID,
+				LinkedWorkID: link.AcademicWorkID, StateWorkID: state.PaperID,
+				Kind: state.Kind, Status: state.Status, MetadataJSON: orm.RawJSON(state.MetadataJSON),
+				SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion,
+			})
+		}
+	}
+	metadataSources, err := metadataFromSources(db, dataset, entries, metadataDocuments)
 	if err != nil {
 		return view, err
 	}
