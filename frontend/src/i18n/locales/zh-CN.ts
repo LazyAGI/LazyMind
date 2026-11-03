@@ -10567,8 +10567,6 @@ const zhCN = {
       "directionSelection": "研究方向",
       "allDirections": "默认全选",
       "yourChoice": "人工选择",
-      "allDirectionsHint": "调研完成后，按全部方向自动继续。",
-      "manualDirectionsHint": "调研完成后，等待你选择方向并确认继续。",
       "preparingAll": "你可以离开此页面，调研完成后会按全部方向自动继续；需要补充信息时会通知你。",
       "preparingManual": "你可以离开此页面，调研完成后会通知你选择方向并确认继续。",
       "steps": {"research": "初步调研", "chooseDirection": "确定研究方向", "search": "检索与拓展", "screen": "筛选与补充", "analyze": "关系分析与证据核验"},

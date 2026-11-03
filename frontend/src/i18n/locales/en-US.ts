@@ -10824,8 +10824,6 @@ const enUS = {
       "directionSelection": "Research directions",
       "allDirections": "Select all by default",
       "yourChoice": "Choose manually",
-      "allDirectionsHint": "Continue automatically with all directions after initial research.",
-      "manualDirectionsHint": "Wait for you to choose directions and confirm after initial research.",
       "preparingAll": "You can leave this page. Research will continue with all directions; you will be notified if more information is needed.",
       "preparingManual": "You can leave this page. You will be notified to choose directions and confirm after initial research.",
       "steps": {"research": "Preliminary research", "chooseDirection": "Confirm research directions", "search": "Search and expansion", "screen": "Screening and follow-up", "analyze": "Relationship analysis and evidence verification"},

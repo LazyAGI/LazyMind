@@ -202,27 +202,27 @@ describe('paper task startup routes', () => {
         mount(['a']);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
-        fireEvent.click(screen.getByRole('radio', { name: /深入/ }));
-        fireEvent.click(screen.getByRole('radio', { name: '人工选择' }));
+        fireEvent.click(within(screen.getByRole('radiogroup', { name: '深入分析 · 研究方向' })).getByRole('radio', { name: '人工选择' }));
+        expect(screen.getByRole('radio', { name: '深入分析', exact: true })).toBeChecked();
         await submit();
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep', direction_selection: 'manual' }), false);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
         expect(screen.getByRole('radio', { name: /^标准扩展/ })).toBeChecked();
-        expect(screen.getByRole('radio', { name: '默认全选' })).toBeChecked();
+        expect(within(screen.getByRole('radiogroup', { name: '标准扩展 · 研究方向' })).getByRole('radio', { name: '默认全选' })).toBeChecked();
     });
     it('defaults to all directions and omits direction selection for fast expansion', async () => {
         mount(['a']);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
-        expect(screen.getByRole('radio', { name: '默认全选' })).toBeChecked();
-        expect(screen.getByText('调研完成后，按全部方向自动继续。')).toBeInTheDocument();
+        expect(within(screen.getByRole('radiogroup', { name: '标准扩展 · 研究方向' })).getByRole('radio', { name: '默认全选' })).toBeChecked();
         for (const [name, steps] of [
-            [/^标准扩展/, ['初步调研', '确定研究方向', '1. 检索与拓展', '2. 筛选与补充']],
-            [/^深入分析/, ['初步调研', '确定研究方向', '1. 检索与拓展', '2. 筛选与补充', '3. 关系分析与证据核验']],
+            [/^标准扩展/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充']],
+            [/^深入分析/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '关系分析与证据核验']],
         ] as const) {
-            const card = screen.getByRole('radio', { name }).closest('label')!;
-            expect(within(card).getAllByRole('listitem').map(item => item.textContent)).toEqual(steps);
+            const card = screen.getByRole('radio', { name }).closest('.paper-research-depth-option')!;
+            expect(within(card).getAllByRole('listitem')).toHaveLength(steps.length);
+            for (const step of steps) expect(within(card).getByText(step, { exact: true })).toBeInTheDocument();
         }
         for (const tier of [/^标准扩展/, /^深入分析/, /^快速扩展/]) {
             fireEvent.click(screen.getByRole('radio', { name: tier }));

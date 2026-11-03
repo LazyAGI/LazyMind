@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
-import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Radio, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
-import type { RadioChangeEvent } from 'antd/es/radio';
 import { BranchesOutlined, DownOutlined, EditOutlined, FundProjectionScreenOutlined, HistoryOutlined, ReadOutlined, ReloadOutlined, CheckOutlined, MinusOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
@@ -620,15 +619,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <Switch checked={expansionEnabled} onChange={setExpansionEnabled} disabled={busy || topicBusy} aria-label={t('paperTasks.enableExpansion')} />
             </div>}
             {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'} />
-                {launch.kind === 'expansion' && budgetMode !== 'fast' && <section className="paper-direction-selection">
-                    <Typography.Text strong>{t('paperTasks.expansionDepth.directionSelection')}</Typography.Text>
-                    <Radio.Group aria-label={t('paperTasks.expansionDepth.directionSelection')} value={directionSelection} onChange={(event: RadioChangeEvent) => setDirectionSelection(event.target.value)} disabled={busy}>
-                        <Radio value="all">{t('paperTasks.expansionDepth.allDirections')}</Radio>
-                        <Radio value="manual">{t('paperTasks.expansionDepth.yourChoice')}</Radio>
-                    </Radio.Group>
-                    <Typography.Text type="secondary">{t(`paperTasks.expansionDepth.${directionSelection === 'all' ? 'allDirectionsHint' : 'manualDirectionsHint'}`)}</Typography.Text>
-                </section>}
+                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'}
+                    directionSelection={directionSelection} onDirectionSelectionChange={setDirectionSelection} disabled={busy} />
                 {launch.kind === 'review' && <p className="paper-task-launch-flow-hint"><BranchesOutlined />{t('paperTasks.reviewFlow.directionsHint')}</p>}
                 {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message={t(capabilities.openalex_key ? 'paperTasks.expansionDepth.searchConfiguration' : 'paperTasks.expansionDepth.basicSearch')} description={<>
                   {!capabilities.openalex_key && <div>{t('paperTasks.expansionDepth.openalexBenefits')} <Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">{t('paperTasks.expansionDepth.configureOpenalex')}</Link></div>}

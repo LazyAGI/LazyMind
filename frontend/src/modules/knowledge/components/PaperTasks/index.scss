@@ -370,6 +370,9 @@
 }
 .paper-expansion-mode-output { color: var(--color-primary, #2858b8); font-size: 12px; }
 .paper-expansion-mode-step.step-chooseDirection {
+  flex-direction: column;
+  gap: 6px;
+  padding-block: 6px;
   color: var(--color-warning-text-active, #93590a);
   background: var(--color-warning-bg, #fff3d9);
 }
@@ -470,4 +473,7 @@
 
 .paper-preparation-all-directions.ant-btn { justify-self: start; padding-left: 0; font-size: 12px; }
 
-.paper-direction-selection { display: grid; gap: 8px; padding: 12px 0 4px; }
+
+.paper-expansion-direction-options { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 8px; }
+.paper-expansion-direction-options label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+.paper-expansion-direction-options input { margin: 0; accent-color: var(--color-primary, #2858b8); }
