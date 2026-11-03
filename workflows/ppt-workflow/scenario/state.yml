@@ -86,6 +86,13 @@ steps:
         this workflow supports optional uploaded materials.
 
       Startup clarification contract:
+      - Academic defaults: for research_report, paper_review, thesis_defense,
+        reading_notes or a paper-library handoff/academic group meeting, use
+        科研风格 and generate_background_images=disabled when those preferences
+        were not explicitly supplied. These defaults satisfy startup visual
+        questions; do not pause or ask for them. Preserve explicit user style
+        instructions and explicit AI-background enablement. Uploaded templates
+        still determine their own style and always disable AI backgrounds.
       - Uploaded PPTX templates take precedence over visual-style and AI
         background answers. When template_mode=upload, use style_flow=auto,
         generate_background_images=disabled, and capability marker
@@ -96,7 +103,8 @@ steps:
       - The Chat host collects presentation topic, exact slide count, target
         customer/audience, visual style, whether per-slide AI background generation
         is enabled, whether a PPTX template is used, and generation mode before
-        creating this workflow session. Extract all seven
+        creating this workflow session, using the academic defaults above for
+        omitted visual preferences. Extract supplied values and defaults
         faithfully from {{user_input}}; clarification
         answers may have been merged into the original request.
         For uploaded templates the Chat host also inspects ALL template pages
@@ -206,7 +214,8 @@ steps:
       - whether the user explicitly asked for AI-generated material images
         (default: no — do not invent this need)
       - AI background generation: record exactly enabled or disabled from the
-        startup answer. This is independent from foreground material images.
+        explicit startup answer; absent an answer, academic scenarios default
+        to disabled. This is independent from foreground material images.
       - Style flow is always auto. Keep the outline pipeline's deck-wide style
         preparation; do not generate or display alternative style previews.
       - Generation mode: record exactly quick for 快速生成, or full for

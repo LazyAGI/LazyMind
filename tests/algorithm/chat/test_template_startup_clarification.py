@@ -51,6 +51,49 @@ def test_catalog_upload_rules_do_not_leak_into_bound_or_unrelated_asks(runtime):
         assert 'attachment' not in emit.call_args.kwargs['questions'][0]
 
 
+def test_paper_handoff_card_skips_defaulted_visual_fields_and_keeps_other_choices():
+    from lazymind.chat.service.chat_service import _build_ask_user_tool
+    package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
+    policy = yaml.safe_load(package.read_text())['runtime']
+    toolkit = MagicMock()
+    frozen = {'kind': 'ppt', 'handoff_id': 'owned',
+              'input': {'papers': [{'paper_id': 'a'}, {'paper_id': 'b'}],
+                        'user_instruction': '8页组会，详细讲解方法，15分钟'}}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client = factory.return_value
+        client.transport.request.return_value.status_code = 200
+        client.transport.request.return_value.json.return_value = frozen
+        contribution = resolve_workflow_injection(
+            None, conversation_id='paper-chat', current_query='8页组会，详细讲解方法，15分钟',
+            workflow_catalog=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                               'runtime': policy}],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                                   'tool_name': 'trigger_ppt_workflow'}],
+        )
+        questions = [{'id': f['id'], 'text': f['question'], 'type': f['type'],
+                      'choices': f.get('choices', [])} for f in policy['clarification_fields']
+                     if f['id'] in {'template_mode', 'visual_style', 'generate_background_images', 'generation_mode'}]
+        tool = _build_ask_user_tool(contribution.runtime_policy)[0]
+        with patch('lazymind.chat.engine.tools.ask_user._write_agent_data') as emit:
+            tool(questions)
+        emitted = emit.call_args.kwargs['questions']
+        expected = {f['question'] for f in policy['clarification_fields']
+                    if f['id'] in {'template_mode', 'generation_mode'}}
+        assert {q['text'] for q in emitted} == expected
+        assert sum('attachment' in q for q in emitted) == 1
+        # Explicit style/background instructions stay in the original request;
+        # suppressing questions must not rewrite them to defaults.
+        explicit = '科研汇报用深色风格，启用 AI 底图'
+        merged = _merge_startup_clarification_context(
+            '不使用模板，完整生成',
+            [{'role': 'user', 'content': explicit}, call('ask_user', {'questions': emitted})], policy,
+        )
+        assert explicit in merged
+
+
 def test_conflicting_catalog_upload_contracts_require_workflow_selection(runtime):
     from copy import deepcopy
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy

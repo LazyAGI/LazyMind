@@ -960,9 +960,10 @@ def enforce_startup_clarification_policy(
                 )
             governed.extend(proposals[0] if proposals else [question])
         return governed
+    satisfied = set((runtime_policy or {}).get('_host_satisfied_fields') or [])
     governed_fields = [
         field for field in _runtime_clarification_fields(runtime_policy)
-        if (
+        if field['id'] in satisfied or (
             field.get('choice_policy') == 'fixed'
             and field.get('type') in {'single', 'multiple'}
             and field.get('choices')
@@ -971,7 +972,6 @@ def enforce_startup_clarification_policy(
     if not governed_fields:
         return questions
 
-    satisfied = set((runtime_policy or {}).get('_host_satisfied_fields') or [])
     governed: List[Any] = []
     for raw_question in questions:
         if not isinstance(raw_question, dict):
@@ -1012,7 +1012,7 @@ def enforce_startup_clarification_policy(
         governed.append(question)
     if questions and not governed:
         raise WorkflowClientError('WORKFLOW_INPUT_ALREADY_SUPPLIED',
-                                  'Selected paper sources are already bound; do not request another upload.')
+                                  'Requested inputs are already bound or defaulted; proceed without another question.')
     return governed
 
 

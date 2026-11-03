@@ -14,6 +14,11 @@ when_to_use: >
   A paper-library handoff (kind=ppt) is an academic presentation with its sources
   already supplied. Bind the complete handoff JSON as task_context; never ask
   the user to re-upload those papers or type internal IDs.
+  Academic/scientific presentations, including paper group meetings, default to
+  科研风格 (clear, readable, evidence-led scientific typography and diagrams) and
+  generate_background_images=disabled. Do not ask visual_style or AI-background
+  questions for these defaults. Preserve an explicit user visual direction or
+  explicit request to enable AI backgrounds; an uploaded template takes precedence.
   Uploaded source materials are optional: text-only requests must start from
   the user's prompt. The startup card may offer the declared optional PPTX
   template choice; show its upload control only after the user selects upload,
@@ -46,7 +51,7 @@ runtime:
   paper_handoff:
     kind: ppt
     input: task_context
-    satisfies: [academic_materials]
+    satisfies: [academic_materials, visual_style, generate_background_images]
   publisher_owned_slots:
     - reflection_markdown
     - deck_outline
@@ -354,7 +359,9 @@ runtime:
     - id: visual_style
       label: 风格
       ask_when: >
-        Only when no PPTX template is uploaded, selected or identified in the
+        Never for academic/scientific decks or paper group meetings: default to
+        科研风格 unless the user already supplied a different direction; do not ask.
+        Otherwise only when no PPTX template is uploaded, selected or identified in the
         request AND the user has supplied no
         visual direction. Any explicit colors, typography, layout/density,
         references, prohibitions or qualified style description satisfies this
@@ -383,7 +390,12 @@ runtime:
         - 卡通可爱｜圆润造型、活泼色彩、友好叙事
     - id: generate_background_images
       label: AI 底图
-      ask_when: Only when no PPTX template has been uploaded or selected. Uploaded templates always disable AI backgrounds.
+      ask_when: >
+        Never for academic/scientific decks or paper group meetings: default to
+        disabled, unless the user explicitly requested enabling AI backgrounds.
+        Otherwise only when no PPTX template has been uploaded or selected AND
+        the user has not already specified whether backgrounds should be generated.
+        Uploaded templates always disable AI backgrounds.
       question: 是否为每一页启用 AI 生成底图？启用后会根据需求和素材先生成一组相互关联、可编辑的底图提示词，再生成 16:9 无文字背景并应用到幻灯片背景层。
       type: single
       choice_policy: fixed
