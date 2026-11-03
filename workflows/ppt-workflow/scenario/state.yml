@@ -77,6 +77,9 @@ steps:
       uploaded source collection is genuinely needed; a simple, self-contained
       presentation request should not spend a separate step collecting material.
 
+      Markdown headings must contain only section titles, without sequence numbers
+      or slide-number prefixes. The document editor displays numbering automatically.
+
       Step boundary (mandatory):
       - This step analyzes requirements and reads an uploaded template, without research.
       - Uploaded templates must be read here before collect_materials;
@@ -658,6 +661,9 @@ steps:
       concise Markdown deck outline for the UI. The Markdown must describe what
       each page covers. Do NOT publish per-page generation prompts and do NOT
       generate slide HTML yet.
+
+      Markdown headings must contain only slide titles, without sequence numbers
+      or slide-number prefixes. The document editor displays numbering automatically.
 
       Requirement analysis:
       {{requirement_analysis}}
