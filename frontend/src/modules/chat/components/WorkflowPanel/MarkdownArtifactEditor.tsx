@@ -627,7 +627,8 @@ export function MarkdownArtifactEditor({
   const hasOutline = Boolean(markdownOutline.title || markdownOutline.items.length);
   const referenceTargets = useMemo(
     () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown).map((target) => {
-      const numberingLabel = numbering?.entries[target.anchorId.slice('block-'.length)]?.label;
+      const numberingLabel = target.type === 'reference'
+        ? undefined : numbering?.entries[target.anchorId.slice('block-'.length)]?.label;
       return numberingLabel
         ? { ...target, label: `${numberingLabel} ${target.label}` }
         : target;
@@ -2194,6 +2195,7 @@ export function MarkdownArtifactEditor({
                                 >
                                   {target.type === 'image'
                                     ? <PictureOutlined />
+                                    : target.type === 'reference' ? <LinkOutlined />
                                     : <FontSizeOutlined />}
                                 </span>
                                 <span className='writer-markdown-editor__reference-option-label'>

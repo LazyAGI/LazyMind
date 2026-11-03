@@ -1,6 +1,7 @@
 const MATERIALIZED_SYSTEM_ANCHOR_RE = /<a\s+id=(["'])(block-[^"']+)\1((?:\s+[^>]*?)?)\s*>\s*<\/a>/gi;
 const EDITOR_SYSTEM_ANCHOR_RE = /<a\s+id=(["'])(block-[^"']+)\1((?:\s+[^>]*?)?)\s*\/>/gi;
 const SYSTEM_ANCHOR_LINE_RE = /^<a\s+id=(["'])(block-[^"']+)\1((?:\s+[^>]*?)?)\s*(?:\/>|>\s*<\/a>)$/i;
+const PAPER_REFERENCE_ANCHOR_RE = /^<a\s+id=(["'])(paper-ref-[\p{L}\p{N}_.-]+)\1\s*(?:\/>|>\s*<\/a>)$/u;
 const HEADING_NUMBERING_CONFIG_LINE_RE = /^\s*<!--\s*heading-numbering:[^\r\n]*-->\s*$/i;
 const OUTLINE_INSTRUCTION_LINE_RE = /^\s*<!--\s*writer:outline\s+(\{.*\})\s*-->\s*$/;
 const PAPER_CHARTS_LINE_RE = /^\s*<!--\s*paper-charts:\s*(\[.*\])\s*-->\s*$/;
@@ -68,7 +69,8 @@ function pageMarkersForSave(markdown: string): string {
 export interface WriterMarkdownReferenceTarget {
   anchorId: string;
   label: string;
-  type: 'heading' | 'image';
+  type: 'heading' | 'image' | 'reference';
+  citationNumber?: string;
 }
 
 export interface WriterMarkdownOutlineItem {
@@ -650,7 +652,7 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
   return { title, items };
 }
 
-/** Collect anchored headings and images that can be used as cross-reference targets. */
+/** Collect anchored headings, images and numbered bibliography entries. */
 export function collectWriterMarkdownReferenceTargets(
   markdown: string,
 ): WriterMarkdownReferenceTarget[] {
@@ -676,13 +678,24 @@ export function collectWriterMarkdownReferenceTargets(
     if (fenceCharacter) continue;
 
     const trimmed = line.trim();
-    const anchor = trimmed.match(SYSTEM_ANCHOR_LINE_RE);
+    const anchor = trimmed.match(SYSTEM_ANCHOR_LINE_RE) ?? trimmed.match(PAPER_REFERENCE_ANCHOR_RE);
     if (anchor) {
       pendingAnchorId = anchor[2];
       continue;
     }
     if (!trimmed) continue;
 
+    if (pendingAnchorId?.startsWith('paper-ref-')) {
+      const entry = trimmed.match(/^\\?\[([1-9]\d*)\\?\]\s+(.+)$/);
+      if (entry) targets.push({
+        anchorId: pendingAnchorId,
+        label: `[${entry[1]}] ${entry[2]}`,
+        type: 'reference',
+        citationNumber: entry[1],
+      });
+      pendingAnchorId = undefined;
+      continue;
+    }
     const heading = trimmed.match(HEADING_LINE_RE);
     if (heading && pendingAnchorId) {
       targets.push({
@@ -717,7 +730,7 @@ export function writerMarkdownInternalReference(text: string, anchorId: string):
     : '';
 }
 
-/** Replace the selected source text in-place so its visible wording stays unchanged. */
+/** Link selected wording, or append a numeric citation to an existing bibliography entry. */
 export function applyWriterMarkdownInternalReference(
   markdown: string,
   paragraphText: string,
@@ -725,7 +738,11 @@ export function applyWriterMarkdownInternalReference(
   selectedText: string,
   anchorId: string,
 ): string {
-  const reference = writerMarkdownInternalReference(selectedText, anchorId);
+  const citation = collectWriterMarkdownReferenceTargets(markdown)
+    .find((target) => target.anchorId === anchorId && target.type === 'reference');
+  const reference = citation
+    ? `${selectedText}[\\[${citation.citationNumber}\\]](#${anchorId})`
+    : writerMarkdownInternalReference(selectedText, anchorId);
   if (!reference || !paragraphText || startOffset < 0) return markdown;
 
   const matches: number[] = [];
@@ -736,10 +753,11 @@ export function applyWriterMarkdownInternalReference(
     let visibleText = '';
     const sourceOffsets: number[] = [];
     for (let index = 0; index < block.length;) {
-      const link = block.slice(index).match(/^\[([^\]]*)\]\([^)]+\)/);
+      const link = block.slice(index).match(/^\[((?:\\.|[^\\\]])*)\]\([^)]+\)/);
       if (link) {
-        visibleText += link[1];
+        visibleText += writerMarkdownLinkLabelText(link[1]);
         for (let labelIndex = 0; labelIndex < link[1].length; labelIndex += 1) {
+          if (link[1][labelIndex] === '\\' && /[\\\[\]]/.test(link[1][labelIndex + 1] ?? '')) labelIndex += 1;
           sourceOffsets.push(index + 1 + labelIndex);
         }
         index += link[0].length;
@@ -772,7 +790,7 @@ interface WriterMarkdownReferenceRange {
 }
 
 function writerMarkdownLinkLabelText(labelSource: string): string {
-  return labelSource.replace(/\\([\\\]])/g, '$1');
+  return labelSource.replace(/\\([\\\[\]])/g, '$1');
 }
 
 function writerMarkdownVisibleBlock(block: string): {
@@ -793,11 +811,11 @@ function writerMarkdownVisibleBlock(block: string): {
     const label = writerMarkdownLinkLabelText(labelSource);
     const visibleStart = text.length;
     text += label;
-    if (link[2].startsWith('#block-')) {
+    if (link[2].startsWith('#block-') || link[2].startsWith('#paper-ref-')) {
       references.push({
         sourceStart: index,
         sourceEnd: index + link[0].length,
-        labelSource,
+        labelSource: link[2].startsWith('#paper-ref-') ? '' : labelSource,
         visibleStart,
         visibleEnd: text.length,
       });
@@ -807,7 +825,7 @@ function writerMarkdownVisibleBlock(block: string): {
   return { text, references };
 }
 
-/** Unwrap the internal Markdown link containing the selection while preserving its label. */
+/** Unwrap object links; remove numeric citation markers without changing the surrounding prose. */
 export function removeWriterMarkdownInternalReference(
   markdown: string,
   paragraphText: string,
@@ -816,11 +834,11 @@ export function removeWriterMarkdownInternalReference(
   selectedReference?: { anchorId: string; occurrence: number },
 ): string {
   if (
-    selectedReference?.anchorId.startsWith('block-')
+    (selectedReference?.anchorId.startsWith('block-') || selectedReference?.anchorId.startsWith('paper-ref-'))
     && selectedReference.occurrence >= 0
   ) {
     let occurrence = 0;
-    const referencePattern = /\[((?:\\.|[^\\\]])*)\]\(#(block-[^)]+)\)/g;
+    const referencePattern = /\[((?:\\.|[^\\\]])*)\]\(#((?:block-|paper-ref-)[^)]+)\)/g;
     for (const match of markdown.matchAll(referencePattern)) {
       if (match[2] !== selectedReference.anchorId) continue;
       if (occurrence !== selectedReference.occurrence) {
@@ -829,7 +847,8 @@ export function removeWriterMarkdownInternalReference(
       }
       const sourceStart = match.index ?? -1;
       if (sourceStart < 0) return markdown;
-      return `${markdown.slice(0, sourceStart)}${match[1]}${markdown.slice(sourceStart + match[0].length)}`;
+      const replacement = match[2].startsWith('paper-ref-') ? '' : match[1];
+      return `${markdown.slice(0, sourceStart)}${replacement}${markdown.slice(sourceStart + match[0].length)}`;
     }
     return markdown;
   }
