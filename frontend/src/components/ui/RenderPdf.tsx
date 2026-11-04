@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { PdfCitationLayer } from "./PdfCitationLayer";
+import { restorePdfLinkAnnotationBorders } from "./pdfNativeLinkBorders";
 import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
 import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
@@ -1012,6 +1013,7 @@ export default function RenderPdf({
           devicePixelRatio={Math.min(2, Math.max(1.5, window.devicePixelRatio || 1))}
           renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
           renderAnnotationLayer
+          filterAnnotations={restorePdfLinkAnnotationBorders}
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
             window.requestAnimationFrame(() => tagReferenceTextLayer(index));
