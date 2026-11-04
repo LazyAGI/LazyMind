@@ -66,6 +66,8 @@
 /* Equation-first reading surface: one calm canvas, details stay secondary. */
 .pdf-study-selected{padding-top:4px;}
 .pdf-study-summary p,.pdf-study-symbols dd,.pdf-symbol-definition p{font-size:15px;line-height:1.85;color:#334155;}
+.pdf-study-summary p:first-of-type:not(:last-of-type){padding-bottom:11px;border-bottom:1px solid #e1ebf6;color:#253b55;font-weight:550;}
+.pdf-study-summary p + p{margin-top:11px;}
 .pdf-study-symbols>div{padding:12px 0;}
 .pdf-study-inline-math{padding:2px;}
 .pdf-study-generation{flex:1;min-width:0;}

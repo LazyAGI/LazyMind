@@ -178,7 +178,7 @@ const enUS = {
     "explainRetry": "Retry explanation",
     "explainError": "Could not explain this formula. Check the model configuration and retry.",
     "explainCancelled": "Cancelled. You can start again.",
-    "summary": "What this formula means",
+    "summary": "What this formula does",
     "generalMath": "General math meaning",
     "moreDetails": "Reasoning and sources",
     "symbols": "Symbols & meanings",

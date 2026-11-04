@@ -178,7 +178,7 @@ const zhCN = {
     "explainRetry": "重试解释",
     "explainError": "暂时无法解释此公式，请检查模型配置后重试。",
     "explainCancelled": "已取消，可以重新开始。",
-    "summary": "这是什么公式",
+    "summary": "这条公式在做什么",
     "generalMath": "通用数学释义",
     "moreDetails": "推导与来源",
     "symbols": "符号与含义",

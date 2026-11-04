@@ -23,6 +23,7 @@
 .pdf-study-dialog .pdf-study-summary{margin:12px 0 2px;padding:16px 18px;border:1px solid #dbe7f4;border-radius:12px;background:#f5f9fe}
 .pdf-study-dialog .pdf-study-summary h3{margin:0 0 5px;color:#356799;font-size:12px;font-weight:650}
 .pdf-study-dialog .pdf-study-summary p{margin:0;color:#26374c;font-size:15px;line-height:1.65}
+.pdf-study-dialog .pdf-study-summary p + p{margin-top:11px}
 .pdf-study-dialog .pdf-study-disclaimer{margin:2px 0 12px;color:#8190a1;font-size:11px}
 .pdf-study-dialog .pdf-study-actions{padding:7px 0}
 .pdf-study-dialog .pdf-study-more,.pdf-study-dialog .pdf-study-symbol-catalog{margin-top:8px;padding:12px 0;border-top:1px solid #e7edf4;color:#526b84}

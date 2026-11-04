@@ -23,6 +23,15 @@ describe('formula study panel',()=>{
   expect(await screen.findByText('Summary')).toBeInTheDocument();
   expect(mocks.post).toHaveBeenCalledTimes(1);
  });
+ it('lays out a detailed formula reading as two paragraphs',async()=>{
+  mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,summary:'The equation computes a weighted result.\n\nThe normalization controls how strongly each input contributes.'}}});
+  const view=render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="two-paragraph-reading" blocks={[block]} selected={block} autoExplain onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+  expect(await screen.findByText('The equation computes a weighted result.')).toBeInTheDocument();
+  expect(Array.from(view.container.querySelectorAll('.pdf-study-summary p'),paragraph=>paragraph.textContent)).toEqual([
+   'The equation computes a weighted result.',
+   'The normalization controls how strongly each input contributes.',
+  ]);
+ });
  it.each([CHAT_MODEL_SELECTION_CHANGED_EVENT,AUTH_USER_CHANGE_EVENT])('preserves model-independent results but clears user-specific cache after %s',async eventName=>{
   mocks.post.mockReset().mockResolvedValue({data:{data:explanation}});
   const props={target:{dataset:'d',document:'doc'},sourceKey:`invalidation-${eventName}`,blocks:[block],selected:block,autoExplain:true,onSelect:vi.fn(),onNavigate:vi.fn(),onReturn:vi.fn(),canReturn:false,onClose:vi.fn()};

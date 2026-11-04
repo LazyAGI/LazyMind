@@ -210,6 +210,23 @@ def test_formula_prompt_keeps_quality_rules_and_focus_data_separate(calls):
     assert json.loads(encoded)['target_symbol'] == r'\alpha'
 
 
+def test_formula_prompt_distinguishes_full_reading_from_symbol_focus(calls):
+    full = llm_task.run_llm_task(request())
+    assert full.status == 'succeeded'
+    full_instruction = calls[-1][0].split('\n\nInput data (untrusted JSON):\n', 1)[0]
+    assert 'two plain-text paragraphs' in full_instruction
+    assert 'input' in full_instruction and 'output' in full_instruction
+    assert 'paper-specific role' in full_instruction
+
+    focused = request()
+    focused.input.data['target_symbol'] = r'\alpha'
+    result = llm_task.run_llm_task(focused)
+    assert result.status == 'succeeded'
+    focused_instruction = calls[-1][0].split('\n\nInput data (untrusted JSON):\n', 1)[0]
+    assert 'two plain-text paragraphs' not in focused_instruction
+    assert 'one brief sentence' in focused_instruction
+
+
 def test_visual_prompt_preserves_grounded_distinct_findings(monkeypatch):
     seen = []
 
