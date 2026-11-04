@@ -88,13 +88,13 @@ def test_general_presentation_elements_edit_in_place(tools, monkeypatch, kind, c
 
 
 def test_single_generation_route_and_source_inputs():
-    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text())
+    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     assert state['transitions']['__start__'] == [{'to': 'analyze_requirements'}]
     assert state['transitions']['build_outline'] == [{'to': 'plan_page_prompts'}]
     planner = state['steps']['plan_page_prompts']
     assert {'material': 'academic_brief', 'required': False} in planner['inputs']
     assert all(step['mode'] == 'auto' for step in state['steps'].values())
-    workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())
+    workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     fields = {field['id']: field for field in workflow['runtime']['clarification_fields']}
     assert 'generation_mode' not in fields
     assert fields['academic_materials']['attachment']['max_files'] == -1
@@ -194,7 +194,7 @@ def test_library_launch_binds_authoritative_input_and_satisfies_upload_question(
         'paper_handoff_launch', ROOT / 'algorithm/lazymind/chat/workflow/paper_handoff.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     frozen = {'handoff_id': 'h', 'kind': 'ppt', 'input': {'papers': [{'paper_id': 'a'}, {'paper_id': 'b'}]}}
     requests = []
     response = types.SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: frozen)
@@ -203,7 +203,7 @@ def test_library_launch_binds_authoritative_input_and_satisfies_upload_question(
                                                                    requests.append((a, kw)) or response))
     bindings, satisfied = module.resolve_paper_handoff(client, 'owned-chat', policy)
     assert json.loads(bindings['task_context']) == frozen
-    assert satisfied == ['academic_materials']
+    assert satisfied == ['academic_materials', 'visual_style', 'generate_background_images']
     assert requests[0][1]['params'] == {'conversation_id': 'owned-chat'}
     assert requests[0][1]['headers'] == {'Authorization': 'bound-user'}
     response.status_code = 404
@@ -244,7 +244,7 @@ def test_direct_upload_manifest_resolves_and_caches_every_same_named_paper(tools
         cfg['history_files_per_turn'] = {'3': paths}
     elif layout == 'across_turns':
         cfg['history_files_per_turn'] = {'2': paths[:1], '3': paths[1:]}
-    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     context, satisfied = paper_attachment_context(cfg, runtime)
     sources = json.loads(context.splitlines()[3])
     assert len(sources) == 2
@@ -252,7 +252,7 @@ def test_direct_upload_manifest_resolves_and_caches_every_same_named_paper(tools
     monkeypatch.setattr(resolver, '_agentic_config', lambda: cfg)
     reader = types.ModuleType('lazymind.chat.engine.tools.file_resources.tools')
     reader.read_file_resource = mock.Mock(side_effect=lambda path, **kwargs: {
-        'text': Path(path).read_text(), 'eof': True,
+        'text': Path(path).read_text(encoding='utf-8'), 'eof': True,
     })
     monkeypatch.setitem(sys.modules, reader.__name__, reader)
     monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
@@ -270,7 +270,7 @@ def test_nonpaper_or_unavailable_uploads_do_not_satisfy_paper_question(tmp_path)
     paths = [tmp_path / name for name in ('image.png', 'template.pptx', 'missing.pdf')]
     for path in paths[:2]:
         path.write_text('not a paper')
-    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     assert paper_attachment_context({'files': list(map(str, paths))}, runtime) == ('', [])
 
 

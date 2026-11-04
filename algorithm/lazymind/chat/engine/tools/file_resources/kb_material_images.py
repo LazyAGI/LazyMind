@@ -66,7 +66,9 @@ def _image_reference(raw: str) -> tuple[str, str] | None:
             if parsed.hostname and not parsed.username and not parsed.password and not any(c.isspace() for c in ref):
                 return 'url', ref
             return None
-        if parsed.scheme and parsed.scheme not in ('http', 'https'):
+        # urlsplit treats a Windows drive letter as a URI scheme. Accept only
+        # native absolute paths here; the upload-root check below still applies.
+        if parsed.scheme and parsed.scheme not in ('http', 'https') and not Path(ref).is_absolute():
             return None
         local = local_path_from_static_file_url(parsed.path if parsed.path.startswith('/static-files/') else ref)
         if not local:

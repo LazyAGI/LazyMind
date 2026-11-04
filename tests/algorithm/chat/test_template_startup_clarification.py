@@ -15,7 +15,11 @@ from lazymind.chat.workflow.workflow_manager import (
 @pytest.fixture
 def runtime():
     package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
-    policy = yaml.safe_load(package.read_text())['runtime']
+    policy = yaml.safe_load(package.read_text(encoding='utf-8'))['runtime']
+    # Exercise the generic host's upload/follow-up contract. PPT now derives
+    # template_mode internally; its current startup UI is covered separately.
+    template = next(f for f in policy['clarification_fields'] if f['id'] == 'template_mode')
+    template.update(question='请选择并上传模板', choice_policy='fixed', allow_other=False)
     return {key: policy[key] for key in ('clarification_fields', 'attachment_clarification')}
 
 
@@ -23,7 +27,8 @@ def test_discovered_template_ask_emits_upload_control_without_model_metadata(run
     from lazymind.chat.service.chat_service import _build_ask_user_tool
 
     field = next(f for f in runtime['clarification_fields'] if f['id'] == 'template_mode')
-    question = {'text': field['question'], 'type': 'single', 'choices': field['choices']}
+    question = {'id': 'template_mode', 'text': field['question'], 'type': 'single',
+                'choices': field['choices'], 'reason': '确认模板来源', 'required': True}
     tool = _build_ask_user_tool(
         {}, [{'workflow_ref': 'builtin:ppt-workflow', 'runtime': runtime}], discovery_mode=True,
     )[0]
@@ -42,7 +47,8 @@ def test_discovered_template_ask_emits_upload_control_without_model_metadata(run
 def test_catalog_upload_rules_do_not_leak_into_bound_or_unrelated_asks(runtime):
     from lazymind.chat.service.chat_service import _build_ask_user_tool
 
-    question = {'text': '请选择文件处理方式', 'type': 'single', 'choices': ['摘要', '翻译']}
+    question = {'id': 'file_action', 'text': '请选择文件处理方式', 'type': 'single',
+                'choices': ['摘要', '翻译'], 'reason': '确认文件处理目标', 'required': True}
     catalog = [{'workflow_ref': 'builtin:ppt-workflow', 'runtime': runtime}]
     for discovery in (True, False):
         tool = _build_ask_user_tool({}, catalog, discovery_mode=discovery)[0]
@@ -54,7 +60,7 @@ def test_catalog_upload_rules_do_not_leak_into_bound_or_unrelated_asks(runtime):
 def test_paper_handoff_card_skips_defaulted_visual_fields_and_keeps_other_choices():
     from lazymind.chat.service.chat_service import _build_ask_user_tool
     package = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow/workflow.yaml'
-    policy = yaml.safe_load(package.read_text())['runtime']
+    policy = yaml.safe_load(package.read_text(encoding='utf-8'))['runtime']
     toolkit = MagicMock()
     frozen = {'kind': 'ppt', 'handoff_id': 'owned',
               'input': {'papers': [{'paper_id': 'a'}, {'paper_id': 'b'}],
@@ -74,14 +80,15 @@ def test_paper_handoff_card_skips_defaulted_visual_fields_and_keeps_other_choice
                                    'tool_name': 'trigger_ppt_workflow'}],
         )
         questions = [{'id': f['id'], 'text': f['question'], 'type': f['type'],
-                      'choices': f.get('choices', [])} for f in policy['clarification_fields']
-                     if f['id'] in {'template_mode', 'visual_style', 'generate_background_images', 'generation_mode'}]
+                      'choices': f.get('choices', []), 'reason': f.get('reason') or '确认生成要求',
+                      'required': True} for f in policy['clarification_fields']
+                     if f['id'] in {'template_mode', 'visual_style', 'generate_background_images'}]
         tool = _build_ask_user_tool(contribution.runtime_policy)[0]
         with patch('lazymind.chat.engine.tools.ask_user._write_agent_data') as emit:
             tool(questions)
         emitted = emit.call_args.kwargs['questions']
         expected = {f['question'] for f in policy['clarification_fields']
-                    if f['id'] in {'template_mode', 'generation_mode'}}
+                    if f['id'] == 'template_mode'}
         assert {q['text'] for q in emitted} == expected
         assert sum('attachment' in q for q in emitted) == 1
         # Explicit style/background instructions stay in the original request;
@@ -102,7 +109,8 @@ def test_conflicting_catalog_upload_contracts_require_workflow_selection(runtime
     other = deepcopy(runtime)
     field = next(f for f in runtime['clarification_fields'] if f['id'] == 'template_mode')
     next(f for f in other['clarification_fields'] if f['id'] == 'template_mode')['attachment']['max_files'] = 2
-    question = {'text': field['question'], 'type': 'single', 'choices': field['choices']}
+    question = {'id': 'template_mode', 'text': field['question'], 'type': 'single',
+                'choices': field['choices'], 'reason': '确认模板来源', 'required': True}
     with pytest.raises(WorkflowClientError, match='Multiple workflows'):
         enforce_startup_clarification_policy(
             [question], {}, [{'runtime': runtime}, {'runtime': other}], discovery_mode=True,
@@ -142,7 +150,10 @@ def second_round():
          'content': '{"next_page":null,"sample_date":"2020-01-01"}'},
         call('KBToolkit_kb_search', {'query': '试用期起止日期'}),
         {'role': 'tool', 'name': 'KBToolkit_kb_search', 'content': '{"results":[]}'},
-        ask('template_detail_dates', '第 8 页汇报日期是哪天？试用期起止时间？'),
+        call('ask_user', {'questions': [
+            {'id': 'presentation_output_format', 'text': '请选择输出格式', 'type': 'single'},
+            {'id': 'template_detail_dates', 'text': '第 8 页汇报日期是哪天？试用期起止时间？', 'type': 'text'},
+        ]}),
         {'role': 'tool', 'name': 'ask_user', 'content': 'The user submitted the form.'},
     ]
 
@@ -168,10 +179,10 @@ def test_unrelated_workflow_keeps_single_card_contract(runtime):
 def test_existing_attachment_does_not_unlock_a_second_basic_card(runtime):
     history = [
         {'role': 'user', 'content': '用已上传的 template.pptx 生成答辩'},
-        ask('generation_mode', '请选择生成方式'),
+        ask('presentation_output_format', '请选择输出格式'),
     ]
     assert workflow_startup_clarification_already_asked(
-        history, runtime, attachment_names=['template.pptx'], current_query='完整生成',
+        history, runtime, attachment_names=['template.pptx'], current_query='输出 PPTX',
     )
 
 
@@ -183,17 +194,17 @@ def test_direct_upload_combined_card_preserves_all_questions_and_answers(runtime
         call('pptx_analyzer', {'filename': 'template.pptx', 'page': 8}),
         {'role': 'tool', 'name': 'pptx_analyzer', 'content': '{"next_page":null}'},
         call('ask_user', {'questions': [
-            {'id': 'generation_mode', 'text': '请选择生成方式', 'type': 'single'},
+            {'id': 'presentation_output_format', 'text': '请选择输出格式', 'type': 'single'},
             {'id': 'template_detail_date', 'text': '第八页的汇报日期？', 'type': 'text'},
             {'id': 'template_detail_name', 'text': '汇报人姓名？', 'type': 'text'},
         ]}),
     ]
-    answer = '完整生成；11 月 10 日；小王'
+    answer = '输出 PPTX；11 月 10 日；小王'
     assert workflow_startup_clarification_already_asked(
         history, runtime, attachment_names=['template.pptx'], current_query=answer,
     )
     merged = _merge_startup_clarification_context(answer, history, runtime)
-    for expected in ('页数按内容安排', '请选择生成方式', '第八页的汇报日期', '汇报人姓名', answer):
+    for expected in ('页数按内容安排', '请选择输出格式', '第八页的汇报日期', '汇报人姓名', answer):
         assert expected in merged
     assert merged.count(answer) == 1
 
@@ -273,9 +284,11 @@ def test_trigger_and_first_step_receive_both_rounds_and_original_template_bindin
             'session_id': 'session-1', 'state_version': 1, 'projection': {'ready': ['analyze_requirements']},
         }
         contribution = resolve_workflow_injection(
-            None, current_query='汇报日期 11 月 10 日，试用期未知', conversation_history=second_round(),
+            None, current_query='输出 PPTX，汇报日期 11 月 10 日，试用期未知', conversation_history=second_round(),
             workflow_catalog=[item], allowed_workflow_refs=['builtin:ppt-workflow'],
             workflow_activations=[item],
+            clarification={'workflow_ref': 'builtin:ppt-workflow',
+                           'values': {'topic': '转正答辩', 'slide_count': '12'}},
         )
         pending = list(contribution.tools)
         registered = {}
@@ -288,6 +301,7 @@ def test_trigger_and_first_step_receive_both_rounds_and_original_template_bindin
         result = registered['trigger_ppt_workflow'](
             input_bindings={'template_pptx': '转正模版.pptx'}, request_context='汇报日期 11 月 10 日',
         )
+        assert result['status'] == 'prepared', result
         registered['advance_step'](['analyze_requirements'])
     brief = result['request_context']
     assert all(value in brief for value in ['保留量化对比', '12 页', '15 分钟', '第 8 页', '试用期未知'])

@@ -90,7 +90,7 @@ def test_contract_read_failure_cannot_default_to_html(monkeypatch, tools):
 
 
 def test_prompt_stage_receives_durable_template_mode():
-    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text())
+    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     step = state['steps']['plan_page_prompts']
     assert {'material': 'template_mode', 'required': True} in step['inputs']
     assert 'output_format="native_pptx"' in step['prompt']
@@ -116,7 +116,7 @@ def test_uploaded_template_respects_saved_choice(monkeypatch, tools, output_form
 
 def test_template_startup_asks_only_missing_output_choice():
     from lazymind.chat.workflow.clarification import resolve_fields, startup_card
-    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，使用附件 company.pptx 作为 PPTX 模板',
                                      supplied={'template_pptx': 'company.pptx'})
     assert values['template_mode'] == 'upload'
@@ -130,7 +130,7 @@ def test_template_startup_asks_only_missing_output_choice():
 
 def test_plain_startup_never_asks_template_format_or_generation_mode():
     from lazymind.chat.workflow.clarification import resolve_fields
-    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：城市介绍，8页，不生成AI底图')
     assert values['template_mode'] == 'none' and missing == []
     assert 'presentation_output_format' not in values
@@ -143,7 +143,7 @@ def test_plain_startup_never_asks_template_format_or_generation_mode():
 ])
 def test_explicit_template_output_does_not_ask_again(text, expected):
     from lazymind.chat.workflow.clarification import resolve_fields
-    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
     values, missing = resolve_fields(policy, '主题：研究报告，8页，' + text,
                                      supplied={'template_pptx': 'template.pptx'})
     assert values['presentation_output_format'] == expected and missing == []

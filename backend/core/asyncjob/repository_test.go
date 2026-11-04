@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -362,5 +363,41 @@ func TestEnqueueParticipatesInImmediateTransaction(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("enqueue escaped caller rollback")
+	}
+}
+
+// A worker can commit between Enqueue's idempotency read and its insert. SQLite
+// must retry that entire transaction with a fresh WAL snapshot, not lose the job.
+func TestEnqueueSurvivesConcurrentWriter(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
+	var wrote atomic.Bool
+	if err := db.Callback().Query().After("gorm:query").Register("test:enqueue_writer", func(tx *gorm.DB) {
+		if tx.Statement.Table != "async_jobs" || !wrote.CompareAndSwap(false, true) {
+			return
+		}
+		tx.AddError(db.Create(&orm.AsyncJob{ID: "other-worker", JobType: "fixture", Status: "succeeded", IdempotencyKey: "other"}).Error)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove("test:enqueue_writer") })
+	req := EnqueueRequest{JobType: "fixture", IdempotencyKey: "projection", Payload: map[string]string{"session": "owned"}}
+	job, err := Enqueue(t.Context(), db, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Enqueue(t.Context(), db, req)
+	if err != nil || again.ID != job.ID {
+		t.Fatalf("retry lost idempotency: %v %v", again, err)
+	}
+	var persisted orm.AsyncJob
+	if err := db.Where("id = ?", job.ID).Take(&persisted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !wrote.Load() || persisted.Status != "pending" || string(persisted.PayloadJSON) != `{"session":"owned"}` {
+		t.Fatalf("job was lost or changed after writer contention: %+v", persisted)
+	}
+	var count int64
+	if err := db.Model(&orm.AsyncJob{}).Count(&count).Error; err != nil || count != 2 {
+		t.Fatalf("expected one projection and one competing write, got %d: %v", count, err)
 	}
 }

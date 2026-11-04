@@ -137,7 +137,7 @@ def test_typed_template_binding_skips_style_and_background_questions():
     values, missing = resolve_fields(policy('ppt-workflow'), '用上传模板做8页关于气候变化的PPT', {
         'topic': '气候变化', 'template_pptx': 'template.pptx',
     })
-    assert not missing
+    assert [field['id'] for field in missing] == ['presentation_output_format']
     assert values['template_mode'] == 'upload'
     assert 'generate_background_images' not in values
     assert 'visual_style' not in values
