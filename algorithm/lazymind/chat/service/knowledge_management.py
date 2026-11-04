@@ -24,7 +24,9 @@ from lazymind.chat.engine.tools.workspace_context import thaw
 
 BUILTIN_ID = 'lazymind-knowledge'
 PAPER_IMPORT_TOOL = 'knowledge.paper.import'
-READ_ONLY_TOOLS = ('knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate', 'knowledge.paper.sources')
+READ_ONLY_TOOLS = (
+    'knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate', 'knowledge.paper.sources',
+)
 MANAGEMENT_TOOLS = READ_ONLY_TOOLS + (
     'knowledge.create', 'knowledge.folder.create', 'knowledge.resource.update_metadata',
     'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload', 'knowledge.document.reparse',
@@ -77,7 +79,9 @@ def _resolve_paper_sources(arguments):
     for source_id in dict.fromkeys(arguments['source_ids']):
         item = refs.get(source_id)
         if not item or item.get('source_type') != 'external':
-            raise ToolExecutionError('Unknown current search source; use the exact citation_index from the search results')
+            raise ToolExecutionError(
+                'Unknown current search source; use the exact citation_index from the search results',
+            )
         sources.append({'source_id': source_id, **{key: item[key] for key in ('title', 'url', 'doi') if item.get(key)}})
     if len(json.dumps(sources, ensure_ascii=False).encode()) > 48 * 1024:
         raise ToolExecutionError('Selected source metadata is too large; import a smaller batch')
