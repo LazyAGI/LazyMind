@@ -28,7 +28,7 @@ def test_template_is_read_before_material_collection():
     assert 'read_template' not in state['transitions']
     assert 'read_template' not in state['steps']
     read = state['steps']['analyze_requirements']
-    assert read['tools'] == ['pptx_analyzer', 'ppt_paper_handoff_context']
+    assert read['tools'] == ['pptx_analyzer']
     assert 'all_pages=true' in read['prompt']
     assert {'material': 'template_content_brief', 'required': False} in read['outputs']
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))

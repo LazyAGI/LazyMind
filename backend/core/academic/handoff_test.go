@@ -70,8 +70,8 @@ func TestHandoffContextSeparatesBusinessInputFromNavigation(t *testing.T) {
 		t.Fatal("unknown view was accepted", w.Code)
 	}
 	prefix := academicChatContext(t.Context(), db.DB, "u", handoff.ConversationID)
-	if !strings.Contains(prefix, handoff.ID) || strings.Contains(prefix, "Frozen title") || strings.Contains(prefix, input.UserInstruction) {
-		t.Fatal("Chat prefix must contain a locator without duplicating the business input", prefix)
+	if prefix != "" {
+		t.Fatal("PPT Chat must use the launch prompt and ordinary attachments", prefix)
 	}
 	if err := db.Model(&orm.Dataset{}).Where("id=?", "papers").Update("create_user_id", "other").Error; err != nil {
 		t.Fatal(err)
@@ -170,8 +170,8 @@ func TestPaperTaskHandoffIncludesApplicableNotesAndFreezesInput(t *testing.T) {
 			if fields["candidate_directions"] != nil || fields["selected_directions"] != nil {
 				t.Fatal("paper task received literature-review directions")
 			}
-			if kind == "ppt" && fields["notes"] != nil {
-				t.Fatal("direct PPT received reflection notes")
+			if fields["notes"] == nil {
+				t.Fatal("paper task lost existing notes")
 			}
 			w = httptest.NewRecorder()
 			r := paperRequest("")

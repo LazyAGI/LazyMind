@@ -83,6 +83,7 @@ def test_ppt_material_images_are_optional_and_search_failure_can_continue():
     }
 
     assert outputs == {
+        'reflection_markdown': False,
         'material_summary': True,
         'material_images': False,
         'material_clarification': True,

@@ -412,7 +412,17 @@ func runAcademicChat(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	}
 	_ = json.Unmarshal(row.Ext, &task)
 	name := firstNonEmpty(paperTaskNames[task.Kind], payload["workflow_id"])
-	body := marshal(map[string]any{"conversation_id": row.ID, "query": payload["query"], "stream": true, "enable_workflow": true, "enable_plugin": true, "workflow_mode": "auto", "mentions": []map[string]string{{"type": "workflow", "resource_id": "builtin:" + payload["workflow_id"], "display_name": name}}})
+	requestBody := map[string]any{"conversation_id": row.ID, "query": payload["query"], "stream": true, "enable_workflow": true, "enable_plugin": true, "workflow_mode": "auto", "mentions": []map[string]string{{"type": "workflow", "resource_id": "builtin:" + payload["workflow_id"], "display_name": name}}}
+	if task.Kind == "ppt" {
+		attachments, instruction, err := paperChatAttachments(ctx, store.DB(), job.CreateUserID, row.ID)
+		if err != nil {
+			return asyncjob.Result{}, err
+		}
+		query := payload["query"] + instruction
+		requestBody["query"] = query
+		requestBody["input"] = append([]map[string]any{{"input_type": "text", "text": query}}, attachments...)
+	}
+	body := marshal(requestBody)
 	req, _ := http.NewRequestWithContext(ctx, "POST", "http://internal/api/core/conversations:chat", bytes.NewReader(body))
 	req.Header.Set("X-User-Id", job.CreateUserID)
 	req.Header.Set("Content-Type", "application/json")
@@ -449,7 +459,7 @@ func createPaperHandoff(ctx context.Context, tx *gorm.DB, user, dataset, record 
 	inputJSON := marshal(input)
 	if kind != "review" {
 		task := PaperTaskInput{UserInstruction: input.UserInstruction, Papers: refs}
-		if kind == "reflection" || reflectionFirst {
+		if kind == "reflection" || kind == "ppt" {
 			notes, err := paperTaskNotes(ctx, tx, dataset, refs)
 			if err != nil {
 				return old, err
@@ -1295,7 +1305,8 @@ func academicChatContext(ctx context.Context, db *gorm.DB, user, conversation st
 	var handoff orm.AcademicHandoff
 	if db.WithContext(ctx).Select("id", "dataset_id", "kind", "reflection_first").Where("user_id=? AND conversation_id=?", user, conversation).Take(&handoff).Error == nil {
 		if handoff.Kind == "ppt" {
-			return "论文任务定位信息：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind, "reflection_first": handoff.ReflectionFirst})) + "\n使用 ppt-workflow，将定位 JSON 绑定 task_context。通过 ppt_paper_handoff_context 读取完整冻结输入，使用全文读取工具生成正式 PPT，无需重新上传论文。先心得任务须保存 reflection_markdown 并保留原论文清单。"
+			// The launch turn and its ordinary attachments retain the task.
+			return ""
 		}
 		return "论文任务定位信息：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind})) + "\n将定位信息 JSON 绑定到 task_context。需要材料时通过 academic_handoff_context 读取冻结输入，使用 academic_handoff_submit 确认接收。不声称已生成正式文稿或 PPT。"
 	}

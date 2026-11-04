@@ -90,7 +90,7 @@ steps:
 
       Startup clarification contract:
       - Academic defaults: for research_report, paper_review, thesis_defense,
-        reading_notes or a paper-library handoff/academic group meeting, use
+        reading_notes or an academic group meeting, use
         科研风格 and generate_background_images=disabled when those preferences
         were not explicitly supplied. These defaults satisfy startup visual
         questions; do not pause or ask for them. Preserve explicit user style
@@ -141,24 +141,14 @@ steps:
         and do not confuse the number of source files with the requested slide
         count.
 
-      Paper-library handoff (when task_context or the server Chat context provides one):
-      {{task_context}}
-      Call ppt_paper_handoff_context before interpreting its papers. Its authorized
-      server response is authoritative; preserve all selected PaperRef identities
-      and user_instruction. These are supplied sources, not missing attachments.
-      Set presentation_scenario=research_report (or the explicitly requested
-      academic scenario); never skip collection or ask for re-upload/internal IDs.
-      Do not generate a separate reading reflection as part of PPT creation.
-      Record existing reflection_markdown from the tool as saved user material;
-      do not overwrite it or substitute it for the original papers.
-
-      Direct paper uploads plus a written request are an equally valid academic
-      entry, including a single paper or multiple papers for a student group
-      meeting. When the user asks to present/review the attached papers, classify
-      as research_report/paper_review as appropriate; a library handoff is NOT
-      required. Preserve the complete written requirements and every selected
-      attachment filename/turn from launch context. Do not call library tools
-      when task_context is absent; use the attachment cache in collect_materials.
+      Paper attachments plus a written request are the academic entry, including
+      a single paper or multiple papers for a student group meeting. Use the
+      request to select research_report, paper_review or reading_notes. Preserve
+      every selected attachment filename/turn and the complete written requirements.
+      Existing reading notes are supporting material, never a replacement for
+      the original papers. If the request explicitly asks for reading reflections
+      first, record that requirement for collect_materials; otherwise do not
+      generate a separate reflection.
       A PDF extension alone does not make an ordinary business report academic.
 
       Academic page budget:
@@ -336,10 +326,7 @@ steps:
       planning note if they differ; pages can repeat source_page to expand layouts.
     tools:
       - pptx_analyzer
-      - ppt_paper_handoff_context
     inputs:
-      - material: task_context
-        required: false
       - material: template_pptx
         required: false
     outputs:
@@ -544,20 +531,6 @@ steps:
       Use the conversation, uploaded files, requirement analysis, and KB/web
       retrieval subject to the KB-first gate below.
 
-      Paper-library sources (task_context):
-      {{task_context}}
-      If a paper-library handoff exists, call ppt_cache_library_papers once. It
-      reads every selected paper through the authorized fulltext API and follows
-      all next_cursor pages. Keep each PaperRef, source_id, content_hash and
-      source_version in material_summary. Read cached chunks with
-      ppt_read_academic_source as needed. Never treat abstracts as full text or
-      search for replacement papers. No attachment upload is needed.
-      If complete=false, report each processing/failed/unavailable/error source
-      and STOP without publishing material_summary or advancing. Processing may
-      be retried later; authorization/version failures require refreshed context.
-      Never concatenate different versions or generate a reduced paper selection.
-      For additional actual attachments, use the separate attachment reader below.
-
       Uploaded file parsing:
       - For academic scenarios, call ppt_cache_academic_sources with ALL relevant
         exact attachment filenames from the original request, conversation and
@@ -569,7 +542,13 @@ steps:
         Do not separately call read_user_attachment for those papers. Preserve
         each filename/source_id in material_summary, list every failure, and
         do not claim failed papers were analyzed. Repeating the cache call reuses
-        successes and retries failures. User-provided reading notes need no file.
+        successes and retries failures. If ANY selected paper fails, report it
+        and STOP before publishing material_summary; never silently drop a paper
+        or substitute its abstract. User-provided reading notes need no file.
+      - When the request asks for reading reflections first, read ALL selected
+        papers, distinguish paper evidence from the reader's views, and publish
+        the real prose with ppt_publish_paper_reflection before material_summary.
+        Preserve those reflections alongside every original source for the PPT.
       - You CAN read PPT/PPTX with the attachment reader. If the user uploaded a
         PDF/DOC/DOCX/PPT/PPTX or refers to an uploaded source file, call
         read_user_attachment(filename=<uploaded filename>) to extract text.
@@ -605,9 +584,9 @@ steps:
         authorized KB/work records when needed; do not invent missing updates.
 
       Retrieval policy (do this before writing the summary):
-      The frozen paper-library selection is read by ppt_cache_library_papers,
-      not generic KB semantic search. Apply the following retrieval gate only to
-      additional KB material explicitly requested beyond those selected papers.
+      Read selected paper attachments with ppt_cache_academic_sources. Apply
+      the following retrieval gate only to additional KB material explicitly
+      requested beyond those selected papers.
       1. KB-first gate (mandatory): if the user supplied, selected, or mentioned
          a knowledge base / selected documents, or the topic looks internal,
          call kb semantic search BEFORE calling any web tool. Do not call
@@ -721,9 +700,8 @@ steps:
       Academic analysis (only for the four academic scenarios above):
       Reuse collected source_ids via ppt_read_academic_source; continue reading
       chunks needed for each claim. Never infer a full paper from its excerpt.
-      If a source is absent from material_summary, use ppt_cache_library_papers
-      for a paper-library task, or ppt_cache_academic_sources with its exact
-      attachment filename for a conversation upload. Never use paper_id as a filename. Distinguish the user's own paper, one paper, multiple
+      If a source is absent from material_summary, use ppt_cache_academic_sources
+      with its exact attachment filename and turn. Never use paper_id as a filename. Distinguish the user's own paper, one paper, multiple
       papers, and reading notes. Reading notes alone are valid input: never
       invent a paper or force an upload. Keep each paper's title, authors,
       filename/URL, and available page/figure/table references with its claims.
@@ -823,7 +801,7 @@ steps:
 
       Stop after saving.
     tools:
-      - ppt_cache_library_papers
+      - ppt_publish_paper_reflection
       - ppt_source_connections
       - ppt_collect_github_prs
       - ppt_read_pr_description
@@ -841,8 +819,6 @@ steps:
       - ppt_extract_pdf_images
       - ppt_generate_material_images
     inputs:
-      - material: task_context
-        required: false
       - material: presentation_scenario
         required: true
       - material: requirement_analysis
@@ -856,6 +832,8 @@ steps:
       - material: template_content_brief
         required: false
     outputs:
+      - material: reflection_markdown
+        required: false
       - material: material_summary
         required: true
       - material: material_clarification
