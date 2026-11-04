@@ -147,7 +147,10 @@ def paper_execution(monkeypatch):
         )
         value = json.loads(result.stdout)
         if result.returncode or 'error' in value:
-            raise RuntimeError(label + '执行失败: ' + value.get('error', result.stderr))
+            detail = value.get('error', result.stderr)
+            for frame in value.get('frames', []):
+                detail += f'\nFile "{frame["file"]}", line {frame["line"]}, in {frame["function"]}'
+            raise RuntimeError(label + '执行失败: ' + detail)
         return value
 
     monkeypatch.setattr(container, 'validate_environment', lambda: None)
@@ -178,7 +181,7 @@ def offline_paper_model(monkeypatch):
             pass
 
         def iter_lines(self):
-            value = {'choices': [{'index': 0, 'delta': {'content': self.content_text}}]}
+            value = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': self.content_text}}]}
             yield ('data: ' + json.dumps(value)).encode('utf-8')
             yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}'
             yield b'data: [DONE]'

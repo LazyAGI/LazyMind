@@ -186,7 +186,8 @@ Do not include a per-result provenance inventory. Use category and series only f
 string fields present in every selected row. category MUST be an ordered numeric coordinate for a line chart;
 independent tasks or unordered conditions need bars or points, never an invented trajectory.
 sort is source (preserve evidence order), value_ascending or value_descending. Lines always sort by numeric x.
-Select at most four metric/unit/kind combinations and 32 estimates in a bar/point figure; split dense comparisons.
+Prefer coherent, readable comparisons. The host partitions dense standard figures without dropping findings.
+Keep the metric name independent of group values: put a media condition or method in coordinates, not in metric.
 data_status is simulated only when the input explicitly says so; otherwise use supplied. executed/code success and
 is_demo=false do not establish real-world measurement. The bound plan will expose actual values, denominators,
 source columns and interval meaning before rendering; requirements must not override these executed facts.

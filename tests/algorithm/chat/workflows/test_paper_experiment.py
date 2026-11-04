@@ -714,8 +714,12 @@ def test_ask_user_answer_keeps_original_goal():
 
 def test_dynamic_model_experiment_to_f4_contract_and_downloads(example, tmp_path, offline_paper_model):
     """Exercise the dynamic SDK boundary and real contracts without a live provider."""
+    response = copy.deepcopy(example['model_response'])
+    files = {item['path']: item['content'] for item in response.pop('code_files')}
+    response.update(code=files['experiment.py'], config=json.loads(files['config.json']),
+                    dependencies=[line for line in files['requirements.txt'].splitlines() if line.strip()])
     offline_paper_model({'action': 'simulation', 'table_ids': [], 'reason': '本轮只生成模拟实验。'},
-                        example['model_response'])
+                        response)
     pool = workflow.pool_from_business({**example['input'], 'request': '明确进行模拟研究，比较均值与中位数。'})
     result = workflow.execute_step('experiment', pool)
     output = {key: workflow.material(result['pool'], key)['content'] for key in contracts.OUTPUTS['experiment']}

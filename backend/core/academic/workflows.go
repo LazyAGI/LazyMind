@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -384,7 +385,13 @@ func init() {
 				payload.CompletedArtifacts = artifacts
 			}
 		}
-		asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, MaxAttempts: 5})
+		request := asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, MaxAttempts: 5}
+		if err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+			_, err := asyncjob.EnqueueInTransaction(ctx, tx, request)
+			return err
+		}); err != nil {
+			log.Printf("academic projection enqueue failed for session %s: %v", session, err)
+		}
 	}
 }
 func runAcademicChat(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {

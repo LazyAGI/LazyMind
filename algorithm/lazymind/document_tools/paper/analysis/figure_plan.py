@@ -82,7 +82,7 @@ def _flat_terminology(value, rows):
 def bind_figures(value, analysis):
     """Keep the proposal inspectable; sources, counts and intervals come from executed rows."""
     from ..plotting.skills import PlotSkills
-    from ..plotting.standard import STANDARD_STYLES, check_encoding
+    from ..plotting.standard import STANDARD_STYLES, check_encoding, coordinate
     from .results import result_rows
     rows = result_rows(analysis)
     arrangement = parse(FigureArrangement, _flat_terminology(value, rows), 'analysis.figures', extra='ignore')
@@ -110,23 +110,46 @@ def bind_figures(value, analysis):
         if identifiers and indices and identifiers != [rows[position]['id'] for position in indices]:
             raise ValueError(f'Figure {index}: finding_ids and legacy result_indices select different results or order')
         indices = [positions[key] for key in identifiers] if identifiers else list(dict.fromkeys(indices))
-        selected = [findings[position] for position in indices]
         selected_rows = [rows[position] for position in indices]
         try:
-            check_encoding(draft, selected_rows)
+            check_encoding(draft, selected_rows, check_capacity=False)
         except ValueError as exc:
             raise ValueError(f'Figure {index} ({draft["title"]}), selected finding_ids '
                              f'{[row["id"] for row in selected_rows]}: {exc}') from exc
+        groups = [selected_rows]
         if draft['style'] in STANDARD_STYLES:
-            panels = {(row['metric'], row['unit'], row['kind']) for row in selected_rows}
-            if len(panels) > 4 or (not draft['style'].startswith('line_') and len(selected_rows) > 32):
-                raise ValueError(f'Figure {index}: split into coherent figures with at most 4 metrics and 32 estimates')
-        columns = {(ref['table_id'], ref['column']): ref for row in selected for ref in row['columns']}
-        figures.append(dict(copy.deepcopy(draft), id=f'fig{index}',
-                            finding_ids=[row['id'] for row in selected], columns=list(columns.values()),
-                            evidence=[{key: copy.deepcopy(row[key]) for key in (
-                                'id', 'label', 'metric', 'value', 'unit', 'comparison', 'scope', 'columns',
-                                'sample_size', 'interval')} for row in selected_rows]))
+            # Capacity is a layout choice. Split intact evidence instead of failing the whole analysis.
+            panels = {}
+            for row in selected_rows:
+                key = (row['metric'], row['unit'], row['kind'], coordinate(row, draft.get('facet')))
+                panels.setdefault(key, []).append(row)
+            groups, batch, panel_count = [], [], 0
+            limit = None if draft['style'].startswith('line_') else 32
+            for panel in panels.values():
+                for offset in range(0, len(panel), limit or len(panel)):
+                    chunk = panel[offset:offset + limit] if limit else panel
+                    if batch and (panel_count == 4 or (limit and len(batch) + len(chunk) > limit)):
+                        groups.append(batch)
+                        batch, panel_count = [], 0
+                    batch.extend(chunk)
+                    panel_count += 1
+            if batch:
+                groups.append(batch)
+        if len(groups) == 1:
+            groups = [selected_rows]
+        if len(groups) > 1 and draft.get('source_chart_id'):
+            raise ValueError('An existing redraw cannot change figure identity; select a smaller existing scope.')
+        for part, group in enumerate(groups, 1):
+            spec = copy.deepcopy(draft)
+            if len(groups) > 1:
+                spec['title'] += f' ({part}/{len(groups)})'
+            check_encoding(spec, group)
+            columns = {(ref['table_id'], ref['column']): ref for row in group for ref in row['columns']}
+            figures.append(dict(spec, id=f'fig{len(figures) + 1}',
+                                finding_ids=[row['id'] for row in group], columns=list(columns.values()),
+                                evidence=[{key: copy.deepcopy(row[key]) for key in (
+                                    'id', 'label', 'metric', 'value', 'unit', 'comparison', 'scope', 'columns',
+                                    'sample_size', 'interval')} for row in group]))
     observed = list(dict.fromkeys(value for levels in coordinate_values(result_rows(analysis)).values()
                                   for value in levels if isinstance(value, str)))
     # Ordering is a presentation hint; unknown labels never become data identities

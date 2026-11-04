@@ -29,7 +29,7 @@ def _equivalent(rows, left, right):
     return len(pairs) == len(_levels(rows, left)) == len(_levels(rows, right))
 
 
-def check_encoding(spec, rows):
+def check_encoding(spec, rows, *, check_capacity=True):
     """Resolve only unambiguous grouping, never turn numeric metadata into category labels."""
     for key in ('category', 'series', 'facet'):
         name = spec.get(key)
@@ -73,7 +73,7 @@ def check_encoding(spec, rows):
             raise ValueError('Duplicate category/series cell; choose a facet or separate estimands, never pool silently')
         cells.add(identity)
         panels.add(panel)
-    if len(panels) > 4:
+    if check_capacity and len(panels) > 4:
         raise ValueError('Split the figure into at most four metric/unit/facet panels')
     if spec['style'] in LINE_STYLES:
         name = spec.get('category')

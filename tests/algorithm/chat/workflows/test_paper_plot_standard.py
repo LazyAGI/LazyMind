@@ -593,3 +593,34 @@ def test_dimension_binding_discovers_actual_fields_and_keeps_unknown_fields_inva
         check_encoding(dict(style='bar_grouped_hatch', category='不存在的字段'), rows)
     with pytest.raises(ValueError, match='unavailable'):
         check_encoding(dict(style='bar_grouped_hatch', category='value'), rows)
+
+
+@pytest.mark.parametrize('mode', ['metrics', 'facets', 'dense'])
+def test_dense_standard_figure_is_split_without_losing_evidence(analysis, mode):
+    count = 70 if mode == 'dense' else 6
+    prototype = analysis['findings'][0]
+    analysis['findings'] = []
+    for index in range(count):
+        row = copy.deepcopy(prototype)
+        row['id'] = f'r{index + 1}'
+        metadata = json.loads(row['calculation'])
+        metadata.update(label=f'Observation {index + 1}',
+                        metric=f'metric-{index}' if mode == 'metrics' else 'score',
+                        coordinates={'condition': str(index), 'item': str(index)})
+        row['calculation'] = json.dumps(metadata)
+        analysis['findings'].append(row)
+    before = copy.deepcopy(analysis)
+    ids = [row['id'] for row in analysis['findings']]
+    proposal = dict(figures=[dict(
+        title='Measurements', purpose='Show every observed result.',
+        style='bar_grouped_hatch', finding_ids=ids, category='label',
+        facet='condition' if mode == 'facets' else None)])
+    figures = bind_figures(proposal, analysis)['figures']
+    selected = [identifier for figure in figures for identifier in figure['finding_ids']]
+    assert selected == ids
+    assert len(figures) > 1
+    rows = result_rows(analysis)
+    for figure in figures:
+        check_encoding(figure, [row for row in rows if row['id'] in figure['finding_ids']])
+        assert len(figure['finding_ids']) <= 32
+    assert analysis == before

@@ -61,3 +61,58 @@ def test_current_section_addition_preserves_original_abstract():
     result = resolve_constraints(dict(required_sections=['abstract', 'methods']), '',
                                  current_request='还需包含讨论。')
     assert result['required_sections'] == ['abstract', 'methods', 'discussion']
+
+
+MIXED_STAGE_REQUEST = (
+    '请完成一篇正文约5000词的英文学术论文。'
+    '文献综述实际检索相关工作，使用中文约2500字。'
+    '选题、综述和审稿说明可用中文；大纲与论文使用英语，paper_language=en。'
+    '方法与系统实现约1800词，实证分析约1400词。'
+    '保留原始数字，不编造数据、对照实验或显著性结论。'
+)
+
+
+def test_stage_requirements_do_not_become_manuscript_constraints():
+    result = resolve_constraints({}, MIXED_STAGE_REQUEST)
+    assert result['paper_language'] == 'en'
+    assert result['word_target'] == 5000
+    assert result['required_sections'] == []
+
+
+@pytest.mark.parametrize('user_request', [
+    '保留原始数字，不编造数据、对照实验或显著性结论。',
+    '保留方法定义和实验数据。',
+    '包含实验数据的附件可作为背景。',
+    'The attachment includes results and conclusions from earlier studies.',
+])
+def test_material_preservation_is_not_a_required_section_list(user_request):
+    assert resolve_constraints({}, user_request)['required_sections'] == []
+
+
+@pytest.mark.parametrize('heading', ['实证评价', '评价设计与实证结果', '评价', 'Empirical Analysis', 'Empirical Study'])
+def test_requested_evaluation_accepts_normal_academic_headings(heading):
+    validate_required_sections('# Paper\n\n## ' + heading + '\n', {'required_sections': ['evaluation']})
+
+
+def test_review_body_language_and_length_remain_local_without_a_language_field():
+    result = resolve_constraints({}, '完成约5000词的英文学术论文。综述正文用中文约2500字。')
+    assert result['paper_language'] == 'en' and result['word_target'] == 5000
+
+
+def test_old_pool_repairs_only_values_matching_the_legacy_parser():
+    import copy
+    from lazymind.document_tools.paper.writing.requirements import refresh_legacy_constraints
+    pool = {'request': MIXED_STAGE_REQUEST, 'constraints': {
+        'paper_language': 'zh-CN', 'word_target': 2500, 'required_sections': ['evaluation', 'conclusion']}}
+    refresh_legacy_constraints(pool)
+    assert pool['constraints']['paper_language'] == 'en'
+    assert pool['constraints']['word_target'] == 5000
+    assert pool['constraints']['required_sections'] == []
+    before = copy.deepcopy(pool)
+    refresh_legacy_constraints(pool)
+    assert pool == before
+    custom = {'request': MIXED_STAGE_REQUEST, 'constraints': {
+        'paper_language': 'en', 'word_target': 6200, 'required_sections': ['abstract', 'methods']}}
+    refresh_legacy_constraints(custom)
+    assert custom['constraints']['word_target'] == 6200
+    assert custom['constraints']['required_sections'] == ['abstract', 'methods']

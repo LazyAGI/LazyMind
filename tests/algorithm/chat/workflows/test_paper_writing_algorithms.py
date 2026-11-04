@@ -739,7 +739,7 @@ def test_plugin_contains_only_thin_entry_and_calls_shared_runtime(tmp_path, monk
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
-        files[str(relative)] = base64.b64encode(source.read_bytes()).decode()
+        files[relative.as_posix()] = base64.b64encode(source.read_bytes()).decode()
     assert sorted(p.relative_to(PACKAGE).as_posix() for p in (PACKAGE / 'scripts').rglob('*.py')) == ['scripts/tools.py']
     assert len((PACKAGE / 'scripts/tools.py').read_text().splitlines()) < 15
     loaded = load_workflow_package_tools({'files': files}, ['run_paper_step'],

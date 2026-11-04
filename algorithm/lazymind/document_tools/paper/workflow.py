@@ -236,6 +236,7 @@ def pool_from_business(value: dict) -> dict:
     from .writing.requirements import resolve_constraints
     pool = {'schema': SCHEMA, 'topic': value['topic'], 'request': value.get('request', ''),
             'constraints': resolve_constraints(value.get('constraints', {}), value.get('request', '')),
+            'requirements_version': 2,
             'selected_issue_ids': copy.deepcopy(value.get('selected_issue_ids', [])),
             'sequence': 0, 'materials': [], 'current': {}, 'history': []}
     value = copy.deepcopy(value)
@@ -393,7 +394,8 @@ def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *
     if step == 'write_outline':
         # Commit one paper-length target with the outline so drafting inherits it.
         pool = copy.deepcopy(pool)
-        from .writing.requirements import resolve_constraints
+        from .writing.requirements import refresh_legacy_constraints, resolve_constraints
+        refresh_legacy_constraints(pool)
         pool['constraints'] = resolve_constraints(
             pool.get('constraints', {}), pool.get('request', ''),
             current_request=request if request != pool.get('request', '') else '',

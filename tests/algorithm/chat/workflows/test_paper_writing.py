@@ -1032,6 +1032,8 @@ def test_config_logical_edges_and_no_real_external_calls():
             continue
         if step == 'revise_document':
             actual.add('F6')
+        if step == 'data_analysis':
+            actual.add('F3')  # Native rewind carries prepared-data recovery snapshots.
         if step in {'write_outline', 'write_document', 'data_analysis', 'literature_review'}:
             actual.discard(node)  # Outline/draft/direct revision are distinct F5 entries.
         if step == 'write_outline':
