@@ -203,8 +203,8 @@ export async function startManagedOAuthSession(
   provider: CloudDataSourceProvider,
   reauthorizeConnectionId?: string,
   onOpened?: () => void,
+  popup: ReservedManagedAuthorizationPopup = reserveManagedAuthorizationPopup(),
 ): Promise<string | null> {
-  const popup = reserveManagedAuthorizationPopup();
   if (popup === null) {
     return null;
   }
@@ -326,12 +326,13 @@ export function createOAuthEngine(ctx: ManagementContext) {
         (account) =>
           account.status === "connected" && Boolean(account.connection?.connectionId),
       );
-      const nextConnection = connectedAccount?.connection || null;
+      const nextConnection = connectedAccount?.connection || nextAccounts[0]?.connection || null;
       setNotionOauthConnection(nextConnection);
       if (nextConnection && ctx.selectedType === "notion") {
         setOauthConnection(nextConnection);
-        setOauthState("connected");
-        setConnectionVerified(true);
+        const state = getOAuthStateFromConnection(nextConnection);
+        setOauthState(state);
+        setConnectionVerified(state === "connected");
       }
     } catch (error) {
       console.error("Failed to refresh Notion auth accounts", error);
@@ -604,11 +605,13 @@ export function createOAuthEngine(ctx: ManagementContext) {
   const startManagedOAuth = async (
     provider: CloudDataSourceProvider,
     reauthorizeConnectionId?: string,
+    popup?: ReservedManagedAuthorizationPopup,
   ) => {
     const connectionId = await startManagedOAuthSession(
       provider,
       reauthorizeConnectionId,
       () => setOauthState("waiting"),
+      popup,
     );
     if (!connectionId) {
       return false;
@@ -627,6 +630,27 @@ export function createOAuthEngine(ctx: ManagementContext) {
     options?: StartCloudOAuthOptions,
   ) => {
     const savedGitHubReauthorization = provider === "github" && Boolean(options?.reauthorizeConnectionId);
+    const notionPopup = provider === "notion" && !options?.setup && ctx.cloudManagedOAuthAvailable !== false
+      ? reserveManagedAuthorizationPopup()
+      : undefined;
+    if (notionPopup === null) return false;
+    if (provider === "notion") {
+      try {
+        const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider: "notion", status: null,
+        });
+        const connections = getCloudConnectionItems(response.data);
+        const existing = connections.find((item) => item.connection_id === ctx.notionOauthConnection?.connectionId)
+          || connections.find((item) => item.connection_id?.trim());
+        if (!options?.reauthorizeConnectionId && existing) {
+          options = { ...options, reauthorizeConnectionId: existing.connection_id };
+        }
+      } catch {
+        if (notionPopup) closeManagedAuthorizationPopup(notionPopup);
+        message.error(t("modelProvider.cloudDocuments.notionConnectionsLoadFailed"));
+        return false;
+      }
+    }
     if (!options?.setup && !savedGitHubReauthorization) {
       if (provider === "feishu" && ctx.cloudManagedOAuthAvailable === true) {
         const connectionId = await startFeishuCLISession(
@@ -644,7 +668,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
         if (ctx.cloudManagedOAuthAvailable === false) {
           return false;
         }
-        return startManagedOAuth(provider, options?.reauthorizeConnectionId);
+        return startManagedOAuth(provider, options?.reauthorizeConnectionId, notionPopup);
       }
       if (!ctx.feishuAppSetup?.appId.trim() || !ctx.feishuAppSetup.appSecret.trim()) {
         ctx.openCloudSetupModal("feishu", "create");
@@ -681,14 +705,16 @@ export function createOAuthEngine(ctx: ManagementContext) {
           ? requestFeishuDataSourceAuthorizeUrl
           : (input: Parameters<typeof requestCloudDataSourceAuthorizeUrl>[1]) =>
               requestCloudDataSourceAuthorizeUrl(provider, input);
-      const authorizeUrl = await requestAuthorizeUrl({
+      const authorizeInput = {
         tenantId: selectedAgent.tenant_id || getScanTenantId(),
-        ...(savedGitHubReauthorization && options?.reauthorizeConnectionId
-          ? { reauthorizeConnectionId: options.reauthorizeConnectionId }
-          : { appId: activeSetup?.appId || "", appSecret: activeSetup?.appSecret || "" }),
         scopes: provider === "feishu" ? FEISHU_DEFAULT_SCOPES : [],
         returnUrl: window.location.href,
-      });
+      };
+      const authorizeUrl = await requestAuthorizeUrl(
+        (provider === "notion" || savedGitHubReauthorization) && options?.reauthorizeConnectionId
+          ? { ...authorizeInput, reauthorizeConnectionId: options.reauthorizeConnectionId }
+          : { ...authorizeInput, appId: activeSetup?.appId || "", appSecret: activeSetup?.appSecret || "" },
+      );
       const draftFormValues =
         options?.draftFormValues ??
         (options?.draftWizardOpen === false ? {} : form.getFieldsValue(true));

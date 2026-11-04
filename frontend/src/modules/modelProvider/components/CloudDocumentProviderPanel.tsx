@@ -97,6 +97,9 @@ function getProviderDescription(
       account: vm.notionOauthConnection?.accountName || "Notion workspace",
     });
   }
+  if (vm.notionOauthConnection?.connectionId) {
+    return t("modelProvider.cloudDocuments.notionReauthorizeRequired");
+  }
   if (!vm.isNotionSetupReady) {
     return t("modelProvider.cloudDocuments.notionSetupRequiredHint");
   }
@@ -271,6 +274,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             logo={<ProviderLogo type={item.type} icon={item.icon} logoUrl={item.logoUrl} />} />;
         }
         const isNotion = item.type === "notion";
+        const hasNotionConnection = isNotion && Boolean(vm.notionOauthConnection?.connectionId);
         const isGoogleDrive = item.type === "googledrive";
         const isWeChatOfficialAccount = item.type === "wechat";
         const isAuthValid = isFeishu
@@ -313,7 +317,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             handleOpenGitHubSetup();
             return;
           }
-          if (isNotion && isAuthValid) {
+          if (isNotion && (isAuthValid || hasNotionConnection)) {
             handleManageNotionAuth();
             return;
           }
@@ -329,6 +333,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             <div className="model-provider-cloud-doc-resource-copy">
               <h3>{getProviderTitle(item.type, t)}</h3>
               <p>{getProviderDescription(item.type, t, vm)}</p>
+              {isNotion && <p>{t("modelProvider.cloudDocuments.notionSingleConnectionHint")}</p>}
             </div>
             <Tag
               className="model-provider-cloud-doc-resource-status"
@@ -342,7 +347,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
                 className="model-provider-cloud-doc-resource-action"
                 onClick={handleManage}
               >
-                {isAuthValid
+                {isAuthValid || hasNotionConnection
                   ? t("modelProvider.cloudDocuments.manageAccount")
                   : isNotion
                     ? t("modelProvider.cloudDocuments.notionConnectAction")
