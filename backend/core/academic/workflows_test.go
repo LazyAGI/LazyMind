@@ -70,8 +70,8 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 	}
 	var count int64
 	db.Model(&orm.AcademicExpansion{}).Count(&count)
-	if count != 4 {
-		t.Fatalf("four expansion entry paths should create four records, got %d", count)
+	if count != 3 {
+		t.Fatalf("only expansion and direction-only review should create expansion records, got %d", count)
 	}
 	var topic orm.AcademicExpansion
 	if err := db.Where("title=? AND goal=?", "agents", "expansion").Take(&topic).Error; err != nil {
@@ -90,8 +90,8 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 		t.Fatal("topic preparation must return an empty paper array", w.Body.String())
 	}
 	db.Model(&orm.AcademicHandoff{}).Count(&count)
-	if count != 2 {
-		t.Fatalf("reflection and ppt should have separate handoffs, got %d", count)
+	if count != 3 {
+		t.Fatalf("selected-paper review, reflection and ppt should have separate handoffs, got %d", count)
 	}
 }
 
@@ -359,6 +359,26 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	var launchPayload map[string]string
 	if err = json.Unmarshal(launchJob.PayloadJSON, &launchPayload); err != nil || launchPayload["query"] != "请生成论文综述。\n"+expectedInstruction {
 		t.Fatalf("new Chat received internal or duplicate context: %q %v", launchPayload["query"], err)
+	}
+	if launchPayload["workflow_id"] != "paper-writing" {
+		t.Fatalf("review must use the real paper-writing workflow: %v", launchPayload)
+	}
+	w := httptest.NewRecorder()
+	request := paperRequest("")
+	request.URL.RawQuery = "conversation_id=" + handoff.ConversationID
+	AcademicChatContext(w, request)
+	var taskContext struct {
+		HandoffID string              `json:"handoff_id"`
+		Kind      string              `json:"kind"`
+		Input     ReviewWorkflowInput `json:"input"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &taskContext); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("review context unavailable: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if taskContext.HandoffID != handoff.ID || taskContext.Kind != "review" ||
+		taskContext.Input.UserInstruction != expectedInstruction || len(taskContext.Input.Papers) != 2 ||
+		taskContext.Input.Papers[0].Paper.PaperID != "a" || taskContext.Input.Papers[1].Paper.PaperID != "b" {
+		t.Fatalf("review context lost the frozen selection or user requirements: %+v", taskContext)
 	}
 
 	update := "请重试本步，每篇关系和贡献压缩成两句话，保留现有两篇论文及其版本。"

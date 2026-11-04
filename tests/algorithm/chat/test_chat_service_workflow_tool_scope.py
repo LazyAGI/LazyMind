@@ -180,8 +180,11 @@ def test_selected_workflow_can_clarify_before_session_creation():
     }]}
 
     assert _workflow_startup_clarification_available(runtime, None)
-    assert not _workflow_startup_clarification_available(
+    assert _workflow_startup_clarification_available(
         runtime, {'session_id': 'session-1'},
+    )
+    assert not _workflow_startup_clarification_available(
+        runtime, {'session_id': 'session-1', 'workflow_mode': 'auto'},
     )
 
 

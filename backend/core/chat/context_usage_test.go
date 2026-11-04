@@ -71,15 +71,18 @@ func TestPreviewQueryReadsTextInput(t *testing.T) {
 
 func TestMentionedBuiltinWorkflowReplacesDefaultCatalog(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
-	catalog := []map[string]any{{"workflow_ref": "plugin:default", "workflow_id": "default"}}
+	catalog := []map[string]any{
+		{"workflow_ref": "plugin:default", "workflow_id": "default"},
+		{"workflow_ref": "builtin:image-workflow", "workflow_id": "image-workflow", "when_to_use": "Generate images"},
+	}
 	selected, builtins, err := mergeMentionedWorkflows(
 		t.Context(), db.DB, "user-1", []string{"builtin:image-workflow"}, catalog,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(selected) != 0 {
-		t.Fatalf("selected catalog = %#v, want no default workflows", selected)
+	if len(selected) != 1 || selected[0]["workflow_ref"] != "builtin:image-workflow" || selected[0]["when_to_use"] != "Generate images" {
+		t.Fatalf("selected catalog = %#v, want selected builtin metadata without default workflows", selected)
 	}
 	if len(builtins) != 1 || builtins[0] != "image-workflow" {
 		t.Fatalf("builtins = %#v, want image-workflow", builtins)

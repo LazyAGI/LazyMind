@@ -74,6 +74,7 @@ func documentImageSources(ctx context.Context, target *documentActionContext, re
 			}
 		}
 	}
+	addPaperChartImageSources(ctx, target, artifacts, add)
 	for _, slot := range slots {
 		for _, artifact := range artifacts {
 			if artifact.SlotID != slot || artifact.Validity != "effective" {

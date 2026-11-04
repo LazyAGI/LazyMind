@@ -212,16 +212,17 @@ type projectionResponse struct {
 }
 
 type attemptHistoryDTO struct {
-	AttemptID     string  `json:"attempt_id"`
-	Attempt       int     `json:"attempt"`
-	TaskID        string  `json:"task_id"`
-	Status        string  `json:"status"`
-	Validity      string  `json:"validity"`
-	DurationSec   float64 `json:"duration_sec"`
-	ArtifactCount int64   `json:"artifact_count"`
-	StartedAt     string  `json:"started_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	IntentContext string  `json:"intent_context,omitempty"`
+	AttemptID     string          `json:"attempt_id"`
+	Attempt       int             `json:"attempt"`
+	TaskID        string          `json:"task_id"`
+	Status        string          `json:"status"`
+	Validity      string          `json:"validity"`
+	DurationSec   float64         `json:"duration_sec"`
+	ArtifactCount int64           `json:"artifact_count"`
+	StartedAt     string          `json:"started_at"`
+	UpdatedAt     string          `json:"updated_at"`
+	IntentContext string          `json:"intent_context,omitempty"`
+	InputRequired json.RawMessage `json:"input_required,omitempty"`
 }
 
 func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) (projectionResponse, error) {
@@ -262,9 +263,16 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		if duration < 0 {
 			duration = 0
 		}
+		var pending struct {
+			InputRequired json.RawMessage `json:"input_required"`
+		}
+		if attempt.TerminalCode == "WORKFLOW_INPUT_REQUIRED" {
+			_ = json.Unmarshal([]byte(attempt.ResultJSON), &pending)
+		}
 		attemptHistory[attempt.StepID] = append(attemptHistory[attempt.StepID], attemptHistoryDTO{
 			AttemptID: attempt.ID, Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
 			IntentContext: intentMap[attempt.StepID],
+			InputRequired: pending.InputRequired,
 			DurationSec:   duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: attempt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
 		var bindings []orm.WorkflowAttemptInputBinding
@@ -292,7 +300,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	if err != nil {
 		return projectionResponse{}, err
 	}
-	if display.Status == "waiting" {
+	if display.ApprovalStepID != "" {
 		projection.Completed = false
 	}
 	return projectionResponse{

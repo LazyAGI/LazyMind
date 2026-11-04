@@ -85,6 +85,28 @@ describe("ordinary stage artifacts", () => {
     expect(preview.open).toHaveBeenCalledTimes(2);
   });
 
+  it('downloads the current inline edit with its Chinese Markdown filename', async () => {
+    const create = vi.fn(() => 'blob:edited-document');
+    const revoke = vi.fn();
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = create;
+      static revokeObjectURL = revoke;
+    });
+    vi.useFakeTimers();
+    try {
+      render(<TaskArtifactList artifacts={[file({ name: '文献综述.md', inline_content: '# 已编辑 E2E-NAME-1015' })]} />);
+      fireEvent.click(screen.getByRole('button', { name: 'taskCenter.download 文献综述.md' }));
+      expect(downloadArtifactFile).toHaveBeenCalledWith('blob:edited-document', '文献综述.md');
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'text/markdown', size: new Blob(['# 已编辑 E2E-NAME-1015']).size,
+      }));
+      await vi.runAllTimersAsync();
+      expect(revoke).toHaveBeenCalledWith('blob:edited-document');
+    } finally {
+      vi.useRealTimers(); vi.unstubAllGlobals();
+    }
+  });
+
   it("hides an empty collection and deduplicates repeated IDs", () => {
     const { rerender } = render(<TaskArtifactList artifacts={[]} />);
     expect(screen.queryByRole("region")).not.toBeInTheDocument();

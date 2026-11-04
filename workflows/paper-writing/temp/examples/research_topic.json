@@ -1,0 +1,50 @@
+{
+  "step": "research_topic",
+  "input": {
+    "topic": "方法得分比较",
+    "request": "",
+    "constraints": {
+      "paper_language": "zh-CN",
+      "word_target": null,
+      "paper_type": "research",
+      "citation_style": "GB/T 7714",
+      "focus": []
+    },
+    "mode": "create",
+    "papers": [
+      {
+        "id": "P1",
+        "title": "方法比较示例",
+        "text": "比较方法时应报告评价指标与实验条件。",
+        "url": null,
+        "authors": [],
+        "year": null,
+        "doi": null,
+        "content_type": "excerpt",
+        "source": "upload",
+        "truncated": false
+      }
+    ],
+    "question": null,
+    "evidence": null
+  },
+  "output": {
+    "is_demo": true,
+    "question": {
+      "summary": "比较方法得分，验证差异是否稳定。",
+      "candidates": [
+        {
+          "id": "Q1",
+          "question": "新方法的得分提升是否稳定？",
+          "innovation": "补充重复实验与误差分析。",
+          "rationale": "单次得分不足以说明稳定性。",
+          "source_refs": [
+            "P1"
+          ],
+          "validation_plan": "固定测试条件，重复运行并报告均值和区间。"
+        }
+      ],
+      "selected_id": null
+    }
+  }
+}

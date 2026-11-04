@@ -13,7 +13,7 @@ import (
 func TestWorkflowFailureFreezesInternalWaitingAndRetryExcludesIdleTime(t *testing.T) {
 	for _, stepStatus := range []string{"interrupted", "failed", "succeeded"} {
 		t.Run(stepStatus, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{})
+			db := orm.MigrateTestDB(t, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.SubAgentTask{})
 			ctx := t.Context()
 			start := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
 			at := func(seconds int) time.Time { return start.Add(time.Duration(seconds) * time.Second) }

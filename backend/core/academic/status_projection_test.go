@@ -3,13 +3,16 @@ package academic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -48,6 +51,18 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 					TaskID: "task", Status: "running", Validity: "effective", Attempt: 1, LeaseToken: "lease"}).Error; err != nil {
 					t.Fatal(err)
 				}
+			}
+			var enqueueAttempts atomic.Int32
+			injectBusy := scenario == "failure" && db.Dialector.Name() == "sqlite"
+			if injectBusy {
+				if err := db.Callback().Create().Before("gorm:create").Register("projection-busy", func(tx *gorm.DB) {
+					if tx.Statement.Table == "async_jobs" && enqueueAttempts.Add(1) == 1 {
+						tx.AddError(errors.New("database is locked (5) (SQLITE_BUSY)"))
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { db.Callback().Create().Remove("projection-busy") })
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			runner := asyncjob.Start(ctx, db.DB, asyncjob.Options{JobTypes: []string{"academic.project"}, Concurrency: 1, PollInterval: 10 * time.Millisecond})
@@ -105,6 +120,9 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 						SessionID: session.ID, StepID: "analyze_relations", WorkflowID: "paper_expansion", ConvID: conversation, WorkflowMode: "dynamic",
 					})
 				assertProjected("failed")
+				if injectBusy && enqueueAttempts.Load() < 2 {
+					t.Fatal("projection enqueue did not retry SQLite contention")
+				}
 				return
 			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ function panelAdapter(control: WorkflowControlView, execute: (intent: WorkflowAc
 vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) => <section aria-label={target.filename}>
   {target.content}<button onClick={close}>关闭预览</button>
 </section> }));
+import { useTaskCenterStore, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 
 const fixture = vi.hoisted(() => ({
   session: {} as WorkflowSession,
@@ -58,7 +59,7 @@ vi.mock('./ppt/SlideThumb', () => ({ SlideThumb: () => null }));
 vi.mock('./SlotComponents', () => ({
   isWriterIrSource: () => false,
   SlotDownloadContext: React.createContext(true),
-  SlotMarkdownStream: () => null,
+  SlotMarkdownStream: ({ stream }: { stream: TaskArtifactStream }) => <div data-testid='live-preview'>{stream.content}</div>,
   SlotRenderer: ({ slotId, slot, readOnly, widget }: { widget?: { widgetType?: string }; slotId: string; slot: SlotRevision; readOnly?: boolean }) => {
     const context = useContext(SlotEditingContext);
     fixture.registerFooterAction = context.registerFooterAction;
@@ -88,6 +89,7 @@ vi.mock('./SlotComponents', () => ({
 }));
 
 beforeEach(async () => {
+  useTaskCenterStore.setState({ tasksByConversation: {} });
   await i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
   fixture.fetchWorkflowUI.mockReset().mockImplementation(async () => fixture.ui);
@@ -270,6 +272,49 @@ describe('shared workflow compact layout', () => {
     fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
     expect(screen.queryByRole('region', { name: 'plan.json' })).not.toBeInTheDocument();
     expect(editor).toBeVisible();
+  });
+
+  it('switches to the published document as soon as the owning step completes, despite lagging task chunks', async () => {
+    const step = fixture.session.steps!.find(item => item.step_id === 'write_document')!;
+    step.task_id = 'draft-task';
+    step.status = 'running';
+    const stream: TaskArtifactStream = { task_id: 'draft-task', slot: 'document', stream_id: 'preview',
+      chunk_index: 10, content_type: 'text/markdown', content: '待完成预览', deltas: ['待', '完成', '预览'], state: 'streaming' };
+    useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'draft-task', status: 'running', artifact_streams: [stream] });
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.getByTestId('live-preview')).toHaveTextContent('待完成预览'));
+    step.status = 'succeeded';
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.queryByTestId('live-preview')).not.toBeInTheDocument());
+    expect(view.container.querySelector('article[data-value="正文"]')).toBeInTheDocument();
+    act(() => useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'draft-task',
+      artifact_streams: [{ ...stream, chunk_index: 11, content: '迟到内容' }] }));
+    expect(screen.queryByTestId('live-preview')).not.toBeInTheDocument();
+    expect(view.container.querySelector('article[data-value="正文"]')).toBeInTheDocument();
+  });
+
+  it('hides skipped stages, follows the current step, and restores them on rewind', async () => {
+    fixture.ui.hide_skipped_steps = true;
+    fixture.focusedTab = 'prepare';
+    fixture.session = { ...fixture.session, status: 'active', current_step_id: 'write_document',
+      projection: { current: ['write_document'], pruned: ['prepare'] } };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '成稿' }).querySelector('.workflow-panel__tab-badge')).toHaveTextContent('1');
+    fixture.session = { ...fixture.session, current_step_id: 'prepare',
+      projection: { current: ['prepare'], pruned: [] } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+    expect(screen.getByRole('tab', { name: '成稿' }).querySelector('.workflow-panel__tab-badge')).toHaveTextContent('2');
+  });
+
+  it('excludes internal control steps from rewind without hiding business stages', async () => {
+    fixture.ui.task_presentation = { hidden_steps: ['prepare'] };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.queryByRole('button', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '成稿' })).toBeVisible();
   });
 
   it('keeps a replacement document action when the previous registration cleans up', async () => {
@@ -513,6 +558,14 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByText('正文 notes')).toBeVisible();
   });
 
+  it('numbers ordinary workflow stages even with hidden control steps', async () => {
+    fixture.ui.task_presentation = { hidden_steps: ['route'] };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const tabs = await screen.findByRole('tablist');
+    expect(Array.from(tabs.querySelectorAll('.workflow-panel__tab-badge'), el => el.textContent)).toEqual(['1', '2']);
+    expect(within(tabs).queryByText('产物')).not.toBeInTheDocument();
+  });
+
   it('labels grouped artifact tabs without suggesting they count execution tasks', async () => {
     fixture.ui.task_presentation = { grouped: true, hidden_steps: ['route'] };
     fixture.session.steps!.unshift({ ...fixture.session.steps![0], id: 'route', step_id: 'route' });
@@ -737,6 +790,22 @@ describe('shared workflow compact layout', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  });
+
+  it('shows a successful dynamic yield without failed or approval controls', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'next_step_required', approval_step_id: '' };
+    fixture.session.projection!.current = [];
+    fixture.session.projection!.ready = ['refine_topic'];
+    fixture.session.projection!.nodes = { write_document: {
+      execution: 'succeeded', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
+    } };
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={vi.fn()} />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.getByText('等待下一步')).toBeInTheDocument();
+    expect(screen.queryByText('执行失败')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
   it('blocks approval while an ordinary Chat turn is active without treating it as approval', async () => {
@@ -1406,6 +1475,34 @@ describe('workflow follow and session presentation', () => {
   });
 });
 
+
+it.each(['research_topic', 'refine_topic', 'literature_review', 'experiment', 'data_analysis',
+  'write_outline', 'write_document', 'peer_review', 'revise_document', 'reading_reflection', 'finish'])(
+  'automatically hands %s over to its published complete document', async (stepId) => {
+    const slot = `${stepId}_document`;
+    fixture.ui = { tabs: [{ id: stepId, step_id: stepId, label: '当前文档', layout: 'list',
+      slots: [{ id: slot, label: '当前文档', type: 'file' }] }] };
+    fixture.session = { ...fixture.session, workflow_id: 'paper-writing', status: 'active',
+      current_step_id: stepId, projection: { current: [stepId] },
+      steps: [{ id: 'current-attempt', session_id: 'layout-test', step_id: stepId, task_id: 'owner',
+        attempt: 2, status: 'running', created_at: '', updated_at: '' }],
+      slots: [{ slot_id: slot, slot, step_id: stepId, revision: 1, attempt: 1, selected: true,
+        producer_attempt_id: 'old', artifact_value: { text: '旧文档' }, created_at: '' }],
+    };
+    const preview: TaskArtifactStream = { task_id: 'owner', slot, stream_id: 'live', chunk_index: 3,
+      content_type: 'text/markdown', content: '已经返回的完整预览', state: 'ended' };
+    useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'owner', status: 'running', artifact_streams: [preview] });
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.getByTestId('live-preview')).toHaveTextContent('已经返回的完整预览'));
+    fixture.session.steps![0].status = 'succeeded';
+    fixture.session.slots = [{ ...fixture.session.slots![0], revision: 2, attempt: 2,
+      producer_attempt_id: 'current-attempt', artifact_value: { text: '完整正式文档' } }];
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.queryByTestId('live-preview')).not.toBeInTheDocument());
+    expect(view.container.querySelector('article[data-value="完整正式文档"]')).toBeInTheDocument();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  },
+);
 
 it.each([false, true])('preserves mainline no_advance controls without adding continuation (external=%s)', async external => {
   fixture.session.status = 'waiting';

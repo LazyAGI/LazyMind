@@ -567,7 +567,9 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           </span>
         </Tooltip>
         <span className="task-card-tag">{t("taskCenter.panelTitle")}</span>
-        <StatusBadge status={task.status} />
+        {task.status === 'interrupted' && task.current_phase === 'awaiting_input'
+          ? <span className="task-status">{t('chat.workflowInputRequired', '等待确认')}</span>
+          : <StatusBadge status={task.status} />}
       </div>
       {!collapsed && (
         <>
@@ -703,6 +705,7 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         })}`}>{t("chat.checkModelSettings")}</a>
       </div>
     )}
+    {view?.input_required && <div role="status">{view.input_required}</div>}
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
       state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
@@ -710,7 +713,7 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
       <span className="ordinary-thinking-marker" aria-hidden="true"><StateMarker state={item.state} /></span>
       <span className="ordinary-thinking-terminal-copy">
         <strong>{t("taskCenter.ordinaryThinkingDuration", { duration: formatDuration(ordinaryTaskDurationSeconds(item)) })}</strong>
-        <span>{stateLabel(item.state, t)}</span>
+        <span>{view?.input_required ? t('chat.workflowInputRequired') : stateLabel(item.state, t)}</span>
         {view?.timing.thinking_elapsed_ms != null && <span>{t("taskCenter.ordinaryMeasuredThinkingDuration", { duration: formatDuration(Math.round(view.timing.thinking_elapsed_ms / 1000)) })}</span>}
       </span>
     </div>
@@ -775,7 +778,7 @@ function OrdinaryTaskCard({
               </span>
             )}
             <span className="ordinary-task-status">
-              {stateLabel(item.state, t)}
+              {item.ordinary?.input_required ? t('chat.workflowInputRequired') : stateLabel(item.state, t)}
             </span>
           </span>
         </span>
@@ -909,6 +912,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
 
 function defaultOrdinaryExpandedId(items: OrdinaryTaskItem[]): string | null {
   return items.find((item) => item.state === "running")?.id
+    ?? items.find((item) => item.ordinary?.input_required)?.id
     ?? items.find((item) => item.state === "failed")?.id
     ?? [...items].reverse().find(
       (item) => item.state !== "waiting",
@@ -1221,7 +1225,7 @@ const TaskCenter = (props: Props) => {
         hiddenSteps={taskPresentation?.hidden_steps}
         hideGroupedArtifacts={taskPresentation?.hide_final_artifacts}
         groupedStatus={taskPresentation?.grouped && workflowSession
-          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status))
+          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status, workflowSession.projection?.display?.reason))
           : undefined}
         onClose={onClose}
         showHeader={showHeader}

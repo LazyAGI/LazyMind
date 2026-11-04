@@ -67,6 +67,8 @@ export interface OrdinaryTaskView {
   plan_steps?: string[];
   /** Overall task progress used to estimate plan position, not individual execution states. */
   progress_pct?: number;
+  /** Public question that must be answered before this attempt can resume. */
+  input_required?: string;
   /** Validated setup actions, without the raw task failure or tool logs. */
   capability_dependency?: Pick<MediaCapabilityDependencyDetail, "status" | "required" | "missing" | "message">;
   knowledge_operations?: KnowledgeOperation[];

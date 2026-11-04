@@ -581,6 +581,7 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 		"image-workflow",
 		"image-workflow-v2",
 		"test-workflow",
+		"paper-writing",
 		"ppt-workflow",
 		"bid_tech_proposal_writer",
 		"academic_research_pipeline",

@@ -610,6 +610,7 @@ jobs:
         shell: python
         env:
           LAZYLLM_INIT_DOC: "1"
+          PYTHONUTF8: "1"
         run: |
           import subprocess
           import sys

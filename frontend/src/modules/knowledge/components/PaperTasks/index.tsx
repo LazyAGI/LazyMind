@@ -327,7 +327,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             onNotificationResolved?.('paper-task-launch');
             setLaunch(undefined);
             if (result.expansion_id && ['expansion', 'review'].includes(launch.kind)) await openDetail(result.expansion_id);
-            else if (result.conversation_id) goChat(result.conversation_id, launch.kind === 'review');
+            else if (result.conversation_id) goChat(result.conversation_id);
             else throw new Error('任务未返回有效记录，请重试');
         } catch (error) {
             if (onNotification) {

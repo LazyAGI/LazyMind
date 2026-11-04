@@ -114,6 +114,44 @@ func TestSuccessfulStepHandoffPreservesExecutionClock(t *testing.T) {
 	}
 }
 
+func TestProjectionPreservesInputRequiredQuestion(t *testing.T) {
+	db, session, now := ordinaryFixture(t)
+	for i, code := range []string{"WORKFLOW_INPUT_REQUIRED", "WORKFLOW_STOPPED"} {
+		row := orm.WorkflowSessionStep{
+			ID: code, SessionID: session.ID, StepID: "write", Attempt: i + 1,
+			Status: "cancelled", Validity: "effective", TerminalCode: code,
+			ResultJSON: `{"input_required":{"question":"请选择意见","request_sha256":"abc"}}`,
+			CreatedAt:  now.Add(time.Duration(i) * time.Second), UpdatedAt: now,
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		ordinary, err := projectOrdinarySession(t.Context(), db.DB, &session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		question := ordinary.Tasks[0].InputRequired
+		if (code == "WORKFLOW_INPUT_REQUIRED" && question != "请选择意见") || (code != "WORKFLOW_INPUT_REQUIRED" && question != "") {
+			t.Fatalf("ordinary waiting state for %s: %q", code, question)
+		}
+	}
+	view, err := projectSession(t.Context(), db.DB, &session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := view.AttemptHistory["write"]
+	if len(attempts) != 2 {
+		t.Fatalf("attempts: %#v", attempts)
+	}
+	var pending map[string]string
+	if err := json.Unmarshal(attempts[0].InputRequired, &pending); err != nil || pending["question"] != "请选择意见" {
+		t.Fatalf("pending question lost: %s (%v)", attempts[0].InputRequired, err)
+	}
+	if len(attempts[1].InputRequired) != 0 {
+		t.Fatalf("ordinary cancellation must not expose a pending question: %s", attempts[1].InputRequired)
+	}
+}
+
 func TestFreezeRouteDecisionSerializesWithArtifactInvalidation(t *testing.T) {
 	db := newTestDB(t)
 	if db.Dialector.Name() != "postgres" {
