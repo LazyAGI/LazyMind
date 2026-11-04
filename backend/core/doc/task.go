@@ -2716,7 +2716,13 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 	}
 	caller := datasetCatalogCallerFromRequest(r)
 	caller.UserID, caller.UserName = userID, userName
-	bound, err := bindPageOriginal(r.Context(), caller, ImportOriginalRequest{FileRef: uploadFileID, DatasetID: datasetID, ParentID: documentPID, DisplayName: displayName, Tags: tags, DocumentID: documentID, TaskID: taskID, RelativePath: relativePath, DataSourceType: item.Task.DataSourceType})
+	conflictPolicy := ""
+	if _, isPaperUpload := r.Context().Value(paperUploadKey{}).(paperUploadScope); isPaperUpload {
+		// A removed paper may still retain an original with this filename. Keep
+		// that original intact and give the newly imported PDF its own name.
+		conflictPolicy = "rename"
+	}
+	bound, err := bindPageOriginal(r.Context(), caller, ImportOriginalRequest{FileRef: uploadFileID, DatasetID: datasetID, ParentID: documentPID, DisplayName: displayName, Tags: tags, DocumentID: documentID, TaskID: taskID, RelativePath: relativePath, DataSourceType: item.Task.DataSourceType, ConflictPolicy: conflictPolicy})
 	if err != nil {
 		if scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope); ok {
 			if task, replayErr := existingPaperUpload(store.DB().WithContext(r.Context()), scope); replayErr == nil {

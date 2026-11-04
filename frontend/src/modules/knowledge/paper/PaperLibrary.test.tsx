@@ -677,13 +677,28 @@ describe('paper library behavior', () => {
         const confirm = await within(dialog).findByRole("button", { name: "加入论文库" });
         vi.mocked(confirmLibraryPdf).mockRejectedValueOnce(new Error("数据库保存失败"));
         fireEvent.click(confirm);
-        expect(await within(dialog).findByRole("alert")).toHaveTextContent("导入尚未完成");
+        expect(await within(dialog).findByRole("alert")).toHaveTextContent("数据库保存失败");
         expect(upload).toHaveBeenCalledOnce();
         await waitFor(() => expect(confirm).toBeEnabled());
         fireEvent.click(confirm);
         await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
         expect(upload).toHaveBeenCalledOnce();
         expect(readLibrary(datasetId).attachments.find((item) => item.paperId === "new-pdf")?.contentRef).toBe("one-uploaded-document");
+    });
+    it("keeps the PDF choice and shows the name conflict when task creation fails", async () => {
+        const upload = vi.fn().mockRejectedValue(Object.assign(new Error("Request failed with status code 400"), {
+            response: { data: { code: 2000203, message: "Invalid request", data: { detail: "target already contains this name" } } },
+        }));
+        vi.mocked(paperFromPdf).mockResolvedValueOnce(makePaper("new-pdf", "Conflict PDF", null));
+        await renderLibrary({ onUploadPdf: upload });
+        const dialog = await openImportDialog("直接上传", "上传文献");
+        fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["%PDF"], "conflict.pdf", { type: "application/pdf" })] } });
+        const confirm = await within(dialog).findByRole("button", { name: "加入论文库" });
+        fireEvent.click(confirm);
+        expect(await within(dialog).findByRole("alert")).toHaveTextContent("同名");
+        expect(within(dialog).getAllByText("Conflict PDF").length).toBeGreaterThan(0);
+        expect(confirm).toBeEnabled();
+        expect(upload).toHaveBeenCalledOnce();
     });
     it("protects an edit draft while saving and restores editing after a failed write", async () => {
         let fail!: (error: Error) => void;

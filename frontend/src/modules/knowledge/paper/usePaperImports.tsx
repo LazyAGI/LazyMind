@@ -8,6 +8,7 @@ import { mergeLibraryChanges, previewLibraryPapers, confirmLibraryPdf, importLib
 import { previewPaperLink, previewPaperPDF, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
 import { paperFromPdf } from './pdfMeta';
 import { computeFileSha256 } from '../utils/fileHash';
+import { getImportErrorMessage } from '../utils/importError';
 import { isArxivInput } from './arxivImport';
 import { pdfIdentityMatch, pdfTargetCandidates, type PdfPaper } from './pdfAssociation';
 import PdfImportReview from './PdfImportReview';
@@ -131,8 +132,9 @@ export function usePaperImports(options: ImportOptions) {
     };
     const reportImportError = (error: unknown, title: string, id = "import-submit") => {
         if (!isCurrentScope()) return;
-        notify({ id, title, message: error instanceof Error ? error.message : title });
-        setImportError("导入尚未完成，已保留当前输入；请重试或查看通知。");
+        const reason = getImportErrorMessage(error, title);
+        notify({ id, title, message: reason });
+        setImportError(reason);
     };
     const commit = async () => {
         if (disabled || busyRef.current || searching || !pending || (pendingPdf && !pdfReviewComplete))

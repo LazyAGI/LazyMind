@@ -269,7 +269,7 @@ func (s *OriginalService) prepare(ctx context.Context, caller DatasetCatalogCall
 	if err != nil {
 		return nil, err
 	}
-	if req.ConflictPolicy != "" && req.ConflictPolicy != "ask" && req.ConflictPolicy != "skip_same_content" {
+	if req.ConflictPolicy != "" && req.ConflictPolicy != "ask" && req.ConflictPolicy != "skip_same_content" && req.ConflictPolicy != "rename" {
 		return nil, originalError(DatasetServiceInvalidArgument, "invalid conflict policy")
 	}
 	name, err := originalFilename(firstNonEmpty(req.DisplayName, meta.OriginalFilename))
@@ -368,7 +368,14 @@ func (s *OriginalService) BindOriginalTx(ctx context.Context, tx *gorm.DB, calle
 				}
 			}
 		}
-		return OriginalImportResult{}, originalError("CONFLICT", "target already contains this name")
+		if req.ConflictPolicy == "rename" {
+			req.DisplayName, err = availableOriginalDisplayName(tx, req.DatasetID, req.ParentID, req.DisplayName)
+			if err != nil {
+				return OriginalImportResult{}, err
+			}
+		} else {
+			return OriginalImportResult{}, originalError("CONFLICT", "target already contains this name")
+		}
 	}
 	now := s.now()
 	docID, taskID := firstNonEmpty(req.DocumentID, newDocID()), firstNonEmpty(req.TaskID, newTaskID())
@@ -397,6 +404,31 @@ func (s *OriginalService) BindOriginalTx(ctx context.Context, tx *gorm.DB, calle
 		}
 	}
 	return OriginalImportResult{Document: d, Task: task, ContentSHA256: p.hash, SubmissionStatus: "pending"}, nil
+}
+
+func availableOriginalDisplayName(tx *gorm.DB, datasetID, parentID, name string) (string, error) {
+	ext := filepath.Ext(name)
+	stem := []rune(strings.TrimSuffix(name, ext))
+	for number := 1; number <= 9999; number++ {
+		suffix := fmt.Sprintf(" (%d)", number)
+		maxStem := 512 - utf8.RuneCountInString(ext) - utf8.RuneCountInString(suffix)
+		if maxStem < 1 {
+			break
+		}
+		part := stem
+		if len(part) > maxStem {
+			part = part[:maxStem]
+		}
+		candidate := string(part) + suffix + ext
+		var count int64
+		if err := tx.Model(&orm.Document{}).Where("dataset_id = ? AND p_id = ? AND display_name = ? AND deleted_at IS NULL", datasetID, parentID, candidate).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return candidate, nil
+		}
+	}
+	return "", originalError("CONFLICT", "target has too many documents with this name")
 }
 func (s *OriginalService) ImportOriginal(ctx context.Context, caller DatasetCatalogCaller, req ImportOriginalRequest) (OriginalImportResult, error) {
 	p, err := s.PrepareOriginalBinding(ctx, caller, req)
