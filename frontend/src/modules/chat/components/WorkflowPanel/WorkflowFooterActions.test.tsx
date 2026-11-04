@@ -1,6 +1,35 @@
-import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
 import { useSlotFooterActions } from './useSlotFooterActions';
+import { DocumentActions } from './DocumentActions';
+import { buildDocumentFooterItems } from './documentFooter';
+
+afterEach(cleanup);
+
+it('keeps compact document actions accessible and preserves format selection and pending state', async () => {
+  await i18n.changeLanguage('en-US');
+  const copy = vi.fn();
+  const downloadText = vi.fn();
+  const actions = buildDocumentFooterItems(new Map([
+    ['copy', { label: 'Copy content', icon: 'copy' as const, onClick: copy }],
+    ['download', { label: 'Download', icon: 'download' as const, onClick: vi.fn(), menuLabel: 'Choose download format',
+      menu: [{ key: 'text', label: 'Plain text', onClick: downloadText }] }],
+  ]));
+  const view = render(<DocumentActions compact documentFooter={actions} />);
+  const copyButton = screen.getByRole('button', { name: 'Copy content', exact: true });
+  expect(copyButton).toHaveTextContent(i18n.t('chat.copy'));
+  expect(screen.getByRole('button', { name: 'Download', exact: true })).toHaveTextContent('Download');
+  fireEvent.click(copyButton);
+  expect(copy).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: 'Choose download format' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Plain text' }));
+  expect(downloadText).toHaveBeenCalledOnce();
+  view.rerender(<DocumentActions compact documentFooter={actions} actionPending />);
+  expect(copyButton).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Download', exact: true })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Choose download format' })).toBeDisabled();
+});
 
 describe('document footer action registration', () => {
   it('does not let stale cleanup remove a replacement registration', () => {

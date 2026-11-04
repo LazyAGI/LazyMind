@@ -239,20 +239,25 @@ function AutoSlotGrid({
     <div className='workflow-panel__auto-grid'>
       {Object.entries(bySlot).map(([slotId, revisions]) => (
         <div key={slotId} className='workflow-panel__slot-group'>
-          <span className='workflow-panel__slot-label'>{slotId}</span>
+          {revisions.every(revision => revision.content_type === 'image') && <span className='workflow-panel__slot-label'>{slotId}</span>}
           <div className='workflow-panel__slot-items'>
             {revisions.map((rev) => (
-              <SlotRenderer
+              <DocumentActionScope
                 key={`${rev.slot_id}-${rev.list_index ?? -1}`}
-                slot={rev}
-                workflowSession={session}
-                sessionId={session.session_id}
-                slotId={slotId}
-                revisionCount={rev.revision_count}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                readOnly={readOnly}
-              />
+                inline={rev.content_type !== 'image'}
+                label={rev.caption || slotId}
+              >
+                <SlotRenderer
+                  slot={rev}
+                  workflowSession={session}
+                  sessionId={session.session_id}
+                  slotId={slotId}
+                  revisionCount={rev.revision_count}
+                  onRefresh={onRefresh}
+                  onReference={onReference}
+                  readOnly={readOnly}
+                />
+              </DocumentActionScope>
             ))}
           </div>
         </div>
@@ -596,19 +601,21 @@ function InnerTabsCell({
         return (
           <div key={slotId} role='tabpanel' hidden={i !== activeIdx}>
             {rev ? (
-              <SlotRenderer
-                slot={rev}
-                workflowSession={session}
-                widget={def?.widget}
-                expectedType={def?.type}
-                sessionId={session.session_id}
-                slotId={slotId}
-                revisionCount={rev.revision_count}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                hideImageMutationActions={hideImageMutationActions}
-                readOnly={readOnly}
-              />
+              <DocumentActionScope inline={def?.type !== 'image' && def?.widget?.widgetType !== 'html-slide'} showTitle={false} label={def?.label ?? slotId}>
+                <SlotRenderer
+                  slot={rev}
+                  workflowSession={session}
+                  widget={def?.widget}
+                  expectedType={def?.type}
+                  sessionId={session.session_id}
+                  slotId={slotId}
+                  revisionCount={rev.revision_count}
+                  onRefresh={onRefresh}
+                  onReference={onReference}
+                  hideImageMutationActions={hideImageMutationActions}
+                  readOnly={readOnly}
+                />
+              </DocumentActionScope>
             ) : (
               <div className='composite-cell__empty'>—</div>
             )}
@@ -941,33 +948,36 @@ function CompositeSlotGrid({
   ) => {
     const def = tab.slots.find((slot) => slot.id === slotId);
     const rev = findSlotRevision(session, tab, def?.id ?? slotId, sortOrder);
+    const documentActions = def?.type !== 'image' && def?.widget?.widgetType !== 'html-slide';
     if (!rev && hideEmptyCells) return null;
     return (
       <div key={key} className='composite-grid__cell' style={style}>
-        {def?.label && <span className='composite-grid__cell-label'>{def.label}</span>}
+        {def?.label && (!documentActions || !rev) && <span className='composite-grid__cell-label'>{def.label}</span>}
         {rev ? (
-          <SlotRenderer
-            slot={rev}
-            workflowSession={session}
-            widget={def?.widget}
-            slideNavigation={paged ? {
-              index: rows.indexOf(activePage),
-              total: rows.length,
-              expanded: slideExpanded,
-              onExpandedChange: setSlideExpanded,
-              onChange: (index) => {
-                if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
-              },
-            } : undefined}
-            expectedType={def?.type}
-            sessionId={session.session_id}
-            slotId={slotId}
-            revisionCount={rev.revision_count}
-            onRefresh={onRefresh}
-            onReference={onReference}
-            hideImageMutationActions={hideImageMutationActions}
-            readOnly={readOnly}
-          />
+          <DocumentActionScope inline={documentActions} label={def?.label ?? slotId}>
+            <SlotRenderer
+              slot={rev}
+              workflowSession={session}
+              widget={def?.widget}
+              slideNavigation={paged ? {
+                index: rows.indexOf(activePage),
+                total: rows.length,
+                expanded: slideExpanded,
+                onExpandedChange: setSlideExpanded,
+                onChange: (index) => {
+                  if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
+                },
+              } : undefined}
+              expectedType={def?.type}
+              sessionId={session.session_id}
+              slotId={slotId}
+              revisionCount={rev.revision_count}
+              onRefresh={onRefresh}
+              onReference={onReference}
+              hideImageMutationActions={hideImageMutationActions}
+              readOnly={readOnly}
+            />
+          </DocumentActionScope>
         ) : (
           <div className='composite-grid__cell-empty'>—</div>
         )}
@@ -1063,10 +1073,14 @@ function CompositeSlotGrid({
       hideEmptyCells,
     );
     const rowTotalWeight = rowColumns.reduce((sum, column) => sum + column.weight, 0) || totalWeight;
+    const documentRow = rowColumns.every(column => {
+      const def = tab.slots.find(slot => slot.id === column.slotId);
+      return def && def.type !== 'image' && def.widget?.widgetType !== 'html-slide';
+    });
     return (
         <div
           key={sortOrder}
-          className={`composite-grid__row${formatCLayout && hasNestedContainer(formatCLayout) ? ' composite-grid__row--tree' : stackCompositeCells ? ' composite-grid__row--stack' : ''}`}
+          className={`composite-grid__row${documentRow ? ' composite-grid__row--documents' : ''}${formatCLayout && hasNestedContainer(formatCLayout) ? ' composite-grid__row--tree' : stackCompositeCells ? ' composite-grid__row--stack' : ''}`}
           onClick={() => onFocusSortOrder?.(sortOrder)}
           role='button'
           tabIndex={0}
@@ -1394,9 +1408,7 @@ function NamedTabSlot({
   readOnly,
   hideLabel = false,
   slotStepId,
-  primaryDocumentKey,
 }: {
-  primaryDocumentKey?: string;
   slotDef: SlotDef;
   hideLabel?: boolean;
   slotStepId?: string;
@@ -1426,6 +1438,8 @@ function NamedTabSlot({
     || (slotDef.widget?.itemWidth ?? 0) >= 600
     || slotDef.widget?.collapsed === true;
   const isWriterDocument = slotDef.widget?.widgetType === 'writer-document';
+  const documentActions = slotDef.type !== 'image' && slotDef.widget?.widgetType !== 'html-slide';
+  const cardTitle = documentActions && !collapseWhenEmpty && slotDef.widget?.collapsed === undefined;
   const showStream = shouldShowArtifactStream(artifactStream, revisions);
 
   const paperPendingKey = session.workflow_id === 'paper_expansion'
@@ -1471,7 +1485,8 @@ function NamedTabSlot({
         aria-label={t('chat.workflowContentItemAria', { index: rev.sort_order ?? '' })}
       >
         <DocumentActionScope
-          inline={Boolean(rev.document) && `${rev.slot_id}:${rev.list_index ?? -1}` !== primaryDocumentKey}
+          inline={documentActions}
+          showTitle={cardTitle && !hideLabel}
           label={slotDef.cardinality === 'list' ? `${slotLabel} · ${(rev.list_index ?? 0) + 1}` : slotLabel}
         >
           <SlotRenderer
@@ -1498,7 +1513,7 @@ function NamedTabSlot({
 
   return (
     <div className={`workflow-panel__named-slot${prefersFullGridRow ? ' workflow-panel__named-slot--full-grid-row' : ''}${isWriterDocument ? ' workflow-panel__named-slot--writer-document' : ''}`}>
-      {(!hideLabel || collapseWhenEmpty) && <div className='workflow-panel__slot-heading'>
+      {(!hideLabel || collapseWhenEmpty) && !cardTitle && <div className='workflow-panel__slot-heading'>
         {(slotDef.label || slotDef.id) && (
           <span className='workflow-panel__slot-label'>{slotLabel}</span>
         )}
@@ -1599,13 +1614,6 @@ function TabSlotGrid({
   const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session))
     .filter(slot => !isPaperReportTab || slot.id !== 'relation_analysis')
     .filter(slot => slot.id !== 'expansion_result' || !isPaperReportTab || (!paperReportReady && paperResultReady));
-  const documents = visibleSlots.flatMap(slotDef => getTabSlotRevisions(session, tab, slotDef.id)
-    .filter(revision => revision.document)
-    .map(revision => ({ slotDef, revision })));
-  const primaryDocument = documents.find(({ slotDef, revision }) =>
-    !readOnly && !slotDef.widget?.readOnly && revision.document?.editable) ?? documents[0];
-  const primaryDocumentKey = primaryDocument
-    ? `${primaryDocument.revision.slot_id}:${primaryDocument.revision.list_index ?? -1}` : undefined;
   const process = tab.layout === 'list' ? tab.generation_process : undefined;
   const producerRunning = session.steps?.some(step => step.step_id === getTabStepId(tab)
     && step.validity !== 'stale' && (step.status === 'running' || step.status === 'pending'));
@@ -1635,7 +1643,6 @@ function TabSlotGrid({
     return (
       <NamedTabSlot
         key={slotDef.id}
-        primaryDocumentKey={primaryDocumentKey}
         slotDef={slotDef}
         slotStepId={resolveWorkflowTabStepId(tab, session.steps)}
         hideLabel={session.workflow_id === 'paper_expansion' || visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'

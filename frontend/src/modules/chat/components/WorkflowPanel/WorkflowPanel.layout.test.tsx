@@ -360,14 +360,15 @@ describe('shared workflow compact layout', () => {
     expect(screen.queryByText('正文 chapters')).not.toBeInTheDocument();
     expect(screen.queryByText('正文 report')).not.toBeInTheDocument();
     const footer = within(screen.getByRole('group', { name: '工作流会话操作' }));
-    expect(footer.getAllByRole('button', { name: '复制内容' })).toHaveLength(1);
+    expect(footer.queryByRole('button', { name: '复制内容' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: '全文' })).getByRole('button', { name: '复制内容' })).toBeVisible();
     fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByText('正文 chapters')).toBeVisible());
     expect(screen.getByText('正文 report')).toBeVisible();
     fireEvent.click(within(screen.getByRole('group', { name: '检查报告' }))
       .getByRole('button', { name: '下载' }));
     expect(fixture.documentAction).toHaveBeenLastCalledWith('report:-1', 'download', 'markdown');
-    expect(footer.getAllByRole('button', { name: '复制内容' })).toHaveLength(1);
+    expect(footer.queryByRole('button', { name: '复制内容' })).not.toBeInTheDocument();
 
     // A normal refresh preserves the user's expanded view.
     fixture.session = { ...fixture.session, slots: [...fixture.session.slots!] };
@@ -391,7 +392,7 @@ describe('shared workflow compact layout', () => {
     expect(screen.queryByRole('button', { name: '生成过程' })).not.toBeInTheDocument();
   });
 
-  it('keeps main document actions in the footer and scopes chapter/report actions to their own documents', async () => {
+  it('keeps every document action beside its content across refreshes and tab switches', async () => {
     fixture.ui.tabs![1].slots = [
       { id: 'document', label: '论文初稿', type: 'file' },
       { id: 'chapters', label: '分章稿', type: 'file', cardinality: 'list' },
@@ -406,9 +407,14 @@ describe('shared workflow compact layout', () => {
     const view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('tab', { name: '成稿', selected: true });
     const footer = within(screen.getByRole('group', { name: '工作流会话操作' }));
-    await waitFor(() => expect(footer.getAllByRole('button', { name: '复制内容' })).toHaveLength(1));
-    expect(footer.getAllByRole('button', { name: '下载' })).toHaveLength(1);
-    expect(footer.getAllByRole('button', { name: '发布' })).toHaveLength(1);
+    const main = within(await screen.findByRole('group', { name: '论文初稿' }));
+    expect(main.getByRole('button', { name: '复制内容' })).toBeVisible();
+    expect(main.getByRole('button', { name: '下载' })).toBeVisible();
+    fireEvent.click(main.getByRole('button', { name: '发布' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('document:-1', 'publish', 'markdown');
+    expect(footer.queryByRole('button', { name: '复制内容' })).not.toBeInTheDocument();
+    expect(footer.queryByRole('button', { name: '下载' })).not.toBeInTheDocument();
+    expect(footer.queryByRole('button', { name: '发布' })).not.toBeInTheDocument();
     const chapter = within(screen.getByRole('group', { name: '分章稿 · 4' }));
     fireEvent.click(chapter.getByRole('button', { name: '复制内容' }));
     expect(fixture.documentAction).toHaveBeenLastCalledWith('chapters:3', 'copy', 'markdown');
@@ -417,16 +423,42 @@ describe('shared workflow compact layout', () => {
     expect(fixture.documentAction).toHaveBeenLastCalledWith('chapters:3', 'download', 'text');
     fireEvent.click(within(screen.getByRole('group', { name: '检查报告' })).getByRole('button', { name: '下载' }));
     expect(fixture.documentAction).toHaveBeenLastCalledWith('report:-1', 'download', 'markdown');
-    fireEvent.click(footer.getByRole('button', { name: '复制内容' }));
+    fireEvent.click(main.getByRole('button', { name: '复制内容' }));
     expect(fixture.documentAction).toHaveBeenLastCalledWith('document:-1', 'copy', 'markdown');
     fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
     expect(screen.queryByRole('button', { name: '复制内容' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
-    await waitFor(() => expect(within(screen.getByRole('group', { name: '工作流会话操作' })).getAllByRole('button', { name: '下载' })).toHaveLength(1));
+    expect(within(await screen.findByRole('group', { name: '论文初稿' })).getByRole('button', { name: '下载' })).toBeVisible();
     // Revisions of the same document update without accumulating old actions.
     fixture.session = { ...fixture.session, slots: fixture.session.slots!.map(slot => ({ ...slot, revision: 2 })) };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     expect(screen.getAllByRole('button', { name: '复制内容' })).toHaveLength(9);
+  });
+
+  it('scopes side-by-side outline and report actions to their own composite cells', async () => {
+    fixture.ui.tabs![1] = {
+      ...fixture.ui.tabs![1], layout: 'composite',
+      slots: [{ id: 'outline', label: '论文大纲', type: 'file' }, { id: 'report', label: '大纲检查报告', type: 'text' }],
+      composite_layout: { direction: 'row', children: [{ slot: 'outline', weight: 2 }, { slot: 'report', weight: 1 }] },
+    };
+    fixture.session.slots = ['outline', 'report'].map(slot => ({
+      slot_id: slot, slot, sort_order: 0, step_id: 'write_document', selected: true, revision: 1,
+      artifact_id: slot, artifact_value: { text: slot },
+      document: { representation: 'markdown', editable: slot === 'outline', capabilities: ['convert_document'] },
+    } as SlotRevision));
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const outline = within(await screen.findByRole('group', { name: '论文大纲' }));
+    const report = within(screen.getByRole('group', { name: '大纲检查报告' }));
+    fireEvent.click(outline.getByRole('button', { name: '下载' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('outline:-1', 'download', 'markdown');
+    fireEvent.click(report.getByRole('button', { name: '复制内容' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('report:-1', 'copy', 'markdown');
+    fireEvent.click(outline.getByRole('button', { name: '发布' }));
+    expect(fixture.documentAction).toHaveBeenLastCalledWith('outline:-1', 'publish', 'markdown');
+    expect(report.queryByRole('button', { name: '发布' })).not.toBeInTheDocument();
+    const footer = within(screen.getByRole('group', { name: '工作流会话操作' }));
+    expect(footer.queryByRole('button', { name: '下载' })).not.toBeInTheDocument();
+    expect(footer.queryByRole('button', { name: '发布' })).not.toBeInTheDocument();
   });
 
   it.each(['native', 'codex'] as const)('follows steps until the user selects a tab on %s', async surface => {
@@ -929,7 +961,7 @@ describe('external workflow surface boundary', () => {
       const execute = vi.fn(async () => {});
       const view = render(<WorkflowPanel conversationId='layout-test' />);
       await screen.findByRole('button', { name: '发布' });
-      const buttons = () => ['工作流会话操作', '工作流审批操作'].flatMap(name => within(screen.getByRole('group', { name })).getAllByRole('button'))
+      const buttons = () => ['成稿', '工作流审批操作'].flatMap(name => within(screen.getByRole('group', { name })).getAllByRole('button'))
         .map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled, title: button.title }));
       const native = buttons();
       view.rerender(<WorkflowPanel conversationId='layout-test' embedded controlAdapter={panelAdapter(control, execute)} />);
