@@ -147,7 +147,8 @@ describe('paper task startup routes', () => {
         [{ stage_timing: [{ step_id: 'prepare_plan', attempt: 1, status: 'completed', queue_and_execution_ms: 0 }] }, 'prepare_plan · 0 s · completed'],
         [{ source_queries: [{ query: 'agent research', sources: [{ source: 'arxiv', status: 'ok', count: 0, elapsed_ms: 0 }] }] }, 'agent research：arxiv ok（0）'],
     ])('omits raw execution logs even when they are available: %j', async (report, text) => {
-        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, report } });
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, report, progress: { candidate_set: input } },
+            workflow_steps: [{ step_id: 'expand_and_screen', status: 'succeeded' }] });
         mount(undefined, '?expansion_id=r');
         fireEvent.click(await screen.findByRole('button', { name: '查看过程' }));
         expect(screen.queryByText('执行详情')).not.toBeInTheDocument();
@@ -203,7 +204,7 @@ describe('paper task startup routes', () => {
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
         fireEvent.click(within(screen.getByRole('radiogroup', { name: '深入研究 · 研究方向' })).getByRole('radio', { name: '人工选择' }));
-        expect(screen.getByRole('radio', { name: '深入研究', exact: true })).toBeChecked();
+        expect(screen.getByRole('radio', { name: /^深入研究$/ })).toBeChecked();
         await submit();
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep', direction_selection: 'manual' }), false);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
@@ -217,8 +218,8 @@ describe('paper task startup routes', () => {
         fireEvent.click(await screen.findByText('基于选中论文扩展'));
         expect(within(screen.getByRole('radiogroup', { name: '标准扩展 · 研究方向' })).getByRole('radio', { name: '默认全选' })).toBeChecked();
         for (const [name, steps] of [
-            [/^标准扩展/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '自动准备全文']],
-            [/^深入研究/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '研究分析与报告', '自动准备全文']],
+            [/^标准扩展/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '补齐论文正文']],
+            [/^深入研究/, ['初步调研', '确定研究方向', '检索与拓展', '筛选与补充', '研究分析与报告', '补齐论文正文']],
         ] as const) {
             const card = screen.getByRole('radio', { name }).closest<HTMLElement>('.paper-research-depth-option')!;
             expect(within(card).getAllByRole('listitem')).toHaveLength(steps.length);
@@ -261,12 +262,12 @@ describe('paper task startup routes', () => {
         expect(modes.queryByRole('radio', { name: '深入研究' })).not.toBeInTheDocument();
         const standard = within(modes.getByRole('radiogroup', { name: '标准扩展 · 研究方向' }));
         expect(standard.getByRole('radio', { name: '默认全选' })).toBeChecked();
-        const flow = within(screen.getByRole('region', { name: '论文综述流程' }));
+        const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
         const first = direction ? '确认综述主题' : '确认论文与主题';
         const steps = flow.getAllByRole('listitem');
         expect(steps).toHaveLength(6);
         await waitFor(() => [
-            first, '初调与确定方向', '检索论文', '筛选与补充', '自动准备全文', '交接综述材料',
+            first, '初调与确定方向', '检索论文', '筛选与补充', '补齐论文正文', '交接综述材料',
         ].forEach((stage, index) => expect(within(steps[index]).getByText(stage)).toBeVisible()));
         fireEvent.click(standard.getByRole('radio', { name: '人工选择' }));
         if (budgetMode === 'fast') {
@@ -293,7 +294,7 @@ describe('paper task startup routes', () => {
         expect(await screen.findByRole('menuitem', { name: '指定方向生成' })).toHaveAttribute('aria-disabled', 'true');
         fireEvent.click(screen.getByText('基于选中论文生成综述'));
         expect(screen.getByRole('switch', { name: '开启论文扩展' })).not.toBeChecked();
-        const flow = within(screen.getByRole('region', { name: '论文综述流程' }));
+        const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
         expect(flow.getAllByRole('listitem')).toHaveLength(2);
         const selectedPapers = within(screen.getByRole('region', { name: '已选论文' }));
         await waitFor(() => expect(selectedPapers.getByText('全文解析失败')).toBeVisible());
@@ -372,8 +373,10 @@ describe('paper task startup routes', () => {
         fireEvent.click(screen.getByRole('switch', { name: '开启论文扩展' }));
         fireEvent.click(screen.getByRole('button', { name: '开始扩展' }));
         const drawer = (await screen.findByText('论文综述 · 资料准备')).closest('[role=dialog]') as HTMLElement;
-        const flow = within(within(drawer).getByRole('region', { name: '论文综述流程' }));
-        for (const stage of ['论文扩展', '准备全文', '交接综述材料']) expect(flow.getByText(stage)).toBeVisible();
+        const flow = within(within(drawer).getByRole('region', { name: '综述材料准备与交接' }));
+        for (const stage of ['确认论文与主题', '初调与确定方向', '检索论文', '筛选与补充', '补齐论文正文', '交接综述材料']) expect(flow.getByText(stage)).toBeVisible();
+        expect(flow.getByText('初调与确定方向').closest('li')).toHaveAttribute('aria-current', 'step');
+        expect(flow.getByText('待确认方向')).toBeVisible();
         expect(within(drawer).getByText('选择综述关注的方向')).toBeVisible();
         expect(within(drawer).queryByText('正式拓展')).not.toBeInTheDocument();
         fireEvent.click(within(drawer).getByRole('button', { name: /close/i }));
@@ -549,8 +552,75 @@ describe('result paper title navigation', () => {
     });
 });
 describe('result list actions', () => {
+    it('refreshes research records until full text and review handoff have finished', async () => {
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+        const expansion = { ...record, title: '扩展记录', material_progress: { processing_count: 1 } };
+        const review = { ...record, id: 'review-prep', title: '综述资料记录', goal: 'review',
+            material_progress: { processing_count: 1, distinct_ready_count: 1 } };
+        const needsText = { ...review, material_progress: { processing_count: 0, distinct_ready_count: 1 } };
+        const waiting = { ...review, material_progress: { processing_count: 0, distinct_ready_count: 2 } };
+        const done = { ...expansion, material_progress: { processing_count: 0 } };
+        vi.mocked(listResearchRecords).mockResolvedValueOnce({ items: [expansion, review], reviews: [] })
+            .mockResolvedValueOnce({ items: [done, needsText], reviews: [] })
+            .mockResolvedValueOnce({ items: [done, waiting], reviews: [] })
+            .mockResolvedValue({ items: [done, { ...waiting, auto_review_id: 'handoff' }], reviews: [] });
+        mount();
+        fireEvent.click(screen.getByRole('button', { name: '研究记录' }));
+        const expansionRow = await screen.findByRole('button', { name: /查看扩展成果: 扩展记录/ });
+        const reviewRow = screen.getByRole('button', { name: /查看扩展成果: 综述资料记录/ });
+        expect(expansionRow).toHaveTextContent('正在补齐论文正文');
+        expect(reviewRow).toHaveTextContent('正在补齐论文正文');
+        expect(expansionRow).not.toHaveTextContent('已完成');
+        await act(async () => { vi.advanceTimersByTime(12000); });
+        expect(expansionRow).toHaveTextContent('已完成');
+        expect(reviewRow).toHaveTextContent('待补充正文');
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
+        expect(reviewRow).toHaveTextContent('待交接');
+        await act(async () => { vi.advanceTimersByTime(12000); });
+        expect(reviewRow).toHaveTextContent('已完成');
+        const calls = vi.mocked(listResearchRecords).mock.calls.length;
+        await act(async () => { vi.advanceTimersByTime(12000); });
+        expect(listResearchRecords).toHaveBeenCalledTimes(calls);
+    });
+
+    it('advances a review from screening through full text to the saved handoff', async () => {
+        const review = { ...record, goal: 'review', status: 'running', preparation: {
+            confirmed_at: '2026-11-04T00:00:00Z', user_instruction: '', summary: '', questions: [], directions: [], selected_directions: ['tools'],
+        } };
+        const workflow = [
+            { step_id: 'expand_and_screen', status: 'succeeded' },
+            { step_id: 'screen_and_supplement', status: 'running' },
+        ];
+        const view = { ...detail, record: review, workflow_steps: workflow };
+        vi.mocked(getExpansion).mockResolvedValue(view);
+        mount(undefined, '?expansion_id=r');
+        const flow = within(await screen.findByRole('region', { name: '综述材料准备与交接' }));
+        const current = (label: string) => expect(flow.getByText(label).closest('li')).toHaveAttribute('aria-current', 'step');
+        current('筛选与补充');
+
+        const published = { ...view, record: { ...review, status: 'completed' },
+            workflow_steps: workflow.map(step => ({ ...step, status: 'succeeded' })) };
+        vi.mocked(getExpansion).mockResolvedValue({ ...published, contents: [...detail.contents,
+            { id: 'cc', paper_id: 'c', content_hash: '', status: 'processing' },
+        ] });
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
+        current('补齐论文正文');
+        expect(flow.getByText(/1 篇全文处理中/)).toBeVisible();
+        expect(flow.queryByText('材料已交接')).not.toBeInTheDocument();
+
+        vi.mocked(getExpansion).mockResolvedValue(published);
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
+        current('交接综述材料');
+        expect(flow.getByText('待交接')).toBeVisible();
+
+        vi.mocked(getExpansion).mockResolvedValue({ ...published, record: { ...published.record, auto_review_id: 'review' } });
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
+        expect(flow.getByText('材料已交接')).toBeVisible();
+        expect(flow.getAllByRole('listitem')).toHaveLength(6);
+    });
+
     it('shows research details above the papers after completion while keeping the process collapsed', async () => {
-        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, goal: 'review', report: { narrative: '研究解读正文', reading_order: ['a'], limitations: ['旧版待查事项'] } } } as unknown as Awaited<ReturnType<typeof getExpansion>>);
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, goal: 'review', progress: { candidate_set: input }, report: { narrative: '研究解读正文', reading_order: ['a'], limitations: ['旧版待查事项'] } } } as unknown as Awaited<ReturnType<typeof getExpansion>>);
         mount(undefined, '?expansion_id=r');
         await selectMultiple();
         const reading = screen.getByText('研究解读').closest('details')!;
@@ -558,9 +628,9 @@ describe('result list actions', () => {
         expect(reading).toHaveAttribute('open');
         expect(process).toHaveAttribute('aria-expanded', 'false');
         expect(process.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(screen.getByRole('region', { name: '论文综述流程' })).toBeVisible();
+        expect(screen.getByRole('region', { name: '综述材料准备与交接' })).toBeVisible();
         fireEvent.click(process);
-        expect(screen.getByRole('region', { name: '论文综述流程' })).toBeVisible();
+        expect(screen.getByRole('region', { name: '综述材料准备与交接' })).toBeVisible();
         expect(screen.getByText('研究解读正文')).toBeVisible();
         expect(screen.queryByText('旧版待查事项')).not.toBeInTheDocument();
         expect(screen.queryByText('建议阅读顺序')).not.toBeInTheDocument();
@@ -600,7 +670,6 @@ describe('result list actions', () => {
         const title = await screen.findByRole('heading', { name: 'agents' });
         expect(within(title.parentElement!).getByText('标准扩展')).toBeInTheDocument();
         const progress = within(await screen.findByRole('region', { name: '拓展进展' }));
-        fireEvent.click(progress.getByRole('button', { name: '查看过程' }));
         expect(progress.getByText('筛选与补充')).toBeInTheDocument();
         expect(progress.queryByText('研究报告与论文关系')).not.toBeInTheDocument();
     });
@@ -617,9 +686,14 @@ describe('result list actions', () => {
         expect(screen.queryByRole('button', { name: /生成综述|批量入库/ })).not.toBeInTheDocument();
     });
     it.each(['pending', 'running', 'active', 'failed', 'cancelled'])('hides intermediate papers and actions while expansion is %s', async status => {
-        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status, report: { narrative: '尚未完成的研究解读' },
+        const attemptStatus = status === 'active' ? 'running' : status;
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, status, budget_mode: 'deep', report: { narrative: '尚未完成的研究解读' },
             progress: { candidate_set: { input } },
-        } });
+        }, workflow_steps: [
+            { step_id: 'expand_and_screen', status: 'succeeded' },
+            { step_id: 'screen_and_supplement', status: 'succeeded' },
+            { step_id: 'analyze_relations', status: attemptStatus },
+        ] });
         mount(undefined, '?expansion_id=r');
         await screen.findByRole('region', { name: '拓展进展' });
         expect(screen.queryByRole('table')).not.toBeInTheDocument();
@@ -628,10 +702,10 @@ describe('result list actions', () => {
         expect(screen.queryByText('研究解读')).not.toBeInTheDocument();
         expect(screen.getByText('拓展完成后会通知你查看结果。')).toBeVisible();
         expect(screen.getByRole('button', { name: '打开拓展会话' })).toBeEnabled();
-        fireEvent.click(screen.getByRole('button', { name: '查看过程' }));
-        expect(screen.getByText('检索与拓展')).toBeVisible();
+        expect(within(screen.getByRole('region', { name: '拓展进展' })).getByText('检索与拓展', { selector: 'span' })).toBeVisible();
         expect(screen.getByText('研究分析与报告')).toBeVisible();
-        expect(screen.getByText('研究分析与报告').closest('li')).toHaveAttribute('data-status', ['running', 'active'].includes(status) ? 'running' : 'pending');
+        expect(screen.getByText('研究分析与报告').closest('li')).toHaveAttribute('data-status',
+            status === 'pending' ? 'queued' : status === 'cancelled' ? 'canceled' : attemptStatus);
         expect(screen.queryByText('准备参考论文与检索计划')).not.toBeInTheDocument();
         expect(screen.queryByText('检索工具调用训练信号')).not.toBeInTheDocument();
         expect(previewPaperImport).not.toHaveBeenCalled();

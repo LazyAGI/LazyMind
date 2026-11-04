@@ -1,15 +1,10 @@
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BudgetMode, DirectionSelection } from '../../api/paperWorkflows';
+import { paperFlowSteps } from './paperFlowModel';
 
 export const researchDepthLabels = { fast: '快速', balanced: '标准', deep: '深入' };
 
-const sharedExpansionSteps = ['search', 'screen'] as const;
-const expansionSteps = {
-  fast: ['search'],
-  balanced: sharedExpansionSteps,
-  deep: [...sharedExpansionSteps, 'analyze'],
-} as const;
 const reviewModes = ['fast', 'balanced'] as const;
 const expansionModes = [...reviewModes, 'deep'] as const;
 
@@ -48,14 +43,10 @@ export default function ResearchDepth({ value, onChange, forReview = false, dire
             {directionOptions}
           </div> : <>
             <span className="paper-expansion-mode-flow" role="list">
-              {mode !== 'fast' && ['research', 'chooseDirection'].map(step => <span key={step} role="listitem"
-                className={`paper-expansion-mode-step step-${step}`}>
-                <span>{t(`paperTasks.expansionDepth.steps.${step}`)}</span>
-                {step === 'chooseDirection' && directionOptions}
-              </span>)}
-              {[...expansionSteps[mode], 'prepareFulltext'].map(step => <span key={step} role="listitem"
-                className={`paper-expansion-mode-step step-${step}`}>
-                {t(`paperTasks.expansionDepth.steps.${step}`)}
+              {paperFlowSteps('expansion', mode).map(step => <span key={step.id} role="listitem"
+                className={`paper-expansion-mode-step step-${step.id}`}>
+                <span>{t(step.labelKey!)}</span>
+                {step.id === 'chooseDirection' && directionOptions}
               </span>)}
             </span>
             <span className="paper-expansion-mode-output">{t(`paperTasks.expansionDepth.outputs.${mode}`)}</span>

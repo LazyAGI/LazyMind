@@ -247,7 +247,6 @@
   > .ant-alert { margin-bottom: 20px; }
 }
 .paper-preparation-meta { display: flex; align-items: center; gap: 6px; color: var(--paper-research-muted); font-size: 12px; }
-.paper-preparation-steps { margin: 24px 0; padding-bottom: 24px; border-bottom: 1px solid var(--paper-research-border); }
 .paper-preparation-findings {
   margin: 0 0 26px; padding: 16px 18px; border-radius: 8px; background: var(--paper-research-soft);
   h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 14px; font-weight: 500; }
@@ -469,29 +468,6 @@
 }
 .paper-expansion-context-seeds .ant-tag { margin: 0; font-size: 12px; }
 .paper-expansion-context-directions { .ant-typography { margin-bottom: 4px; } > span { font-size: 12px; } }
-.paper-expansion-progress {
-  padding: 14px 16px;
-  margin-bottom: 16px;
-  border: 1px solid var(--color-border-secondary, #e5eaf1);
-  border-radius: 8px;
-  > span.ant-typography { font-size: 12px; }
-  [hidden] { display: none; }
-}
-.paper-expansion-progress-heading {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  > .ant-btn { margin-left: auto; padding-right: 0; font-size: 12px; }
-}
-.paper-expansion-progress-current.ant-typography { margin: 8px 0 3px; font-size: 13px; }
-.paper-expansion-timeline {
-  list-style: none; margin: 14px 0 0; padding: 4px 0 0; border-top: 1px solid var(--color-border-secondary, #e5eaf1);
-  > li { display: flex; gap: 10px; position: relative; padding: 12px 0; }
-  > li:not(:last-child)::before { content: ''; position: absolute; top: 36px; bottom: -8px; left: 10px; width: 1px; background: var(--color-border-secondary, #e5eaf1); }
-  > li[data-status='done'] .paper-expansion-stage-marker { color: var(--color-success, #389e0d); background: var(--color-success-bg, #f6ffed); }
-  > li[data-status='running'] .paper-expansion-stage-marker { color: var(--color-primary); background: var(--color-primary-bg, #e6f4ff); }
-}
-.paper-expansion-stage-marker { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; font-size: 12px; color: var(--color-text-secondary); background: var(--color-fill-quaternary, #f7f9fc); }
-.paper-expansion-stage-content { flex: 1; min-width: 0; > p { margin: 3px 0; } }
-
 .paper-preparation-all-directions.ant-btn { justify-self: start; padding-left: 0; font-size: 12px; }
 
 

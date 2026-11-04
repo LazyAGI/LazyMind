@@ -7,6 +7,15 @@ import { useConversationRunningStore } from '@/modules/chat/store/conversationRu
 import type { Expansion, ReviewRecord } from '../../api/paperWorkflows';
 import ReviewRecordStatus from './ReviewRecordStatus';
 import PaperTaskStatus from './PaperTaskStatus';
+import { paperMaterialPhase } from './paperFlowModel';
+
+const materialBadges = {
+    published: { status: 'pending', label: 'recordsListPublished' },
+    fulltext: { status: 'running', label: 'reviewFlow.processingFulltext' },
+    needFulltext: { status: 'pending', label: 'flowStatus.needFulltext' },
+    incompleteResearch: { status: 'pending', label: 'flowStatus.incompleteResearch' },
+    waitingHandoff: { status: 'pending', label: 'flowStatus.waitingHandoff' },
+} as const;
 
 export default function ResearchRecords({ expansions, reviews, open, loading, error, statusLabel, onExpansion, onReview }: {
     expansions: Expansion[]; reviews: ReviewRecord[]; open: boolean; loading: boolean; error: boolean;
@@ -42,11 +51,16 @@ export default function ResearchRecords({ expansions, reviews, open, loading, er
                 const { record } = row;
                 const created = dayjs(record.created_at);
                 const related = reviews.filter(review => review.expansion_id === record.id).length;
+                const phase = row.kind === 'expansion' ? paperMaterialPhase(row.record) : undefined;
+                const materialBadge = phase && phase !== 'done' ? materialBadges[phase] : undefined;
                 return <List.Item><button type="button" className="paper-expansion-history-row paper-research-record" aria-label={`${t(row.kind === 'review' ? 'paperTasks.viewReviewRecord' : 'paperTasks.viewResult')}: ${record.title}`}
                     onClick={() => row.kind === 'review' ? onReview(row.record) : onExpansion(record.id)}>
                     <span className="paper-expansion-history-content">
                         <span className="paper-research-record-kind">{row.kind === 'review' ? <ReadOutlined /> : <BranchesOutlined />}{t(row.kind === 'expansion' ? 'paperTasks.recordsExpansion' : 'paperTasks.task.review')}
-                            <span className="paper-research-record-status">{row.kind === 'review' ? <ReviewRecordStatus conversationId={record.conversation_id} /> : <PaperTaskStatus status={row.record.status}>{statusLabel(row.record.status)}</PaperTaskStatus>}</span>
+                            <span className="paper-research-record-status">{row.kind === 'review' ? <ReviewRecordStatus conversationId={record.conversation_id} />
+                                : <PaperTaskStatus status={materialBadge?.status ?? row.record.status}>
+                                    {materialBadge ? t(`paperTasks.${materialBadge.label}`) : statusLabel(row.record.status)}
+                                </PaperTaskStatus>}</span>
                         </span>
                         <Tooltip title={record.title} placement="topLeft"><span className="paper-expansion-history-title">{record.title}</span></Tooltip>
                         <span className="paper-expansion-history-meta">{row.kind === 'review' ? <>

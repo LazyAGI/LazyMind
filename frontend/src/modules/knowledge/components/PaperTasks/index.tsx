@@ -14,7 +14,8 @@ import ExpansionDetails from './ExpansionDetails';
 import GeneratedContents from './GeneratedContents';
 import ResearchRecords from './ResearchRecords';
 import ReviewRecordDrawer from './ReviewRecordDrawer';
-import ReviewFlow, { ReviewEntryFlow } from './ReviewFlow';
+import { ReviewEntryFlow } from './ReviewFlow';
+import { expansionRecordIsActive, paperMaterialPhase, reviewMaterialCounts } from './paperFlowModel';
 import ReviewTopic from './ReviewTopic';
 import ResearchDepth from './ResearchDepth';
 import PaperTaskStatus from './PaperTaskStatus';
@@ -148,6 +149,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const previewRequest = useRef(0);
     const pendingPreview = useRef<{ key: string; promise: Promise<ImportPreviewItem[]> }>();
     const pendingDetail = useRef<{ id: string; promise: Promise<ExpansionDetail> }>();
+    const pendingHistory = useRef<{ dataset: string }>();
     const detailRequest = useRef(0);
     const detailTarget = useRef<string>();
     const taskLabel = (kind: string) => t(`paperTasks.task.${kind}`, { defaultValue: kind });
@@ -170,21 +172,38 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
     }, [selectedPaperTaskError, selected.length, selectedTitles]);
-    const refreshHistory = async () => {
-        setHistoryLoading(true);
+    const refreshHistory = useCallback(async (background = false) => {
+        if (background && pendingHistory.current?.dataset === dataset) return;
+        const request = { dataset };
+        pendingHistory.current = request;
+        if (!background) setHistoryLoading(true);
         try {
-            const result = await listResearchRecords(dataset, !!onNotification);
+            const result = await listResearchRecords(dataset, background || !!onNotification);
+            if (pendingHistory.current !== request) return;
             setRecords(result.items || []);
             setReviewRecords(result.reviews || []);
             setHistoryError(false);
             onNotificationResolved?.('expansion-history');
         } catch (error) {
+            if (pendingHistory.current !== request || background) return;
             setHistoryError(true);
-            onNotification?.({ id: 'expansion-history', title: t('paperTasks.recordsLoadFailed'), message: error instanceof Error ? error.message : '记录加载失败，请重试', action: { label: '重新加载', onClick: refreshHistory } });
+            onNotification?.({ id: 'expansion-history', title: t('paperTasks.recordsLoadFailed'), message: error instanceof Error ? error.message : '记录加载失败，请重试', action: { label: '重新加载', onClick: () => refreshHistory() } });
         } finally {
-            setHistoryLoading(false);
+            if (pendingHistory.current === request) {
+                pendingHistory.current = undefined;
+                setHistoryLoading(false);
+            }
         }
-    };
+    }, [dataset, onNotification, onNotificationResolved, t]);
+    const historyActive = records.some(expansionRecordIsActive);
+    useEffect(() => {
+        if (!history) return;
+        const refresh = () => { void refreshHistory(true); };
+        window.addEventListener('focus', refresh);
+        const timer = historyActive ? window.setInterval(refresh, 12000) : undefined;
+        return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer); };
+    }, [history, historyActive, refreshHistory]);
+    useEffect(() => () => { pendingHistory.current = undefined; }, [dataset]);
     const openHistory = () => {
         setHistory(true);
         void refreshHistory().catch(() => {});
@@ -219,6 +238,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     previewRequest.current += 1;
                 }
                 setDetail(result);
+                if (result.material_progress) {
+                    setRecords(previous => previous.map(record => record.id === id
+                        ? { ...result.record, material_progress: result.material_progress } : record));
+                }
                 setParams(current => { if (current.get('expansion_id') === id) return current; const next = new URLSearchParams(current); next.set('expansion_id', id); return next; }, { replace: true });
                 onNotificationResolved?.(`expansion-detail:${id}`);
                 for (const content of result.record.status === 'completed' ? result.contents : []) {
@@ -248,7 +271,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         if (expansionID && detailTarget.current !== expansionID) void openDetail(expansionID).catch(() => {});
     }, [expansionID]);
     const resultReady = detail?.record.status === 'completed';
-    const detailActive = !!detail && (['pending', 'running', 'active', 'preparing'].includes(detail.record.status)
+    const detailMaterialCounts = detail && reviewMaterialCounts(detail);
+    const detailPhase = detail && detailMaterialCounts && paperMaterialPhase(detail.record,
+        { processing_count: detailMaterialCounts.processing, distinct_ready_count: detailMaterialCounts.distinctReady });
+    const detailActive = !!detail && (detailPhase === 'waitingHandoff' || expansionRecordIsActive(detail.record)
         || detail.contents.some(content => ['pending', 'processing'].includes(content.status))
         || detail.presence?.some(item => item.importing));
     useEffect(() => {
@@ -672,12 +698,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     <div className="paper-expansion-navigation">
                         <Button type="link" disabled={detail.chat_status !== 'available'} onClick={() => goChat(detail.record.conversation_id, reviewDetail)}>{t(reviewDetail ? 'paperTasks.reviewFlow.openChat' : 'paperTasks.overview.openChat')}</Button>
                     </div>
-                    <ExpansionDetails key={`details-${detail.record.id}`} detail={detail} statusLabel={statusLabel} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')}>
-                        {reviewDetail && <ReviewFlow status={detail.record.status} reviewStarted={!!detail.record.auto_review_id}
-                            processingCount={detail.contents.filter(content => ['pending', 'processing'].includes(content.status)).length}
-                            readyCount={new Set(detail.contents.filter(content => contentReady(detail, content.paper_id)).map(content => `${content.source_hash || ''}:${content.content_hash}`)).size}
-                            researchIncomplete={detail.record.report?.research_complete === false} />}
-                    </ExpansionDetails>
+                    <ExpansionDetails key={`details-${detail.record.id}`} detail={detail} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')} />
                     {resultReady && <GeneratedContents key={detail.record.id} items={detail.handoffs} onOpen={goChat} onReview={openReviewRecord} />}
                     {resultReady && source && <>
                     <div className="paper-expansion-papers-summary"><Typography.Text strong>{t('paperTasks.paperCount', { count: papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.downloadedCount', { count: papers.filter(item => source.contents.some(content => content.paper_id === item.paper.paper_id && content.quality?.downloaded)).length })} · {t('paperTasks.availableCount', { count: available })}{processing > 0 && <> · {t('paperTasks.processingFulltextCount', { count: processing })}</>}</Typography.Text></div>
@@ -805,6 +826,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     cancelText={t('paperTasks.cancel')} confirmLoading={busy} closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy}
                     okText={t(confirmation?.kind === 'review' ? 'paperTasks.confirmReview' : 'paperTasks.confirmImport', { count: confirmationEligible.length })}
                     okButtonProps={{ disabled: !!confirmationReason || topicBusy }}>
+                    {confirmation?.kind === 'review' && <ReviewEntryFlow mode="direct" />}
                     {confirmation?.kind === 'review' && <Typography.Paragraph type="secondary">{t('paperTasks.newReviewHint')}</Typography.Paragraph>}
                     <Alert type="info" message={t(confirmation?.kind === 'review' ? 'paperTasks.reviewSummary' : 'paperTasks.importSummary', { count: confirmationEligible.length, selected: confirmationPapers.length, skipped: confirmationPapers.length - confirmationEligible.length })} />
                     {actionError && (onNotification ? <p role="status">{actionError}</p> : <Alert type="error" showIcon message={actionError} style={{ marginTop: 12 }} />)}
