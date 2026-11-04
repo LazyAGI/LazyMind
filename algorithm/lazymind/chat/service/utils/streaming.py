@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict
 from lazyllm import LOG
 
-from starlette.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 from lazymind.chat.runtime_events import runtime_event
 
 

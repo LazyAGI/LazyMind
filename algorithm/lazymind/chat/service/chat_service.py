@@ -20,7 +20,7 @@ from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvS
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, set_trace_context
-from starlette.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 from lazymind.chat.config import (
     IMAGE_EXTENSIONS,
     LAZYMIND_LLM_PRIORITY,

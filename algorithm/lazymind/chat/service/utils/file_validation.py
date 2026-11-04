@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import List, Optional
+from fastapi import HTTPException
 
 from lazymind.chat.config import MOUNT_BASE_DIR
 
@@ -8,8 +9,6 @@ from lazymind.chat.config import MOUNT_BASE_DIR
 def validate_and_resolve_files(files: Optional[List[str]]) -> List[str]:
     if not files:
         return []
-
-    from fastapi import HTTPException
 
     root = Path(MOUNT_BASE_DIR).resolve()
     resolved: List[str] = []
