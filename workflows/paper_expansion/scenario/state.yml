@@ -102,7 +102,7 @@ steps:
       背景引用由被引论文指向引用方；比较没有继承方向。区分原文陈述与研究推断，保留适用条件和实验基线。
 
       正常局限与确认范围外的证据写入 limitations，例如不同基线不能直接排名、范围外的第三方原文未单独核对。
-      investigation 可省略，只记录确认范围内的未解决问题或材料缺口，不填固定调查矩阵。标为 excluded 的问题不计入完成条件。
+      investigation 可省略，只在回答确认范围内的问题仍缺关键证据时标为 open 或 blocked。已回答的问题标为 resolved，剩余比较局限写入 limitations。范围外的问题标为 excluded。
       如需记录 clue_resolutions，必须放在对应 investigation 条目内部，不能放顶层。
       只复制完整 query_ids；查询文字、题录和来源版本由服务取得，不再传 queries。
       确认范围内的缺口会在部分报告中明确说明，无需等到穷尽调查或耗尽预算才交付。

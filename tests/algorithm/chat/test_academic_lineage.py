@@ -324,11 +324,13 @@ def test_incomplete_report_preserves_actual_material_gap(lineage):
     assert ctx.report_requests[0].input.data['limitations'] == report['coverage_gaps']
 
 
-def test_excluded_question_does_not_block_completion(lineage):
+@pytest.mark.parametrize('status', ['excluded', 'resolved'])
+def test_question_limits_do_not_block_completion(lineage, status):
     module, ctx, events, _, args = lineage
     limit = '仅比较本次确认的两篇原文，第三方实现不单独取证。'
     args['limitations'] = [limit]
-    args['investigation'][0].update(status='excluded', unresolved_clues=['第三方实现的原始依据'], gaps=[])
+    args['investigation'][0].update(status=status, unresolved_clues=['第三方实现的原始依据'],
+                                   gaps=['未逐一比较范围外后续工作的附录和完整实验'])
     module.academic_submit_relations(**args)
     report = _artifact(events, 'expansion_report')
     assert report['completion'] == {'status': 'complete', 'reason': 'scope_covered'}

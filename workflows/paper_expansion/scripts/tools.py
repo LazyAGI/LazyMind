@@ -803,8 +803,9 @@ def academic_submit_relations(analyses: list[PaperAnalysis] | None = None,
             Use cross-paper evidence with separate source paper IDs and their own actual read positions.
         relations: Only supported relationships with explicit conditions; no edge for missing evidence.
         limitations: Limits of comparison and applicability, including evidence outside the confirmed scope.
-        investigation: Optional unresolved questions or material gaps within the confirmed scope. An excluded
-            question is not required for completion. Use limitations to describe evidence outside the scope.
+        investigation: Optional unresolved questions or material gaps within the confirmed scope. Mark a
+            question open or blocked only when evidence is still needed to answer it. Put remaining
+            comparison limits on resolved questions and evidence outside the scope in limitations.
             clue_resolutions belongs inside an investigation entry, never at the top level. Copy full query_ids;
             do not supply query text. Omit this argument if no additional investigation record is needed.
     """
@@ -950,15 +951,16 @@ def _submit_research_draft(draft):
     for item in investigation:
         if item['status'] == 'excluded':
             continue
-        reasons = [*item['unresolved_clues'], *item['gaps']]
         for clue in item.get('clue_resolutions', []):
             if clue['status'] in {'open', 'blocked'}:
                 missing.append({'direction': item['direction'], 'kind': item['kind'],
                                 'question_id': item['question_id'], 'clue_name': clue['name'],
                                 'reason': clue['reason']})
-        if reasons:
-            missing.append({'direction': item['direction'], 'kind': item['kind'],
-                            'question_id': item['question_id'], 'reason': '；'.join(dict.fromkeys(reasons))})
+        if item['status'] in {'open', 'blocked'}:
+            reasons = [*item['unresolved_clues'], *item['gaps']]
+            if reasons:
+                missing.append({'direction': item['direction'], 'kind': item['kind'],
+                                'question_id': item['question_id'], 'reason': '；'.join(dict.fromkeys(reasons))})
     cited = {ref['paper_id'] for row in checks for ref in row['evidence']}
     direction_papers = {row['id']: set() for row in research_structure['directions']}
     for node in research_structure['nodes']:
