@@ -403,15 +403,6 @@ runtime:
       choices:
         - 启用｜为每页生成独立 AI 底图
         - 不启用｜使用纯色、渐变和矢量装饰
-    - id: generation_mode
-      label: 生成方式
-      question: 请选择生成方式。两种方式能力相同，都会自动执行到最终 PPT；快速生成隐藏中间步骤展示，完整生成展示过程，均不需要分步确认。
-      type: single
-      choice_policy: fixed
-      allow_other: false
-      choices:
-        - 快速生成
-        - 完整生成，耗时较长
 
 tool_scripts:
   - path: scripts/tools.py

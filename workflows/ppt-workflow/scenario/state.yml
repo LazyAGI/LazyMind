@@ -218,10 +218,7 @@ steps:
         to disabled. This is independent from foreground material images.
       - Style flow is always auto. Keep the outline pipeline's deck-wide style
         preparation; do not generate or display alternative style previews.
-      - Generation mode: record exactly quick for 快速生成, or full for
-        完整生成，耗时较长. Both modes execute the same applicable stages and
-        preserve all capabilities. Quick changes intermediate UI visibility only.
-        For quick only, save_artifact(key='compact_presentation', content_type='text', value='hide').
+      - Generation mode: save full for compatibility; do not ask a generation-mode question.
       - Template mode: record exactly none when no template is used, or upload
         when the user selected and attached a PPTX template.
 
@@ -245,7 +242,7 @@ steps:
         )
         save_artifact(
           key='generation_mode', content_type='text',
-          value='quick' for 快速生成, otherwise 'full',
+          value='full',
         )
         save_artifact(
           key='template_mode', content_type='text',
@@ -340,7 +337,7 @@ steps:
       explicit visual constraints, structure, constraints, and assumptions.
       ppt_capability_requirements must be exactly AI_BACKGROUND_IMAGES: enabled
       or AI_BACKGROUND_IMAGES: disabled. style_flow must always be auto.
-      generation_mode must be exactly quick or full, and template_mode must be
+      generation_mode must be full, and template_mode must be
       exactly none or upload.
       Uploaded templates require style_flow=auto, disabled backgrounds and the
       skip_background_images marker, regardless of generation_mode or earlier background answers.

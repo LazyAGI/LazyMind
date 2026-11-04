@@ -43,14 +43,13 @@ final generation revalidates and fills the original PPTX, not HTML.
    1、2” overwrites only those positions.
 5. `build_outline` — reuse the deck prepared above and call
    `ppt_build_outline` → one `deck_outline` Markdown artifact. This stage is automatic.
-6. `plan_page_prompts` — publish `slide_outline[page1..]` in both generation modes.
+6. `plan_page_prompts` — publish `slide_outline[page1..]` for generation.
 7. `generate_ppt` — one call: `ppt_generate_pages`; no outline rewrite. The
    generated slides are the final result.
 
 Steps 3 and 4 are skipped together when AI backgrounds are disabled.
-Quick and full generation execute the same applicable stages automatically.
-Quick hides intermediate tabs through a presentation-only marker; it does not
-skip material analysis or page prompt planning. Charts (including proportions),
+There is one staged generation route. Do not ask quick/full generation mode.
+Charts (including proportions),
 icons and formulas use the shared HTML renderer in every scenario. Native
 PPTX template filling retains its existing visual-editing limitations.
 

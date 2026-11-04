@@ -87,17 +87,16 @@ def test_general_presentation_elements_edit_in_place(tools, monkeypatch, kind, c
     assert '<p>2026 述职报告，其他内容不变</p>' in edited
 
 
-def test_generation_modes_share_executable_graph_and_source_inputs():
+def test_single_generation_route_and_source_inputs():
     state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text())
-    # No generation-mode condition can remove an execution stage.
-    assert not any('generation_mode' in edge.get('when', '')
-                   for edges in state['transitions'].values() for edge in edges)
+    assert state['transitions']['__start__'] == [{'to': 'analyze_requirements'}]
     assert state['transitions']['build_outline'] == [{'to': 'plan_page_prompts'}]
     planner = state['steps']['plan_page_prompts']
     assert {'material': 'academic_brief', 'required': False} in planner['inputs']
     assert all(step['mode'] == 'auto' for step in state['steps'].values())
     workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())
     fields = {field['id']: field for field in workflow['runtime']['clarification_fields']}
+    assert 'generation_mode' not in fields
     assert fields['academic_materials']['attachment']['max_files'] == -1
     slots = {slot['id']: slot for slot in workflow['slots']}
     assert slots['uploaded_materials']['cardinality'] == 'list'
