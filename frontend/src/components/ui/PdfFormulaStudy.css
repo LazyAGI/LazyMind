@@ -22,6 +22,7 @@
 .pdf-study-actions,.pdf-study-loading{padding:10px 0;}
 .pdf-study-loading{display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .pdf-formula-study .pdf-study-primary{background:#285c94;color:white;border-color:#285c94;}
+.pdf-formula-study .pdf-study-primary:hover:not(:disabled){background:#1f4b7a;border-color:#1f4b7a;color:#fff;}
 .pdf-study-symbols{margin:0;}.pdf-study-symbols>div{display:grid;grid-template-columns:minmax(30px,auto) 1fr;gap:12px;padding:10px 0;}.pdf-study-symbols dt code{background:#eaf1f9;color:#234c7b;padding:3px 6px;border-radius:4px;}.pdf-study-symbols dd{margin:0;}
 .pdf-study-citations{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:7px;}
 .pdf-formula-study .pdf-study-citation{font-size:11px;padding:3px 7px;background:#edf4fc;border-color:#d4e2f1;}
