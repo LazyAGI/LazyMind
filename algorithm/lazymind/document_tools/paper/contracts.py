@@ -7,14 +7,14 @@ import math
 
 from .analysis.validation import validate_svg
 
-from .review_schema import SavedReview, text_digest
+from .review.schema import SavedReview, text_digest
 from .experiment.schema import ResultMeta, code_column_types, validate_code_files, validate_result_meta
 from .experiment.results import validate_table
 
 FIELDS = {
     'research_topic': ('papers', 'question', 'evidence'),
     'literature_review': ('papers', 'question', 'evidence'),
-    'experiment': ('question', 'evidence', 'data'),
+    'experiment': ('papers', 'question', 'evidence', 'data', 'source_data', 'writing_materials'),
     'data_analysis': ('data', 'experiment', 'data_context', 'study_design', 'result_meta'),
     'write_document': ('papers', 'question', 'evidence', 'analysis', 'charts', 'outline', 'manuscript',
                        'review', 'review_data', 'selected_issue_ids', 'writing_materials', 'media_assets'),
@@ -132,7 +132,8 @@ def validate_value(kind, value, *, allow_metadata=False):
     if kind == 'code_files':
         if not isinstance(value, list):
             raise ValueError('code_files 必须是列表')
-        validate_code_files(value)
+        if value:
+            validate_code_files(value)
         return
     elif kind == 'result_meta':
         ResultMeta.model_validate(value)
@@ -196,7 +197,7 @@ def validate_value(kind, value, *, allow_metadata=False):
         for issue_id in value:
             text(issue_id, 'selected_issue_ids')
         unique(value, 'selected_issue_ids')
-    elif kind == 'data':
+    elif kind in ('data', 'source_data'):
         if isinstance(value, dict) and ('column_types' in value or 'tables' in value):
             from .analysis.schema import DataTable, DataBundle, parse
             parse(DataBundle if 'tables' in value else DataTable, value)
@@ -231,7 +232,8 @@ def validate_value(kind, value, *, allow_metadata=False):
         text(value['report'], 'report')
         if value['results'] is not None:
             validate_value('data', value['results'])
-            validate_table(value['results'])
+            if 'tables' not in value['results'] and 'column_types' not in value['results']:
+                validate_table(value['results'])
         if value['executed'] and value['results'] is None:
             raise ValueError('已执行实验必须提供结果')
     else:
@@ -257,12 +259,18 @@ def validate_input(step, value):
     allowed = {'topic', 'request', 'mode', *fields}
     if module in CONSTRAINED_MODULES:
         allowed.add('constraints')
+    if module == 'experiment':
+        allowed.add('input_is_demo')
     if not isinstance(value, dict) or set(value) - allowed:
         raise ValueError(f'{step} 输入含未知字段')
     text(value.get('topic'), 'topic')
     if not isinstance(value.get('request', ''), str):
         raise ValueError('request 必须是字符串')
     result = {'topic': value['topic'], 'request': value.get('request', '')}
+    if module == 'experiment' and 'input_is_demo' in value:
+        if type(value['input_is_demo']) is not bool:
+            raise ValueError('input_is_demo 必须是布尔值')
+        result['input_is_demo'] = value['input_is_demo']
     if module in CONSTRAINED_MODULES:
         if module in {'write_outline', 'write_document'}:
             from .writing.requirements import resolve_constraints
@@ -302,9 +310,11 @@ def validate_input(step, value):
     if step == 'revise_document' and result.get('manuscript') and not result.get('review_data'):
         from .publication import normalize_source_citations
         result['manuscript'] = normalize_source_citations(result['manuscript'], result['papers'])
-    required = {'experiment': ('question',), 'refine_topic': ('evidence',), 'peer_review': ('manuscript',),
+    required = {'experiment': (), 'refine_topic': ('evidence',), 'peer_review': ('manuscript',),
                 'revise_document': ('manuscript',), 'reading_reflection': ('papers',)}.get(step, ())
     missing = [name for name in required if not result[name]]
+    if step == 'experiment' and not any(result.get(k) for k in ('question', 'papers', 'data', 'source_data')):
+        missing.append('实验问题或用户数据')
     if step in {'write_outline', 'write_document', 'revise_document'}:
         writing_materials = ('papers', 'question', 'evidence', 'analysis', 'outline', 'manuscript', 'writing_materials')
         if not any(result[k] for k in writing_materials):
@@ -346,6 +356,12 @@ def validate_output(module, value, inputs=None):
             raise ValueError('未成功执行的实验不能声明实测结果')
         if meta.data_origin in ('synthetic', 'none') and not value['is_demo']:
             raise ValueError('模拟或无结果必须保留来源标记')
+        prepared = not value['code_files'] and 'tables' in (value['experiment']['results'] or {})
+        if meta.data_origin == 'user_supplied' or (prepared and meta.data_origin == 'synthetic'):
+            if (value['experiment']['executed'] or value['code_files']
+                    or value['is_demo'] != (meta.data_origin == 'synthetic')):
+                raise ValueError('已有数据整理不能声明新实验或改变原始数据来源')
+            return value
         columns = code_column_types(next(item['content'] for item in value['code_files']
                                          if item['path'] == 'experiment.py'))
         if meta.column_types != columns:

@@ -7,13 +7,30 @@ paper_simulation or usefixtures, so real Writer paths are not silently mocked.
 import copy
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 
 @pytest.fixture
 def paper_simulation(monkeypatch, request):
-    from lazymind.document_tools.paper import api, workflow, review_materials
+    from lazymind.document_tools.paper import api, workflow
+    from lazymind.document_tools.paper.review import materials as review_materials
+    from lazymind.document_tools.paper import source_materials
+    from lazymind.document_tools.paper.experiment import preparation
+
+    def select_source(prompt):
+        payload = json.loads(prompt[prompt.index('\n{') + 1:])
+        if 'blocks' in payload:
+            return json.dumps({'blocks': [block['id'] for block in payload['blocks']]})
+        return json.dumps({'action': 'use_existing' if payload['tables'] else 'missing',
+                           'table_ids': list(payload['tables']), 'reason': '沿用提供的测试数据'})
+
+    selector = Mock(side_effect=select_source)
+    selector.share.return_value = selector
+    selector.prompt.return_value = selector
+    monkeypatch.setattr(source_materials, 'AutoModel', lambda **_: selector)
+    monkeypatch.setattr(preparation, 'AutoModel', lambda **_: selector)
     # This fixture simulates routing/publication, including F2 source selection.
     monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
     monkeypatch.setattr(review_materials, 'prepare', lambda inputs, *a, **kw: copy.deepcopy(inputs['papers']))
@@ -25,6 +42,7 @@ def paper_simulation(monkeypatch, request):
 
     def seed():
         pool = original_seed()
+        workflow.add_material(pool, 'outline', '# 测试论文\n\n## 方法\n已确认测试大纲。', [], [], is_demo=True)
         for paper in workflow.material(pool, 'papers')['content']:
             paper.update(url=None, authors=[], year=None, doi=None, content_type='excerpt', source='test', truncated=False)
         pool['constraints'] = copy.deepcopy(source.get('constraints', {}))
@@ -45,8 +63,11 @@ def paper_simulation(monkeypatch, request):
         return {'papers': papers, 'evidence': value, 'is_demo': True}
 
     def analysis(inputs):
+        from lazymind.document_tools.paper import contracts
         from lazymind.document_tools.paper.analysis.schema import binding
+        inputs = contracts.validate_input('data_analysis', inputs)
         value = copy.deepcopy(source['analysis'])
+        value['summary'] = '# 模拟分析\n\n演示数据。\n\n' + value['summary']
         value.update(binding(inputs))
         table = value['data_sources'][0]
         refs = [dict(table_id=table['id'], column=column) for column in table['columns']]

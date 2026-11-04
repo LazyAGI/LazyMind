@@ -243,4 +243,6 @@ def bind_attachment(bound: dict, workspace: str, request: str) -> dict:
     directory = Path(tempfile.mkdtemp(prefix='paper-input-', dir=workspace))
     target = directory / 'paper_input.json'
     target.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False), encoding='utf-8')
-    return {**bound, 'paper_input': str(target)}
+    from ..review.schema import text_digest
+    return {**bound, 'paper_input': str(target),
+            '_imported_attachments': [text_digest(path.split('?', 1)[0]) for path in files]}

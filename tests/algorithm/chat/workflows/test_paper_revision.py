@@ -8,7 +8,7 @@ BODY = '# Paper\n\n## Methods\nKeep methods.\n\n## Discussion\nShorten this para
 
 def checked_revision(body, inputs=None):
     from lazymind.document_tools.paper.peer_review import build_output
-    from lazymind.document_tools.paper.review_schema import ReviewResult
+    from lazymind.document_tools.paper.review.schema import ReviewResult
     return {**build_output(ReviewResult(summary='Checked revised manuscript', issues=[], limitations=[]),
                            {'topic': 'Paper', 'manuscript': body}), 'manuscript': body}
 
@@ -185,7 +185,7 @@ def test_missing_current_request_does_not_reuse_old_selection():
 @pytest.mark.parametrize('stale', [False, True])
 def test_review_version_is_checked_independently_of_intent(monkeypatch, stale):
     from lazymind.document_tools.paper.peer_review import build_output
-    from lazymind.document_tools.paper.review_schema import ReviewResult
+    from lazymind.document_tools.paper.review.schema import ReviewResult
     review = build_output(ReviewResult.model_validate({
         'summary': 'Shorten discussion.', 'limitations': [],
         'issues': [{'severity': 'minor', 'category': 'language', 'location': 'Discussion',
@@ -243,7 +243,7 @@ def test_missing_section_and_partial_review_use_shared_writer(monkeypatch, parti
     from types import SimpleNamespace
     from unittest.mock import Mock
     from lazymind.document_tools.paper import peer_review
-    from lazymind.document_tools.paper.review_schema import ReviewResult
+    from lazymind.document_tools.paper.review.schema import ReviewResult
     from lazymind.document_tools.toolkits import WriterRevisionToolkit
 
     issues = [
@@ -306,7 +306,7 @@ def test_revision_publication_reports_only_selected_pending_work(tmp_path, monke
     import lazyllm
     from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
     from lazymind.document_tools.paper import peer_review
-    from lazymind.document_tools.paper.review_schema import ReviewResult
+    from lazymind.document_tools.paper.review.schema import ReviewResult
     review = peer_review.build_output(ReviewResult.model_validate({
         'summary': 'Revise discussion', 'limitations': [], 'issues': [
             dict(severity='minor', category='language', location='Discussion', quote='Shorten this paragraph.',

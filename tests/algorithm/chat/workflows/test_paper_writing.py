@@ -24,7 +24,7 @@ def draft_pool():
 
 @pytest.fixture(autouse=True)
 def mock_f1_model(monkeypatch):
-    from lazymind.document_tools.paper import review_materials
+    from lazymind.document_tools.paper.review import materials as review_materials
     monkeypatch.setattr(review_materials, 'prepare', lambda inputs, *_args, **_kwargs: inputs.get('papers', []))
     monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
 
@@ -54,7 +54,7 @@ def test_scenarios_preserve_sources_versions_and_inputs(path, reflection_calls):
                 pool['selected_issue_ids'] = ['R1']
             else:
                 pool['current'].pop('manuscript', None)
-        if node == 'F4':
+        if node == 'F4' and not any(item['node'] == 'F3' for item in pool['history']):
             pool['current'].pop('experiment', None)  # Select raw data, not the unexecuted F3 demo.
         before = copy.deepcopy(pool)
         result = tools.execute_mock(node, pool, '给导师汇报')
@@ -151,7 +151,7 @@ def test_invalid_input_rejected(corrupt):
         tools.execute_mock('F2', pool)
 
 
-@pytest.mark.parametrize('a,b', [('F1','F3'), ('F1','F5'), ('F3','F5'), ('F4','F3'), ('F6','F2')])
+@pytest.mark.parametrize('a,b', [('F1','F3'), ('F1','F5'), ('F3','F5'), ('F6','F2')])
 def test_forbidden_execution_edges(a, b):
     pool = tools.execute_mock(a, tools.seed_pool())['pool']
     with pytest.raises(ValueError, match='不允许'):
@@ -184,7 +184,6 @@ def test_edited_experiment_report_keeps_simulated_result_and_history():
     assert experiment['content']['report'] == '# 用户修改的实验方案'
     assert experiment['content']['executed'] is False
     assert experiment['version'] == 2
-    selected['current'].pop('experiment')  # Explicit raw-data selection for F4.
     assert tools.execute_mock('F4', selected)['status'] == 'completed'
 
 
@@ -202,7 +201,7 @@ def runtime(monkeypatch, tmp_path):
     return ctx, batches
 
 
-def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime, tmp_path):
+def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime, tmp_path, reflection_calls):
     ctx, batches = runtime
     workflow = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
@@ -213,15 +212,26 @@ def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime
     path = tmp_path / 'seed.json'
     path.write_text(json.dumps({'data': seed}))
     for step in ['research_topic', 'literature_review', 'experiment', 'data_analysis', 'write_document', 'peer_review', 'reading_reflection']:
-        ctx.params = {'step_id': step, 'remote_inputs': {'seed_pool': str(path)}}
+        selected_pool = experiment_pool if step == 'data_analysis' else str(path)
+        if step == 'write_document':
+            writing = copy.deepcopy(seed)
+            writing['current'].pop('manuscript', None)
+            writing_path = tmp_path / 'writing-seed.json'
+            writing_path.write_text(json.dumps(writing))
+            selected_pool = str(writing_path)
+        ctx.params = {'step_id': step, 'remote_inputs': {'seed_pool': selected_pool}}
         ctx.output_slots = [item['material'] for item in state['steps'][step]['outputs']]
         tools.run_paper_step()
-        assert {item['key'] for item in batches[-1]} == {
-            item['material'] for item in state['steps'][step]['outputs']}
+        actual = {item['key'] for item in batches[-1]}
+        declared = {item['material'] for item in state['steps'][step]['outputs']}
+        required = {item['material'] for item in state['steps'][step]['outputs'] if item.get('required', True)}
+        assert required <= actual <= declared
         document = next(item for item in batches[-1] if item['key'].endswith('_document'))
         assert document['content_type'] == 'file'
         assert Path(document['value']).name == tools.STEP_LABELS[step] + '.md'
         assert '演示数据' in tools._read_bound(document['value'])
+        if step == 'experiment':
+            experiment_pool = next(item['value'] for item in batches[-1] if item['key'] == 'experiment_pool')
     ctx.params = {'step_id': 'finish'}
     tools.run_paper_step()
     assert batches[-1][0]['key'] == 'finish_document'
@@ -257,9 +267,9 @@ def test_f1_direct_entry_uses_conversation_pdfs_and_publishes_pool(user_input, r
     outputs = {item['key']: item['value'] for item in batches[-1]}
     pool = tools._read_bound(outputs['research_topic_pool'])
     assert pool['topic'] == '证据可追溯性'
-    assert tools.material(pool, 'papers')['content'] == [
-        {**paper, 'abstract': '论文讨论证据追溯的方法与局限。'} for paper in papers
-    ]
+    extracted = tools.material(pool, 'papers')['content']
+    assert [p['id'] for p in extracted] == [p['id'] for p in papers]
+    assert all(p['text'] in e['text'] and e['extraction_version'] == 1 for p, e in zip(papers, extracted))
     assert pool['history'][0]['node'] == 'F1'
     assert '## 研究问题' in tools._read_bound(outputs['research_topic_document'])
 
@@ -506,10 +516,14 @@ def test_f7_attachment_entry_publishes_papers_and_reflection(count, user_input, 
     assert set(outputs) == {'reading_reflection_pool', 'reading_reflection_document'}
     pool = tools._read_bound(outputs['reading_reflection_pool'])
     assert pool['topic'] == (user_input or '；'.join(paper['title'] for paper in papers))
-    assert tools.material(pool, 'papers')['content'] == papers == before
+    extracted = tools.material(pool, 'papers')['content']
+    assert papers == before
+    assert [p['id'] for p in extracted] == [p['id'] for p in papers]
+    assert all(p['text'] in e['text'] and e['extraction_version'] == 1 for p, e in zip(papers, extracted))
     assert pool['history'][-1]['node'] == 'F7'
     assert pool['current']['papers'] in pool['history'][-1]['inputs']
-    assert reflection_calls[0]['papers'] == [{**paper, 'source_kind': 'full_text'} for paper in papers]
+    assert [p['id'] for p in reflection_calls[0]['papers']] == [p['id'] for p in papers]
+    assert all(p['source_kind'] == 'partial_text' for p in reflection_calls[0]['papers'])
     assert reflection_calls[0]['request'] == user_input
     assert tools._read_bound(outputs['reading_reflection_document']) == '# 阅读心得\n\n' + '、'.join(
         paper['id'] for paper in papers
@@ -522,6 +536,8 @@ def test_f7_explicit_empty_sources_do_not_fallback(source, runtime, reflection_c
     ctx, batches = runtime
     path = tmp_path / 'input.md'
     value = tools.pool_from_business({'topic': '明确主题'}) if source == 'seed_pool' else {'topic': '明确主题'}
+    if source == 'seed_pool':
+        value['imported_attachments'] = [tools.text_digest('/uploads/无关论文.pdf')]
     path.write_text(json.dumps(value))
     monkeypatch.setattr(tools, '_conversation_papers', lambda *_: pytest.fail('history was scanned'))
     ctx.params = {'step_id': 'reading_reflection', 'remote_inputs': {source: str(path)},
@@ -538,7 +554,7 @@ def test_f7_explicit_empty_sources_do_not_fallback(source, runtime, reflection_c
 def test_f7_missing_materials_stop_before_model(papers, error, runtime, reflection_calls, monkeypatch):
     ctx, batches = runtime
     monkeypatch.setattr(tools, '_conversation_papers', lambda *_: papers)
-    ctx.params = {'step_id': 'reading_reflection'}
+    ctx.params = {'step_id': 'reading_reflection', 'history_files_per_turn': {'1': ['/uploads/paper.pdf']}}
     with pytest.raises(tools.MissingMaterials, match=error):
         tools.run_paper_step()
     assert not reflection_calls and not batches
@@ -637,12 +653,15 @@ def test_f2_uses_explicit_selection_or_merges_attachments_into_saved_pool(use_po
         'evidence': '# 文献综述', 'papers': inputs['papers'], 'is_demo': False,
     })
     ctx.params = {'step_id': 'literature_review',
-                  'remote_inputs': {'seed_pool' if use_pool else 'paper_input': str(source)}}
+                  'remote_inputs': {'seed_pool' if use_pool else 'paper_input': str(source)},
+                  'history_files_per_turn': {'1': ['/uploads/new.pdf']}}
     tools.run_paper_step()
     outputs = {item['key']: item['value'] for item in batches[-1]}
     assert set(outputs) == {'literature_review_pool', 'literature_review_document'}
     result = tools._read_bound(outputs['literature_review_pool'])
-    expected = papers if not use_pool else [papers[0], uploaded[1]]
+    from lazymind.document_tools.paper.source_materials import extract_paper
+    expected = papers if not use_pool else [papers[0], {k: v for k, v in extract_paper(uploaded[1], '').items()
+                                                      if k != 'source_tables'}]
     assert tools.material(result, 'papers')['content'] == expected
     assert tools._read_bound(str(source)) == value
 
@@ -684,7 +703,8 @@ def test_paper_entry_explicit_topic_without_request_uses_attachments(
         {'id': 'P1', 'title': '论文', 'text': '正文'},
     ])
     monkeypatch.setattr(tools.research_topic, 'infer_topic', lambda *_: pytest.fail('explicit topic was inferred'))
-    ctx.params = {'step_id': step, 'remote_inputs': {'paper_topic': str(topic)}}
+    ctx.params = {'step_id': step, 'remote_inputs': {'paper_topic': str(topic)},
+                  'history_files_per_turn': {'1': ['/uploads/paper.pdf']}}
     tools.run_paper_step()
     outputs = {item['key']: item['value'] for item in batches[-1]}
     assert tools._read_bound(outputs[step + '_pool'])['topic'] == '明确阅读主题'
@@ -720,11 +740,14 @@ def test_bound_manuscript_does_not_block_conversation_papers(
     outputs = {item['key']: item['value'] for item in batches[-1]}
     pool = tools._read_bound(outputs[step + '_pool'])
     assert tools.material(pool, 'manuscript')['content'] == manuscript.read_text()
-    assert tools.material(pool, 'papers')['content'] == papers
+    extracted = tools.material(pool, 'papers')['content']
+    assert extracted[0]['id'] == papers[0]['id']
+    assert papers[0]['text'] in extracted[0]['text']
+    assert extracted[0]['extraction_version'] == 1
     assert step + '_document' in outputs
     if step == 'reading_reflection':
         assert reflection_calls[0]['papers'][0]['id'] == 'P1'
-        assert reflection_calls[0]['papers'][0]['text'] == '附件论文正文'
+        assert '附件论文正文' in reflection_calls[0]['papers'][0]['text']
 
 
 @pytest.mark.parametrize('binding', ['manuscript_file', 'manuscript_text'])
@@ -764,14 +787,14 @@ def test_f1_pdf_resources_are_scoped_deduplicated_and_parsed(tmp_path, monkeypat
     monkeypatch.setattr(ingest, 'ingest_pdf_file', cached_pdf)
     monkeypatch.setattr(resolver, 'resolve_text_target', lambda file_id, **_kwargs: resolved[file_id])
     papers = tools._conversation_papers({
-        '2': ['/uploads/论文二.pdf', '/uploads/配置.json'],
+        '2': ['/uploads/论文二.pdf', '/uploads/图片.png'],
         '1': ['/uploads/论文一.pdf'],
         '3': ['/uploads/论文一.pdf'],
     })
     assert [(paper['id'], paper['title'], paper['text']) for paper in papers] == [
         ('P1', '论文一', '证据一'), ('P2', '论文二', '证据二'),
     ]
-    assert calls == [('论文一.pdf', 1), ('论文二.pdf', 2), ('论文一.pdf', 3)]
+    assert calls == [('论文一.pdf', 1), ('论文二.pdf', 2)]
     assert '/uploads/' not in json.dumps(papers, ensure_ascii=False)
 
 
@@ -790,8 +813,9 @@ def test_paper_attachments_reuse_text_resolver_and_content_identity(suffix, tmp_
     monkeypatch.setattr(resolver, 'resolve_text_target', resolve)
     path = '/uploads/论文' + suffix
     papers = tools._conversation_papers({'1': [path], '2': [path]})
-    assert calls == [(path, 1, True), (path, 2, True)]
-    assert papers == [{'id': 'upload-' + tools.text_digest('完整论文正文'), 'title': '论文', 'text': '完整论文正文'}]
+    assert calls == [(path, 1, True)]
+    assert papers == [{'id': 'upload-' + tools.text_digest('完整论文正文'), 'title': '论文', 'text': '完整论文正文',
+                       'attachment_key': tools.text_digest(path)}]
 
 
 @pytest.mark.parametrize('body,error', [
@@ -833,7 +857,9 @@ def test_f1_explicit_and_saved_inputs_do_not_rescan_conversation(runtime, tmp_pa
     assert tools.material(tools._read_bound(first['research_topic_pool']), 'papers')['content'][0]['id'] == 'P1'
 
     seed = tmp_path / 'seed.json'
-    seed.write_text(json.dumps(tools.pool_from_business({'topic': '已确认主题'}), ensure_ascii=False))
+    saved = tools.pool_from_business({'topic': '已确认主题'})
+    saved['imported_attachments'] = [tools.text_digest('/uploads/其他论文.pdf')]
+    seed.write_text(json.dumps(saved, ensure_ascii=False))
     ctx.params['remote_inputs'] = {'seed_pool': str(seed)}
     tools.run_paper_step()
     second = {item['key']: item['value'] for item in batches[-1]}
@@ -898,6 +924,9 @@ def test_f2_merges_uploaded_papers_with_saved_materials(binding, runtime, tmp_pa
     expected = [existing, uploaded] if binding else [
         {key: value for key, value in existing.items() if key != 'abstract'}, uploaded,
     ]
+    from lazymind.document_tools.paper.source_materials import extract_paper
+    expected = [paper if binding and paper['id'] == existing['id'] else {
+        k: v for k, v in extract_paper(paper, '').items() if k != 'source_tables'} for paper in expected]
     assert calls[-1]['papers'] == expected
     published = [{**paper, 'citation': paper.get('citation', paper['title'])} for paper in expected]
     assert tools.material(result, 'papers')['content'] == published

@@ -99,7 +99,17 @@ def main():
     json.dumps(config, allow_nan=False)
     input_path = root / 'input.csv'
     data = None
-    if input_path.is_file():
+    bundle_path = root / 'input.json'
+    if bundle_path.is_file():
+        data = json.loads(bundle_path.read_text(encoding='utf-8'))
+        if isinstance(data, dict) and 'tables' in data:
+            if not isinstance(data['tables'], list) or not data['tables']:
+                raise ValueError('input.json 必须是非空表集合')
+            for entry in data['tables']:
+                validate_table({key: entry['table'][key] for key in ('columns', 'rows')}, input_data=True)
+        else:
+            validate_table(data, input_data=True)
+    elif input_path.is_file():
         with input_path.open(encoding='utf-8-sig', newline='') as stream:
             reader = csv.reader(stream)
             columns = next(reader, [])

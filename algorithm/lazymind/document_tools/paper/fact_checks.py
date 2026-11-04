@@ -6,7 +6,7 @@ import statistics
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 
-from .review_schema import CheckedFact, FactCheck, ReviewIssue
+from .review.schema import CheckedFact, FactCheck, ReviewIssue
 
 CATEGORY_LABELS = {'numbers': '数字与分母', 'comparison': '比较方向', 'literature': '文献支持范围',
                    'data_status': '模拟/实测状态', 'figure': '图文一致性'}

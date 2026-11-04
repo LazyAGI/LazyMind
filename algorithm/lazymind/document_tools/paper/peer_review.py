@@ -17,7 +17,7 @@ from .fact_checks import (CATEGORY_LABELS as FACT_LABELS, STATUS_LABELS, NUMERIC
                           _pointer, _quantity_token, check_facts,
                           literature_coverage, literature_input, reconcile_precision_advice, review_issues)
 from .prompts.peer_review_prompt import (JSON_STRUCTURE_PROMPT, LITERATURE_PROMPT, REVIEW_PROMPT, REPAIR_PROMPT)
-from .review_schema import (FactCheck, FactClaim, LiteratureReadings, RepairedIssue, ReviewIssue,
+from .review.schema import (FactCheck, FactClaim, LiteratureReadings, RepairedIssue, ReviewIssue,
                             ReviewRepair, ReviewResult, SavedReview, text_digest)
 
 SEVERITY_LABELS = {'major': '重要问题', 'minor': '一般问题', 'suggestion': '建议'}
@@ -426,7 +426,7 @@ def _needs_source(target, manuscript):
 
 def repair_request(inputs: dict, targets: dict) -> tuple[str, set[int]]:
     """Format-only repairs need no manuscript; quote repairs get selected original lines."""
-    from .review_context import source_lines
+    from .review.context import source_lines
 
     context = {key: inputs[key] for key in ('topic', 'request') if key in inputs}
     sources = [target for path, target in targets.items() if path.startswith('issues.')

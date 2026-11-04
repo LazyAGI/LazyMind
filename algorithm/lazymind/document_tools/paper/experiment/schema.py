@@ -217,6 +217,7 @@ class ResultMeta(StrictModel):
     metrics: list[Metric] = Field(max_length=30)
     seed: int | None
     column_types: dict[str, Literal['string', 'integer', 'number', 'boolean']] | None = None
+    input_table_ids: list[str] = Field(default_factory=list)
     execution_log: str = ''
     elapsed_seconds: float = Field(default=0.0, ge=0)
 
@@ -249,6 +250,12 @@ def validate_result_meta(value, experiment, data=None):
     if table is None:
         if meta.metrics:
             raise ValueError('无结果时不能声明结果指标')
+        return meta
+    if meta.data_origin in {'user_supplied', 'synthetic'} and ('tables' in table or 'column_types' in table):
+        from ..analysis.schema import DataBundle, DataTable
+        (DataBundle if 'tables' in table else DataTable).model_validate(table)
+        if meta.execution_status != 'not_run' or (meta.data_origin == 'user_supplied' and meta.method != 'empirical'):
+            raise ValueError('用户提供的数据不得声明为本次执行或模拟')
         return meta
     validate_table(table, meta.column_types)
     if not meta.metrics or any(metric.column not in table['columns'] for metric in meta.metrics):

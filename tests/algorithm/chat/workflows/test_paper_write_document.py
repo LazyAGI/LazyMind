@@ -9,7 +9,7 @@ import pytest
 from lazyllm.tools.writer.data_models.task import WritingTask
 from lazymind.document_tools.paper import contracts, peer_review
 from lazymind.document_tools.paper.writing import common as document, revise_document as revision_entry
-from lazymind.document_tools.paper.review_schema import text_digest
+from lazymind.document_tools.paper.review.schema import text_digest
 from lazymind.document_tools.toolkits import WriterRevisionToolkit
 
 

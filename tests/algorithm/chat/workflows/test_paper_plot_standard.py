@@ -212,7 +212,7 @@ def test_actual_svg_export_keeps_visible_cjk_labels_for_fact_checks():
     from PIL import Image
     from lazymind.document_tools.paper.plotting import worker
     from lazymind.document_tools.paper.fact_checks import check_facts
-    from lazymind.document_tools.paper.review_schema import ReviewResult
+    from lazymind.document_tools.paper.review.schema import ReviewResult
     code = '''import matplotlib.pyplot as plt
 
 def draw(data, statistics, spec):

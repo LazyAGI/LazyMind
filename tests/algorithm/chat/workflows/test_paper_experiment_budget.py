@@ -12,7 +12,7 @@ from lazymind import model_config
 from lazymind.common.token_estimation import estimate_tokens
 from lazymind.config import config
 from lazymind.document_tools.paper import contracts, experiment, workflow
-from lazymind.document_tools.paper.experiment import algorithm
+from lazymind.document_tools.paper.experiment import algorithm, preparation
 from lazymind.document_tools.paper.experiment.generation import GeneratedExperiment
 from lazymind.document_tools.paper.prompts.experiment_prompt import EXPERIMENT_PROMPT
 
@@ -28,6 +28,10 @@ def model_response(monkeypatch):
     model.share.return_value = model
     model.prompt.return_value = model
     monkeypatch.setattr(algorithm, 'AutoModel', lambda **_: model)
+    selector = Mock(return_value=json.dumps({'action': 'simulation', 'table_ids': [], 'reason': '按要求模拟'}))
+    selector.share.return_value = selector
+    selector.prompt.return_value = selector
+    monkeypatch.setattr(preparation, 'AutoModel', lambda **_: selector)
     return example['input'], model
 
 
@@ -77,5 +81,6 @@ def test_experiment_projects_current_materials_without_serializing_historical_po
     inputs = workflow.business_input('experiment', pool, '继续实验')
     assert inputs == {'topic': pool['topic'], 'request': '继续实验',
                       'question': '当前研究问题', 'evidence': '当前综述',
-                      'data': workflow.material(pool, 'data')['content']}
+                      'data': workflow.material(pool, 'data')['content'],
+                      'papers': workflow.material(pool, 'papers')['content'], 'input_is_demo': True}
     assert pool == before

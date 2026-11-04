@@ -2,8 +2,9 @@ id: paper-writing
 name: 论文写作
 description: 支持选题、综述、实验、分析、写作、审稿与阅读心得；轻量实验可授权运行，复杂实验提供模拟数据，结果可继续分析绘图。
 when_to_use: >
-  用户只要求数据分析时，直接选择 data_analysis；F4 工具会从当前会话的 JSON 附件读取完整约定输入，
-  不需要模型逐行读取或重写附件内容。已有 paper_input 或材料池绑定时优先沿用绑定。
+  用户要求实验或数据分析时，先选择 experiment（F3 实验与数据准备），再按阶段确认规则进入 data_analysis。
+  F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
+  补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。
   Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
   Literature reviews retain supplied papers and expand references through Sciverse and selected knowledge bases.
   Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
@@ -16,13 +17,14 @@ when_to_use: >
   questionnaire or preparation step. Preserve the original research/review request after the answer.
   Bind experiment_execution to simulate_only for refusal/no answer, or allow_local for explicit agreement.
   Bind allow_local only after explicit consent for this task. The experiment tool applies the
-  bounded CPU execution policy; unsupported experiments or execution failures yield labelled previews.
+  bounded CPU execution policy; computations using real user data that cannot run must report missing results, not synthetic replacements.
   If ask_user is not registered, use simulate_only. A registered tool's validation failure is NOT
   unavailability or a user answer: report that failure and stop rather than bypassing the question.
   Execution takes place in the current LazyMind service container, not on the browser user's computer.
   For direct experiment entry, bind the user's explicit experimental question to experiment_question.
   If it is unclear, ask for that question; never invent a goal. F1/F2 entries reuse the accumulated
-  question and evidence instead. F3 handles execution and fallback internally, records actual status,
+  question and evidence instead. Existing data does not require a new experimental question.
+  F3 first selects and prepares existing data; never replace supplied observations with simulation. It records actual status,
   and returns final results for F4. Never separately run this generated code through Chat tools.
   For an existing manuscript to review or revise, bind the exact attachment filename to manuscript_file;
   do not first summarize or copy the manuscript through Chat.
@@ -103,7 +105,7 @@ steps:
   - {id: research_topic, label: "研究选题"}
   - {id: literature_review, label: "文献综述"}
   - {id: refine_topic, label: "调整选题"}
-  - {id: experiment, label: "实验研究"}
+  - {id: experiment, label: "实验数据准备"}
   - {id: data_analysis, label: "数据分析"}
   - {id: write_outline, label: "论文大纲"}
   - {id: write_document, label: "论文写作"}
@@ -143,8 +145,8 @@ slots:
   - {id: refine_topic_pool, label: "调整选题材料池", type: file, cardinality: single, exposed: false}
   - {id: refine_topic_document, label: "调整选题", type: file, cardinality: single}
   - {id: experiment_pool, label: "实验研究材料池", type: file, cardinality: single, exposed: false}
-  - {id: experiment_document, label: "实验研究", type: file, cardinality: single}
-  - {id: experiment_code, label: "实验代码包", type: file, cardinality: single}
+  - {id: experiment_document, label: "实验数据准备", type: file, cardinality: single}
+  - {id: experiment_code, label: "实验与数据包", type: file, cardinality: single}
   - {id: experiment_results, label: "实验结果与来源", type: file, cardinality: single}
   - {id: data_analysis_pool, label: "数据分析材料池", type: file, cardinality: single, exposed: false}
   - {id: data_analysis_document, label: "数据分析", type: file, cardinality: single}
@@ -208,7 +210,7 @@ ui:
         - {id: refine_topic_document}
     - id: experiment
       step_id: experiment
-      label: "实验研究"
+      label: "实验数据准备"
       layout: list
       allow_download: true
       slots:

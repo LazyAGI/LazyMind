@@ -47,6 +47,13 @@ def export_experiment(output: dict, workspace: str, data: dict | None = None,
         for item in output['code_files']:
             archive.writestr(item['path'], item['content'])
         archive.writestr('结果来源.json', result_path.read_text(encoding='utf-8'))
+        if not output['code_files']:
+            archive.writestr('README.md', output['experiment']['report'])
+            archive.writestr('results.json', json.dumps(table, ensure_ascii=False, indent=2, allow_nan=False))
+            entries = table['tables'] if 'tables' in table else [{'id': 'data', 'table': table}]
+            for entry in entries:
+                archive.writestr(entry['id'] + '.csv', csv_text(entry['table']))
+            return {'experiment_code': str(archive_path), 'experiment_results': str(result_path)}
         archive.writestr('run_experiment.py', Path(results.__file__).read_text(encoding='utf-8'))
         archive.writestr('result_schema.json', json.dumps(
             result_schema(output['result_meta']['column_types']), ensure_ascii=False, indent=2))
@@ -54,10 +61,13 @@ def export_experiment(output: dict, workspace: str, data: dict | None = None,
         archive.writestr('使用前必读.txt',
                          source_notice(output['result_meta']) + '\n'
                          '检查后运行 python run_experiment.py；统一导出器校验字段和类型后保存 results.json/results.csv。\n'
-                         '只有用户选择的输入数据会附在 input.csv，不含其他材料或环境凭证。\n')
+                         '只有选定的输入数据会附在 input.csv 或 input.json。\n')
         if data is not None:
             # Input is machine-readable data, not a preview; preserve original values.
-            archive.writestr('input.csv', csv_text(data, spreadsheet_safe=False))
+            if 'tables' in data or output['result_meta'].get('input_table_ids'):
+                archive.writestr('input.json', json.dumps(data, ensure_ascii=False, allow_nan=False))
+            else:
+                archive.writestr('input.csv', csv_text(data, spreadsheet_safe=False))
         if table:
             prefix = 'results' if output['experiment']['executed'] else 'preview_results'
             archive.writestr(prefix + '.json', json.dumps(table, ensure_ascii=False, indent=2, allow_nan=False))

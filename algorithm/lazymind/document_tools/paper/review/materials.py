@@ -11,12 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from lazymind.config import config
 
-from .contracts import MissingMaterials
-from .literature_review import _prompt
-from .material_bindings import MaterialBindings
-from .prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT
-from .runtime_events import report_progress
-from .review_retrieval import RETRIEVAL_ERRORS, read_sciverse, sciverse_provider, search_sciverse, unique_candidates
+from ..contracts import MissingMaterials
+from ..literature_review import _prompt
+from ..material_bindings import MaterialBindings
+from ..prompts.literature_review_prompt import MATERIAL_SELECTION_PROMPT
+from ..runtime_events import report_progress
+from .retrieval import RETRIEVAL_ERRORS, read_sciverse, sciverse_provider, search_sciverse, unique_candidates
 
 
 class SearchPlan(BaseModel):

@@ -670,7 +670,7 @@ def test_direct_entry_accepts_question_without_pool_and_missing_question_fails(t
     pool = workflow.initialize_pool({'experiment_question': str(path)}, '请设计实验')
     value = workflow.business_input('experiment', pool)
     assert contracts.validate_input('experiment', value)['question'] == path.read_text()
-    with pytest.raises(contracts.MissingMaterials, match='question'):
+    with pytest.raises(contracts.MissingMaterials, match='实验问题或用户数据'):
         contracts.validate_input('experiment', {'topic': 'T'})
 
 
@@ -714,7 +714,7 @@ def test_ask_user_answer_keeps_original_goal():
 
 def test_real_model_experiment_to_f4_contract_and_downloads(example, tmp_path):
     """Run explicitly with configured real llm; never runs generated experiment code."""
-    pool = workflow.pool_from_business(example['input'])
+    pool = workflow.pool_from_business({**example['input'], 'request': '明确进行模拟研究，比较均值与中位数。'})
     result = workflow.execute_step('experiment', pool)
     output = {key: workflow.material(result['pool'], key)['content'] for key in contracts.OUTPUTS['experiment']}
     output['is_demo'] = result['mock']

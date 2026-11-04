@@ -6,7 +6,7 @@
 
 **状态：下文是目标 v2 规范，不是当前代码能力说明。** 当前公共入口和仓库内 fixtures 仍使用 v1。2026-10-19 已确认：各模块先基于代码和文档开发，联调时统一差异，不把全局 v2 迁移作为开工前置条件。当前字段以 [contracts.py](../../../algorithm/lazymind/document_tools/paper/contracts.py) 为准；返回结构变更必须同步调用方，不能直接把对象返回给仍要求字符串的骨架。
 
-**F6 当前实现（2026-10-19）：** 已接真实模型调用，一次生成 `ReviewResult`，返回 `review: str`（Markdown）、`review_data: dict`（结构化意见）、`is_demo: bool` 共三个字段。提示词在 `algorithm/lazymind/document_tools/paper/prompts/peer_review_prompt.py`，入口为 `paper/peer_review.py`，共享类型在 `paper/review_schema.py`。F6 调用测试使用真实模型，不用 monkeypatch；格式与排版测试直接调用函数。下文的完整 v2 Review / ContentRef 尚未接入。当前完整样例见 [F6 运行样例](../../../tests/fixtures/paper-writing/peer_review.json)，model_response/output 只是格式示例；不要直接传入 temp/examples 下的目标 v2 对象。
+**F6 当前实现（2026-10-19）：** 已接真实模型调用，一次生成 `ReviewResult`，返回 `review: str`（Markdown）、`review_data: dict`（结构化意见）、`is_demo: bool` 共三个字段。提示词在 `algorithm/lazymind/document_tools/paper/prompts/peer_review_prompt.py`，入口为 `paper/peer_review.py`，共享类型在 `paper/review/schema.py`。F6 调用测试使用真实模型，不用 monkeypatch；格式与排版测试直接调用函数。下文的完整 v2 Review / ContentRef 尚未接入。当前完整样例见 [F6 运行样例](../../../tests/fixtures/paper-writing/peer_review.json)，model_response/output 只是格式示例；不要直接传入 temp/examples 下的目标 v2 对象。
 
 ## 当前实验接口
 

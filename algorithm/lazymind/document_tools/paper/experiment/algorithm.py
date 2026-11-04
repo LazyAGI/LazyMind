@@ -55,13 +55,17 @@ def build_output(draft: ExperimentDraft, inputs: dict, execution=None) -> dict:
     return validate_output('experiment', {
         'experiment': {'executed': executed, 'plan': draft.plan, 'results': table, 'report': report},
         'code_files': [item.model_dump() for item in draft.code_files],
-        'result_meta': meta.model_dump(), 'is_demo': origin in ('synthetic', 'none'),
+        'result_meta': meta.model_dump(exclude={'input_table_ids'}), 'is_demo': origin in ('synthetic', 'none'),
     })
 
 
 def run(inputs: dict, *, on_event=None, allow_execution=False) -> dict:
     """Generate once, then use the Runtime's execution choice within the bounded executor."""
     inputs = validate_input('experiment', inputs)
+    from .preparation import prepare
+    existing, inputs = prepare(inputs, on_event)
+    if existing is not None:
+        return existing
     prompt = EXPERIMENT_PROMPT + '\n\nInput JSON:\n' + json.dumps(inputs, ensure_ascii=False)
     writer = WriterToolBase(llm=AutoModel(model='llm'))
     system_prompt = writer._structured_output_prompt(GeneratedExperiment)
@@ -83,6 +87,17 @@ def run(inputs: dict, *, on_event=None, allow_execution=False) -> dict:
         on_event({'tag': 'phase', 'phase': '校验字段、结果类型与代码接口'})
     parsed = writer._parse_structured_response(response, GeneratedExperiment)
     draft = validate_generation(writer, parsed, inputs, on_event)
+    if inputs.get('data') is not None:
+        if draft.method != 'empirical':
+            raise ValueError('基于用户数据的实验不能替换为模拟实验')
+        # A failed computation must not turn observed user data into a synthetic preview.
+        draft = draft.model_copy(update={'results': None, 'no_results_reason': '仅接受本次用户数据计算结果。'})
     from .executor import execute
     execution = execute(draft, inputs, allowed=allow_execution, on_event=on_event)
-    return build_output(draft, inputs, execution)
+    if inputs.get('input_is_demo'):
+        draft = draft.model_copy(update={'method': 'simulation',
+                                         'assumptions': [*draft.assumptions, '输入材料包含模拟/演示数据。']})
+    output = build_output(draft, inputs, execution)
+    if inputs.get('selected_table_ids'):
+        output['result_meta']['input_table_ids'] = inputs['selected_table_ids']
+    return output

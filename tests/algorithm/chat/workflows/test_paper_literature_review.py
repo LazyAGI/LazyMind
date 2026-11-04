@@ -10,7 +10,8 @@ import pytest
 from httpx import HTTPStatusError, ReadTimeout, Request, Response
 
 from lazymind.common.token_estimation import estimate_tokens
-from lazymind.document_tools.paper import api, contracts, literature_review, review_materials, workflow
+from lazymind.document_tools.paper import api, contracts, literature_review, workflow
+from lazymind.document_tools.paper.review import materials as review_materials
 from lazymind.document_tools.paper.runtime_events import current_events
 
 

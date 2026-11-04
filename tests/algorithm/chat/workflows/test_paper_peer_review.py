@@ -766,7 +766,7 @@ def test_arity_category_and_scalar_state_quotation_are_generation_errors_without
     errors, _ = peer_review.fact_claim_errors(malformed)
     assert {'category', 'operation', 'sources'} <= set(errors)
     # Compatibility: older saved selections remain readable; only generation is repaired.
-    from lazymind.document_tools.paper.review_schema import SavedReview, text_digest
+    from lazymind.document_tools.paper.review.schema import SavedReview, text_digest
     saved = SavedReview(summary='历史审稿', issues=[], limitations=[], fact_claims=[malformed],
                         manuscript_sha256=text_digest(quote), review_sha256=text_digest('历史审稿'))
     assert saved.fact_claims[0].category == 'numbers'

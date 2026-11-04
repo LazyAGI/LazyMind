@@ -70,6 +70,8 @@ def decide(draft, inputs, allowed):
 def execute(draft, inputs, allowed=False, on_event=None):
     reason = decide(draft, inputs, allowed)
     if reason:
+        if inputs.get('data') is not None:
+            reason = reason.replace('使用模拟示例', '保留用户数据，本次不生成替代结果')
         return {'status': 'not_run', 'reason': reason, 'logs': '', 'elapsed_seconds': 0.0, 'results': None}
     files = {f.path: f.content for f in draft.code_files}
     if on_event:
@@ -87,6 +89,8 @@ def execute(draft, inputs, allowed=False, on_event=None):
     except (RuntimeError, ValueError, KeyError) as exc:
         reason = str(exc)
         if on_event:
-            on_event({'tag': 'phase', 'phase': '实验未完成，保留原因并使用模拟示例'})
+            phase = ('实验未完成，保留原因，不生成替代结果' if inputs.get('data') is not None
+                     else '实验未完成，保留原因并使用模拟示例')
+            on_event({'tag': 'phase', 'phase': phase})
         return {'status': 'timeout' if '超时' in reason else 'failed', 'reason': reason,
                 'logs': reason, 'elapsed_seconds': round(time.monotonic() - started, 3), 'results': None}

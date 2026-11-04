@@ -400,7 +400,7 @@ def run(inputs):
     output = _modify_manuscript(prepared, inputs['constraints'], toolkit)
     from ..publication import publish_citations, resolve_chart_sources
     from .. import peer_review
-    from ..review_schema import ReviewResult, ReviewIssue
+    from ..review.schema import ReviewResult, ReviewIssue
     # Check the same canonical Markdown that publication will deliver.
     body = publish_citations(output['manuscript'], inputs.get('papers') or [])
     body = resolve_chart_sources(body, prepared['charts'])

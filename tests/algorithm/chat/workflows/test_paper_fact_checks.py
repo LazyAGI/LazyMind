@@ -4,7 +4,7 @@ import copy
 import pytest
 
 from lazymind.document_tools.paper.fact_checks import check_facts, review_issues
-from lazymind.document_tools.paper.review_schema import LiteratureReading, ReviewResult, SavedReview, text_digest
+from lazymind.document_tools.paper.review.schema import LiteratureReading, ReviewResult, SavedReview, text_digest
 
 
 def claim(category='numbers', quote='结果为 93.33%。', asserted='93.33', operation='percentage', sources=None):

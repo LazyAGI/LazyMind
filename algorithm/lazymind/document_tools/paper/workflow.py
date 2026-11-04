@@ -14,13 +14,13 @@ from . import contracts, reading_reflection, research_topic
 from .api import run_algorithm
 from .contracts import MissingMaterials
 from .entry import MAX_MANUSCRIPT_CHARS, read_manuscript
-from .review_schema import text_digest
+from .review.schema import text_digest
 from .analysis import trace as diagnostics
 
 SCHEMA = 'paper-material-pool.v2'
 ROUTES = {
     'F1': ['F2'], 'F2': ['F1', 'F3', 'F5', 'F7'], 'F3': ['F4'],
-    'F4': ['F5'], 'F5': ['F6'], 'F6': ['F5'], 'F7': [],
+    'F4': ['F3', 'F5'], 'F5': ['F6'], 'F6': ['F5'], 'F7': [],
 }
 STEP_NODE = {
     'research_topic': 'F1', 'literature_review': 'F2', 'experiment': 'F3', 'data_analysis': 'F4', 'write_document': 'F5',
@@ -177,8 +177,17 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
         item = material(pool, kind)
         if item:
             value[kind] = copy.deepcopy(item['content'])
+    if module == 'experiment' and any(material(pool, key) and material(pool, key)['mock']
+                                      for key in ('data', 'source_data', 'papers')):
+        value['input_is_demo'] = True
     experiment = material(pool, 'experiment')
     data = material(pool, 'data')
+    if module == 'experiment' and not data and not material(pool, 'source_data') and experiment:
+        meta = material(pool, 'result_meta')
+        if meta and meta['content']['data_origin'] in {'observed', 'user_supplied'}:
+            from .experiment.handoff import to_analysis
+            value['data'] = to_analysis({'topic': pool['topic'], 'experiment': experiment['content'],
+                                         'result_meta': meta['content']})['data']
     if (module == 'data_analysis' and experiment and any(h['node'] == 'F3' for h in pool['history'])
             and (data is None or pool['materials'].index(data) < pool['materials'].index(experiment))):
         # F3's input dataset is not its output. Never silently analyse the old
@@ -256,8 +265,10 @@ def _conversation_papers(files_by_turn: dict | None) -> list[dict]:
             path = str(raw_path).split('?', 1)[0]
             if Path(path).suffix.lower() in {
                 '.pdf', '.doc', '.docx', '.pptx', '.txt', '.md', '.markdown', '.tex', '.rst', '.html', '.htm',
+                '.csv', '.tsv', '.json',
             }:
-                paths.append((int(turn), path))
+                if not any(existing == path for _, existing in paths):
+                    paths.append((int(turn), path))
     if not paths:
         return []
 
@@ -269,6 +280,10 @@ def _conversation_papers(files_by_turn: dict | None) -> list[dict]:
     papers = []
     known_ids = set()
     for turn, path in paths:
+        if Path(path).suffix.lower() in {'.csv', '.tsv', '.json'}:
+            from .source_materials import read_tabular
+            papers.append(read_tabular(path))
+            continue
         try:
             if Path(path).suffix.lower() == '.pdf':
                 manifest = ingest_pdf_file(path, turn_seq=turn, store=store)
@@ -293,7 +308,8 @@ def _conversation_papers(files_by_turn: dict | None) -> list[dict]:
         if file_id in known_ids:
             continue
         known_ids.add(file_id)
-        papers.append({'id': file_id, 'title': Path(resolved.display_name).stem or file_id, 'text': text})
+        papers.append({'id': file_id, 'title': Path(resolved.display_name).stem or file_id, 'text': text,
+                       'attachment_key': text_digest(path)})
     return papers
 
 
@@ -718,7 +734,7 @@ def _step_request(step: str, pool: dict, params: dict, bound: dict | None = None
     initial = not any(key.endswith('_pool') for key in bound)
     if initial and not current and not retry and not (step == 'peer_review' and 'review_request' in bound):
         current = _business_request(params.get('user_input') or params.get('launch_user_input'))
-    base = _business_request(pool.get('request')) if initial else ''
+    base = _business_request(pool.get('request')) if initial or step == 'experiment' else ''
     if step == 'peer_review' and 'review_request' in bound:
         base = Path(bound['review_request']).read_text(encoding='utf-8-sig')
         contracts.text(base, 'review_request')
@@ -780,7 +796,7 @@ def _run_paper_step(context, stream=None) -> dict:
     handoff_request = None
     review_context = None
     if step == 'literature_review' and 'paper_input' not in bound:
-        from .review_materials import current_handoff
+        from .review.materials import current_handoff
         review_context = current_handoff()
     fixed_review_scope = review_context is not None
     if step == 'prepare':
@@ -797,15 +813,20 @@ def _run_paper_step(context, stream=None) -> dict:
     else:
         if step not in STEP_NODE:
             raise ValueError(f'未知 Workflow 步骤: {step}')
-        if step in {'data_analysis', 'write_outline', 'write_document', 'revise_document'}:
-            if step == 'data_analysis':
-                from .analysis.attachments import bind_attachment
+        if step in {'experiment', 'data_analysis', 'write_outline', 'write_document', 'revise_document'}:
+            if step in {'experiment', 'data_analysis'}:
+                from .analysis.attachments import bind_attachment, _json_files
                 from .data_analysis import retry_request
-                request = retry_request(context.params, request)
+                if step == 'data_analysis':
+                    request = retry_request(context.params, request)
             else:
                 from .writing.attachments import bind_attachment
             with diagnostics.stage('input_binding'):
-                bound = bind_attachment(bound, context.workspace_path, request)
+                history = context.params.get('history_files_per_turn') or {}
+                has_json = _json_files([path for paths in history.values() for path in paths or []]) \
+                    if step in {'experiment', 'data_analysis'} else True
+                if has_json or 'paper_input' in bound:
+                    bound = bind_attachment(bound, context.workspace_path, request)
             with diagnostics.stage('input_validation'):
                 pool = initialize_pool(bound, request)
         elif step in {'research_topic', 'reading_reflection'} and not any(
@@ -831,9 +852,15 @@ def _run_paper_step(context, stream=None) -> dict:
                     value['request'] = handoff_request
                     value.setdefault('topic', '；'.join(paper['title'] for paper in papers))
                 else:
-                    papers = _conversation_papers(context.params.get('history_files_per_turn'))
-                    if step == 'research_topic':
+                    from .source_materials import sync_attachments
+                    imported = pool_from_business({'topic': request.strip()[:120] or '研究材料'})
+                    sync_attachments(imported, context.params.get('history_files_per_turn'), request,
+                                     read_papers=_conversation_papers)
+                    papers = (material(imported, 'papers') or {}).get('content', [])
+                    if step == 'research_topic' and papers:
                         papers = research_topic.prepare_papers(papers)
+                    if material(imported, 'source_data'):
+                        value['source_data'] = material(imported, 'source_data')['content']
                 if papers:
                     # Real attachments take precedence over a demo marker in the request.
                     value['papers'] = papers
@@ -847,6 +874,8 @@ def _run_paper_step(context, stream=None) -> dict:
                     raise MissingMaterials('请先选择至少一篇论文，或上传论文附件，再生成阅读心得。')
                 fallback_topic = '；'.join(paper['title'] for paper in papers)
             pool = _pool_from_entry(value, request, fallback_topic=fallback_topic)
+            if use_attachments and handoff is None:
+                pool['imported_attachments'] = imported.get('imported_attachments', [])
             if step == 'research_topic' and use_attachments and not any(item['mock'] for item in pool['materials']):
                 if 'paper_topic' not in bound:
                     pool['topic'] = research_topic.infer_topic(pool.get('request') or request, papers)
@@ -858,21 +887,29 @@ def _run_paper_step(context, stream=None) -> dict:
         elif review_context is not None and not any(
             key.endswith('_pool') for key in bound
         ):
-            from .review_materials import handoff_input
+            from .review.materials import handoff_input
             pool = pool_from_business(handoff_input(review_context))
         else:
             pool = initialize_pool(bound, request)
-        # Saved upstream materials do not include papers uploaded in later turns.
-        # An explicit programmatic input still owns its selected paper scope.
-        if step == 'literature_review' and not fixed_review_scope and 'paper_input' not in bound:
-            uploaded = _conversation_papers(context.params.get('history_files_per_turn'))
-            current = material(pool, 'papers')
-            papers = copy.deepcopy(current['content']) if current else []
-            existing_ids = {paper['id'] for paper in papers}
-            papers.extend(paper for paper in uploaded if paper['id'] not in existing_ids)
-            if len(papers) > len(existing_ids):
-                derived = [pool['current']['papers']] if current else []
-                add_material(pool, 'papers', papers, derived, [paper['id'] for paper in papers])
+        if bound.get('_imported_attachments'):
+            pool['imported_attachments'] = sorted(set(pool.get('imported_attachments', [])).union(
+                bound['_imported_attachments']))
+        # Import only new attachments before projecting business inputs. Explicit input selections stay pinned.
+        if (not fixed_review_scope and handoff_request is None
+                and ('paper_input' not in bound or any(key.endswith('_pool') for key in bound))):
+            from .source_materials import pending_attachments, sync_attachments
+            history = context.params.get('history_files_per_turn')
+            if step == 'data_analysis' and pending_attachments(pool, history):
+                raise MissingMaterials('收到新附件，请先回到 F3 提取入池并整理，再进行数据分析。')
+            sync_attachments(pool, history, request, read_papers=_conversation_papers)
+        if step == 'data_analysis':
+            prepared = next((item for item in reversed(pool['history']) if item['node'] == 'F3'), None)
+            if prepared is None:
+                raise MissingMaterials('请先进入 F3 整理实验或用户数据，再进行数据分析。')
+            consumed = prepared['inputs']
+            if any(pool['current'].get(kind) and pool['current'][kind] not in consumed
+                   for kind in ('papers', 'source_data', 'data')):
+                raise MissingMaterials('材料已更新，请先回到 F3 整理并确认最新数据，再进行分析。')
         if stream:
             stream.topic = pool['topic']
         if step == 'reading_reflection':
@@ -905,7 +942,7 @@ def _run_paper_step(context, stream=None) -> dict:
         request = _step_request(step, pool, request_params, bound)
         if step == 'literature_review':
             import lazyllm
-            from .review_materials import prepare
+            from .review.materials import prepare
             knowledge_bases = ((lazyllm.globals.get('agentic_config') or {}).get('filters') or {}).get('kb_id', [])
             current = material(pool, 'papers')
             papers = prepare(business_input(step, pool, request), knowledge_bases,
@@ -970,7 +1007,14 @@ def _run_paper_step(context, stream=None) -> dict:
             output = {kind: material(result['pool'], kind)['content'] for kind in contracts.OUTPUTS['experiment']}
             output['is_demo'] = result['mock']
             data = material(pool, 'data')
-            files = export_experiment(output, context.workspace_path, data['content'] if data else None, preference)
+            selected_data = data['content'] if data else None
+            if output['result_meta'].get('input_table_ids'):
+                from .experiment.preparation import candidate_tables
+                candidates = candidate_tables(business_input('experiment', result['pool'], request))
+                selected = [candidates[key] for key in output['result_meta']['input_table_ids']]
+                selected_data = ({key: selected[0]['table'][key] for key in ('columns', 'rows')}
+                                 if len(selected) == 1 else {'tables': selected})
+            files = export_experiment(output, context.workspace_path, selected_data, preference)
             artifacts.extend({'key': key, 'content_type': 'file', 'value': path} for key, path in files.items())
         # Old pinned graphs still receive the structured result inside their existing pool artifact.
         if step == 'peer_review' and 'peer_review_data' in getattr(context, 'output_slots', []):

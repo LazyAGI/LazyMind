@@ -28,6 +28,16 @@ def to_analysis(value):
     if table is None:
         from ..contracts import MissingMaterials
         raise MissingMaterials('缺少数据或实验结果，请提供数据后再进行分析')
+    if 'tables' in table or 'column_types' in table:
+        result = {k: copy.deepcopy(value[k]) for k in ('topic', 'request', 'constraints', 'study_design') if k in value}
+        result['data'] = copy.deepcopy(table)
+        context = copy.deepcopy(value.get('data_context') or {})
+        context['description'] = '\n\n'.join(filter(None, [
+            context.get('description'), source_notice(meta), experiment.get('plan') if experiment else '',
+            *(entry['description'] for entry in table.get('tables', [])),
+        ]))
+        result['data_context'] = context
+        return normalize_input(result)
     types = meta.get('column_types')
     if not types:
         types = {}

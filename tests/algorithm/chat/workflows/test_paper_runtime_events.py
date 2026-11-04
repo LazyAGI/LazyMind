@@ -103,7 +103,7 @@ def test_structured_preview_replaces_revised_fields_and_does_not_emit_raw_json()
 @pytest.mark.parametrize('step', STEPS)
 def test_all_steps_use_shared_progress_preview_and_real_artifact_publication(step, monkeypatch, tmp_path):
     from lazymind.chat.engine.subagent.context import SubAgentContext
-    from lazymind.document_tools.paper import review_materials
+    from lazymind.document_tools.paper.review import materials as review_materials
     monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
     monkeypatch.setattr(review_materials, 'prepare', lambda inputs, *a, **kw: copy.deepcopy(inputs['papers']))
     if step == 'write_outline':

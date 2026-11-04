@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from lazymind.document_tools.paper import contracts, peer_review, publication, workflow
-from lazymind.document_tools.paper.review_schema import ReviewResult, text_digest
+from lazymind.document_tools.paper.review.schema import ReviewResult, text_digest
 from lazymind.document_tools.paper.writing import revise_document
 
 

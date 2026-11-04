@@ -196,8 +196,12 @@ def bind_attachment(bound: dict, workspace: str, request: str) -> dict:
     # Validate only the shared business envelope; each algorithm validates its
     # own projected inputs after the ordinary material-pool initialization.
     from ..workflow import pool_from_business
+    if isinstance(value, dict) and ('tables' in value or {'columns', 'rows'} <= value.keys()):
+        value = {'topic': request.strip()[:120] or filename, 'data': value}
     pool_from_business(value)
     directory = Path(tempfile.mkdtemp(prefix='paper-input-', dir=workspace))
     target = directory / 'paper_input.json'
     target.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False), encoding='utf-8')
-    return {**bound, 'paper_input': str(target)}
+    from ..review.schema import text_digest
+    return {**bound, 'paper_input': str(target),
+            '_imported_attachments': [text_digest(source.split('?', 1)[0])]}
