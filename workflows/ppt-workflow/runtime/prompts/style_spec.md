@@ -58,20 +58,20 @@ dark/cyan scheme just because the topic is technical.
 
 - `palette.primary` MUST equal `primary_color.hex` literally. When the user specifies a custom color, use that color in both fields instead of the catalog hex.
 - `palette.accent` and `palette.neutral` are your creative choice **but must harmonize** with the primary + tone. Use hex uppercase.
-- `typography` must match the design_style's personality (科技感 → Inter / Roboto Mono; 国潮 → serif like "Noto Serif SC"; 卡通可爱 → rounded like ZCOOL KuaiLe; etc.). Keep distinct heading and body stacks when the style calls for them; do not collapse every design to Arial/system-ui. Put the intended named face first and include a portable Office fallback later in each CSS stack (for Chinese, e.g. Microsoft YaHei/SimSun/KaiTi as appropriate; for Latin, e.g. Arial/Georgia/Courier New).
+- Resolve `typography` and text colors for this deck from explicit user choices, then the inspected reference, then audience, language, readability and available fonts. Do not map a topic/style label to a fixed font or body-text color. Keep heading/body roles consistent without requiring different typefaces. Put the selected face first and compatible available fallbacks later; disclose substitutions when a reference font is unavailable. Record concrete font stacks and semantic text/background colors in this deck's contract, not as global defaults learned from one example.
 
 ## Conventional work-review references
 
 For a work review/probation defense with an explicitly approved conventional
-company-deck reference, derive the visual contract from that reference: a stable
-title band, restrained separator, aligned body area, readable tables and text
-beside a relevant figure. Where the reference uses white/light surfaces and dark
-body text, retain them. Use the supplied brand accent sparingly for titles, step
-numbers and table headers; do not force red or copy another organization's logo.
-Allow a project inventory table, method text/diagram split and result chart/table
-to have different content compositions under the same header and typography.
-Do not replace this direction with a dashboard, a wall of equal rounded cards,
-decorative KPI blocks or invented imagery. Preserve meaningful information
+company-deck reference, inspect its hierarchy, alignment, spacing, typography
+and color roles before deriving this deck's visual contract. Reuse the actual
+reference's visual relationships; do not assume a top title band, separator,
+light background, dark body text, particular font or fixed accent placement.
+A work-inventory table, method/figure pairing or result comparison is an optional
+composition chosen for its information structure, not a mandatory page recipe.
+Keep the deck coherent while allowing content-specific compositions. Do not
+replace an approved direction with generic decorative cards or KPI blocks.
+Preserve meaningful information
 density while correcting edge crowding and screenshot overlap. A style reference
 does not authorize full-slide screenshot backgrounds or AI-background generation.
 

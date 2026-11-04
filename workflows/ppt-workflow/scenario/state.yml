@@ -1216,12 +1216,14 @@ steps:
 
       {{runtime_instruction}}
 
-      For a conventional company work-review reference, specify consistent header,
-      body alignment and restrained brand accents; let content decide between a
-      work-inventory table, text/flow split or experiment/result composition.
-      Reproduce hierarchy and readable density while correcting overlaps and
-      edge crowding. Keep screenshots separate from text and result tables.
-      Apply this to both HTML and native PPTX without forcing a brand color or
+      For an approved work-review reference, derive typography, semantic colors,
+      title placement and alignment from the actual reference and explicit user
+      choices. Do not impose a fixed font, body color, light/dark surface or header
+      layout based on this scenario. Choose compositions from information needs;
+      tables, text/flow pairings and result comparisons are options, not templates.
+      Preserve hierarchy, contrast and readable density while correcting overlaps
+      and edge crowding. Keep screenshots separate from text and result tables.
+      Apply this to both HTML and native PPTX without inventing brand assets or
       inserting full-slide screenshot backgrounds.
       Author a distinct, executable visual generation prompt for EACH slide.
       Preserve its approved facts, numbers and intended message. Expand the outline
