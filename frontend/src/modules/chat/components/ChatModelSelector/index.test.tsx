@@ -135,6 +135,41 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
+  it("keeps model selection accessible behind an icon-only trigger", async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector iconOnly />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" });
+    expect(trigger).toHaveTextContent("");
+    expect(trigger).toHaveAttribute("title", "DeepSeek · DeepSeek-V3");
+    expect(trigger.querySelector("img")).toHaveAttribute("src", "/provider-icons/deepseek.svg");
+    expect(trigger.querySelector(".anticon-setting")).toBeNull();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("shows the uploaded supplier logo in the paper trigger", async () => {
+    const value = catalog();
+    value.providers[0].source = "own";
+    value.providers[0].logo_data_url = "data:image/png;base64,uploaded-model";
+    fetchCatalogMock.mockResolvedValue(value);
+    render(<ChatModelSelector iconOnly />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" });
+    await waitFor(() =>
+      expect(trigger.querySelector("img")).toHaveAttribute("src", value.providers[0].logo_data_url),
+    );
+  });
+
+  it("shows Auto instead of a supplier when selection is automatic", async () => {
+    const value = catalog();
+    value.selection = { mode: "auto", provider_name: "DeepSeek", model_name: "DeepSeek-V3", version: 4 };
+    fetchCatalogMock.mockResolvedValue(value);
+    render(<ChatModelSelector iconOnly conversationId="conversation-1" />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：Auto · DeepSeek · DeepSeek-V3" });
+    expect(trigger.querySelector("img")).toBeNull();
+    expect(trigger.querySelector(".chat-model-selector-trigger-icon svg")).toBeInTheDocument();
+    expect(trigger.querySelector(".anticon-setting")).toBeNull();
+  });
+
   it("inherits the uploaded supplier logo in both the current trigger and chooser", async () => {
     const value = catalog();
     const logo = "data:image/png;base64,uploaded-model";

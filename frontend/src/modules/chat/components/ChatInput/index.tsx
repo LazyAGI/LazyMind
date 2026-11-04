@@ -1719,6 +1719,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   {showModelSelector ? (
                     <ChatModelSelector
+                      iconOnly={composerVariant === "paper"}
                       key={`${sessionId || "new"}:${configResetKey ?? ""}`}
                       conversationId={modelSelectionDraft ? undefined : sessionId}
                       draftSelectionKey={modelSelectionDraft ? sessionId : undefined}
