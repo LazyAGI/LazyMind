@@ -1006,13 +1006,15 @@ func TestAutomaticReviewWaitsForFullTextBatchAndHandsOffOnlyUsablePapers(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.AcademicWork{ID: "c", CanonicalTitle: "c", NormalizedTitle: "c", AuthorsJSON: marshal([]string{}), ExternalIDsJSON: marshal(map[string]string{}), ProvenanceJSON: marshal(map[string]string{})}).Error; err != nil {
-		t.Fatal(err)
+	for _, id := range []string{"c", "d"} {
+		if err := db.Create(&orm.AcademicWork{ID: id, CanonicalTitle: id, NormalizedTitle: id, AuthorsJSON: marshal([]string{}), ExternalIDsJSON: marshal(map[string]string{}), ProvenanceJSON: marshal(map[string]string{})}).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	directions := []string{"method"}
 	input := ReviewWorkflowInput{UserInstruction: "Compare methods", CandidateDirections: directions, SelectedDirections: directions}
 	var discovered []PaperRef
-	for _, id := range []string{"a", "b", "c"} {
+	for _, id := range []string{"a", "b", "c", "d"} {
 		paper := PaperRef{PaperID: id, Title: id, SourceVersion: "v1", SourceProvider: "arxiv"}
 		discovered = append(discovered, paper)
 		input.Papers = append(input.Papers, WorkflowPaper{Paper: paper})
@@ -1061,18 +1063,27 @@ func TestAutomaticReviewWaitsForFullTextBatchAndHandsOffOnlyUsablePapers(t *test
 	project(0)
 	setContent("a", "ready")
 	setContent("b", "ready")
-	project(0) // Two usable papers are not enough while c is processing.
+	project(0) // Two usable papers are not enough while c and d are processing.
 	setContent("b", "failed")
 	setContent("c", "unavailable")
+	// The last worker lease for d expired without saving a terminal content row.
+	stoppedJob := db.Model(&orm.AsyncJob{}).Where("job_type=? AND resource_id IN (SELECT id FROM academic_paper_contents WHERE paper_id=?)", "academic.paper_content", "d").Update("status", "failed")
+	if stoppedJob.Error != nil || stoppedJob.RowsAffected != 1 {
+		t.Fatalf("could not simulate an expired full-text worker: %v", stoppedJob.Error)
+	}
 	project(0) // The completed batch has only one usable paper.
 
-	w := httptest.NewRecorder()
-	RetryPaperContent(w, paperRequest(string(marshal(map[string]string{"expansion_id": record.ID, "paper_id": "b"}))))
-	if w.Code != 200 {
-		t.Fatalf("could not retry full text: %d %s", w.Code, w.Body.String())
+	for _, id := range []string{"b", "c"} {
+		w := httptest.NewRecorder()
+		RetryPaperContent(w, paperRequest(string(marshal(map[string]string{"expansion_id": record.ID, "paper_id": id}))))
+		if w.Code != 200 {
+			t.Fatalf("could not retry full text: %d %s", w.Code, w.Body.String())
+		}
 	}
 	project(0)
 	setContent("b", "ready")
+	project(0) // The second retry is still running even though two papers are usable.
+	setContent("c", "ready")
 	project(1)
 	project(1)
 
@@ -1083,8 +1094,8 @@ func TestAutomaticReviewWaitsForFullTextBatchAndHandsOffOnlyUsablePapers(t *test
 	var frozen ReviewWorkflowInput
 	var materials handoffContentSnapshot
 	if json.Unmarshal(handoff.InputJSON, &frozen) != nil || json.Unmarshal(handoff.ContentsJSON, &materials) != nil ||
-		handoff.Version != 1 || len(frozen.Papers) != 2 || len(materials.Contents) != 2 ||
-		frozen.Papers[0].Paper.PaperID != "a" || frozen.Papers[1].Paper.PaperID != "b" {
+		handoff.Version != 1 || len(frozen.Papers) != 3 || len(materials.Contents) != 3 ||
+		frozen.Papers[0].Paper.PaperID != "a" || frozen.Papers[1].Paper.PaperID != "b" || frozen.Papers[2].Paper.PaperID != "c" {
 		t.Fatalf("handoff did not freeze the usable papers from the completed round: %+v %s %s", handoff.Version, handoff.InputJSON, handoff.ContentsJSON)
 	}
 }
