@@ -90,7 +90,16 @@ func (s *OriginalService) AcquireRemoteOriginal(ctx context.Context, caller Data
 	}
 	client := newOriginalHTTPClient()
 	defer client.CloseIdleConnections()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if s.httpTransport != nil {
+		client.Transport = s.httpTransport
+	}
+	downloadURL := *u
+	params := downloadURL.Query()
+	for key, value := range req.PrivateQuery {
+		params.Set(key, value)
+	}
+	downloadURL.RawQuery = params.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL.String(), nil)
 	if err != nil {
 		return OriginalRef{}, err
 	}
@@ -101,6 +110,9 @@ func (s *OriginalService) AcquireRemoteOriginal(ctx context.Context, caller Data
 	}
 	resp, err := client.Do(request)
 	if err != nil {
+		if len(req.PrivateQuery) > 0 {
+			return OriginalRef{}, errors.New("authenticated original download failed")
+		}
 		return OriginalRef{}, err
 	}
 	defer resp.Body.Close()
@@ -128,7 +140,13 @@ func (s *OriginalService) acquireResponse(ctx context.Context, caller DatasetCat
 	}
 	finalURL := req.URL
 	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
+		final := *resp.Request.URL
+		privateQuery := final.Query()
+		for key := range req.PrivateQuery {
+			privateQuery.Del(key)
+		}
+		final.RawQuery = privateQuery.Encode()
+		finalURL = final.String()
 		if name == "" {
 			name = path.Base(resp.Request.URL.Path)
 		}

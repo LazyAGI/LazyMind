@@ -192,11 +192,19 @@ runtime:
         required: true
     - id: topic
       label: 主题
+      required: true
+      reason: 主题决定内容范围，未明确主题时无法组织幻灯片。
+      patterns: ['(?:主题|题目)[是为：:\s]+([^\n，。；]+)', '(?:关于|围绕)([^\n，。；]+?)(?:的?PPT|的?演示|的?汇报)']
       ask_when: Only when the presentation purpose/topic is not already clear from the request. A probation defense is a supplied topic.
       question: 这份 PPT 的主题是什么？
       type: text
     - id: slide_count
       label: 页数
+      required: true
+      resolution: explicit
+      reason: 页数会影响内容颗粒度和生成时间。
+      patterns: ['([0-9一二三四五六七八九十百两]+)\s*页']
+      value_aliases: {沿用模板全部页面: preserve_all, 填满模板全部页面: preserve_all, 保留模板页数: preserve_all}
       ask_when: >
         Only when the desired page count is unknown AND the user has not explicitly
         requested filling all existing template pages, filling the template completely
@@ -214,11 +222,14 @@ runtime:
         - 沿用模板全部页面（已上传模板时）
     - id: target_customer
       label: 对应客户
+      reason: 受众会影响内容表达，已有使用场景时由场景确定。
       ask_when: Only when the audience is unknown and cannot be inferred from the stated purpose. A company probation defense already implies its reviewers/managers; do not ask for a customer.
       question: 这份 PPT 面向哪位客户或哪类受众？
       type: text
     - id: template_mode
       label: PPT 模板
+      default: none
+      value_aliases: {不使用模板｜按需求生成新的视觉风格: none, 上传 PPTX 模板｜分析母版、字体、配色和版式后生成: upload, 使用上传模板: upload, 使用PPTX模板: upload}
       ask_when: Only when template use has not been specified and no attachment has already been identified by the user as the template. Reuse the provided PPTX, do not ask for another upload.
       question: 是否使用现有 PPTX 作为模板？选择上传后可直接添加文件，将沿用模板风格并跳过 AI 底图。
       type: single
@@ -235,6 +246,8 @@ runtime:
         required: true
     - id: visual_style
       label: 风格
+      reason: 未指定风格时按主题自动设计，明确要求优先保留。
+      applies_when: {field: template_mode, equals: none}
       ask_when: >
         Only when no PPTX template is uploaded, selected or identified in the
         request AND the user has supplied no
@@ -265,8 +278,13 @@ runtime:
         - 卡通可爱｜圆润造型、活泼色彩、友好叙事
     - id: generate_background_images
       label: AI 底图
+      required: true
+      resolution: explicit
+      reason: AI 底图会影响视觉效果、生成时间和图片资源使用。
+      applies_when: {field: template_mode, equals: none}
+      value_aliases: {启用｜为每页生成独立 AI 底图: enabled, 不启用｜使用纯色、渐变和矢量装饰: disabled, 不生成AI底图: disabled, 不生成 AI 底图: disabled, 不要生成AI底图: disabled, 不要生成 AI 底图: disabled, 不启用AI底图: disabled, 生成AI底图: enabled, 生成 AI 底图: enabled, 不需要底图: disabled, 启用AI底图: enabled, 关闭AI底图: disabled, '__ask_user_yes__': enabled, '__ask_user_no__': disabled}
       ask_when: Only when no PPTX template has been uploaded or selected. Uploaded templates always disable AI backgrounds.
-      question: 是否为每一页启用 AI 生成底图？启用后会根据需求和素材先生成一组相互关联、可编辑的底图提示词，再生成 16:9 无文字背景并应用到幻灯片背景层。
+      question: 是否为每页生成一张 AI 底图？
       type: single
       choice_policy: fixed
       allow_other: false
@@ -275,6 +293,8 @@ runtime:
         - 不启用｜使用纯色、渐变和矢量装饰
     - id: generation_mode
       label: 生成方式
+      default: quick
+      value_aliases: {快速生成: quick, 完整生成，耗时较长: full, 完整生成: full}
       question: 请选择生成方式。两种方式都会自动执行到最终 PPT，不需要分步确认。
       type: single
       choice_policy: fixed

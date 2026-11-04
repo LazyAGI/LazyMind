@@ -5,8 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+
+	"lazymind/core/common/askuser"
 
 	"gopkg.in/yaml.v3"
 )
@@ -298,6 +301,37 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		field.Question = strings.TrimSpace(field.Question)
 		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
 		field.ChoicePolicy = strings.ToLower(strings.TrimSpace(field.ChoicePolicy))
+		if field.Resolution != "" && field.Resolution != "explicit" {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RESOLUTION_INVALID", "error",
+				path+".resolution", "resolution must be empty or explicit"))
+		}
+		if field.Required && strings.TrimSpace(field.Reason) == "" {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_REASON_REQUIRED", "error",
+				path+".reason", "required clarification fields must explain why confirmation is needed"))
+		}
+		if err := askuser.ValidateRule(field.Validation); err != nil {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_VALIDATION_INVALID", "error",
+				path+".validation", err.Error()))
+		}
+		if field.BooleanLabels != nil && (field.Type != "boolean" || strings.TrimSpace(field.BooleanLabels.Yes) == "" ||
+			strings.TrimSpace(field.BooleanLabels.No) == "" ||
+			strings.TrimSpace(field.BooleanLabels.Yes) == strings.TrimSpace(field.BooleanLabels.No)) {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_LABELS_INVALID", "error",
+				path+".boolean_labels", "boolean labels must be two different non-empty labels"))
+		}
+		if condition := field.AppliesWhen; condition != nil {
+			if !clarificationIDs[condition.Field] || (condition.Equals == nil) == (condition.NotEquals == nil) {
+				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_CONDITION_INVALID", "error",
+					path+".applies_when", "condition must reference an earlier field and declare exactly one comparison"))
+			}
+		}
+		for _, pattern := range field.Patterns {
+			compiled, err := regexp.Compile(pattern)
+			if err != nil || compiled.NumSubexp() != 1 {
+				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_PATTERN_INVALID", "error",
+					path+".patterns", "extraction patterns must be valid regexes with exactly one capture group"))
+			}
+		}
 		if field.Type == "" {
 			field.Type = "text"
 		}
@@ -341,6 +375,12 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			}
 		}
 		field.Choices = choices
+		if field.Default != nil {
+			if err := validateClarificationValue(*field, canonicalClarification(*field, field.Default)); err != nil {
+				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_DEFAULT_INVALID", "error",
+					path+".default", err.Error()))
+			}
+		}
 		if (field.Type == "single" || field.Type == "multiple") && len(field.Choices) == 0 {
 			result.Diagnostics = append(result.Diagnostics, diag(
 				"E_RUNTIME_CLARIFICATION_CHOICES_REQUIRED", "error", path+".choices",
@@ -557,12 +597,12 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 	}
 	for step, limit := range graph.Runtime.ExecutionLimits {
 		_, exists := graph.Nodes[step]
-		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 1 && limit.Timeout <= 3600
+		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 0 && limit.Timeout <= 3600
 		for name, count := range limit.ToolCalls {
 			valid = valid && strings.TrimSpace(name) != "" && count >= 1 && count <= 100
 		}
 		if !valid {
-			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step and bounded positive values"))
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step, bounded positive work limits and an optional timeout"))
 		}
 	}
 	if graph.Runtime.TriggerInputs != nil {

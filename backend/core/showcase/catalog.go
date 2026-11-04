@@ -38,6 +38,9 @@ const (
 	TypeChat        = "chat"
 	TypeWork        = "work"
 	TypeWorkflow    = "workflow"
+	TypePage        = "page"
+
+	PageActionOpenPaperLibrary = "open_paper_library"
 
 	ResultTemplateGeneric = "generic_report_v1"
 	ResultTemplateProduct = "product_report_v1"
@@ -57,7 +60,7 @@ var (
 	htmlAssetReferencePattern = regexp.MustCompile(`\{\{asset_url:([a-z0-9]+(?:[a-z0-9_-]*[a-z0-9])?)\}\}`)
 
 	allowedAssetRoles      = map[string]struct{}{"cover": {}, "result": {}}
-	allowedFeaturedTypes   = map[string]struct{}{TypeChat: {}, TypeWork: {}, TypeWorkflow: {}}
+	allowedFeaturedTypes   = map[string]struct{}{TypeChat: {}, TypeWork: {}, TypeWorkflow: {}, TypePage: {}}
 	allowedImageAssetMIMEs = map[string]struct{}{"image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {}}
 	allowedAssetMIMEs      = map[string]struct{}{"image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {}, htmlAssetMIME: {}}
 	assetMIMEByExtension   = map[string]string{".gif": "image/gif", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".html": htmlAssetMIME}
@@ -90,6 +93,7 @@ type FeaturedDefinition struct {
 	Provider       string                    `yaml:"provider" json:"provider"`
 	Skill          *FeaturedSkillBinding     `yaml:"skill,omitempty" json:"skill,omitempty"`
 	Workflow       *FeaturedWorkflowBinding  `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	PageAction     string                    `yaml:"page_action,omitempty" json:"page_action,omitempty"`
 	Placement      FeaturedPlacement         `yaml:"placement" json:"placement"`
 	Classification FeaturedClassification    `yaml:"classification" json:"classification"`
 	Assets         map[string]FeaturedAsset  `yaml:"assets" json:"assets"`
@@ -297,10 +301,10 @@ func loadFeaturedOrdering(root string) (featuredOrdering, error) {
 
 func applyFeaturedOrdering(definitions []FeaturedDefinition, ordering featuredOrdering) {
 	applyFeaturedOrderLane(definitions, ordering.Home.Chat, func(definition FeaturedDefinition) bool {
-		return definition.Type == TypeChat
+		return definition.Type == TypeChat || definition.Type == TypePage
 	})
 	applyFeaturedOrderLane(definitions, ordering.Home.Work, func(definition FeaturedDefinition) bool {
-		return definition.Type == TypeWork || definition.Type == TypeWorkflow
+		return definition.Type == TypeWork || definition.Type == TypeWorkflow || definition.Type == TypePage
 	})
 }
 
@@ -492,6 +496,7 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 			Tasks:             caseTasks,
 			BuiltinSkillUID:   builtinSkillUID,
 			WorkflowRef:       workflowRef,
+			PageAction:        definition.PageAction,
 			Featured:          definition.Placement.Home,
 			Hot:               definition.Placement.Hot,
 			FeaturedOrder:     definition.Placement.Order,
@@ -771,7 +776,7 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 		return definitionFailure("provider is required for published definitions")
 	}
 	if _, ok := allowedFeaturedTypes[definition.Type]; !ok {
-		return definitionFailure("type must be chat, work, or workflow")
+		return definitionFailure("type must be chat, work, workflow, or page")
 	}
 	if definition.Status == StatusPublished && !definition.Placement.Home && !definition.Placement.Gallery {
 		return definitionFailure("published definition must have a placement")
@@ -779,7 +784,13 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 	if (definition.Placement.Home || definition.Placement.Gallery) && definition.Placement.Order <= 0 {
 		return definitionFailure("placement.order must be positive")
 	}
-	if definition.Type == TypeWorkflow {
+	if definition.Type == TypePage {
+		if definition.PageAction != PageActionOpenPaperLibrary || definition.Skill != nil || definition.Workflow != nil || len(definition.Tasks) != 0 {
+			return definitionFailure("type page requires page_action open_paper_library and forbids skill, workflow, and tasks")
+		}
+	} else if definition.PageAction != "" {
+		return definitionFailure("page_action requires type page")
+	} else if definition.Type == TypeWorkflow {
 		if definition.Skill != nil || definition.Workflow == nil {
 			return definitionFailure("type workflow requires workflow and forbids skill")
 		}
@@ -862,14 +873,14 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 			return definitionFailure("source asset %s is incomplete", assetID)
 		}
 	}
-	if err := validateExperience(definition.Presentation, definition.Tasks, definition.Assets, compiled); err != nil {
+	if err := validateExperience(definition.Presentation, definition.Tasks, definition.Assets, compiled, definition.Type == TypePage); err != nil {
 		return definitionFailure("default locale %s: %v", definition.DefaultLocale, err)
 	}
 	for locale, content := range definition.Locales {
 		if locale == definition.DefaultLocale || !localePattern.MatchString(locale) || !compiled && content.Locale != locale {
 			return definitionFailure("invalid translation locale %q", locale)
 		}
-		if err := validateExperience(content.Presentation, content.Tasks, definition.Assets, compiled); err != nil {
+		if err := validateExperience(content.Presentation, content.Tasks, definition.Assets, compiled, definition.Type == TypePage); err != nil {
 			return definitionFailure("translation %s: %v", locale, err)
 		}
 		if strings.TrimSpace(content.Classification.Category) == "" {
@@ -952,7 +963,7 @@ func validateAssetUsage(definition FeaturedDefinition) error {
 	return nil
 }
 
-func validateExperience(presentation FeaturedPresentation, tasks []FeaturedTask, assets map[string]FeaturedAsset, compiled bool) error {
+func validateExperience(presentation FeaturedPresentation, tasks []FeaturedTask, assets map[string]FeaturedAsset, compiled, page bool) error {
 	card := presentation.Card
 	if card.Title == "" || card.Description == "" || card.OutputLabel == "" || card.ResultSummary == "" {
 		return definitionFailure("presentation.card text fields are required")
@@ -968,6 +979,12 @@ func validateExperience(presentation FeaturedPresentation, tasks []FeaturedTask,
 	}
 	if presentation.Detail.Title == "" || presentation.Detail.Description == "" {
 		return definitionFailure("presentation.detail title and description are required")
+	}
+	if page {
+		if len(tasks) != 0 {
+			return definitionFailure("page entries must not contain tasks")
+		}
+		return nil
 	}
 	if len(tasks) == 0 {
 		return definitionFailure("at least one task is required")

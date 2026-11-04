@@ -59,10 +59,12 @@ jobs:
               # Rebuild and hash-check local packages using the existing frozen
               # catalog path; unchanged remote packages need no download.
               verify_args=(--catalog-only --frozen-lockfile)
-            else
+            elif ! git -C ../.. diff --quiet "$base_sha" HEAD -- skills/builtin-skills.lock.json; then
               git show "$base_sha:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
               verify_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
             fi
+            # With an unchanged lock, full verification must use pinned versions
+            # instead of regenerating entries from the latest remote packages.
           fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \

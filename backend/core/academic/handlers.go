@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 	"lazymind/core/store"
 )
 
-const extractorVersion = "bibliography-rules-v2-native-regions"
+const extractorVersion = "bibliography-rules-v4-author-boundaries"
 
 var numberedReferenceStartPattern = regexp.MustCompile(`(?m)^\s*(?:[-•]\s*)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])\s+`)
 var bulletReferenceStartPattern = regexp.MustCompile(`(?m)^\s*([-•])\s+`)
@@ -276,37 +277,72 @@ func splitReferences(section string) []extractedReference {
 	// continued on the next page). Only fall back to bullets when no numbered
 	// entries exist at all.
 	locs := numberedReferenceStartPattern.FindAllStringSubmatchIndex(section, -1)
-	// A lone bracket-like line can occur inside an author-year citation. It is
-	// not enough to classify the whole bibliography as numbered.
-	numbered := len(locs) >= 2
+	bracketed := make([][]int, 0, len(locs))
+	for _, loc := range locs {
+		if loc[2] >= 0 {
+			bracketed = append(bracketed, loc)
+		}
+	}
+	if len(bracketed) > 0 {
+		locs = bracketed
+	} else {
+		indices := locs[:0]
+		for _, loc := range locs {
+			number := section[loc[4]:loc[5]]
+			if len(number) == 4 && yearPattern.MatchString(number) {
+				continue
+			}
+			indices = append(indices, loc)
+		}
+		locs = indices
+	}
+
+	// Bare numbers must form a citation sequence. Page ranges and wrapped URL
+	// suffixes (434., 2378.) are not evidence of a numbered bibliography.
+	numbered := len(bracketed) >= 2 || len(bracketed) == 1 && strings.TrimSpace(section[:bracketed[0][0]]) == ""
+	if !numbered && len(locs) >= 2 {
+		first, _ := strconv.Atoi(section[locs[0][4]:locs[0][5]])
+		numbered = first <= 2
+		for i := 1; i < len(locs) && numbered; i++ {
+			previous, _ := strconv.Atoi(section[locs[i-1][4]:locs[i-1][5]])
+			current, _ := strconv.Atoi(section[locs[i][4]:locs[i][5]])
+			numbered = current == previous+1
+		}
+	}
 	if !numbered {
 		locs = bulletReferenceStartPattern.FindAllStringSubmatchIndex(section, -1)
 	}
 	items := make([]extractedReference, 0, len(locs))
 	if len(locs) == 0 {
-		paragraphs := regexp.MustCompile(`\n\s*\n`).Split(section, -1)
-		// Author-year bibliographies are commonly unnumbered. pdf.js preserves
-		// visual line endings but not paragraph gaps, so use a conservative
-		// author-name boundary when blank paragraphs are unavailable.
-		if len(paragraphs) <= 1 {
-			authorStart := regexp.MustCompile(`^[A-Z][A-Za-z'’.-]+,\s+(?:[A-Z](?:\.|,)|[A-Z][a-z]+)`)
-			paragraphs = nil
-			current := ""
-			for _, line := range strings.Split(section, "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
-				}
-				if current != "" && authorStart.MatchString(line) {
-					paragraphs = append(paragraphs, current)
-					current = line
-				} else {
-					current = strings.TrimSpace(current + " " + line)
-				}
+		// A name-looking continuation is still an author list until the current
+		// citation has a year. This also preserves author lists across page breaks.
+		authorStart := regexp.MustCompile(`^(?:[A-Z][A-Za-z'’.-]+,\s+(?:[A-Z](?:\.|,)|[A-Z][a-z]+)|[A-Z]\.\s+[A-Z][\p{L}'’.-]+|[A-Z][\p{L}0-9&'’ -]+\.\s+[A-Z])`)
+		pageNumber := regexp.MustCompile(`^\d+$`)
+		continuationStart := regexp.MustCompile(`^[a-z0-9]`)
+		paragraphs := []string{}
+		current := ""
+		gap := false
+		for _, line := range strings.Split(section, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				gap = true
+				continue
 			}
-			if current != "" {
+			if pageNumber.MatchString(line) {
+				continue
+			}
+			complete := extractYear(current) != 0
+			// Blank gaps delimit entries too, except when an author/title continues
+			// on the next PDF page before its publication year appears.
+			if current != "" && complete && (authorStart.MatchString(line) || gap && !strings.HasPrefix(line, "https") && !strings.HasPrefix(line, "http") && !continuationStart.MatchString(line)) {
 				paragraphs = append(paragraphs, current)
+				current = ""
 			}
+			current = strings.TrimSpace(current + " " + line)
+			gap = false
+		}
+		if current != "" {
+			paragraphs = append(paragraphs, current)
 		}
 		for i, paragraph := range paragraphs {
 			raw := strings.Join(strings.Fields(paragraph), " ")
@@ -327,7 +363,7 @@ func splitReferences(section string) []extractedReference {
 		if len(raw) < 10 {
 			continue
 		}
-		key := ""
+		key := strconv.Itoa(i + 1)
 		if numbered {
 			for _, pair := range [][2]int{{loc[2], loc[3]}, {loc[4], loc[5]}} {
 				if pair[0] >= 0 {
@@ -420,6 +456,11 @@ func extractDocumentReferences(ctx context.Context, r *http.Request, userID, dat
 	}
 	byDOI, byArxiv, byRaw := map[string]orm.AcademicReference{}, map[string]orm.AcademicReference{}, map[string]orm.AcademicReference{}
 	for _, ref := range previous {
+		// Earlier extraction versions could combine several papers into one row.
+		// Never carry that row's resolved identity into the corrected entries.
+		if conflictingReferenceIDs(ref.RawText) {
+			continue
+		}
 		if ref.DOINormalized != "" {
 			byDOI[ref.DOINormalized] = ref
 		}
@@ -457,7 +498,7 @@ func extractDocumentReferences(ctx context.Context, r *http.Request, userID, dat
 			usedPreviousIDs[old.ID] = true
 		}
 		rows = append(rows, orm.AcademicReference{ID: id, SourceDocumentID: documentID, SourceWorkID: old.SourceWorkID, ReferenceKey: item.Key,
-			RawText: item.Raw, AuthorsJSON: emptyJSON("[]"), PublicationYear: item.Year, DOINormalized: item.DOI, ArxivIDBase: item.Arxiv,
+			RawText: item.Raw, Title: citationTitle(item.Raw), AuthorsJSON: emptyJSON("[]"), PublicationYear: item.Year, DOINormalized: item.DOI, ArxivIDBase: item.Arxiv,
 			ResolvedWorkID: old.ResolvedWorkID, ResolutionStatus: firstNonEmpty(old.ResolutionStatus, "unresolved"), ResolutionMethod: old.ResolutionMethod,
 			ResolutionConfidence: old.ResolutionConfidence, Page: page, BBoxJSON: bbox, SegmentIDsJSON: emptyJSON("[]"), ExtractorName: "builtin_bibliography",
 			ExtractorVersion: extractorVersion, SourceFingerprint: old.SourceFingerprint, CreatedAt: createdAt, UpdatedAt: now})
@@ -476,6 +517,8 @@ type resolveRequest struct {
 	Works        []WorkInput `json:"works"`
 }
 
+var errConflictingPaperIdentifiers = errors.New("conflicting paper identifiers")
+
 func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.AcademicWork, string, error) {
 	provenanceCopy := map[string]any{}
 	for k, v := range in.Provenance {
@@ -493,12 +536,51 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 		err := tx.WithContext(ctx).Where("id = ?", in.WorkID).Take(&row).Error
 		return row, "id", err
 	}
+	in.DOI = NormalizeDOI(in.DOI)
+	if strings.HasPrefix(in.DOI, "10.48550/arxiv.") {
+		derived, _ := NormalizeArxivID(strings.TrimPrefix(in.DOI, "10.48550/arxiv."))
+		provided, _ := NormalizeArxivID(in.ArxivID)
+		if provided != "" && derived != "" && provided != derived {
+			return orm.AcademicWork{}, "", errConflictingPaperIdentifiers
+		}
+		in.ArxivID = firstNonEmpty(provided, derived)
+	}
+	// A provider can connect two identifiers already owned by separate works.
+	// Keep that hit as a conflicting lead instead of violating a unique index.
+	if arxiv, _ := NormalizeArxivID(in.ArxivID); in.DOI != "" && arxiv != "" {
+		var owners []orm.AcademicWork
+		if err := tx.WithContext(ctx).Where("doi_normalized=? OR arxiv_id_base=?", in.DOI, arxiv).Find(&owners).Error; err != nil {
+			return orm.AcademicWork{}, "", err
+		}
+		if len(owners) > 1 {
+			return owners[0], "", errConflictingPaperIdentifiers
+		}
+	}
+	if in.Provider != "" && in.ProviderWorkID != "" {
+		var possible []orm.AcademicWork
+		if err := tx.WithContext(ctx).Where("CAST(external_ids_json AS TEXT) LIKE ?", "%"+in.ProviderWorkID+"%").Find(&possible).Error; err != nil {
+			return orm.AcademicWork{}, "", err
+		}
+		for _, known := range possible {
+			ids := map[string]string{}
+			_ = json.Unmarshal(known.ExternalIDsJSON, &ids)
+			if ids[in.Provider] != in.ProviderWorkID {
+				continue
+			}
+			doi := NormalizeDOI(in.DOI)
+			arxiv, _ := NormalizeArxivID(in.ArxivID)
+			if doi != "" && known.DOINormalized != "" && doi != known.DOINormalized || arxiv != "" && known.ArxivIDBase != "" && arxiv != known.ArxivIDBase {
+				return known, "", errConflictingPaperIdentifiers
+			}
+			return known, "provider", enrichWorkMissing(ctx, tx, &known, in)
+		}
+	}
 	doi := NormalizeDOI(in.DOI)
 	arxiv, _ := NormalizeArxivID(in.ArxivID)
 	var row orm.AcademicWork
 	if doi != "" && tx.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&row).Error == nil {
 		if arxiv != "" && row.ArxivIDBase != "" && arxiv != row.ArxivIDBase {
-			return row, "", errors.New("conflicting paper identifiers")
+			return row, "", errConflictingPaperIdentifiers
 		}
 		updates := map[string]any{"updated_at": time.Now().UTC()}
 		if arxiv != "" && row.ArxivIDBase == "" {
@@ -526,7 +608,7 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 	}
 	if arxiv != "" && tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error == nil {
 		if doi != "" && row.DOINormalized != "" && doi != row.DOINormalized {
-			return row, "", errors.New("conflicting paper identifiers")
+			return row, "", errConflictingPaperIdentifiers
 		}
 		if doi != "" && row.DOINormalized == "" {
 			if err := tx.WithContext(ctx).Model(&row).Updates(map[string]any{"doi_normalized": doi, "updated_at": time.Now().UTC()}).Error; err != nil {
@@ -606,15 +688,42 @@ func resolveReference(ctx context.Context, tx *gorm.DB, ref *orm.AcademicReferen
 }
 
 func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.AcademicReference, allowExternal bool) (orm.AcademicWork, string, string, error) {
-	if !allowExternal && ref.ResolvedWorkID != "" {
+	if !allowExternal && ref.ResolvedWorkID != "" && !conflictingReferenceIDs(ref.RawText) {
 		var existing orm.AcademicWork
 		if err := tx.WithContext(ctx).Where("id = ?", ref.ResolvedWorkID).Take(&existing).Error; err == nil {
 			return existing, "id", ref.ResolutionStatus, nil
 		}
 	}
-	input := WorkInput{Title: ref.Title, Year: ref.PublicationYear, DOI: ref.DOINormalized, ArxivID: ref.ArxivIDBase}
+	input, err := referenceMetadata(ctx, ref, allowExternal)
+	if err != nil {
+		return orm.AcademicWork{}, "", "", err
+	}
+	return saveReferenceResolution(ctx, tx, ref, input)
+}
+
+func referenceMetadata(ctx context.Context, ref *orm.AcademicReference, allowExternal bool) (WorkInput, error) {
+	if conflictingReferenceIDs(ref.RawText) {
+		return WorkInput{}, errConflictingPaperIdentifiers
+	}
+
+	input := WorkInput{Title: citationTitle(ref.RawText), Year: extractYear(ref.RawText), DOI: ref.DOINormalized, ArxivID: ref.ArxivIDBase}
+	_ = json.Unmarshal(ref.AuthorsJSON, &input.Authors)
 	if input.Title == "" {
-		input.Title = ref.RawText
+		input.Title = ref.Title
+	}
+	if allowExternal && input.ArxivID != "" {
+		id := input.ArxivID
+		_, base, version := extractStrongIDs(ref.RawText)
+		if base == id {
+			id += version
+		}
+		metadata, err := arxivsource.NewClient().Lookup(ctx, id)
+		if err != nil {
+			return WorkInput{}, err
+		}
+		doi := input.DOI
+		input = arxivWorkInput(metadata)
+		input.DOI = firstNonEmpty(doi, input.DOI)
 	}
 	var providerDiagnostics []string
 	if allowExternal && input.ArxivID == "" {
@@ -646,7 +755,7 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			candidate.DOI = firstNonEmpty(input.DOI, openAlex.DOI, candidate.DOI)
 			input = candidate
 		} else if err := errors.Join(providerErrors...); err != nil {
-			return orm.AcademicWork{}, "", "", err
+			return WorkInput{}, err
 		} else if openAlexOK {
 			if input.DOI != "" {
 				openAlex.DOI = input.DOI
@@ -657,6 +766,17 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			providerDiagnostics = append(providerDiagnostics, err.Error())
 		}
 	}
+	if len(providerDiagnostics) > 0 {
+		if input.Provenance == nil {
+			input.Provenance = map[string]any{}
+		}
+		input.Provenance["provider_errors"] = providerDiagnostics
+	}
+	return input, nil
+}
+
+func saveReferenceResolution(ctx context.Context, tx *gorm.DB, ref *orm.AcademicReference, input WorkInput) (orm.AcademicWork, string, string, error) {
+	providerDiagnostics, _ := input.Provenance["provider_errors"].([]string)
 	work, method, err := findOrCreateWork(ctx, tx, input)
 	if err != nil {
 		return work, "", "", err
@@ -673,14 +793,37 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			return work, "", "", err
 		}
 	}
-	status, confidence := "high_confidence", 0.9
-	if method == "doi" || method == "arxiv" {
+	status, confidence := "unresolved", 0.0
+	if input.Provider != "" {
+		status, confidence = "high_confidence", 0.9
+	}
+	if input.Provider != "" && (method == "doi" || method == "arxiv") {
 		status, confidence = "exact", 1
 	}
-	if err := tx.Model(ref).Updates(map[string]any{"resolved_work_id": work.ID, "arxiv_id_base": work.ArxivIDBase, "resolution_status": status, "resolution_method": method, "resolution_confidence": confidence, "updated_at": time.Now().UTC()}).Error; err != nil {
+	if err := tx.Model(ref).Updates(map[string]any{"resolved_work_id": work.ID, "arxiv_id_base": work.ArxivIDBase, "title": input.Title, "authors_json": marshal(input.Authors), "publication_year": input.Year, "resolution_status": status, "resolution_method": method, "resolution_confidence": confidence, "updated_at": time.Now().UTC()}).Error; err != nil {
 		return work, "", "", err
 	}
-	ref.ResolvedWorkID, ref.ResolutionStatus = work.ID, status
+	ref.ResolvedWorkID, ref.ResolutionStatus, ref.ArxivIDBase = work.ID, status, work.ArxivIDBase
+	ref.Title, ref.AuthorsJSON, ref.PublicationYear = input.Title, marshal(input.Authors), input.Year
+	// Return the verified source metadata without overwriting shared identities.
+	if input.Provider != "" {
+		if input.Title != "" {
+			work.CanonicalTitle = input.Title
+		}
+		if len(input.Authors) > 0 {
+			work.AuthorsJSON = marshal(input.Authors)
+		}
+		if input.Year > 0 {
+			work.PublicationYear = input.Year
+		}
+		if input.Venue != "" {
+			work.Venue = input.Venue
+		}
+		if input.Abstract != "" {
+			work.Abstract = input.Abstract
+		}
+		work.ProvenanceJSON = marshal(input.Provenance)
+	}
 	return work, method, status, nil
 }
 
@@ -880,6 +1023,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Papers            []paperlibrary.Paper `json:"papers,omitempty"`
 		ExpansionID       string               `json:"expansion_id,omitempty"`
+		ExpansionVersion  *int64               `json:"expansion_version,omitempty"`
 		Identifier        string               `json:"identifier,omitempty"`
 		LookupFulltext    *bool                `json:"lookup_fulltext,omitempty"`
 		ReferenceIDs      []string             `json:"reference_ids"`
@@ -925,6 +1069,11 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		req.Works = append(req.Works, work)
 	}
 	var expansion *orm.AcademicExpansion
+	expansionPapers := map[string]PaperRef{}
+	if req.ExpansionVersion != nil && req.ExpansionID == "" {
+		replyError(w, 400, "INVALID_REQUEST", "expansion_id is required with expansion_version")
+		return
+	}
 	if req.ExpansionID != "" {
 		record, ok := ownedExpansion(w, r, userID, req.ExpansionID)
 		if !ok {
@@ -934,6 +1083,29 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "INVALID_REQUEST", "target must be the expansion collection")
 			return
 		}
+		version := record.Version
+		if req.ExpansionVersion != nil {
+			version = *req.ExpansionVersion
+		}
+		input, err := completedExpansionInput(store.DB().WithContext(r.Context()), record, version)
+		if err != nil {
+			replyError(w, 409, "EXPANSION_VERSION_UNAVAILABLE", "所选扩展版本不可用，请刷新扩展结果")
+			return
+		}
+		for _, item := range input.Papers {
+			expansionPapers[item.Paper.PaperID] = item.Paper
+		}
+		if len(req.WorkIDs) == 0 || len(req.Works)+len(req.Papers)+len(req.ReferenceIDs)+len(req.SourceDocumentIDs) > 0 || req.Identifier != "" {
+			replyError(w, 400, "INVALID_SELECTION", "select papers from the expansion result")
+			return
+		}
+		for _, id := range req.WorkIDs {
+			if _, exists := expansionPapers[id]; !exists {
+				replyError(w, 422, "INVALID_SELECTION", "paper is not in the selected expansion version")
+				return
+			}
+		}
+		record.Version = version
 		expansion = &record
 	}
 	referenceMap := map[string][]string{}
@@ -964,15 +1136,45 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 500, "REFERENCE_QUERY_FAILED", err.Error())
 			return
 		}
+		resolvedInputs := map[string]WorkInput{}
+		explicitVersions := map[string]string{}
 		for index := range refs {
 			ref := &refs[index]
-			if ref.ResolvedWorkID == "" || (resolveExternal && ref.ArxivIDBase == "") {
+			var resolved orm.AcademicWork
+			if ref.ResolvedWorkID == "" || resolveExternal {
+				_, rawArxiv, version := extractStrongIDs(ref.RawText)
+				key := NormalizeTitle(ref.RawText)
+				if ref.ArxivIDBase != "" {
+					key = "arxiv:" + ref.ArxivIDBase + version
+				}
+				input, ok := resolvedInputs[key]
+				if !ok {
+					var err error
+					input, err = referenceMetadata(r.Context(), ref, resolveExternal)
+					if err != nil {
+						replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+						return
+					}
+					resolvedInputs[key] = input
+				}
 				err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-					_, _, _, resolveErr := resolveReferenceWithExternal(r.Context(), tx, ref, resolveExternal)
-					return resolveErr
+					var err error
+					resolved, _, _, err = saveReferenceResolution(r.Context(), tx, ref, input)
+					return err
 				})
 				if err != nil {
-					continue
+					replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+					return
+				}
+				if input.Provider != "" {
+					previewInputs[resolved.ID] = input
+				}
+				if version != "" && rawArxiv == ref.ArxivIDBase {
+					if old := explicitVersions[resolved.ID]; old != "" && old != version {
+						replyError(w, 422, "REFERENCE_VERSION_CONFLICT", "所选参考文献包含同一论文的不同 arXiv 版本，请分别导入")
+						return
+					}
+					explicitVersions[resolved.ID] = version
 				}
 			}
 			if ref.ResolvedWorkID != "" {
@@ -1056,6 +1258,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]PreviewItem, 0, len(works))
 	verified := map[string]PaperRef{}
+	hashes := map[string]string{}
 	for _, work := range works {
 		p := presenceByID[work.ID]
 		ref := paperRef(work)
@@ -1067,6 +1270,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			work.ProvenanceJSON = marshal(linkInput.Provenance)
 		}
 		var warnings []string
+		var fulltextError *doc.ProcessingDiagnostic
 		if work.ID == linkedWorkID {
 			if values, ok := linkInput.Provenance["lookup_warnings"].([]string); ok {
 				warnings = values
@@ -1076,12 +1280,15 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		if req.LookupFulltext != nil && *req.LookupFulltext && strings.TrimSpace(req.Identifier) == "" && work.ArxivIDBase == "" && work.DOINormalized != "" {
 			found := lookupDOIPDF(r.Context(), work.DOINormalized)
 			warnings = found.Warnings
+			if found.Candidate == nil && found.Err != nil {
+				fulltextError = fulltextLookupDiagnostic(found.Err)
+			}
 			candidates = []FulltextCandidate{}
 			if found.Candidate != nil {
 				candidates = []FulltextCandidate{*found.Candidate}
 			}
 		}
-		if work.ArxivIDBase != "" && (expansion == nil || expansion.DiscoveryMode != "external") {
+		if work.ArxivIDBase != "" && expansion == nil {
 			var provenance map[string]any
 			_ = json.Unmarshal(work.ProvenanceJSON, &provenance)
 			version, _ := provenance["pdf_version"].(string)
@@ -1090,7 +1297,9 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 					version = requested
 				}
 			}
-			if work.ID != linkedWorkID && resolveExternal {
+			sourceInput, hasSource := previewInputs[work.ID]
+			verifiedSource := hasSource && sourceInput.Provider == "arxiv"
+			if work.ID != linkedWorkID && resolveExternal && !verifiedSource {
 				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
 				if e != nil {
 					replyArxivImportError(w, e)
@@ -1111,17 +1320,45 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 				candidates = nil
 			}
 		}
-		if expansion != nil && expansion.DiscoveryMode == "external" {
-			source, e := expansionSource(store.DB(), *expansion, work.ID)
+		if expansion != nil {
+			source := paperSource{Paper: expansionPapers[work.ID], DatasetID: expansion.DatasetID}
+			if expansion.DiscoveryMode == "external" {
+				registered, e := expansionSource(store.DB(), *expansion, work.ID)
+				if e != nil {
+					replyError(w, 422, "INVALID_SELECTION", e.Error())
+					return
+				}
+				source = registered
+				source.Paper = expansionPapers[work.ID]
+			}
+			ref = source.Paper
+			var hash string
+			var e error
+			candidates, hash, e = expansionImportCandidates(r.Context(), userID, source)
 			if e != nil {
-				replyError(w, 422, "INVALID_SELECTION", e.Error())
+				replyError(w, 500, "IMPORT_PREVIEW_FAILED", e.Error())
 				return
 			}
-			if source.Paper.PDFURL != "" {
-				ref = source.Paper
-				verified[work.ID] = ref
-				candidates = []FulltextCandidate{{URL: source.Paper.PDFURL, SourceProvider: source.Paper.SourceProvider, Version: source.Paper.SourceVersion, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
+			if len(candidates) > 0 && hash != "" {
+				hashes[work.ID+"|"+candidates[0].URL] = hash
 			}
+		}
+		if len(candidates) > 0 {
+			primary := candidates[0]
+			if primary.SourceProvider == "arxiv" && primary.Version == "" {
+				metadata, e := arxivsource.NewClient().Lookup(r.Context(), primary.URL)
+				if e != nil {
+					replyArxivImportError(w, e)
+					return
+				}
+				ref = documentPaperRef(ref, marshal(arxivWorkInput(metadata)))
+				ref.ArxivID = metadata.BaseID
+				primary.URL, primary.Version = metadata.PDFURL, metadata.Version
+				candidates[0] = primary
+			}
+			ref.SourceProvider, ref.SourceVersion, ref.PDFURL = primary.SourceProvider, primary.Version, primary.URL
+			pinPaperURLs(&ref)
+			verified[work.ID] = ref
 		}
 		if len(candidates) > 0 && candidates[0].Version != "" {
 			matching := []PresenceDocument{}
@@ -1134,7 +1371,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(candidates) > 0 {
-			p.Importing, err = activePaperImport(r.Context(), userID, req.TargetDatasetID, work.ID, candidates[0].Version)
+			p.Importing, err = activePaperImport(r.Context(), userID, req.TargetDatasetID, work.ID, candidates[0].Version, candidates[0].SourceProvider)
 			if err != nil {
 				replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 				return
@@ -1148,10 +1385,13 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		} else if len(candidates) == 0 {
 			disposition = "metadata_only"
 		}
-		items = append(items, PreviewItem{ManualDownloadURLs: sciHubManualURLs(work.DOINormalized), Warnings: warnings, LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
+		if work.ID == linkedWorkID {
+			fulltextError = linkInput.FulltextError
+		}
+		items = append(items, PreviewItem{FulltextError: fulltextError, ManualDownloadURLs: sciHubManualURLs(work.DOINormalized), Warnings: warnings, LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
-	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion)
+	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion, hashes)
 	if err != nil {
 		replyError(w, 500, "IMPORT_PREVIEW_FAILED", err.Error())
 		return
@@ -1162,7 +1402,75 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 // Shared identities only gain missing metadata; document-specific corrections
 // live in AcademicDocumentState and never overwrite another file's metadata.
 func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, in WorkInput) error {
-	updates := map[string]any{}
+	// Provider identities may acquire strong identifiers on a later lookup.
+	// Never attach an identifier already owned by another scholarly work.
+	doi := NormalizeDOI(in.DOI)
+	arxiv, _ := NormalizeArxivID(in.ArxivID)
+	identifiers := map[string]any{}
+	for _, identity := range []struct{ column, incoming, current string }{
+		{"doi_normalized", doi, row.DOINormalized}, {"arxiv_id_base", arxiv, row.ArxivIDBase},
+	} {
+		if identity.incoming == "" {
+			continue
+		}
+		if identity.current != "" && identity.current != identity.incoming {
+			return errConflictingPaperIdentifiers
+		}
+		if identity.current != "" {
+			continue
+		}
+		var owners int64
+		if err := tx.WithContext(ctx).Model(&orm.AcademicWork{}).Where(identity.column+"=? AND id<>?", identity.incoming, row.ID).Count(&owners).Error; err != nil {
+			return err
+		}
+		if owners > 0 {
+			return errConflictingPaperIdentifiers
+		}
+		identifiers[identity.column] = identity.incoming
+	}
+	if in.Provider != "" && in.ProviderWorkID != "" {
+		ids := map[string]string{}
+		_ = json.Unmarshal(row.ExternalIDsJSON, &ids)
+		ids[in.Provider] = in.ProviderWorkID
+		row.ExternalIDsJSON = marshal(ids)
+		if err := tx.Model(row).Update("external_ids_json", row.ExternalIDsJSON).Error; err != nil {
+			return err
+		}
+	}
+	updates := identifiers
+	if value, ok := identifiers["doi_normalized"]; ok {
+		row.DOINormalized = value.(string)
+	}
+	if value, ok := identifiers["arxiv_id_base"]; ok {
+		row.ArxivIDBase = value.(string)
+	}
+	var provenance map[string]any
+	_ = json.Unmarshal(row.ProvenanceJSON, &provenance)
+	if provenance == nil {
+		provenance = map[string]any{}
+	}
+	changed := false
+	for _, key := range []string{"published_at", "source_version_date"} {
+		date, _ := in.Provenance[key].(string)
+		if date == "" {
+			continue
+		}
+		existing, _ := provenance[key].(string)
+		if key == "published_at" && existing != "" && existing <= date {
+			continue
+		}
+		if key == "source_version_date" && provenance["pdf_version"] != nil && provenance["pdf_version"] != in.Provenance["pdf_version"] {
+			continue
+		}
+		if date != existing {
+			provenance[key] = date
+			changed = true
+		}
+	}
+	if changed {
+		row.ProvenanceJSON = marshal(provenance)
+		updates["metadata_provenance_json"] = row.ProvenanceJSON
+	}
 	if row.Abstract == "" && in.Abstract != "" {
 		row.Abstract = in.Abstract
 		updates["abstract"] = in.Abstract

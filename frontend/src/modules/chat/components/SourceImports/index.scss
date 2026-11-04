@@ -3,9 +3,22 @@
 .source-selection-bar, .source-selection-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border-color, #edf0f5); }
 .source-selection-footer { border-top: 1px solid var(--border-color, #edf0f5); border-bottom: 0; flex-wrap: wrap; }
 .source-selection-bar { flex-wrap: wrap; }
-.source-selection-controls { display: flex; align-items: center; gap: 8px; }
-.source-select-row { display: flex; align-items: center; gap: 10px; padding-left: 16px; }
-.source-select-row .chat-source-item { flex: 1; min-width: 0; }
+.source-import-footer { justify-content: flex-end; }
+.source-fulltext-summary { padding: 12px; margin-bottom: 12px; }
+.source-fulltext-summary .source-fulltext-heading { margin-bottom: 4px; }
+.source-fulltext-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.source-target-form .ant-form-item { margin-bottom: 12px; }
+.source-fulltext-list {
+  border: 1px solid;
+  .source-fulltext-heading { padding: 8px 12px; }
+  .source-fulltext-rows {
+    list-style: none; margin: 0; padding: 0;
+    li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-top: 1px solid; }
+    .ant-checkbox-wrapper { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .ant-tag { margin-inline-end: 0; }
+  }
+  .source-fulltext-pagination { padding: 8px 12px; justify-content: flex-end; }
+}
 .source-group-toggle { color: var(--primary-color, #1677ff); font-size: 12px; }
 .source-group-links {
   list-style: none;

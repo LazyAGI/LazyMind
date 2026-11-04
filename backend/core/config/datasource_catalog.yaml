@@ -28,6 +28,11 @@ file_sources:
 search_sources:
   capabilities: [api_key_required]
   suppliers:
+    - name: OpenAlex
+      description:
+        zh-CN: "论文检索、引用与开放全文地址发现。支持匿名基础查询，可选 Key 提供上游允许的访问预算与托管内容。"
+        en-US: "Paper discovery, citation links and open access locations. Optional API key enables the access budget and hosted content permitted by OpenAlex."
+      base_url: "https://api.openalex.org"
     - name: Sciverse
       description:
         zh-CN: |

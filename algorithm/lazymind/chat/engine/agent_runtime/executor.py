@@ -317,7 +317,7 @@ class AgentExecutor:
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
-            call_quota=ToolCallQuota(options.tool_call_limits),
+            call_quota=ToolCallQuota(options.tool_call_limits, observer=options.tool_call_budget_observer),
             argument_limits={name: DEFAULT_ARGUMENT_REPAIR_LIMIT for name in plan.stop_tools},
             expanded_round_limit=(options.expanded_round_limit if options.expanded_round_limit is not None
                                   else max(2, int(_cfg['agentic_expanded_max_rounds']))),
@@ -442,6 +442,10 @@ class AgentExecutor:
                        for error in self._exception_chain(exc)):
                     yield 'event', {'tag': 'model_fallback_failed', 'fallback_code': 'runtime_failure'}
                 terminal = self._find_model_terminal(exc)
+                if terminal:
+                    terminal_summary = {key: terminal.get(key) for key in (
+                        'model_call_id', 'kind', 'finish', 'attempt_count', 'duration_ms', 'usage')}
+                    lazyllm.LOG.warning(f'[AgentExecutor] failed model call terminal: {terminal_summary}')
                 model_call_id = str((terminal or {}).get('model_call_id') or '')
                 if terminal and model_call_id not in finished_model_calls:
                     if getattr(agent, '_model_fallback_state', None) is None:

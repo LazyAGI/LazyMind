@@ -145,6 +145,45 @@ def test_remote_executor_preserves_ordinary_subagent_stream_event_shape():
     assert RemoteWorkflowExecutor._parse_frame('data: [DONE]\n\n') is None
 
 
+@pytest.mark.asyncio
+async def test_declared_timeout_reports_failure_after_closing_execution(monkeypatch, tmp_path):
+    import asyncio
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'steps': [], 'llm_config': {},
+        'params': {'step_id': 'analyze_relations', 'workflow_runtime': {'execution_limits': {
+            'analyze_relations': {'rounds': 8, 'timeout': 1}}}},
+    }
+    worker.runtime = runtime
+    closed = []
+
+    async def stream(**_kwargs):
+        try:
+            yield 'data: {"type":"task_start"}\n\n'
+            await asyncio.Event().wait()
+        finally:
+            closed.append(True)
+
+    async def acknowledge(*_):
+        assert closed == [True]
+
+    runtime.acknowledge_stop.side_effect = acknowledge
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    runtime.fail.assert_awaited_once()
+    runtime.complete.assert_not_awaited()
+    terminal = runtime.task_event.call_args.args[-1]
+    assert terminal['status'] == 'failed'
+    assert 'WORKFLOW_STEP_TIMEOUT: analyze_relations' in terminal['message']
+    runtime.acknowledge_stop.assert_awaited_once()
+
+
 def test_remote_executor_ignores_non_json_stream_frames():
     assert RemoteWorkflowExecutor._parse_frame('event: heartbeat\n\n') is None
 

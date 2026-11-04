@@ -5,7 +5,7 @@ import { getKnowledgeListPage, readKnowledgeListState, writeKnowledgeListState }
 describe("knowledge list URL state", () => {
   it("round trips independent mine and square filters without losing entry parameters", () => {
     const patch = {
-      view: "mine", source: "official", keyword: "中文 & URL /", officialTag: "法律",
+      view: "mine", source: "official", scene: "academic_papers", keyword: "中文 & URL /", officialTag: "法律",
       tag: "团队", sort: "most_used", cloudSource: "feishu", page: 3, pageSize: 20,
       squareType: "evaluation", squareDomain: "中文测评", squareStatus: "installed", squareKeyword: "测试",
     } as const;
@@ -29,6 +29,12 @@ describe("knowledge list URL state", () => {
   it("removes defaults while preserving foreign parameters", () => {
     expect(writeKnowledgeListState("?source=local&page=1&tag=old&from=chat", { tag: ALL_TAGS }))
       .toBe("?from=chat");
+  });
+
+  it("clears the selected type without losing the paper reading entry mode", () => {
+    expect(writeKnowledgeListState("?scene=academic_papers&showcase_entry=work&page=2", { scene: "", page: 1 }))
+      .toBe("?showcase_entry=work");
+    expect(readKnowledgeListState("").scene).toBe("");
   });
 
   it.each([[3, 10, 11, 2], [3, 10, 0, 1], [2, 10, 21, 2]])(

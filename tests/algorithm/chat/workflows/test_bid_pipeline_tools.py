@@ -62,6 +62,25 @@ def test_small_target_allocates_positive_leaf_targets_with_exact_total():
     assert result['normalized_outline']['chapters'][0]['target_words'] == 1000
 
 
+def test_bid_defaults_style_applicability_and_explicit_image_count():
+    import pytest
+    tools = _load_pipeline_tools()
+    parameters = tools.normalize_bid_parameters('docx', '8000')
+    assert parameters['use_default_docx_template'] is True
+    assert parameters['effect_image_count'] is None
+    parameters = tools.normalize_bid_parameters('md', '8000', effect_image_count='2')
+    assert parameters['use_default_docx_template'] is False
+    assert parameters['docx_style_mode'] == 'not_applicable'
+    assert parameters['effect_image_count'] == 2
+    assert tools.normalize_bid_parameters('docx', '8000', 'false')['use_default_docx_template'] is False
+    assert tools.normalize_bid_parameters('docx', '8000', False)['use_default_docx_template'] is False
+    for count in (0, '0', '-1', '11', '1.5', 'unknown'):
+        with pytest.raises(ValueError, match='effect_image_count'):
+            tools.normalize_bid_parameters('docx', '8000', effect_image_count=count)
+    with pytest.raises(ValueError):
+        tools.normalize_bid_parameters('docx', '')
+
+
 def test_bid_outline_repairs_relative_headings_and_missing_trace_mappings():
     tools = _load_pipeline_tools()
     candidate = tools._bid_outline_from_markdown(

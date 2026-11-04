@@ -4,38 +4,19 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { highlightCode } from "./syntaxHighlight";
+import { getMermaid } from './mermaid';
 
 type MermaidView = "diagram" | "source";
 type CopyStatus = "idle" | "copying" | "copied" | "failed";
+export type MermaidNodeLinks = Record<string, { label: string; onClick: () => void }>;
 type RenderState =
   | { status: "idle" | "rendering"; svg: string; error: string }
   | { status: "success"; svg: string; error: string }
   | { status: "error"; svg: string; error: string };
 
-let mermaidInitialized = false;
 let mermaidBlockSequence = 0;
 const mermaidRenderCache = new Map<string, string>();
 const MERMAID_RENDER_CACHE_LIMIT = 80;
-
-async function getMermaid() {
-  const mermaidModule = await import("mermaid");
-  return mermaidModule.default;
-}
-
-function ensureMermaidInitialized(
-  mermaid: Awaited<ReturnType<typeof getMermaid>>,
-) {
-  if (mermaidInitialized) {
-    return;
-  }
-
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: "default",
-  });
-  mermaidInitialized = true;
-}
 
 function getMermaidRenderId() {
   mermaidBlockSequence += 1;
@@ -129,11 +110,44 @@ const MermaidSource = ({ code }: { code: string }) => {
 const MermaidDiagram = ({
   svg,
   onOpen,
+  nodeLinks,
 }: {
   svg: string;
   onOpen: () => void;
+  nodeLinks?: MermaidNodeLinks;
 }) => {
   const { t } = useTranslation();
+  const host = useRef<HTMLDivElement>(null);
+  const nodeId = (node: Element) => node.getAttribute('data-id') || node.id.match(/(?:^|-)flowchart-(.+)-\d+$/)?.[1] || '';
+  useEffect(() => {
+    const diagram = host.current?.querySelector('svg');
+    // Keep labels legible instead of shrinking a large research map into the panel.
+    const width = diagram?.viewBox?.baseVal.width;
+    if (diagram && width) diagram.style.minWidth = `${Math.ceil(width * 0.85)}px`;
+    host.current?.querySelectorAll('g.node').forEach(node => {
+      const link = nodeLinks?.[nodeId(node)];
+      if (!link) {
+        node.removeAttribute('role'); node.removeAttribute('tabindex'); node.removeAttribute('aria-label');
+        return;
+      }
+      node.setAttribute('role', 'button');
+      node.setAttribute('tabindex', '0');
+      node.setAttribute('aria-label', link.label);
+    });
+  }, [svg, nodeLinks]);
+  if (nodeLinks && Object.keys(nodeLinks).length) return <div ref={host} className="md-mermaid-preview md-mermaid-preview--interactive"
+    onClick={event => {
+      const node = event.target instanceof Element ? event.target.closest('g.node') : null;
+      if (node) nodeLinks[nodeId(node)]?.onClick();
+    }}
+    onKeyDown={event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const node = event.target instanceof Element ? event.target.closest('g.node') : null;
+      const link = node && nodeLinks[nodeId(node)];
+      if (link) { event.preventDefault(); link.onClick(); }
+    }}>
+    <span dangerouslySetInnerHTML={{ __html: svg }} />
+  </div>;
   return (
     <button
       aria-label={t("chat.markdownEnlargeDiagram")}
@@ -149,9 +163,13 @@ const MermaidDiagram = ({
 const MermaidBlockComponent = ({
   code,
   isStreaming = false,
+  nodeLinks,
+  className,
 }: {
   code: string;
   isStreaming?: boolean;
+  nodeLinks?: MermaidNodeLinks;
+  className?: string;
 }) => {
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<MermaidView>("diagram");
@@ -192,7 +210,6 @@ const MermaidBlockComponent = ({
     const renderDiagram = async () => {
       try {
         const mermaid = await getMermaid();
-        ensureMermaidInitialized(mermaid);
         await mermaid.parse(code);
         const { svg } = await mermaid.render(renderId, code);
 
@@ -266,7 +283,7 @@ const MermaidBlockComponent = ({
   };
 
   return (
-    <div className="md-mermaid-block">
+    <div className={`md-mermaid-block ${className ?? ''}`}>
       <div className="md-mermaid-toolbar">
         <div className="md-mermaid-tabs" role="tablist" aria-label={t("chat.markdownMermaidDisplay")}>
           <button
@@ -334,7 +351,7 @@ const MermaidBlockComponent = ({
       {visibleView === "source" ? (
         <MermaidSource code={code} />
       ) : canShowDiagram ? (
-        <MermaidDiagram svg={renderState.svg} onOpen={() => setIsModalOpen(true)} />
+        <MermaidDiagram svg={renderState.svg} nodeLinks={nodeLinks} onOpen={() => setIsModalOpen(true)} />
       ) : (
         <div className="md-mermaid-placeholder" aria-live="polite">
           {t("chat.markdownDiagramGenerating")}
@@ -352,9 +369,13 @@ const MermaidBlockComponent = ({
       >
         {canShowDiagram && (
           <div
-            className="md-mermaid-modal-content"
-            dangerouslySetInnerHTML={{ __html: renderState.svg }}
-          />
+            className={`md-mermaid-modal-content ${className ?? ''}`}
+          >
+            {nodeLinks ? <MermaidDiagram svg={renderState.svg} onOpen={() => {}}
+              nodeLinks={Object.fromEntries(Object.entries(nodeLinks).map(([id, link]) => [id, {
+                ...link, onClick: () => { setIsModalOpen(false); link.onClick(); },
+              }]))} /> : <span dangerouslySetInnerHTML={{ __html: renderState.svg }} />}
+          </div>
         )}
       </Modal>
     </div>

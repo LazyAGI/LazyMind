@@ -40,9 +40,17 @@ func TestZoteroSnapshotHTTPPermissionsAndReplayPreserveEdits(t *testing.T) {
 	if w := invoke("owner"); w.Code != 200 {
 		t.Fatalf("import: %d %s", w.Code, w.Body.String())
 	}
-	if err := db.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND id=?", "papers", paper.ID).Updates(map[string]any{"status": "read", "revision": 2}).Error; err != nil {
+	var entry orm.PaperLibraryEntry
+	if err := db.Where("dataset_id=? AND id=?", "papers", paper.ID).Take(&entry).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&orm.AcademicUserPaperState{UserID: "owner", DatasetID: "papers", PaperID: entry.AcademicWorkID, ReadingStatus: "read"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&entry).Update("revision", 2).Error; err != nil {
+		t.Fatal(err)
+	}
+
 	if w := invoke("owner"); w.Code != 200 {
 		t.Fatalf("replay: %d %s", w.Code, w.Body.String())
 	}
