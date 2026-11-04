@@ -362,6 +362,26 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	if err = json.Unmarshal(launchJob.PayloadJSON, &launchPayload); err != nil || launchPayload["query"] != "请生成论文综述。\n"+expectedInstruction {
 		t.Fatalf("new Chat received internal or duplicate context: %q %v", launchPayload["query"], err)
 	}
+	if launchPayload["workflow_id"] != "paper-writing" {
+		t.Fatalf("review must use the real paper-writing workflow: %v", launchPayload)
+	}
+	w := httptest.NewRecorder()
+	request := paperRequest("")
+	request.URL.RawQuery = "conversation_id=" + handoff.ConversationID
+	AcademicChatContext(w, request)
+	var taskContext struct {
+		HandoffID string              `json:"handoff_id"`
+		Kind      string              `json:"kind"`
+		Input     ReviewWorkflowInput `json:"input"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &taskContext); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("review context unavailable: %d %s %v", w.Code, w.Body.String(), err)
+	}
+	if taskContext.HandoffID != handoff.ID || taskContext.Kind != "review" ||
+		taskContext.Input.UserInstruction != expectedInstruction || len(taskContext.Input.Papers) != 2 ||
+		taskContext.Input.Papers[0].Paper.PaperID != "a" || taskContext.Input.Papers[1].Paper.PaperID != "b" {
+		t.Fatalf("review context lost the frozen selection or user requirements: %+v", taskContext)
+	}
 
 	update := "请重试本步，每篇关系和贡献压缩成两句话，保留现有两篇论文及其版本。"
 	if err = db.Create(&orm.ChatHistory{ID: "continued-instruction", ConversationID: conversation, Seq: 5, RawContent: update}).Error; err != nil {

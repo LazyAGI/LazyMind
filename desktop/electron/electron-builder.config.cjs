@@ -2,6 +2,7 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
+const { createHash } = require("node:crypto");
 
 const execFile = util.promisify(childProcess.execFile);
 const delay = (milliseconds) => new Promise((resolve) => {
@@ -278,6 +279,10 @@ async function signAndStageEmbeddedRuntime(context) {
       }
     });
     await Promise.all(workers);
+    const ghPath = path.join(runtimeRoot, "bin", "gh");
+    if (fs.existsSync(ghPath)) {
+      fs.writeFileSync(`${ghPath}.sha256`, `${createHash("sha256").update(fs.readFileSync(ghPath)).digest("hex")}\n`);
+    }
     const internalElectron = path.join(appPath, "Contents", "MacOS", "LazyMindApp");
     if (fs.existsSync(internalElectron)) {
       const args = [

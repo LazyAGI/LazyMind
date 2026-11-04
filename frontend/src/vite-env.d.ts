@@ -45,6 +45,7 @@ declare global {
       clearObsidianRoot?: () => Promise<unknown> | unknown;
       exportDiagnostics?: () => Promise<string> | string;
       openCloudLogin?: (url: string) => Promise<unknown> | unknown;
+      openGitHubCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
       openCloudRegister?: () => Promise<unknown> | unknown;
       openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
       notifyAppReady?: () => void;

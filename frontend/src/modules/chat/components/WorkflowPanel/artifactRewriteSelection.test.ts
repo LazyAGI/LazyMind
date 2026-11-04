@@ -130,11 +130,11 @@ describe('selectedMarkdownParagraph', () => {
     expect(selectedMarkdownParagraph(container)?.supported).toBe(false);
   });
 
-  it('identifies an internal reference selected at element boundaries', () => {
+  it.each(['block-sec-1', 'paper-ref-SRC-甲'])('identifies an internal reference selected at element boundaries (%s)', (anchorId) => {
     const container = document.createElement('section');
     container.innerHTML = [
       '<div contenteditable="true">',
-      '<p>Alpha <a href="#block-sec-1">beta</a> gamma</p>',
+      `<p>Alpha <a href="#${anchorId}">beta</a> gamma</p>`,
       '</div>',
     ].join('');
     document.body.append(container);
@@ -145,16 +145,16 @@ describe('selectedMarkdownParagraph', () => {
     selectRange(range);
 
     expect(selectedMarkdownParagraph(container)?.internalReference).toEqual({
-      anchorId: 'block-sec-1',
+      anchorId,
       occurrence: 0,
     });
   });
 
-  it('identifies a partial selection inside an internal reference', () => {
+  it.each(['block-sec-1', 'paper-ref-SRC-甲'])('identifies a partial selection inside an internal reference (%s)', (anchorId) => {
     const container = document.createElement('section');
     container.innerHTML = [
       '<div contenteditable="true">',
-      '<p>Alpha <a href="#block-sec-1">beta</a> gamma</p>',
+      `<p>Alpha <a href="#${anchorId}">beta</a> gamma</p>`,
       '</div>',
     ].join('');
     document.body.append(container);
@@ -165,7 +165,7 @@ describe('selectedMarkdownParagraph', () => {
     selectRange(range);
 
     expect(selectedMarkdownParagraph(container)?.internalReference).toEqual({
-      anchorId: 'block-sec-1',
+      anchorId,
       occurrence: 0,
     });
   });

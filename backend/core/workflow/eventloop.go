@@ -43,7 +43,10 @@ type WorkflowStepParams struct {
 	StepID      string `json:"step_id"`
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
-	// LaunchUserInput remains fixed while UserInput carries the current turn.
+	// LaunchUserInput remains fixed. CurrentUserInput is the actual turn input
+	// (also the launch text on cold start); empty means no new turn requirement.
+	// UserInput may fall back to launch intent, including during recovery.
+	// Consumers must not treat cold-start current input as a material override.
 	LaunchUserInput  string `json:"launch_user_input,omitempty"`
 	CurrentUserInput string `json:"current_user_input,omitempty"`
 	IsColdStart      bool   `json:"is_cold_start"`
@@ -116,7 +119,7 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	if p.LaunchUserInput != "" {
 		m["launch_user_input"] = p.LaunchUserInput
 	}
-	if p.CurrentUserInput != "" {
+	if p.CurrentUserInput != "" || p.LaunchUserInput != "" {
 		m["current_user_input"] = p.CurrentUserInput
 	}
 	if p.WorkflowMode != "" {
@@ -575,7 +578,7 @@ func launchWorkflowAttempt(
 	if params.LaunchUserInput != "" {
 		rawParamsMap["launch_user_input"] = params.LaunchUserInput
 	}
-	if params.CurrentUserInput != "" {
+	if params.CurrentUserInput != "" || params.LaunchUserInput != "" {
 		rawParamsMap["current_user_input"] = params.CurrentUserInput
 	}
 	refOrID := params.WorkflowRef
@@ -900,7 +903,7 @@ func OnSubAgentDone(
 			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 			return
 		}
-		if display.Status == "waiting" {
+		if display.ApprovalStepID != "" {
 			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting); err != nil {
 				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
 				return

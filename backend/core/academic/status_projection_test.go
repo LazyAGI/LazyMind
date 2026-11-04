@@ -3,9 +3,11 @@ package academic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +52,18 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 					TaskID: "task", Status: "running", Validity: "effective", Attempt: 1, LeaseToken: "lease"}).Error; err != nil {
 					t.Fatal(err)
 				}
+			}
+			var enqueueAttempts atomic.Int32
+			contend := scenario == "failure" && db.Dialector.Name() == orm.DriverSQLite
+			if contend {
+				if err := db.Callback().Create().Before("gorm:create").Register("projection-busy", func(tx *gorm.DB) {
+					if tx.Statement.Table == "async_jobs" && enqueueAttempts.Add(1) == 1 {
+						tx.AddError(errors.New("database is locked (5) (SQLITE_BUSY)"))
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { db.Callback().Create().Remove("projection-busy") })
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			runner := asyncjob.Start(ctx, db.DB, asyncjob.Options{JobTypes: []string{"academic.project"}, Concurrency: 1, PollInterval: 10 * time.Millisecond})
@@ -98,7 +112,6 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 				}
 			}
 			if scenario == "failure" || scenario == "timeout" {
-				contend := scenario == "failure" && db.Dialector.Name() == orm.DriverSQLite
 				wrote := false
 				if contend {
 					// Commit an independent write after the step read to invalidate the
@@ -126,6 +139,9 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 				assertProjected("failed")
 				if contend && !wrote {
 					t.Fatal("concurrent write did not run")
+				}
+				if contend && enqueueAttempts.Load() < 2 {
+					t.Fatal("projection enqueue did not retry SQLite contention")
 				}
 				var events int64
 				if err := db.Model(&orm.WorkflowEvent{}).

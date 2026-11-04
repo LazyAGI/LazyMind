@@ -83,6 +83,9 @@ export interface TaskArtifact {
 
 /** Ephemeral Markdown preview emitted before the task persists its file artifact. */
 export interface TaskArtifactStream {
+  attempt_id?: string;
+  step_id?: string;
+  attempt?: number;
   task_id: string;
   slot: string;
   content_type: string;
@@ -271,6 +274,20 @@ function normalizePlanSteps(value: unknown): string[] | undefined {
   return value.map((step: string) => step.trim());
 }
 
+function mergeArtifactStreams(current: TaskArtifactStream[] = [], incoming: TaskArtifactStream[] = []): TaskArtifactStream[] {
+  // REST snapshots may omit transient previews or lag live SSE chunks.
+  const streams = new Map(current.map(stream => [stream.stream_id, stream]));
+  incoming.forEach(stream => {
+    const live = streams.get(stream.stream_id);
+    if (!live || stream.chunk_index > live.chunk_index) {
+      streams.set(stream.stream_id, live && live.state !== "streaming" && stream.state === "streaming"
+        ? { ...stream, state: live.state, final_content: live.final_content, artifact: live.artifact }
+        : stream);
+    }
+  });
+  return [...streams.values()];
+}
+
 function stepsToExecutionLog(steps: any[], executionId?: string): TaskLogEntry[] {
   if (!steps || steps.length === 0) return [];
   const entries = steps.flatMap((s): TaskLogEntry[] => {
@@ -438,7 +455,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       if (idx >= 0) {
         next = list.slice();
         const current = next[idx];
-        const incoming = { ...current, ...task, plan_steps: task.plan_steps ?? current.plan_steps };
+        const incoming = { ...current, ...task, plan_steps: task.plan_steps ?? current.plan_steps,
+          artifact_streams: mergeArtifactStreams(current.artifact_streams, task.artifact_streams) };
+        // Retries have new task IDs. An older snapshot cannot restart this attempt.
+        if (TERMINAL_TASK_STATUSES.has(current.status)) incoming.status = current.status;
+        incoming.progress_pct = Math.max(current.progress_pct, incoming.progress_pct);
         // Prefer the longer execution_log: DB snapshots only have completed steps,
         // while the live SSE stream may have buffered more content in memory.
         if (
@@ -548,6 +569,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       task.updated_at = new Date().toISOString();
       switch (event.type) {
         case "task_start":
+          if (TERMINAL_TASK_STATUSES.has(task.status)
+            && (!event.execution_id || event.execution_id === task.execution_id)) break;
           // DB snapshots rebuild the log on reconnect. Live starts also arrive
           // through the conversation stream and cannot replace an established run.
           if (event.snapshot !== true && task.execution_id) return state;
@@ -565,8 +588,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           task.plan_steps = normalizePlanSteps(event.steps) ?? task.plan_steps;
           break;
         case "progress":
+          if (TERMINAL_TASK_STATUSES.has(task.status)) break;
           task.status = "running";
-          task.progress_pct = event.progress ?? task.progress_pct;
+          task.progress_pct = Math.max(task.progress_pct, event.progress ?? task.progress_pct);
           task.current_phase = event.current_phase ?? task.current_phase;
           task.estimated_sec = event.estimated_sec ?? task.estimated_sec;
           if (Array.isArray(event.writing_subtasks)) {
@@ -613,7 +637,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         case "artifact_stream_start": {
           if (!event.stream_id || !event.slot || !event.content_type) break;
           const current = task.artifact_streams ?? [];
-          const next = current.filter((stream) => stream.stream_id !== event.stream_id);
+          if (current.some((stream) => stream.stream_id === event.stream_id)) break;
+          const next = current.slice();
           next.push({
             task_id: taskId,
             slot: event.slot,
@@ -622,7 +647,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             chunk_index: event.chunk_index ?? 1,
             content: "",
             deltas: [],
-            state: "streaming",
+            state: TERMINAL_TASK_STATUSES.has(task.status) || task.progress_pct >= 100 ? "ended" : "streaming",
           });
           task.artifact_streams = next;
           break;
@@ -646,7 +671,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             // Preserve backend event boundaries. The renderer can expose every
             // server delta even when XHR delivers several SSE frames together.
             deltas: [...(stream.deltas ?? (stream.content ? [stream.content] : [])), delta],
-            state: "streaming",
+            state: stream.state,
           };
           task.artifact_streams = nextStreams;
           break;
@@ -664,7 +689,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           nextStreams[streamIndex] = {
             ...stream,
             chunk_index: chunkIndex,
-            state: event.type === "artifact_stream_abort" ? "aborted" : "ended",
+            state: event.type === "artifact_stream_abort" ? "aborted"
+              : stream.state === "streaming" ? "ended" : stream.state,
             message: event.message || stream.message,
           };
           task.artifact_streams = nextStreams;
@@ -672,7 +698,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         }
         case "done":
           task.status = (event.status as TaskStatus) ?? "succeeded";
-          task.progress_pct = 100;
+          if (task.status === "interrupted" && event.current_phase === "awaiting_input") {
+            task.current_phase = event.current_phase;
+          } else {
+            task.progress_pct = 100;
+          }
           task.summary = event.summary ?? task.summary;
           break;
         case "error":
@@ -848,6 +878,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             get().unsubscribeTask(taskId);
             void get().loadConversationTasks(conversationId);
             void get().loadConversationArtifacts(conversationId);
+            scheduleWorkflowSessionRefresh(conversationId);
           }
         },
         error: () => {
@@ -900,6 +931,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   loadArtifactStreamContent: async (conversationId, taskId, artifact) => {
     if (artifact.content_type !== "file") return;
     if (isWriterIRArtifact(artifact)) return;
+    // A Markdown preview can resolve to a ZIP or JSON artifact (paper experiments).
+    // Only the actual Markdown file may replace its preview as text.
+    const name = artifact.value?.filename || artifact.value?.name || artifact.value?.url || '';
+    if (!/\.(?:md|markdown)(?:[?#]|$)/i.test(name)) return;
     const rawUrl = typeof artifact.value?.url === "string" ? artifact.value.url : "";
     const url = resolveCoreAssetUrl(rawUrl);
     if (!url) return;
@@ -929,7 +964,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           ),
           -1,
         );
-        if (streamIndex < 0) return state;
+        if (streamIndex < 0 || task.artifact_streams[streamIndex].state === "aborted") return state;
         const nextStreams = task.artifact_streams.slice();
         nextStreams[streamIndex] = {
           ...nextStreams[streamIndex],
@@ -1061,7 +1096,12 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               if (task.ordinary) return publicTask(mergeOrdinarySnapshot(current?.ordinary, task.ordinary), conversationId);
               // This response cannot order an execution or log changed after its request began.
               if (current && current !== tasksAtRequest?.get(task.task_id)) return current;
-              return mergeTaskOutputSnapshot(current, { ...task, plan_steps: task.plan_steps ?? current?.plan_steps });
+              const sameExecution = !task.execution_id || !current?.execution_id || task.execution_id === current.execution_id;
+              return mergeTaskOutputSnapshot(current, { ...task,
+                status: sameExecution && current && TERMINAL_TASK_STATUSES.has(current.status) ? current.status : task.status,
+                progress_pct: sameExecution ? Math.max(task.progress_pct, current?.progress_pct ?? 0) : task.progress_pct,
+                plan_steps: task.plan_steps ?? current?.plan_steps,
+                artifact_streams: sameExecution ? mergeArtifactStreams(current?.artifact_streams, task.artifact_streams) : task.artifact_streams });
             });
             const runs: OrdinaryRunView[] = res?.data?.data?.runs ?? res?.data?.runs ?? [];
             return {
@@ -1374,7 +1414,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             // request followed by a second reconciliation request.
             scheduleWorkflowSessionRefresh(
               conversationId,
-              type === 'workflow_completed' ? 800 : 100,
+              100,
             );
           } else if (type === 'step_partial_done') {
             if (replayed) {

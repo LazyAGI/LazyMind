@@ -102,6 +102,7 @@ type OrdinaryTaskView struct {
 	Timing              Timing                    `json:"timing"`
 
 	CapabilityDependency *CapabilityDependency `json:"capability_dependency,omitempty"`
+	InputRequired        string                `json:"input_required,omitempty"`
 }
 type RunTiming struct {
 	RequestedAt           time.Time  `json:"requested_at"`

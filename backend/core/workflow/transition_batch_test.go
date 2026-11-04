@@ -276,6 +276,59 @@ func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
 	}
 }
 
+func TestRetryKeepsFailedAttemptInput(t *testing.T) {
+	for _, tc := range []struct{ name, operation, previous, current, want string }{
+		{"button", "retry", "只修改 R1、R3，保留图表", "重试", "只修改 R1、R3，保留图表"},
+		{"empty", "retry", "只修改 R1、R3，保留图表", "", "只修改 R1、R3，保留图表"},
+		{"english", "retry", "Only revise R2", "Retry!", "Only revise R2"},
+		{"new_requirement", "retry", "只修改 R1", "这次只修改 R2", "这次只修改 R2"},
+		{"no_confirmed_input", "retry", "", "重试", "重试"},
+		{"rewind_is_not_retry", "rewind", "只修改 R1", "重新执行", "重新执行"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("intent_context", `{"text":"原始研究任务"}`)
+			previousParams, _ := json.Marshal(map[string]string{"current_user_input": tc.previous})
+			status := StepStatusFailed
+			if tc.operation == "rewind" {
+				status = StepStatusSucceeded
+			}
+			if err := db.Create(&orm.SubAgentTask{ID: "failed-task", Params: previousParams, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "failed-attempt", SessionID: "batch-session", StepID: "branch_b",
+				TaskID: "failed-task", Attempt: 2, Status: status, Validity: "effective"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			// A previous successful pass must never supply this retry's instructions.
+			if err := db.Create(&orm.SubAgentTask{ID: "old-task", Params: json.RawMessage(`{"current_user_input":"只修改 R9"}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "old-attempt", SessionID: "batch-session", StepID: "branch_b",
+				TaskID: "old-task", Attempt: 1, Status: StepStatusSucceeded, Validity: "stale"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			w, data := runBatchTransition(t, db, hash, tc.operation, []map[string]any{
+				{"target_step_id": "branch_b", "task_id": "retried-task", "user_input": tc.current},
+			})
+			if w.Code != http.StatusOK || data["accepted"] != true {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			var task orm.SubAgentTask
+			if err := db.First(&task, "id = ?", "retried-task").Error; err != nil {
+				t.Fatal(err)
+			}
+			var params map[string]any
+			if err := json.Unmarshal(task.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			if params["current_user_input"] != tc.want || params["launch_user_input"] != "原始研究任务" {
+				t.Fatalf("current=%v launch=%v", params["current_user_input"], params["launch_user_input"])
+			}
+		})
+	}
+}
+
 func TestExecuteFreshStepKeepsCurrentInput(t *testing.T) {
 	for _, input := range []string{"当前请求", "继续", "审批通过，继续执行"} {
 		t.Run(input, func(t *testing.T) {

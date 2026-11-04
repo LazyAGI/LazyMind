@@ -284,7 +284,7 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
     content = _document_value(value)
     if isinstance(content, str):
         path = root / f'{name}.md'
-        path.write_text(content, encoding='utf-8')
+        path.write_text(content, encoding='utf-8', newline='')
         return str(path)
     return _write_input_artifact(root, f'{name}.lmd', content, WRITER_IR_SCHEMA)
 
@@ -471,10 +471,35 @@ def _numbering_payload(view: Any, numbering: Mapping[str, Any]) -> dict[str, Any
     return {'ordered_style': view.ordered_style, 'entries': entries}
 
 
+def markdown_prose(markdown):
+    """Mask fences while preserving offsets for exact source edits."""
+    lines, fence = [], None
+    for line in markdown.splitlines(keepends=True):
+        marker = re.match(r'^\s{0,3}(`{3,}|~{3,})', line)
+        hidden = fence is not None or marker is not None
+        if marker:
+            token = marker[1]
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+        lines.append(re.sub(r'[^\r\n]', ' ', line) if hidden else line)
+    return ''.join(lines)
+
+
+def strip_paper_chart_numbering(markdown: str) -> str:
+    """Undo only explicitly marked figure labels in paper slot files."""
+    pattern = (r'(<a id="block-[A-Za-z][A-Za-z0-9_-]{0,63}") data-paper-figure-label="(图[0-9]+)"'
+               r'(></a>\s*!\[)\2 ')
+    for match in reversed(list(re.finditer(pattern, markdown_prose(markdown)))):
+        markdown = markdown[:match.start()] + match[1] + match[3] + markdown[match.end():]
+    return markdown
+
+
 def render_document(value: Any) -> dict[str, Any]:
     """Render canonical editable content and its generated numbering sidecar."""
     if isinstance(value, str):
-        document = ensure_markdown_heading_anchors(value)
+        document = ensure_markdown_heading_anchors(strip_paper_chart_numbering(value))
         view = build_numbering_view_from_markdown(document)
         numbering = compute_numbering(view)
         title_match = re.search(r'^#\s+(.+)$', document, re.MULTILINE)
@@ -507,6 +532,8 @@ def save_document(
             raise ValueError(
                 'base artifact representation does not match Markdown edit'
             )
+        value = strip_paper_chart_numbering(value)
+        base_value = strip_paper_chart_numbering(base_value)
         base_numbering = compute_numbering(
             build_numbering_view_from_markdown(base_value)
         )
@@ -581,3 +608,10 @@ __all__ = [
     'save_document',
     'writer_schema',
 ]
+
+
+def validate_paper_svg(svg):
+    """Use the F4 publication policy, including inert Matplotlib styles."""
+    from .paper.analysis.validation import validate_svg
+
+    validate_svg(svg)

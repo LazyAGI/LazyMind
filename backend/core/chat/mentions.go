@@ -749,7 +749,6 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 		}
 		if strings.HasPrefix(ref, "builtin:") {
 			forcedBuiltins = append(forcedBuiltins, strings.TrimPrefix(ref, "builtin:"))
-			continue
 		}
 		if item, ok := byRef[ref]; ok {
 			selected = append(selected, item)
@@ -764,7 +763,11 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 			Where("p.plugin_ref=? AND p.status='active' AND (p.owner_user_id=? OR p.owner_user_id='')", ref, userID).Take(&row).Error; err != nil { // workflow-naming: persistence
 			return nil, nil, fmt.Errorf("workflow mention is not accessible: %s", ref)
 		}
-		selected = append(selected, map[string]any{"workflow_ref": row.WorkflowRef, "workflow_id": row.WorkflowID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash})
+		item := map[string]any{"workflow_ref": row.WorkflowRef, "workflow_id": row.WorkflowID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash}
+		if policy, ok := workflow.RuntimePolicyForRevision(ctx, db, userID, ref, row.HeadRevisionID); ok {
+			item["runtime"] = policy
+		}
+		selected = append(selected, item)
 	}
 	return selected, forcedBuiltins, nil
 }
@@ -932,7 +935,7 @@ func buildWorkflowActivation(item map[string]any, workflowRef string) map[string
 		"tool_name":    "trigger_" + stem + "_workflow",
 		"tool_description": strings.TrimSpace(fmt.Sprintf(
 			"Start the exact executable Workflow %q explicitly selected by the user and return its Ready frontier. This is execution, not resource lookup. %s %s",
-			name, fmt.Sprint(item["description"]), fmt.Sprint(item["when_to_use"]),
+			name, optionalActivationString(item["description"]), optionalActivationString(item["when_to_use"]),
 		)),
 		"prompt": "The user explicitly selected an executable Workflow with @workflow. Apply its declared Runtime startup clarification policy first; ask only for missing declared fields. When no declared field is missing, call its bound trigger directly. Do not search for the Workflow as an artifact, do not merely explain it, and do not call list_workflows or select another Workflow.",
 	}

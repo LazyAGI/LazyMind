@@ -221,6 +221,41 @@ describe('Writer Markdown system anchors', () => {
     )).toBe(source);
   });
 
+  it('keeps paper chart ownership hidden and attached to renamed outline headings', () => {
+    const charts = '<!-- paper-charts: ["accuracy"] -->';
+    const source = '# Paper\n\n<a id="block-sec-1"></a>\n## Results\n' + charts;
+    const editable = writerMarkdownForEditing(source);
+    expect(editable).not.toContain('paper-charts');
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(
+      source, editable.replace('## Results', '## Verified results'),
+    ));
+    expect(saved).toContain('## Verified results\n' + charts);
+    expect(writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(
+      source, '# Paper',
+    ))).not.toContain('paper-charts');
+  });
+
+  it('preserves all chart assignments across descriptions and keeps them in their sections', () => {
+    const first = '<!-- paper-charts: ["accuracy"] -->';
+    const second = '<!-- paper-charts: ["latency"] -->';
+    const third = '<!-- paper-charts: ["overview"] -->';
+    const source = '# Paper\n\n<a id="block-sec-1"></a>\n## Results\n'
+      + first + '\n插图：准确率\n' + second + '\n插图：耗时\n\n'
+      + '<a id="block-sec-2"></a>\n## Discussion\n' + third;
+    const editable = writerMarkdownForEditing(source);
+    expect(editable).not.toContain('paper-charts');
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(
+      source, editable.replace('## Results', '## Verified results'),
+    ));
+    expect(saved).toContain('## Verified results\n' + first + '\n' + second);
+    expect(saved).toContain('## Discussion\n' + third);
+    expect(saved).toContain('插图：准确率');
+    expect(saved).toContain('插图：耗时');
+    expect(writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(
+      saved, writerMarkdownForEditing(saved),
+    ))).toBe(saved);
+  });
+
   it('restores stable heading anchors on save and removes anchors for deleted headings', () => {
     const source = [
       '# 标题',
@@ -508,5 +543,37 @@ describe('Writer Markdown system anchors', () => {
     const materialized = '详见[第1章](#block-sec-1)。';
 
     expect(restoreWriterMarkdownInternalReferenceLabels(materialized, source)).toBe(source);
+  });
+});
+
+describe('paper bibliography references', () => {
+  const bibliography = '<a id="paper-references-start"></a>\n\n**参考文献**\n\n'
+    + '<a id="paper-ref-SRC-甲.v2"></a>\n\n[1] Author. Study.\n\n'
+    + '<a id="paper-references-end"></a>';
+  const citation = '[\\[1\\]](#paper-ref-SRC-甲.v2)';
+
+  it('offers existing bibliography entries without treating code examples as targets', () => {
+    expect(collectWriterMarkdownReferenceTargets(bibliography)).toEqual([
+      { anchorId: 'paper-ref-SRC-甲.v2', label: '[1] Author. Study.', type: 'reference', citationNumber: '1' },
+    ]);
+    expect(collectWriterMarkdownReferenceTargets('```md\n' + bibliography + '\n```')).toEqual([]);
+    expect(collectWriterMarkdownOutline(bibliography).items).toEqual([]);
+  });
+
+  it('adds canonical numeric citations after selected prose, including after an existing citation', () => {
+    const source = `Alpha${citation} beta\n\n${bibliography}`;
+    expect(applyWriterMarkdownInternalReference(source, 'Alpha[1] beta', 9, 'beta', 'paper-ref-SRC-甲.v2'))
+      .toBe(`Alpha${citation} beta${citation}\n\n${bibliography}`);
+    expect(applyWriterMarkdownInternalReference(source, 'Alpha[1] beta', 9, 'beta', 'paper-ref-missing'))
+      .toBe(source);
+  });
+
+  it('removes only the selected citation, leaving prose and the bibliography intact', () => {
+    const source = `Alpha${citation} beta${citation}\n\n${bibliography}`;
+    expect(removeWriterMarkdownInternalReference(source, 'Alpha[1] beta[1]', 13, '[1]', {
+      anchorId: 'paper-ref-SRC-甲.v2', occurrence: 1,
+    })).toBe(`Alpha${citation} beta\n\n${bibliography}`);
+    expect(removeWriterMarkdownInternalReference(source, 'Alpha[1] beta[1]', 5, '[1]'))
+      .toBe(`Alpha beta${citation}\n\n${bibliography}`);
   });
 });

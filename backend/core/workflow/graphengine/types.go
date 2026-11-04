@@ -156,14 +156,17 @@ type RuntimePolicy struct {
 	CompletedEditStep         string                    `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
 	CompletedEditRouting      string                    `json:"completed_edit_routing,omitempty" yaml:"completed_edit_routing,omitempty"`
 	CompletedContinueSteps    []string                  `json:"completed_continue_steps,omitempty" yaml:"completed_continue_steps,omitempty"`
-	ClarificationFields       []ClarificationField      `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
-	PostStepChecks            []PostStepCheck           `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
+	// RecoveryInputs maps a rerun step's external inputs to feedback output slots.
+	// Core snapshots selected feedback before rewind invalidates its producer.
+	RecoveryInputs      map[string]map[string]string `json:"recovery_inputs,omitempty" yaml:"recovery_inputs,omitempty"`
+	ClarificationFields []ClarificationField         `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
+	PostStepChecks      []PostStepCheck              `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
 }
 
 func (p RuntimePolicy) IsZero() bool {
 	return p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
 		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
-		len(p.PostStepChecks) == 0
+		len(p.PostStepChecks) == 0 && len(p.RecoveryInputs) == 0
 }
 
 type ExecutionLimit struct {

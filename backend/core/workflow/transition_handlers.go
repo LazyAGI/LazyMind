@@ -151,6 +151,29 @@ func selectLLMChoiceRoutes(ctx context.Context, tx *gorm.DB, sessionID string, g
 	if err := tx.WithContext(ctx).Where("session_id = ? AND validity = ?", sessionID, "effective").Find(&decisions).Error; err != nil {
 		return err
 	}
+	// Preparation-created sessions have no start attempt to freeze their entry choice.
+	hasStart := false
+	for _, decision := range decisions {
+		hasStart = hasStart || decision.FromStepID == "__start__"
+	}
+	if !hasStart && graph.StartRoute == "choice" {
+		snapshot, err := loadRuntimeSnapshot(ctx, tx, sessionID, graph)
+		if err != nil {
+			return err
+		}
+		var session orm.WorkflowSession
+		if err := tx.Select("state_version").First(&session, "id = ?", sessionID).Error; err != nil {
+			return err
+		}
+		start := graphengine.DecideRoute(graph, "__start__", snapshot.Materials)
+		if err := persistRouteDecision(ctx, tx, sessionID, "__start__", "", start.Activated, start.Pruned,
+			start.Bypassed, start.Witnesses, session.StateVersion); err != nil {
+			return err
+		}
+		if err := tx.Where("session_id = ? AND validity = ?", sessionID, "effective").Find(&decisions).Error; err != nil {
+			return err
+		}
+	}
 	for _, decision := range decisions {
 		route := graph.StartRoute
 		if node, ok := graph.Nodes[decision.FromStepID]; ok {
@@ -663,7 +686,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			if err != nil {
 				return err
 			}
-			if display.Status == "waiting" {
+			if display.ApprovalStepID != "" {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing", false, nil)
 			}
 			if display.Status == "paused" {
@@ -678,16 +701,28 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				req.CommandID, session.ID, req.TargetStepID, req.Operation, req.GraphHash, graph.GraphHash, session.StateVersion)
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
 		}
-		if req.Operation == "retry" || req.Operation == "rewind" ||
-			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {
-			applyRecoveryIntent(session.IntentContext, &targets[0])
-		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
 				targets[0].TargetStepID, "effective").Order("attempt DESC").First(&latest).Error; err != nil {
 				return err
+			}
+			// A bare retry repeats this failed attempt's confirmed request, not
+			// the workflow launch intent or a successful older attempt's request.
+			if req.Operation == "retry" && session.ControllerHost != "external-agent" && isBareRetryInput(currentInputs[targets[0].TaskID]) {
+				var previous orm.SubAgentTask
+				err := tx.Select("params").Where("id = ?", latest.TaskID).First(&previous).Error
+				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				var input struct {
+					CurrentUserInput string `json:"current_user_input"`
+				}
+				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) {
+					targets[0].UserInput = input.CurrentUserInput
+					currentInputs[targets[0].TaskID] = input.CurrentUserInput
+				}
 			}
 			var failedResult struct {
 				Summary    string                       `json:"summary"`
@@ -715,6 +750,10 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 						"user_retry_available":   true})
 			}
 		}
+		if req.Operation == "retry" || req.Operation == "rewind" ||
+			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {
+			applyRecoveryIntent(session.IntentContext, &targets[0])
+		}
 		completedContinue := session.Status == SessionStatusCompleted && len(targets) == 1 &&
 			req.Operation == "execute" && declaredCompletedContinueStep(graph, targets[0].TargetStepID) &&
 			containsProjectionStep(projection.Continue, targets[0].TargetStepID)
@@ -722,6 +761,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
+			if req.Operation == "rewind" {
+				if err := snapshotRecoveryInputs(ctx, tx, &session, graph, req.CommandID, targets[0].TargetStepID); err != nil {
+					return err
+				}
+			}
 			if invalidErr := invalidateForOperation(ctx, tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
@@ -928,6 +972,15 @@ func applyRecoveryIntent(intentContext string, target *transitionTarget) {
 		target.RuntimeInstruction = existing + "\n\n" + instruction
 	} else {
 		target.RuntimeInstruction = instruction
+	}
+}
+
+func isBareRetryInput(input string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.TrimRight(strings.TrimSpace(input), "。.!！"))) {
+	case "", "重试", "重新执行", "retry", "re-run", "rerun", "try again":
+		return true
+	default:
+		return false
 	}
 }
 

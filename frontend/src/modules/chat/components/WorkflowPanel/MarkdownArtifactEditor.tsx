@@ -122,7 +122,8 @@ function WriterAnchorEditor(props: JsxEditorProps) {
   )?.value;
   if (
     typeof id === 'string'
-    && (id.startsWith('block-') || id.startsWith('writer-page-marker-'))
+    && (id.startsWith('block-') || id.startsWith('writer-page-marker-')
+      || /^paper-(?:ref-[\p{L}\p{N}_.-]+|references-(?:start|end))$/u.test(id))
   ) {
     return (
       <span
@@ -146,7 +147,7 @@ function attachOutlineDescription(heading: HTMLElement, item: WriterMarkdownOutl
 
 function internalWriterReferenceLink(target: EventTarget | null): HTMLAnchorElement | null {
   return target instanceof Element
-    ? target.closest<HTMLAnchorElement>('a[href^="#block-"]')
+    ? target.closest<HTMLAnchorElement>('a[href^="#block-"], a[href^="#paper-ref-"]')
     : null;
 }
 
@@ -626,9 +627,8 @@ export function MarkdownArtifactEditor({
   const hasOutline = Boolean(markdownOutline.title || markdownOutline.items.length);
   const referenceTargets = useMemo(
     () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown).map((target) => {
-      const numberingLabel = target.type === 'heading'
-        ? numbering?.entries[target.anchorId.slice('block-'.length)]?.label
-        : undefined;
+      const numberingLabel = target.type === 'reference'
+        ? undefined : numbering?.entries[target.anchorId.slice('block-'.length)]?.label;
       return numberingLabel
         ? { ...target, label: `${numberingLabel} ${target.label}` }
         : target;
@@ -701,6 +701,11 @@ export function MarkdownArtifactEditor({
           target.dataset.writerHeadingMode = numbering?.entries[nodeId]?.mode ?? 'ordered';
           const label = numbering?.entries[nodeId]?.label;
           if (label) target.dataset.writerNumberingLabel = label;
+        } else {
+          const label = numbering?.entries[anchor.anchorId.slice('block-'.length)]?.label;
+          const caption = target.getAttribute('alt') ?? '';
+          const imageBlock = target.closest<HTMLElement>('[data-editor-block-type="image"]');
+          if (imageBlock && label) imageBlock.dataset.writerImageCaption = `${label} ${caption}`.trim();
         }
       });
       const surface = root.querySelector<HTMLElement>('.writer-markdown-editor__surface');
@@ -1089,6 +1094,7 @@ export function MarkdownArtifactEditor({
       dismissSelectionToolbar();
     };
     const dismissOnScroll = (event: Event) => {
+      if (event.target instanceof Node && isMarkdownToolbarInteractionTarget(event.target)) return;
       const root = rootRef.current;
       const surface = root?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
       if (event.target === surface || !root || !(event.target instanceof Node) || !root.contains(event.target)) {
@@ -2189,6 +2195,7 @@ export function MarkdownArtifactEditor({
                                 >
                                   {target.type === 'image'
                                     ? <PictureOutlined />
+                                    : target.type === 'reference' ? <LinkOutlined />
                                     : <FontSizeOutlined />}
                                 </span>
                                 <span className='writer-markdown-editor__reference-option-label'>
