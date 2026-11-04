@@ -179,6 +179,18 @@ EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
     ),
     'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
+ACADEMIC_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Academic Search Content Rules\n'
+        'Use the returned abstract or passage if it supports the answer. When more detail is needed for a '
+        'selected academic search hit, pass the unchanged result to `get_content` or `get_contents` on the '
+        'same provider. Use that reader for the paper even when general web tools are available. If the '
+        'provider has no matching paper or the available text is insufficient, state the evidence gap. '
+        'Distinguish a preview or abstract from the full paper. Cite the original paper ref verbatim '
+        'in the answer text, outside code formatting.',
+    ),
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+}
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
@@ -836,8 +848,8 @@ DEFAULT_TOOLS: list[ToolConfig] = [
             'name': 'AcademicSearchToolkit',
             'desc': (
                 'Search papers, authors, abstracts, and scholarly metadata with the first available '
-                'provider. Use this instead of general web search for academic questions, and fetch '
-                'content only after identifying the relevant paper.'
+                'provider. Use this for academic questions. To read more about a paper found here, '
+                'pass the original hit to get_content or get_contents on the same provider.'
             ),
             'pick_first_valid': True,
             'tools': _ACADEMIC_SEARCH_ENGINE_INSTANCES,
@@ -848,7 +860,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='academic_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
-        appendix_system_prompt=EXTERNAL_SEARCH_CONTENT_APPENDIX,
+        appendix_system_prompt=ACADEMIC_SEARCH_CONTENT_APPENDIX,
     ),
     ToolConfig(
         name='url_fetch',
