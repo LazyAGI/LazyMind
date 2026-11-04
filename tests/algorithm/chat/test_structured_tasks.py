@@ -217,6 +217,7 @@ def test_formula_prompt_distinguishes_full_reading_from_symbol_focus(calls):
     assert 'two plain-text paragraphs' in full_instruction
     assert 'input' in full_instruction and 'output' in full_instruction
     assert 'paper-specific role' in full_instruction
+    assert 'for a loss' in full_instruction and 'for a bound' in full_instruction
 
     focused = request()
     focused.input.data['target_symbol'] = r'\alpha'
