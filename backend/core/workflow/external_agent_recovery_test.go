@@ -40,6 +40,10 @@ func seedRecoveredExternalTask(t *testing.T) (*orm.DB, orm.ExternalAgentWorkflow
 func TestExternalTaskCollectsRecoveredSessionWithoutExecuting(t *testing.T) {
 	db, task, session := seedRecoveredExternalTask(t)
 	history := orm.ChatHistory{ID: externalWorkflowHistoryID(task.ID)}
+	// Compare persisted snapshots; PostgreSQL stores timestamps at microsecond precision.
+	if err := db.First(&session, "id=?", task.SessionID).Error; err != nil {
+		t.Fatal(err)
+	}
 	var beforeSteps []orm.WorkflowSessionStep
 	var beforeArtifacts []orm.WorkflowSlotRevision
 	db.Order("id").Find(&beforeSteps)
@@ -65,7 +69,9 @@ func TestExternalTaskCollectsRecoveredSessionWithoutExecuting(t *testing.T) {
 	}
 	var afterSteps []orm.WorkflowSessionStep
 	var afterArtifacts []orm.WorkflowSlotRevision
-	db.First(&session, "id=?", task.SessionID)
+	if err := db.First(&session, "id=?", task.SessionID).Error; err != nil {
+		t.Fatal(err)
+	}
 	db.Order("id").Find(&afterSteps)
 	db.Order("id").Find(&afterArtifacts)
 	after, _ := json.Marshal([]any{session, afterSteps, afterArtifacts})
@@ -139,11 +145,17 @@ func TestExternalTaskRecoveryRollsBackWhenResultProjectionFails(t *testing.T) {
 	if err := db.Where("id=?", externalWorkflowHistoryID(task.ID)).Delete(&orm.ChatHistory{}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// Use the same database representation on both sides of the rollback check.
+	if err := db.First(&task, "id=?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
 	before, _ := json.Marshal(task)
 	if err := recoverExternalWorkflowTasks(context.Background(), db.DB); err == nil {
 		t.Fatal("missing chat anchor must fail collection")
 	}
-	db.First(&task, "id=?", task.ID)
+	if err := db.First(&task, "id=?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
 	after, _ := json.Marshal(task)
 	if string(before) != string(after) {
 		t.Fatalf("failed collection partially committed: %s", after)
@@ -153,7 +165,7 @@ func TestExternalTaskRecoveryRollsBackWhenResultProjectionFails(t *testing.T) {
 func TestExternalTaskRecoveryRequiresCompletedProjection(t *testing.T) {
 	db, task, _ := seedRecoveredExternalTask(t)
 	// A stale Session label must not substitute for current Runtime completion.
-	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id=?", "successful-retry").Update("status", "awaiting_approval").Error; err != nil {
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id=?", "successful-retry").Update("status", "running").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := recoverExternalWorkflowTasks(context.Background(), db.DB); err != nil {
