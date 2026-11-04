@@ -170,6 +170,13 @@
   font-size: 12px;
   outline: none;
 }
+.document-publication-result-target {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ant-color-text-secondary, #667085);
+}
 .document-publication-results-header {
   display: flex;
   align-items: center;

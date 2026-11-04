@@ -78,9 +78,10 @@ def read_snapshot(task_id, task):
                             and output.get('format') in ('json', 'python', 'text')
                             and output.get('mode') in ('streaming', 'buffered', 'complete', 'interrupted')):
                         if channel == 'reasoning' and (output['format'] != 'text'
-                                or len(output['text'].encode('utf-8')) > MAX_REASONING):
+                                                       or len(output['text'].encode('utf-8')) > MAX_REASONING):
                             continue
-                        step[channel] = {key: output[key] for key in ('text', 'format', 'mode', 'truncated') if key in output}
+                        step[channel] = {key: output[key]
+                                         for key in ('text', 'format', 'mode', 'truncated') if key in output}
                         step[channel]['estimated_tokens'] = estimate_tokens(output['text'])
                 steps.append(step)
             value.update(execution_id=trace_id, revision=public['revision'], process_steps=steps,
@@ -88,7 +89,8 @@ def read_snapshot(task_id, task):
                          error=public_error(public.get('error')))
             if not value.get('error') and task.get('status') == 'failed':
                 summary_path = source.with_name('summary.json')
-                if summary_path.resolve().is_relative_to(WORKSPACES.resolve()) and summary_path.stat().st_size <= 2 * 1024 * 1024:
+                if (summary_path.resolve().is_relative_to(WORKSPACES.resolve())
+                        and summary_path.stat().st_size <= 2 * 1024 * 1024):
                     saved = json.loads(summary_path.read_text())
                     if saved.get('task_id') == task_id and saved.get('trace_id') == trace_id:
                         value['error'] = public_error(saved.get('error'))

@@ -636,6 +636,7 @@ async def _run_completion_review_scenario(
     final='Analysis delivered.',
     before_final=None,
     on_chunk=None,
+    tool_events=(),
 ):
     fake_llm = MagicMock()
     fake_llm.globals._init_sid = lambda sid: None
@@ -657,6 +658,8 @@ async def _run_completion_review_scenario(
         async def stream(self, _llm, _plan):
             if before_final is not None:
                 await before_final()
+            for event in tool_events:
+                yield 'event', event
             yield 'final', final
 
     monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
@@ -2515,4 +2518,41 @@ async def test_issue869_material_collection_does_not_require_skip_marker(monkeyp
     assert _terminal(events)['status'] == ('failed' if missing_required else 'succeeded')
     if missing_required:
         assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('terminal, saved, tool_failed', [
+    (True, True, False), (False, True, False), (True, False, False), (True, True, True),
+])
+async def test_workflow_terminal_delivery_uses_saved_result_summary(
+    monkeypatch, tmp_path, terminal, saved, tool_failed,
+):
+    model = MagicMock()
+    result = {'status': 'ok', 'paper_count': 53, 'artifact': {'key': 'result'}}
+    final = repr(result) if terminal else 'The research findings are ready.'
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={'required_output_artifact_keys': ['result'],
+                'output_slot_types': {'result': 'json'},
+                'terminal_tools': ['publish_result']},
+        output_slots=['result'],
+        artifacts=[{'slot': 'result', 'content_type': 'json', 'seq': 1,
+                    'value': {'data': {'findings': ['Actual saved finding.']}}}] if saved else [],
+        tool_events=[{'tag': 'tool_results', 'tool_results': [
+            {'name': 'publish_result' if terminal else 'read_paper',
+             'result': 'Publisher failed' if tool_failed else result},
+        ]}],
+        final=final,
+    )
+    completion = _terminal(events)
+    if tool_failed:
+        assert completion['status'] == 'failed'
+        assert 'Publisher failed' in completion['summary']
+    elif not saved:
+        assert completion['status'] == 'failed'
+        assert completion['current_phase'] == 'missing_required_artifacts'
+    else:
+        assert completion['status'] == 'succeeded'
+        assert completion['summary'] == ('本步骤结果已保存。' if terminal else final)
     model.share.assert_not_called()

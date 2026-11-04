@@ -2,11 +2,14 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/codexplugin"
@@ -16,6 +19,13 @@ import (
 )
 
 func TestPluginConnectOfflineMigrationFailureAndDisconnect(t *testing.T) {
+	originalPrepare := prepareCodexDesktop
+	originalHealth := startupHealth
+	prepareCalls := 0
+	var prepareError error
+	prepareCodexDesktop = func(context.Context, string) error { prepareCalls++; return prepareError }
+	startupHealth = func(context.Context, string) string { return "" }
+	t.Cleanup(func() { prepareCodexDesktop = originalPrepare; startupHealth = originalHealth })
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX executable fixtures")
 	}
@@ -65,6 +75,9 @@ exit 1
 	if status := adapter.Connect(context.Background()); status.State != agentintegration.Failed {
 		t.Fatalf("expected failed installation: %+v", status)
 	}
+	if prepareCalls != 0 {
+		t.Fatal("restarted Codex after a failed plugin install")
+	}
 	if data, _ := os.ReadFile(path); string(data) != original {
 		t.Fatal("failed install changed original MCP")
 	}
@@ -83,9 +96,25 @@ exit 1
 	if string(after) != string(events) {
 		t.Fatal("repeated connect reinstalled plugin")
 	}
+	if prepareCalls != 2 {
+		t.Fatal("installed plugin skipped desktop connection")
+	}
+	prepareError = errors.New("Codex refused to close")
+	if status := adapter.Connect(context.Background()); status.State != agentintegration.Failed || !strings.Contains(status.Message, prepareError.Error()) {
+		t.Fatalf("installed plugin hid a failed restart: %+v", status)
+	}
+	prepareError = nil
 	record, err := codexplugin.Read()
 	if err != nil {
 		t.Fatal(err)
+	}
+	heartbeat, _ := json.Marshal(map[string]any{"connector_id": record.ConnectorID, "ready": false,
+		"checked_at": time.Now().UnixMilli(), "issue": "capability_unavailable"})
+	if err := os.WriteFile(record.PairingFile+".codex-status.json", heartbeat, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status := adapter.Status(context.Background()); status.State != agentintegration.Enabled || status.Connection == nil || !status.Connection.MCPConfigured || status.Connection.ControlReady || status.Issue == nil || status.Issue.Code != "capability_unavailable" {
+		t.Fatalf("installed plugin and native compatibility were conflated: %+v", status)
 	}
 	if status := adapter.Disconnect(context.Background()); status.State != agentintegration.Ready {
 		t.Fatalf("disconnect failed: %+v", status)

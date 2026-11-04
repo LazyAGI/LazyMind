@@ -291,7 +291,23 @@ steps:
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:
-      - {material: seed_pool, required: false, transport: path}
+      - material: seed_pool
+        required: true
+        transport: path
+        alternatives:
+          - {material: paper_input}
+          - {material: manuscript_file}
+          - {material: manuscript_text}
+          - {material: research_topic_pool}
+          - {material: research_topic_document}
+          - {material: literature_review_pool}
+          - {material: literature_review_document}
+          - {material: experiment_pool}
+          - {material: experiment_document}
+          - {material: data_analysis_pool}
+          - {material: data_analysis_document}
+          - {material: write_outline_pool}
+          - {material: write_outline_document}
       - {material: paper_input, required: false, transport: path}
       - {material: manuscript_file, required: false, transport: path}
       - {material: manuscript_text, required: false, transport: path}

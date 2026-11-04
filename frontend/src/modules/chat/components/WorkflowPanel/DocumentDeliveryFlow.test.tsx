@@ -46,7 +46,7 @@ vi.mock('./FilePreviewDrawer', () => ({ FilePreviewDrawer: () => null }));
 vi.mock('@/modules/chat/components/MarkdownViewer', () => ({ default: ({ children }: { children: string }) => <div>{children}</div> }));
 const api = vi.hoisted(() => ({
   getPublicationForArtifact: vi.fn(), listDocumentProviders: vi.fn(), saveDocumentArtifact: vi.fn(), publishDocument: vi.fn(), getSlots: vi.fn(),
-  getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn(),
+  getPublicationTargets: vi.fn(), preflightPublication: vi.fn(async () => ({ data: { data: { targets: [] } } })), createPublicationGroup: vi.fn(),
 }));
 const confirm = vi.hoisted(() => vi.fn());
 vi.mock('@/modules/chat/utils/request', async (original) => ({

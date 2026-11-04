@@ -104,7 +104,8 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   expect(capture.editor!.getRootElement()).toHaveTextContent('Unsaved paragraph.');
   // A read-only source view must not crash the editor or expose a silently
   // reformatted replacement when its mapping is unavailable.
-  document.querySelector<HTMLDetailsElement>('.writer-document-options')!.open = true;
+  const menu = document.querySelector<HTMLDetailsElement>('.writer-document-options')!;
+  act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
   fireEvent.click(screen.getByRole('button', { name: '源码' }));
   expect(onSave).not.toHaveBeenCalled();
   expect(screen.queryByRole('textbox', { name: '源码' })).not.toBeInTheDocument();
@@ -158,4 +159,30 @@ it.each(['ref-001', 'SRC-001', 'KB-001', 'source.v2_甲'])('preserves and naviga
   expect(link.textContent).toBe('[1]');
   fireEvent.click(link);
   expect(surface.scrollTo).toHaveBeenCalled();
+}, 15000);
+
+it('selects a bibliography entry and saves a canonical citation through the real editor', async () => {
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect(20, 40, 160, 20) });
+  const source = '# 论文\n\nOriginal paragraph.\n\n'
+    + '<a id="paper-references-start"></a>\n\n**参考文献**\n\n'
+    + '<a id="paper-ref-SRC-甲"></a>\n\n[1] Author. Study.\n\n'
+    + '<a id="paper-references-end"></a>';
+  const onSave = vi.fn(async (markdown: string) => ({ markdown, revision: 2 }));
+  const { container } = render(<MarkdownArtifactEditor markdown={source} sourceRevision={1} onSave={onSave} />);
+  await waitFor(() => expect(capture.editor).not.toBeNull());
+  const paragraph = Array.from(container.querySelectorAll('p')).find(p => p.textContent === 'Original paragraph.')!;
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  fireEvent.mouseUp(paragraph);
+  const trigger = await screen.findByTitle(i18n.t('chat.writerIR.crossReference'));
+  fireEvent.mouseDown(trigger);
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByTitle('[1] Author. Study.'));
+  await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), { timeout: 3000 });
+  expect(publishedSource(onSave.mock.calls[0][0])).toBe(source.replace(
+    'Original paragraph.', 'Original paragraph.[\\[1\\]](#paper-ref-SRC-甲)',
+  ));
+  expect(container.querySelector('a[href="#paper-ref-SRC-甲"]')).toHaveTextContent('[1]');
 }, 15000);

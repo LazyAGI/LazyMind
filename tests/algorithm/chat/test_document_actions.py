@@ -34,6 +34,8 @@ def test_v1_registry_has_exact_actions_phases_and_immutable_specs():
         "builtin:document.convert_document.v1": {"preview", "execute"},
         "builtin:document.write_document.v1": {"execute"},
         "builtin:document.wechat_draft_url.v1": {"preview"},
+        "builtin:document.publication_target.v1": {"preview"},
+        "builtin:document.reconcile.v1": {"preview"},
     }
     assert specs["builtin:document.sync_document.v1"]["execute"].external_side_effects
     assert all(
@@ -556,3 +558,104 @@ def test_native_conversion_rejects_copy_snapshot():
             {'provider': 'notion', 'document': '# Unsaved'},
             artifact={'data': '# Original'},
         )
+
+
+@pytest.mark.parametrize(('revision', 'writable', 'expected'), [
+    ('changed', True, 'PUBLICATION_TARGET_CHANGED'),
+    ('original', False, 'PUBLICATION_PERMISSION_REQUIRED'),
+    ('original', True, ''),
+])
+def test_github_publication_preflight_checks_remote_revision_and_permission(monkeypatch, revision, writable, expected):
+    from types import SimpleNamespace
+    from lazyllm.tools.writer.data_models import TargetDocument
+    from lazymind.document_tools import resources
+    target = TargetDocument(adapter='github', uri='https://github.com/fixture/repo/blob/main/note.md',
+                            meta={'revision': 'original', 'owner': 'fixture', 'repo': 'repo'})
+    loaded = target.model_copy(deep=True)
+    loaded.meta['revision'] = revision
+    # Expose read capabilities only; attempting a write would fail this fixture.
+    provider = SimpleNamespace(
+        load_document=lambda value: {'target_document': loaded},
+        _target_type=lambda value: 'repository',
+        _fs=lambda kind: SimpleNamespace(_repository=lambda owner, repo: {'permissions': {'push': writable}}),
+    )
+    monkeypatch.setattr(resources, 'get_writer_provider', lambda name: provider)
+    result = invoke_document_action('builtin:document.publication_target.v1', 'preview', {
+        'provider': 'github', 'target_document': target.model_dump(),
+    })
+    assert result['state'] == ('blocked' if expected else 'ready')
+    assert result.get('code', '') == expected
+    assert target.meta['revision'] == 'original'
+
+
+@pytest.mark.parametrize('saved_target', [False, True])
+@pytest.mark.parametrize(('writable', 'exists', 'expected'), [
+    (True, False, ''), (False, False, 'PUBLICATION_PERMISSION_REQUIRED'),
+    (True, True, 'PUBLICATION_TARGET_EXISTS'),
+])
+def test_github_creation_preflight_keeps_prepared_branch_and_directory(
+    monkeypatch, saved_target, writable, exists, expected,
+):
+    from lazyllm.tools.fs.supplier.github import GitHubRepoFS, GitHubFSError
+    from lazymind.document_tools.resources import WriterResourceCapabilities
+
+    access = {'writable': True, 'exists': False}
+    calls = []
+
+    def api(self, method, path, **kwargs):
+        calls.append((method, path, kwargs.get('params')))
+        assert method == 'GET', 'preflight must not create a file or PR'
+        if path == '/repos/fixture/docs':
+            return {'default_branch': 'other', 'permissions': {'push': access['writable']}}
+        if path == '/repos/fixture/docs/git/ref/heads/release':
+            return {'object': {'sha': 'branch-sha'}}
+        if '/git/ref/heads/' in path:
+            raise GitHubFSError('GITHUB_BRANCH_NOT_FOUND', 'fixture', status_code=404)
+        assert kwargs['params'] == {'ref': 'release'}
+        if path == '/repos/fixture/docs/contents/guides':
+            return []
+        assert path == '/repos/fixture/docs/contents/guides/Latest.md'
+        if access['exists']:
+            return {'type': 'file'}
+        raise GitHubFSError('GITHUB_TARGET_NOT_FOUND', 'fixture', status_code=404)
+
+    monkeypatch.setattr(GitHubRepoFS, '_api', api)
+    parent = 'https://github.com/fixture/docs/tree/release/guides'
+    prepared = json.loads(WriterResourceCapabilities().resolve_create_target('Create a guide at ' + parent))
+    assert prepared['target_document']['meta']['create_pending']
+    access.update(writable=writable, exists=exists)
+    args = {'provider': 'github', 'title': 'Latest', 'parent_uri': '' if saved_target else 'Publish to ' + parent}
+    if saved_target:
+        args['target_document'] = prepared['target_document']
+    result = invoke_document_action('builtin:document.publication_target.v1', 'preview', args)
+    assert result['state'] == ('blocked' if expected else 'ready')
+    assert result.get('code', '') == expected
+    if not expected:
+        target = result['target_document']
+        assert target['meta']['create_pending']
+        assert target['meta']['ref'] == 'release'
+        assert target['meta']['directory'] == 'guides'
+        assert target['title'] == 'Latest'
+        assert ('GET', '/repos/fixture/docs/contents/guides/Latest.md', {'ref': 'release'}) in calls
+
+
+@pytest.mark.parametrize('parent', [
+    'Publish the guide',
+    'Publish to https://github.com/fixture/first or https://github.com/fixture/second',
+])
+def test_github_creation_preflight_requires_one_destination(monkeypatch, parent):
+    from lazyllm.tools.fs.supplier.github import GitHubRepoFS
+
+    def api(self, method, path, **kwargs):
+        assert method == 'GET'
+        if path.endswith('/git/ref/heads/main'):
+            return {'object': {'sha': 'branch-sha'}}
+        assert path in ('/repos/fixture/first', '/repos/fixture/second')
+        return {'default_branch': 'main', 'permissions': {'push': True}}
+
+    monkeypatch.setattr(GitHubRepoFS, '_api', api)
+    result = invoke_document_action('builtin:document.publication_target.v1', 'preview', {
+        'provider': 'github', 'title': 'Guide', 'parent_uri': parent,
+    })
+    assert result['state'] == 'blocked'
+    assert result['code'] == 'PUBLICATION_TARGET_UNAVAILABLE'

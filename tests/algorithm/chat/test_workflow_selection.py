@@ -13,7 +13,7 @@ from lazymind.chat.workflow.workflow_manager import (
     _workflow_trigger_tools,
     enforce_startup_clarification_policy,
     resolve_workflow_injection,
-    workflow_startup_clarification_already_asked,
+    _merge_startup_clarification_context,
 )
 from lazymind.workflow_sdk import WorkflowClientError
 
@@ -485,6 +485,7 @@ def test_fixed_startup_choice_policy_overrides_model_other_option():
         'text': '是否为这份 PPT 启用 AI 底图？',
         'type': 'single',
         'choices': ['启用｜为每页生成独立 AI 底图', '不启用｜使用纯色、渐变和矢量装饰'],
+        'choice_policy': 'fixed',
         'allow_other': False,
     }]
 
@@ -506,7 +507,7 @@ def test_seed_startup_choice_policy_remains_open_ended():
     assert enforce_startup_clarification_policy(questions, runtime) == questions
 
 
-def test_startup_clarification_is_single_shot_and_default_trigger_merges_context():
+def test_default_trigger_merges_startup_clarification_context():
     runtime = {
         'clarification_fields': [
             {'id': 'topic', 'question': '主题是什么？', 'type': 'text'},
@@ -532,8 +533,6 @@ def test_startup_clarification_is_single_shot_and_default_trigger_merges_context
         {'role': 'tool', 'name': 'ask_user', 'tool_call_id': 'ask-1',
          'content': 'The user submitted the form.'},
     ]
-    assert workflow_startup_clarification_already_asked(history, runtime)
-
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
         'session_id': 'session-1', 'state_version': 1,
@@ -614,7 +613,7 @@ def test_completed_historical_clarification_does_not_block_a_new_workflow_reques
         {'role': 'user', 'content': '再做一份 PPT'},
     ]
 
-    assert not workflow_startup_clarification_already_asked(history, runtime)
+    assert _merge_startup_clarification_context('再做一份 PPT', history, runtime) == '再做一份 PPT'
 
 
 def test_interrupted_historical_clarification_does_not_block_a_new_request():
@@ -648,16 +647,10 @@ def test_interrupted_historical_clarification_does_not_block_a_new_request():
         # The workflow crashed here, before an assistant completion was saved.
     ]
 
-    assert not workflow_startup_clarification_already_asked(
-        history,
-        runtime,
-        current_query='重新做一个春节 PPT',
-    )
-    assert workflow_startup_clarification_already_asked(
-        history,
-        runtime,
-        current_query='不启用',
-    )
+    assert _merge_startup_clarification_context('重新做一个春节 PPT', history, runtime) == '重新做一个春节 PPT'
+    merged = _merge_startup_clarification_context('不启用', history, runtime)
+    assert '做一个春节 PPT' in merged
+    assert 'Clarification answers:\n不启用' in merged
 
 
 def test_clarification_answer_turn_can_pass_merged_request_context_to_trigger():
@@ -1454,26 +1447,34 @@ def test_completed_actions_are_opt_in_and_domain_neutral():
     assert 'source_session' not in policy['completed_actions'][0]['params']
 
 
-def test_local_markdown_patch_preserves_other_sections_and_draft_version():
+@pytest.mark.parametrize('content_type', ['text', 'file'])
+def test_local_markdown_patch_preserves_other_sections_and_draft_version(content_type):
     from lazymind.chat.workflow.workflow_manager import _safe_session_tools
     toolkit = MagicMock()
     original = '## 第一节\n原内容\n\n## 第二节\n保持原样\n'
     toolkit.list_artifacts.return_value = {'artifacts': [
-        {'artifact_id': 'outline-7', 'slot': 'deck_outline', 'revision': 7},
+        {'artifact_id': 'outline-7', 'slot': 'deck_outline', 'revision': 7, 'content_type': content_type},
     ]}
     toolkit.read_artifact.return_value = {
-        'revision': 7, 'draft_version': 3, 'content_type': 'text',
+        'revision': 7, 'draft_version': 3, 'content_type': content_type,
         'value': {'text': original, 'meta': {'title': 'Outline'}},
     }
     toolkit.patch_artifact.return_value = {'revision': 8}
     tool = next(tool for tool in _safe_session_tools(toolkit, 'session')
                 if tool.__name__ == 'patch_artifact_text')
-    tool('deck_outline', '## 第一节\n原内容', '## 第一节\n新内容')
+    tool('deck_outline', '## 第一节\n原内容', '## 1. 第一节\n新内容')
     toolkit.patch_artifact.assert_called_once_with(
         'outline-7', 7, {'text': original.replace('原内容', '新内容'), 'meta': {'title': 'Outline'}},
-        'text', '', base_draft_version=3,
+        content_type, '', base_draft_version=3,
     )
     toolkit.advance_step.assert_not_called()
+    toolkit.patch_artifact.reset_mock()
+    replacement = original.replace('原内容', '新内容').replace('## 第一节', '## 1.1. 第一节')
+    tool('deck_outline', original, replacement)
+    toolkit.patch_artifact.assert_called_once_with(
+        'outline-7', 7, {'text': original.replace('原内容', '新内容'), 'meta': {'title': 'Outline'}},
+        content_type, '', base_draft_version=3,
+    )
 
 
 @pytest.mark.parametrize('excerpt', ['', 'missing', 'repeat'])
@@ -1512,7 +1513,7 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
         importer.return_value = {'resource_id': 'r1', 'revision': 1, 'content_hash': 'sha256:test'}
         factory.return_value.get_state.return_value = {'projection': {'ready': ['analyze_requirements']}}
         contribution = resolve_workflow_injection(
-            None, current_query='制作13页中国新年PPT',
+            None, current_query='制作13页中国新年PPT，不生成AI底图',
             allowed_workflow_refs=['builtin:ppt'] if selected else None,
             workflow_catalog=[{'workflow_ref': 'builtin:ppt', 'workflow_id': 'ppt', 'revision_id': 'r1'}],
             workflow_activations=[{'workflow_ref': 'builtin:ppt', 'workflow_id': 'ppt', 'revision_id': 'r1',

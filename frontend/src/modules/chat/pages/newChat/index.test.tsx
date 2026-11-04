@@ -3,7 +3,10 @@ import { forwardRef, useImperativeHandle } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import {
+  NEW_CHAT_INPUT_DRAFT_KEY,
+  useChatInputStore,
+} from "@/modules/chat/store/chatInput";
 import NewChatPage from "./index";
 import type { ShowcaseCase } from "@/modules/showcase/api";
 
@@ -197,10 +200,6 @@ vi.mock("@/modules/chat/store/chatThink", () => ({
 }));
 vi.mock("@/modules/showcase/api", () => ({
   listShowcaseCases: mocks.listShowcaseCases,
-  matchesShowcaseEntryType: (capabilityType: string, entryType: string) =>
-    entryType === "chat"
-      ? capabilityType === "chat"
-      : capabilityType === "work" || capabilityType === "workflow",
 }));
 vi.mock("@/modules/showcase/useFeaturedCapabilityBinding", () => ({
   useFeaturedCapabilityBinding: () => ({
@@ -215,7 +214,7 @@ vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
 
 describe("NewChatPage featured templates", () => {
   beforeEach(() => {
-    useChatInputStore.getState().setModeDraft();
+    useChatInputStore.getState().clearAllInputContents();
     window.sessionStorage.clear();
     mocks.setThinkingDepth.mockClear();
     mocks.listShowcaseCases.mockReset();
@@ -312,6 +311,62 @@ describe("NewChatPage featured templates", () => {
     await waitFor(() => expect(mocks.latestChatInputProps.runInBackground).toBe(true));
     expect(mocks.latestChatInputProps.value).toBe('Keep this draft @');
     expect(mocks.clearFiles).toHaveBeenCalledTimes(cleared);
+  });
+
+  it('restores an unsent welcome draft after leaving and reopening Quick Q&A', async () => {
+    const firstView = render(
+      <MemoryRouter initialEntries={['/agent/chat/home']}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mocks.latestChatInputProps).not.toBeNull());
+
+    act(() => mocks.latestChatInputProps.onChange('不要丢失这段快速问答草稿'));
+    expect(
+      useChatInputStore.getState().getInputContent(NEW_CHAT_INPUT_DRAFT_KEY),
+    ).toBe('不要丢失这段快速问答草稿');
+
+    firstView.unmount();
+    mocks.latestChatInputProps = null;
+    render(
+      <MemoryRouter initialEntries={['/agent/chat/home']}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.value).toBe('不要丢失这段快速问答草稿');
+    });
+  });
+
+  it('restores an unsent New task draft after visiting another conversation', async () => {
+    window.sessionStorage.setItem('chat_new_run_in_background', '1');
+    render(
+      <MemoryRouter initialEntries={['/agent/chat/home']}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+    });
+
+    act(() => mocks.latestChatInputProps.onChange('继续完成这项后台任务'));
+    act(() => {
+      window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: 'another-conversation', source: 'sidebar' },
+      }));
+    });
+    useChatInputStore.getState().setModeDraft({ text: '', mentions: [], files: [] });
+    act(() => {
+      window.dispatchEvent(new CustomEvent('lazymind:chat-select-conversation', {
+        detail: { conversationId: '', runInBackground: true, source: 'sidebar' },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+      expect(mocks.latestChatInputProps.value).toBe('继续完成这项后台任务');
+    });
   });
 
   it('restores the draft transferred from a historical conversation on mode change', async () => {
@@ -697,5 +752,17 @@ describe("NewChatPage featured templates", () => {
     expect(mocks.latestChatInputProps.showcaseSelection.skill.moreLabel).toBe(
       "showcase.exploreMoreCapabilities",
     );
+  });
+
+  it.each(["chat", "work"])("opens the paper collection view from %s quick selection", async (mode) => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ ...featuredCase, id: "paper-reading", title: "论文阅读", type: "page", page_action: "open_paper_library", tasks: [] }], categories: [] });
+    render(<MemoryRouter initialEntries={[`/agent/chat/home?showcase_entry=${mode}`]}><Routes>
+      <Route path="/agent/chat/home" element={<NewChatPage />} />
+      <Route path="/lib/knowledge/list" element={<span>论文集选择</span>} />
+    </Routes></MemoryRouter>);
+    await waitFor(() => expect(mocks.latestChatInputProps.showcaseSelection.skill.options[0]?.label).toBe("论文阅读"));
+    act(() => mocks.latestChatInputProps.showcaseSelection.skill.onChange("paper-reading"));
+    expect(await screen.findByText("论文集选择")).toBeInTheDocument();
+    expect(mocks.latestChatInputProps.value).not.toContain("论文阅读");
   });
 });

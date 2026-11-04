@@ -225,7 +225,7 @@ def draw_ecdf(ax, series, methods, colors, edges, line_styles, title, xlabel, xl
         raise ValueError('Every distinct method needs its own supplied appearance; do not truncate groups')
     paper_axes(ax, title, xlabel, 'Cumulative probability', True)
     results = {}
-    for method, color, edge, line_style in zip(methods, colors, edges, line_styles):
+    for method, _color, edge, line_style in zip(methods, colors, edges, line_styles):
         values = np.sort(numeric_vector(series[method]))
         if not len(values) or values[0] < xlim[0] or values[-1] > xlim[1]:
             raise ValueError('Every valid observation must fit in the ECDF range')

@@ -20,3 +20,7 @@ export function isLearningActionCompatible(action: LearningSelectionAction, text
   const languageMatches = !action.languages?.length || action.languages.includes("*") || action.languages.includes(language) || (hasHan && action.languages.some((item) => item === "zh-Hant" || item === "lzh"));
   return languageMatches && (!action.subjectKinds?.length || action.subjectKinds.includes(subjectKind));
 }
+
+export function visibleLearningSelectionActions(actions: LearningSelectionAction[], text: string, hasTranslationButton: boolean): LearningSelectionAction[] {
+  return actions.filter((action) => isLearningActionCompatible(action, text) && !(hasTranslationButton && action.key === "translation"));
+}

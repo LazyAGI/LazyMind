@@ -2,6 +2,7 @@ package academic
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -9,6 +10,7 @@ import (
 	"lazymind/core/paperlibrary"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +35,31 @@ func confirmUpload(t *testing.T, paper paperlibrary.Paper, id, key string, confi
 		t.Fatal(e)
 	}
 	return &out
+}
+func TestLibraryPdfConfirmationPreservesLongAuthorListAndFiltersPunctuation(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	paper := libraryDraft("paper", "Large collaboration", "10.1234/collaboration")
+	authors := []string{"DeepSeek-AI", "张三", "Ke Xu", "Ke Xu"}
+	for i := range 1000 {
+		authors = append(authors, fmt.Sprintf("Author %d", i))
+	}
+	paper.Metadata.Authors = append([]string{" ", " : ", "：", "—", "..."}, authors...)
+	if _, _, err := findOrCreateWork(t.Context(), db, WorkInput{Title: paper.Metadata.Title, Authors: slices.Clone(paper.Metadata.Authors), DOI: paper.Metadata.Identifiers.DOI}); err != nil {
+		t.Fatal(err)
+	}
+	uploadReceipt(t, db, "papers", "pdf", "upload", paper.ID, "hash")
+	confirmUpload(t, *paper, "pdf", "upload", true)
+	view := readLibrary(t, "papers")
+	if view.PaperCount != 1 || view.PDFAttachmentCount != 1 || !slices.Equal(view.Data.Papers[0].Metadata.Authors, authors) {
+		t.Fatal("PDF import lost valid author entries or retained punctuation")
+	}
+	var item orm.PaperImportItem
+	if err := db.Where("id='upload'").Take(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	if item.Stage != "done" || item.LibraryPaperID != paper.ID {
+		t.Fatal("PDF association was not completed", item.Stage)
+	}
 }
 func TestLibraryCorrectedIdentityOwnsNewPdfAndDetachIsDurable(t *testing.T) {
 	db := paperLibraryTestDB(t)

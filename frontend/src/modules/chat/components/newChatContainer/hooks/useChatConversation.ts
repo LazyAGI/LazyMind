@@ -33,7 +33,7 @@ import {
 } from "@/modules/chat/constants/chat";
 import { streamManager, type RunTerminal } from "@/modules/chat/utils/StreamManager";
 import { MailConfirmationReplayStore, mailConfirmationMetadata, mailConfirmationTurnSignature } from "@/modules/chat/utils/mailConfirmationReplay";
-import { ChatServiceApi } from "@/modules/chat/utils/request";
+import { ChatServiceApi, type ConversationFollowUp } from "@/modules/chat/utils/request";
 import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
 import UIUtils from "@/modules/chat/utils/ui";
 import {
@@ -48,6 +48,7 @@ import {
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
+import { appendAcceptedSteering, applySteeringTimeline, assignSteeringIntent } from "@/modules/chat/utils/steeringTimeline";
 import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
 import {
   buildCitedMessageText,
@@ -1131,7 +1132,11 @@ export function useChatConversation({
     }
 
     const updateMessageListInternal = (list: any[]) => {
-      const newList = [...list];
+      const newList = Array.isArray(result.steering_replay)
+        ? applySteeringTimeline(list, result.history_id, result.steering_replay, true, result.model_output)
+        : Array.isArray(result.steering_applied)
+          ? applySteeringTimeline(list, result.history_id, result.steering_applied)
+          : [...list];
       const runtimeEventType = result.runtime_event?.type;
       const runtimeEventData = result.runtime_event?.data;
       const scheduledRetry =
@@ -1164,7 +1169,7 @@ export function useChatConversation({
       let assistantMessageIndex = newList.length - 1;
       let matchesHistory = false;
       if (result.history_id) {
-        const existingAssistantIndex = newList.findIndex(
+        const existingAssistantIndex = newList.findLastIndex(
           (item) =>
             item?.role === RoleTypes.ASSISTANT &&
             item?.history_id === result.history_id,
@@ -1278,7 +1283,7 @@ export function useChatConversation({
       };
 
       newList[assistantMessageIndex] = assistantMessage;
-      return newList;
+      return assignSteeringIntent(newList, result.history_id || assistantMessage.history_id, result.intent_updated);
     };
 
     if (isActiveConversation) {
@@ -2088,7 +2093,9 @@ export function useChatConversation({
     setMessageList((current) => {
       if (currentConversationIdRef.current !== id) return current;
       const merged = [...current];
-      const messageKey = (item: any) => `${item.role}:${item.history_id}`;
+      const messageKey = (item: any) => item.steering_follow_up_id
+        ? `${item.role}:steering:${item.steering_follow_up_id}`
+        : `${item.role}:${item.history_id}`;
       const keys = new Set(current.filter((item) => item.history_id).map(messageKey));
       const records = new Map<string, any>();
       for (const item of current) {
@@ -2099,7 +2106,11 @@ export function useChatConversation({
       for (const record of history) {
         if (record.id && !records.has(record.id)) records.set(record.id, record);
       }
-      for (const item of buildChatMessageListFromHistory(history)) {
+      const pageItems = buildChatMessageListFromHistory(history);
+      const pageOrder = new Map(
+        pageItems.map((item, index) => [messageKey(item), index]),
+      );
+      for (const item of pageItems) {
         if (keys.has(messageKey(item))) continue;
         const historyId = item.original_history_id || item.history_id;
         const record = records.get(historyId) || item;
@@ -2112,6 +2123,15 @@ export function useChatConversation({
             || String(existingRecord.create_time || "").localeCompare(String(record.create_time || ""))
             || existingId.localeCompare(historyId);
           if (order !== 0) return order > 0;
+          const existingPageOrder = pageOrder.get(messageKey(existing));
+          const itemPageOrder = pageOrder.get(messageKey(item));
+          if (
+            existingPageOrder !== undefined &&
+            itemPageOrder !== undefined &&
+            existingPageOrder !== itemPageOrder
+          ) {
+            return existingPageOrder > itemPageOrder;
+          }
           if (item.role === RoleTypes.USER) return existing.role !== RoleTypes.USER;
           return item.archived_failure && existing.role === RoleTypes.ASSISTANT && !existing.archived_failure;
         });
@@ -2511,8 +2531,22 @@ export function useChatConversation({
     scheduleStreamRecovery(conversationId);
   }
 
+  function showAcceptedSteering(item: ConversationFollowUp) {
+    if (item.conversation_id !== currentConversationIdRef.current || !item.target_history_id) return;
+    const list = appendAcceptedSteering(messageListRef.current, item.target_history_id, {
+      id: item.id, text: item.text,
+      accepted_at: item.accepted_at ? Date.parse(item.accepted_at) / 1000 : undefined,
+    });
+    if (list === messageListRef.current) return;
+    messageListRef.current = list;
+    setMessageList(list);
+    conversationMessagesCache.current.set(item.conversation_id, list);
+    streamManager.saveMessageList(item.conversation_id, list);
+  }
+
   return {
     modelFallbackNotificationHolder,
+    showAcceptedSteering,
     creationError,
     draftWorkspace,
     messageList,

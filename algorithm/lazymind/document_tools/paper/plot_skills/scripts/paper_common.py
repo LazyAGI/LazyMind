@@ -41,7 +41,7 @@ def configure(style):
                          'pdf.fonttype': 42, 'ps.fonttype': 42, 'svg.fonttype': 'none'})
     fonts = {font.name for font in font_manager.fontManager.ttflist}
     fallback = next((name for name in ('Noto Serif CJK SC', 'Noto Serif CJK JP',
-                                      'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Arial Unicode MS')
+                                       'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Arial Unicode MS')
                      if name in fonts), None)
     if fallback:
         plt.rcParams['font.family'] = [*plt.rcParams['font.serif'], fallback]

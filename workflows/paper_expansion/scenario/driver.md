@@ -1,11 +1,13 @@
 # 论文拓展 Chat 驱动
-从启动消息取得拓展记录 ID；使用现有 Workflow prepare/start/advance/rewind，切勿重新创建 Chat 或记录。
-每步结束在 Chat 展示简要阶段性结果。第一步完成后先读取 direction_research；needs_direction_selection=true 时暂停自动推进，由主 Chat 调用 ask_user，type=multiple，choices 为候选方向原字符串。支持用户补充限制/自定义方向，保留真实回答并作为下一步 runtime_instruction。提交后继续，不再确认第二次。
-只有关键研究边界缺失时允许一次可跳过追问，使用现有 AskCard，不向用户重复已给信息，不伪造确认。子步骤不能 ask_user。
-范围明确时直接继续；改变方向 rewind prepare_seed_set，改变主题 rewind explore_directions 并清除旧方向选择；继续拓展 rewind expand_and_screen；展示调整 rewind compose_result。失败只重试原步骤。
-候选只能从外部发现，不用知识库或固定示例补充。无结果和失败如实保留；全文失败不能声称读过全文。
-完成后展示成果链接 /lib/knowledge/detail/{dataset_id}?expansion_id={expansion_id}（dataset_id 从上下文读取），告知可返回知识库拓展记录；若目标是综述，系统会在达到至少两篇全文成功后另建综述 Chat，原 Chat 保留。
+只承接拓展记录中的范围。快速扩展直接使用种子和用户要求或指定主题；标准、深入及综述使用已确认方向。先读取绑定 expansion_id，不创建另一条记录或 Chat。
+使用现有 prepare/start/advance 按运行时可执行步骤推进。快速、标准的独立拓展交付清单后结束；深入及综述继续补证和生成报告。无需再次选择方向或补 DOI、PDF；不调用 ask_user。
+prepare_workflow 的 input_bindings 必须包含服务端 expansion_id。先读取任务上下文中的准备成果、已确定方向与固定调研深度 research_guidance；后续重试、继续和范围修订不能改变该深度。
+同一范围继续拓展或调整论文清单 rewind expand_and_screen；报告由提交工具根据有依据的研究发现撰写并发布，不单独改写保存的正文。失败重试原步骤，复用已保存产物。
+用户实质改变研究问题或方向时，快速扩展从论文集发起新任务；其他档回到拓展记录补充调研并确认。
+每步结束给简要结果，完成后提供原拓展记录链接。普通拓展按需取文，综述目标达到两篇合格正文后由服务创建独立综述 Chat；当前 Chat 不执行综述。
+进度与结束回复以本次冻结产物为准，简述实际交付的论文清单或研究报告。结论的适用条件随报告表达；不另报证据缺口状态，不展开检索过程、内部待查问题、调查矩阵、阅读路线、任务标识或工具日志。
+推进步骤前只用一句简短中文说明用户关心的进度，例如“开始检索相关论文”“正在阅读论文并比较主要方法”“正在撰写研究报告”。不要复述 revision、Ready/frontier、执行模式、内部步骤 ID、工具参数或可自行修复的调用错误。工具完成回执只供内部调度，不复制字典、JSON 或内部产物键；真正影响成果或需要用户处理的失败才简短说明影响。
+不得把轮次或工具调用达到上限、检索未发现描述成覆盖完整；只使用已登记的真实论文，用户种子保留，非种子按本轮筛选调整，用户重点不被模型覆盖。
 
-从服务端任务上下文取得 expansion_id，prepare_workflow 的 input_bindings 必须绑定 expansion_id。不得向用户询问内部 ID。
 
-候选必须来自本任务 academic_search_papers(expansion_id, query) 的实际返回；禁止知识库检索或模型记忆补充候选。academic_read_paper 必须传 expansion_id。搜索失败或无结果如实展示。全文缺失时说明仅依据摘要；关系分析不得编造全文证据。最终结果包含完整种子和已发现候选，保留全文异常，版本字段沿用服务端返回。
+有身份歧义的承接、启发或组件使用关系在提交分析前，先用 references 查真实条目，再按实际关键词定位并读取对应正文或参考文献块的真实 positions；reference_key 和 PDF 页码均不能冒充 position。提交前完成必要身份补读；材料不足时保留身份不确定，不假称已读。不同模块/对象的格式、参数和数据分别归属，不跨段混合；不同指标保留各自基线。作者摘要被截断时，未列出的姓名不能当作不存在的反证。

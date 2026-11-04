@@ -11,7 +11,7 @@ from lazymind.chat.engine.tools.ask_user import AskUserQuestion, _normalise_ques
 from lazymind.chat.service.chat_service import _build_ask_user_tool
 from lazymind.chat.workflow.workflow_manager import (
     _merge_startup_clarification_context,
-    workflow_startup_clarification_already_asked,
+    _history_startup_ask_index,
 )
 
 
@@ -31,11 +31,14 @@ def recorded_question():
 def test_tool_schema_describes_actual_question_fields():
     manager = ToolManager(_build_ask_user_tool())
     schema = manager.tools_description[0]['function']['parameters']
-    item = schema['$defs']['AskUserQuestion']
-    assert item['required'] == ['text']
-    assert set(item['properties']) == {'text', 'type', 'choices', 'allow_other', 'id', 'attachment'}
-    assert set(item['properties']['type']['enum']) == {'boolean', 'single', 'multiple', 'text'}
-    assert item['properties']['choices']['items'] == {'type': 'string'}
+    branches = schema['properties']['questions']['items']['oneOf']
+    assert {branch['properties']['type']['const'] for branch in branches} == {
+        'boolean', 'single', 'multiple', 'text'}
+    for branch in branches:
+        assert {'id', 'text', 'reason', 'required', 'type'} <= set(branch['required'])
+        if 'choices' in branch['properties']:
+            assert branch['properties']['choices']['items'] == {'type': 'string', 'minLength': 1}
+
 
 
 @pytest.mark.parametrize('kind,choices', [
@@ -43,9 +46,13 @@ def test_tool_schema_describes_actual_question_fields():
 ])
 def test_existing_question_types_remain_compatible(kind, choices):
     manager = ToolManager(_build_ask_user_tool())
-    arguments, failure = manager._validate_tool('ask_user', {
-        'questions': [{'text': 'Question?', 'type': kind, 'choices': choices}],
-    })
+    question = {'id': 'scope', 'text': 'Question?', 'reason': 'Choose the scope.',
+                'required': True, 'type': kind}
+    if kind in {'single', 'multiple'}:
+        question['choices'] = choices
+    elif kind == 'boolean':
+        question['boolean_labels'] = {'yes': 'Use this scope', 'no': 'Choose another scope'}
+    arguments, failure = manager._validate_tool('ask_user', {'questions': [question]})
     assert failure is None
     result = _normalise_questions(arguments['questions'])[0]
     assert result['type'] == kind
@@ -64,6 +71,8 @@ def test_recorded_arguments_publish_one_real_question_event(recorded_question, g
             'choices': {'item': [item['label'] for item in recorded_question['options']]},
             'allow_other': 'true',
         }
+    question_input = AskUserQuestion.model_validate(question_input).model_dump(exclude_none=True, exclude_unset=True)
+    question_input.update(id='execution', reason='本次实验需要明确运行范围。', required=True)
     runtime = {'clarification_fields': [{
         'id': 'execution', 'question': '是否允许本次任务运行实验？',
         'type': 'single', 'choice_policy': 'fixed', 'allow_other': False,
@@ -108,12 +117,12 @@ def test_accepted_aliases_preserve_goal_on_answer_turn(recorded_question):
         'id': 'execution', 'question': '是否允许本次任务运行实验？', 'type': 'single',
         'choices': ['不允许', '允许'],
     }]}
-    assert workflow_startup_clarification_already_asked(history, runtime)
+    assert _history_startup_ask_index(history, runtime) == 1
     merged = _merge_startup_clarification_context('不允许', history, runtime)
     assert '比较均值和中位数，设计实验' in merged
     assert 'Clarification answers:\n不允许' in merged
     history[-1]['content'] = json.dumps({'ok': False, 'value': 'Invalid arguments'})
-    assert not workflow_startup_clarification_already_asked(history, runtime)
+    assert _history_startup_ask_index(history, runtime) == -1
     assert _merge_startup_clarification_context('重新开始', history, runtime) == '重新开始'
 
 

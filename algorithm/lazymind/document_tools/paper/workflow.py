@@ -24,7 +24,8 @@ ROUTES = {
 }
 STEP_NODE = {
     'research_topic': 'F1', 'literature_review': 'F2', 'experiment': 'F3', 'data_analysis': 'F4', 'write_document': 'F5',
-    'peer_review': 'F6', 'reading_reflection': 'F7', 'refine_topic': 'F1', 'revise_document': 'F5', 'write_outline': 'F5',
+    'peer_review': 'F6', 'reading_reflection': 'F7', 'refine_topic': 'F1',
+    'revise_document': 'F5', 'write_outline': 'F5',
 }
 STEP_LABELS = {
     'research_topic': '研究选题', 'literature_review': '文献综述', 'experiment': '实验研究', 'data_analysis': '数据分析',
@@ -140,10 +141,11 @@ def seed_pool() -> dict:
          'source': 'demo', 'truncated': False},
     ], [], ['ref-demo-1', 'ref-demo-2'], is_demo=True)
     add_material(pool, 'data', {'columns': ['method', 'score'],
-                               'rows': [['baseline', 60], ['evidence', 75]]}, [], [], is_demo=True)
+                                'rows': [['baseline', 60], ['evidence', 75]]}, [], [], is_demo=True)
     add_material(pool, 'question', '比较不同证据组织方法对引用可追溯性的影响（演示问题）。',
                  [], [], is_demo=True)
-    add_material(pool, 'manuscript', '# [示例] 已有论文\n\n## 方法\n待完善证据定位。\n\n## 局限\n仅为流程测试。', [], ['ref-demo-1'], is_demo=True)
+    add_material(pool, 'manuscript', '# [示例] 已有论文\n\n## 方法\n待完善证据定位。\n\n## 局限\n仅为流程测试。', [], [
+                 'ref-demo-1'], is_demo=True)
     return validate_pool(pool)
 
 
@@ -159,7 +161,8 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
         manuscript, charts = material(pool, 'manuscript'), material(pool, 'charts')
         if manuscript:
             media = material(pool, 'media_assets')
-            validate_chart_references(manuscript['content'], figure_catalog(charts['content'] if charts else [], media['content'] if media else None))
+            validate_chart_references(manuscript['content'], figure_catalog(
+                charts['content'] if charts else [], media['content'] if media else None))
             from .publication import validate_citations
             papers = material(pool, 'papers')
             validate_citations(manuscript['content'], papers['content'] if papers else [], published=True)
@@ -168,7 +171,7 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
             value[kind] = copy.deepcopy(pool.get(kind, [])) if step == 'revise_document' else []
             continue
         if kind in {'review', 'review_data'} and (step in {'write_outline', 'write_document'}
-                or (step == 'revise_document' and not pool.get('selected_issue_ids'))):
+                                                  or (step == 'revise_document' and not pool.get('selected_issue_ids'))):
             value[kind] = None
             continue
         item = material(pool, kind)
@@ -555,8 +558,10 @@ def pool_from_inputs(inputs: dict[str, Any]) -> dict:
                     protect_reference_region(content, document)
                     papers = material(pool, 'papers')
                     document = publish_citations(document, papers['content'] if papers else [])
-                updated = {**content, 'report': document} if kind == 'experiment' and isinstance(content, dict) else document
-                add_material(pool, kind, updated, [pool['current'][kind]], current['source_refs'], is_demo=current['mock'])
+                updated = {**content,
+                           'report': document} if kind == 'experiment' and isinstance(content, dict) else document
+                add_material(pool, kind, updated, [pool['current'][kind]],
+                             current['source_refs'], is_demo=current['mock'])
     return validate_pool(pool)
 
 
@@ -586,7 +591,6 @@ def _runtime_request(params: dict) -> tuple[str, str]:
     else:
         request = str(recovery or params.get('user_input') or params.get('launch_user_input') or '').strip()
     return request, instruction
-
 
 
 def initialize_pool(bound: dict[str, str], request: str = '') -> dict:
@@ -921,7 +925,8 @@ def _run_paper_step(context, stream=None) -> dict:
             pool['selected_issue_ids'] = resolve_review_issues(
                 request, review['content'] if review else None,
                 workflow_context={'current_step': step,
-                                  'previous_completed_step': 'peer_review' if previous in {'peer_review', 'F6'} else previous,
+                                  'previous_completed_step': (
+                                      'peer_review' if previous in {'peer_review', 'F6'} else previous),
                                   'review_matches_manuscript': matches},
             )
         fail = '[mock:fail]' in request + instruction and '[mock:retry]' not in request + instruction
@@ -942,7 +947,8 @@ def _run_paper_step(context, stream=None) -> dict:
             papers = material(result['pool'], 'papers')
             original = publish_citations(manuscript['content'], papers['content'] if papers else [])
             media = material(result['pool'], 'media_assets')
-            published = publish_charts(original, figure_catalog(charts['content'] if charts else [], media['content'] if media else None))
+            published = publish_charts(original, figure_catalog(
+                charts['content'] if charts else [], media['content'] if media else None))
             if step == 'revise_document':
                 checked = material(result['pool'], 'review_data')['content']
                 if checked['manuscript_sha256'] != text_digest(published):
@@ -958,7 +964,8 @@ def _run_paper_step(context, stream=None) -> dict:
             {'key': f'{step}_pool', 'content_type': 'json', 'value': result['pool']},
             {'key': f'{step}_document', 'content_type': 'text', 'value': result['document']},
         ]
-        if step == 'experiment' and {'experiment_code', 'experiment_results'} <= set(getattr(context, 'output_slots', [])):
+        if (step == 'experiment'
+                and {'experiment_code', 'experiment_results'} <= set(getattr(context, 'output_slots', []))):
             from .experiment.artifacts import export_experiment
             output = {kind: material(result['pool'], kind)['content'] for kind in contracts.OUTPUTS['experiment']}
             output['is_demo'] = result['mock']
@@ -1020,7 +1027,6 @@ def _run_paper_step(context, stream=None) -> dict:
             path = publication_dir / markdown_filename(label)
             path.write_text(artifact['value'], encoding='utf-8')
             artifact.update(content_type='file', value=str(path))
-    from .runtime_events import report_progress
     report_progress(97, '正在保存文档')
     with diagnostics.stage('output_publication'):
         saved = save_artifacts(artifacts)

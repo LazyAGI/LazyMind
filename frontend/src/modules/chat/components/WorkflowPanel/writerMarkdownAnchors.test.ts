@@ -545,3 +545,35 @@ describe('Writer Markdown system anchors', () => {
     expect(restoreWriterMarkdownInternalReferenceLabels(materialized, source)).toBe(source);
   });
 });
+
+describe('paper bibliography references', () => {
+  const bibliography = '<a id="paper-references-start"></a>\n\n**参考文献**\n\n'
+    + '<a id="paper-ref-SRC-甲.v2"></a>\n\n[1] Author. Study.\n\n'
+    + '<a id="paper-references-end"></a>';
+  const citation = '[\\[1\\]](#paper-ref-SRC-甲.v2)';
+
+  it('offers existing bibliography entries without treating code examples as targets', () => {
+    expect(collectWriterMarkdownReferenceTargets(bibliography)).toEqual([
+      { anchorId: 'paper-ref-SRC-甲.v2', label: '[1] Author. Study.', type: 'reference', citationNumber: '1' },
+    ]);
+    expect(collectWriterMarkdownReferenceTargets('```md\n' + bibliography + '\n```')).toEqual([]);
+    expect(collectWriterMarkdownOutline(bibliography).items).toEqual([]);
+  });
+
+  it('adds canonical numeric citations after selected prose, including after an existing citation', () => {
+    const source = `Alpha${citation} beta\n\n${bibliography}`;
+    expect(applyWriterMarkdownInternalReference(source, 'Alpha[1] beta', 9, 'beta', 'paper-ref-SRC-甲.v2'))
+      .toBe(`Alpha${citation} beta${citation}\n\n${bibliography}`);
+    expect(applyWriterMarkdownInternalReference(source, 'Alpha[1] beta', 9, 'beta', 'paper-ref-missing'))
+      .toBe(source);
+  });
+
+  it('removes only the selected citation, leaving prose and the bibliography intact', () => {
+    const source = `Alpha${citation} beta${citation}\n\n${bibliography}`;
+    expect(removeWriterMarkdownInternalReference(source, 'Alpha[1] beta[1]', 13, '[1]', {
+      anchorId: 'paper-ref-SRC-甲.v2', occurrence: 1,
+    })).toBe(`Alpha${citation} beta\n\n${bibliography}`);
+    expect(removeWriterMarkdownInternalReference(source, 'Alpha[1] beta[1]', 5, '[1]'))
+      .toBe(`Alpha beta${citation}\n\n${bibliography}`);
+  });
+});

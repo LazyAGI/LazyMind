@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -12,6 +13,7 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
     SectionInstruction,
     WriterDocument,
+    WritingContext,
 )
 from lazyllm.tools.writer.numbering import (
     apply_numbering_update_ir,
@@ -29,6 +31,7 @@ from lazyllm.tools.writer.utils import (
     parse_document_markdown,
     save_artifact_json,
     set_document_editable,
+    strip_heading_numbering,
     writer_document_from_lmd,
     writer_document_to_lmd,
     writer_document_to_markdown,
@@ -140,6 +143,8 @@ def persist_artifact_json(
     extra_meta: dict[str, Any] | None = None,
 ) -> str:
     """Persist an LMD/JSON envelope through the shared Writer artifact format."""
+    if schema_name == writer_schema('context.WritingContext'):
+        data = WritingContext.model_validate(data).model_dump()
     return save_artifact_json(
         data,
         path,
@@ -225,6 +230,17 @@ def _read_artifact_data(path: str) -> Any:
     return raw
 
 
+def cleanup_writer_temporary(root: Path) -> None:
+    """Release a call-owned directory after its result has been handed off."""
+    from lazyllm import LOG
+    try:
+        shutil.rmtree(root)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        LOG.warning(f'[Writer] Temporary cleanup failed: {type(exc).__name__}')
+
+
 def _temp_root() -> Path:
     from lazymind.chat.engine.tools.workspace_context import (
         get_tool_resolution_context,
@@ -249,7 +265,7 @@ def _temp_root() -> Path:
 def _write_input_artifact(
     root: Path, filename: str, data: Any, schema_name: str
 ) -> str:
-    return save_artifact_json(
+    return persist_artifact_json(
         data,
         str(root / filename),
         schema_name=schema_name,
@@ -290,7 +306,7 @@ def _primary_data(result: dict) -> Any:
 
 
 def _markdown_heading_key(value: str) -> str:
-    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    text = strip_heading_numbering(str(value or ''))
     return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
 
 
@@ -314,6 +330,19 @@ def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
                 (index, len(heading.group('marks')), heading.group('title').strip())
             )
     return rows
+
+
+def normalize_generated_markdown(markdown: str) -> str:
+    """Remove numbering from generated headings."""
+    lines = markdown.splitlines(keepends=True)
+    for index, level, title in _markdown_heading_rows([line.rstrip('\r\n') for line in lines]):
+        if level == 1:
+            continue
+        clean = strip_heading_numbering(title)
+        if clean != title:
+            heading = _MARKDOWN_ATX_HEADING_RE.match(lines[index].rstrip('\r\n'))
+            lines[index] = lines[index][:heading.start('title')] + clean + lines[index][heading.end('title'):]
+    return ''.join(lines)
 
 
 def _normalize_streamed_markdown_section(
@@ -456,7 +485,6 @@ def markdown_prose(markdown):
                 fence = None
         lines.append(re.sub(r'[^\r\n]', ' ', line) if hidden else line)
     return ''.join(lines)
-
 
 
 def strip_paper_chart_numbering(markdown: str) -> str:

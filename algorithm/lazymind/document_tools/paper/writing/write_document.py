@@ -18,11 +18,15 @@ from .common import (
     _validate_manuscript,
     prepare_writer_context,
     validate_inputs as validate_writing_inputs,
-    validate_result,
+    validate_result as _validate_result,
 )
 
 from .write_outline import prepare_outline
 from .requirements import validate_required_sections
+
+
+validate_result = _validate_result
+
 
 def validate_inputs(inputs):
     validate_writing_inputs(inputs)
@@ -46,8 +50,10 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
     signature = _heading_signature(outline)
     # 章节规划与正文生成沿用公共 Writer，补充论文约束。
     report_progress(25, '正在规划章节')
-    planned = json.loads(_trace_call('section_plan', toolkit.generate_section_instructions,
-        writing_task_json=task_json, outline_json=_CHART_OWNERS.sub('', outline), writing_context_json=context_json,
+    planned = json.loads(_trace_call(
+        'section_plan', toolkit.generate_section_instructions,
+        writing_task_json=task_json, outline_json=_CHART_OWNERS.sub('', outline),
+        writing_context_json=context_json,
     ))
     plan = _prepare_sections(planned['section_instructions'], outline, task['constraints'])
     report_progress(27, '正在整理全篇共享事实与章节论证任务')
@@ -59,10 +65,10 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
     callbacks = _section_callbacks(events)
     report_progress(30, '正在生成正文')
     sections = json.loads(_trace_call('draft_sections', toolkit.stream_draft_blocks_markdown,
-        writing_task_json=task_json, section_instructions_json=_json(plan),
-        writing_context_json=context_json,
-        on_delta=on_delta or (events.delta if events else lambda delta: None), **callbacks,
-    ))
+                                      writing_task_json=task_json, section_instructions_json=_json(plan),
+                                      writing_context_json=context_json,
+                                      on_delta=on_delta or (events.delta if events else lambda delta: None), **callbacks,
+                                      ))
     if not isinstance(sections, list) or not sections or any(not isinstance(s, str) or not s.strip() for s in sections):
         raise ValueError('Writer returned no complete draft sections.')
     if events:
@@ -70,9 +76,9 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
     # 组装完整稿件。
     report_progress(83, '正在组装全文')
     result = json.loads(_trace_call('assemble', toolkit.generate_draft_document_markdown,
-        draft_sections_json=_json(sections), writing_context_json=context_json,
-        outline_json=_CHART_OWNERS.sub('', outline), title=signature[0][1],
-    ))
+                                    draft_sections_json=_json(sections), writing_context_json=context_json,
+                                    outline_json=_CHART_OWNERS.sub('', outline), title=signature[0][1],
+                                    ))
     body = normalize_source_citations(result['draft_document'], prepared['reference_candidates'])
     body = _materialize_chart_insertions(body, prepared['charts'])
     report_progress(85, '正在核对来源事实与正文中的比较关系')
@@ -88,6 +94,7 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
     _validate_manuscript(body, signature, prepared['charts'], task['constraints'], toolkit, context_json,
                          candidates=prepared['reference_candidates'], check_quality=False)
     return {'manuscript': body, 'is_demo': False}
+
 
 def run(inputs):
     from ..analysis import trace as diagnostics

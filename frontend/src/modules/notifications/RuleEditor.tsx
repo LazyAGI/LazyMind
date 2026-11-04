@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Modal, Select, Spin, Switch, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { channelAccountLabel, isChannelAccountAvailable, listChannelAccounts, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
+import { CHANNEL_ACCOUNTS_CHANGED_EVENT, channelAccountLabel, isChannelAccountAvailable, isChannelAccountAuthorizationRequired, listChannelAccounts, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 import { TerminalConnectionPage } from '@/modules/channelGateway/pages/ChannelConnectionPage';
 import { ArrowRightOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import { isDesktopRuntime } from '@/runtime/mode';
@@ -10,6 +10,7 @@ import { channelGateEnabled, channels, events, providers, type ChannelName, type
 import TargetPicker from './TargetPicker';
 import ChannelBrand from './ChannelBrand';
 import BrowserPermission from './BrowserPermission';
+import { NativeDesktopPermission } from './DesktopNotificationPermission';
 import { desktopNotificationsAuthorized } from './browser';
 import useWeChatNotificationStatus from './useWeChatNotificationStatus';
 import { wechatStatusHint, wechatStatusLabel } from './wechatNotificationStatus';
@@ -60,6 +61,11 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
     return () => { active = false; };
   }, [refresh, accountsRefresh]);
   useEffect(() => {
+    const update = () => setRefresh(n => n + 1);
+    window.addEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
+    return () => window.removeEventListener(CHANNEL_ACCOUNTS_CHANGED_EVENT, update);
+  }, []);
+  useEffect(() => {
     const updated = wechat.account;
     if (updated) setAccounts(old => old.map(account => account.id === updated.id ? updated : account));
   }, [wechat.account]);
@@ -90,7 +96,9 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
       const canConfigure = channel === 'desktop' ? desktopAvailable : hasAvailableAccount;
       const globallyDisabled = variant === 'task' && Boolean(preferences && !channelGateEnabled(preferences, channel));
       const channelDisabled = disabled || globallyDisabled;
-      const authorizationRequired = channel === 'wecom' && Boolean(rule?.account_id && authorizationErrors[rule.account_id]);
+      const authorizationRequired = channel === 'wecom' && (Boolean(rule?.account_id && authorizationErrors[rule.account_id])
+        || (variant === 'task' ? Boolean(account && isChannelAccountAuthorizationRequired(account))
+          : !hasAvailableAccount && providerAccounts.some(isChannelAccountAuthorizationRequired)));
       const wechatState = channel === 'wechat' ? wechat.status ?? (available ? 'unconfigured' : 'disconnected') : undefined;
       const wechatReauthorizationRequired = wechatState === 'reauthorization';
       const pendingActivation = wechatState === 'pending';
@@ -102,10 +110,10 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
         <ChannelBrand channel={channel} avatar={account?.avatar_url} />
         <div className="notification-grow"><strong>{t('notifications.' + channel)}</strong> <Tag className={`notification-status is-${statusStyle}`}>{t('notifications.' + statusLabel)}</Tag>
           <p>{channel === 'desktop' ? t('notifications.desktopHint') : variant === 'settings' ? t('notifications.' + channel + 'Hint') : rule?.account_id ? `${account ? channelAccountLabel(account, accounts) : t('notifications.accountUnavailable')} · ${rule.recipient_id || t('notifications.chooseRecipient')}` : t('notifications.' + channel + 'Hint')}</p>
-          {channel === 'desktop' && (nativeDesktop ? <p>{t('notifications.nativeDesktopHint')}</p> : <BrowserPermission />)}
+          {channel === 'desktop' && (nativeDesktop ? <NativeDesktopPermission t={t} /> : <BrowserPermission />)}
           {variant === 'task' && channel !== 'desktop' && !notificationOff && rule?.account_id && !available && !pendingActivation && !loading && <small className="notification-warning">{t('notifications.unavailable')}</small>}
         </div>
-        {channel !== 'desktop' && !canConfigure && <Button className="notification-configure-action" icon={<ArrowRightOutlined />} disabled={channelDisabled || loading} onClick={() => openConnection(channel)}>{t('notifications.connect')}</Button>}
+        {channel !== 'desktop' && !canConfigure && <Button className="notification-configure-action" icon={<ArrowRightOutlined />} disabled={channelDisabled || loading} onClick={() => openConnection(channel)}>{t(authorizationRequired ? 'notifications.wecomRepairAuthorization' : 'notifications.connect')}</Button>}
         {(variant === 'task' || canConfigure || rule?.enabled) && <Switch aria-label={t('notifications.' + channel)} checked={Boolean(rule?.enabled)} disabled={channelDisabled || (loading && channel !== 'desktop') || (!canConfigure && !rule?.enabled)} onChange={(enabled: boolean) => {
           onChange({ ...value, channels: { ...value.channels, [channel]: variant === 'settings' ? { enabled } : { ...rule, enabled } } });
         }} />}
@@ -125,7 +133,8 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
       {globallyDisabled && <div className="notification-channel-gate"><p>{t('notifications.channelDisabledHint')}</p><div>
         {onOpenSettings && <Button type="link" disabled={disabled} aria-label={`${t('notifications.openSettingsEnable')} · ${t('notifications.' + channel)}`} onClick={() => onOpenSettings(channel)}>{t('notifications.openSettingsEnable')}</Button>}
       </div></div>}
-      {variant === 'task' && channel !== 'desktop' && rule?.enabled && (canConfigure || channel === 'wechat' && Boolean(account)) && <TargetPicker key={channel} disabled={channelDisabled} inline provider={channel} accounts={providerAccounts} refreshKey={channel === 'wechat' ? JSON.stringify([refresh, accountsRefresh, wechatState]) : undefined} onAccountConnected={updateAccount} onAuthorizationChange={updateAuthorization} current={rule} onClose={() => {}} onSave={target => {
+      {variant === 'task' && channel !== 'desktop' && providerAccounts.length > 0 && <Button type="link" disabled={disabled} onClick={() => openConnection(channel)}>{t('notifications.manageAccounts')} · {t('notifications.' + channel)}</Button>}
+      {variant === 'task' && channel !== 'desktop' && rule?.enabled && (canConfigure || channel === 'wechat' && Boolean(account)) && <TargetPicker key={channel} disabled={channelDisabled} inline provider={channel} accounts={providerAccounts} refreshKey={JSON.stringify([refresh, accountsRefresh, channel === 'wechat' ? wechatState : undefined])} onAccountConnected={updateAccount} onAuthorizationChange={updateAuthorization} current={rule} onClose={() => {}} onSave={target => {
         onChange({ ...value, channels: { ...value.channels, [channel]: target } });
       }} />}
       </div>;

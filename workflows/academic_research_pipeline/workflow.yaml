@@ -12,32 +12,68 @@ when_to_use: >
   论文大纲、完整论文、同行评审和修订交付组成的一体化流程时使用。启动前必须确认并绑定：
   研究主题、论文类型（研究型/实证/文献综述/理论/案例/会议论文）、目标篇幅、正文语言（中文/英文）、
   引用格式（APA 7/Chicago/MLA 9/IEEE/Vancouver/GB/T 7714）和导出格式（md/docx）。用户已经明确的值
-  直接使用；缺少任意项时一次性询问清楚，不能先启动后猜默认值。仅需单次检索、单独润色、
+  直接使用；导出格式未指定时采用 DOCX。其他必需参数缺少时每次最多询问三个，
+  已回答的字段不再重复询问，不能先启动后猜必需参数。仅需单次检索、单独润色、
   单独审稿或格式转换时不应触发完整流程。
 
 runtime:
   exclusive_tool_capabilities: [writer.create, writer.revise]
   collects_knowledge: true
   clarification_fields:
-    - {id: research_topic, label: 研究主题, question: 请确认论文的研究主题或核心问题。, type: text}
+    - id: research_topic
+      label: 研究主题
+      question: 论文的研究主题或核心问题是什么？
+      reason: 研究主题决定检索范围和论证方向。
+      required: true
+      type: text
+      validation: {min_length: 1, max_length: 1000, example: '例如：大语言模型在医学问答中的可靠性'}
     - id: paper_type
       label: 论文类型
+      required: true
+      resolution: explicit
+      reason: 不同论文类型需要不同的研究方法与正文结构。
+      choice_policy: fixed
+      allow_other: false
+      value_aliases: {research: research, empirical: empirical, literature_review: literature_review, theoretical: theoretical, case_study: case_study, conference: conference, 研究型论文: research, 实证研究: empirical, 文献综述: literature_review, 理论研究: theoretical, 案例研究: case_study, 会议论文: conference}
       question: 请选择论文类型。
       type: single
       choices: [研究型论文, 实证研究, 文献综述, 理论研究, 案例研究, 会议论文]
-    - {id: word_target, label: 目标篇幅, question: 请确认论文正文的目标字数。, type: text}
+    - id: word_target
+      label: 目标篇幅
+      question: 论文正文的目标篇幅是多少？
+      reason: 篇幅决定章节预算和写作工作量；中文按字数，英文按单词数。
+      required: true
+      type: text
+      resolution: explicit
+      patterns: ['(?:摘要|abstract)[^0-9零一二三四五六七八九十百千万两，。；;\n]*[0-9.,，零一二三四五六七八九十百千万两]+\s*(?:字|词|words)|([0-9.,，零一二三四五六七八九十百千万两]+)\s*(?:字|词|words)']
+      validation: {format: positive_integer, min: 1, max_length: 12, example: '例如：8000'}
     - id: paper_language
       label: 正文语言
+      required: true
+      resolution: explicit
+      reason: 正文语言影响检索侧重、写作和篇幅计数单位。
+      choice_policy: fixed
+      allow_other: false
+      value_aliases: {中文: zh-CN, 英文: en, zh-CN: zh-CN, en: en, Chinese: zh-CN, English: en}
       question: 请选择论文正文语言。
       type: single
       choices: [中文, 英文]
     - id: citation_style
       label: 引用格式
+      required: true
+      resolution: explicit
+      reason: 引用格式需要符合学校或期刊要求，不能替你猜定规范。
+      choice_policy: fixed
+      allow_other: false
       question: 请选择引用格式。
       type: single
       choices: [APA 7, Chicago, MLA 9, IEEE, Vancouver, GB/T 7714]
     - id: output_format
       label: 导出格式
+      default: docx
+      choice_policy: fixed
+      allow_other: false
+      value_aliases: {Word: docx, DOCX: docx, Markdown: md}
       question: 请选择最终导出格式。
       type: single
       choices: [docx, md]

@@ -86,7 +86,6 @@ def standalone_f4_request(request):
                           r'(?:only|standalone).{0,40}(?:F4|data_analysis|data analysis)', request, re.I))
 
 
-
 def workflow_input_bindings(bindings, request):
     """Import a catalog reference for standalone F4 JSON analysis requests."""
     if not standalone_f4_request(request) or any(key.endswith('_pool') for key in bindings):
@@ -188,7 +187,7 @@ def bind_attachment(bound: dict, workspace: str, request: str) -> dict:
     try:
         value = json.loads(raw.decode('utf-8-sig'), object_pairs_hook=_unique_fields,
                            parse_constant=_invalid_constant)
-    except (UnicodeError, ValueError, RecursionError) as exc:
+    except (ValueError, RecursionError) as exc:
         raise ContractError('INVALID_INPUT', 'input.paper_input',
                             f'附件 {filename} 不是有效的 UTF-8 JSON：{exc}') from exc
     from . import trace

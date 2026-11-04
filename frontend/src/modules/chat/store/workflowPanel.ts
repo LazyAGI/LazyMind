@@ -571,6 +571,9 @@ export function filterWorkflowTabs(
     if (runtime?.steps?.some(step => step.validity !== 'stale' && effective(step.step_id) && stepIds.has(step.step_id))
       || [...(runtime?.projection?.current ?? []), ...(runtime?.projection?.past ?? [])]
         .some(id => effective(id) && stepIds.has(id))) return true;
+    // The runtime evaluates the complete skip expression, including alternate
+    // completion materials that a tab's single visibility marker cannot express.
+    if ([...stepIds].every(id => runtime?.projection?.bypassed?.includes(id))) return false;
     if (!visibilityReady) return false;
     return !present.has(tab.hide_when_material);
   });

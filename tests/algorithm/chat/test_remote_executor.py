@@ -146,33 +146,42 @@ def test_remote_executor_preserves_ordinary_subagent_stream_event_shape():
 
 
 @pytest.mark.asyncio
-async def test_clarification_persists_question_without_failure_or_completion(monkeypatch, tmp_path):
+async def test_declared_timeout_reports_failure_after_closing_execution(monkeypatch, tmp_path):
+    import asyncio
     from unittest.mock import AsyncMock
     from lazymind.chat.engine.subagent import runner
 
     worker = RemoteWorkflowExecutor()
     runtime = AsyncMock()
-    runtime.context.return_value = {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
+    runtime.context.return_value = {'metadata': {'task_id': 'task'}, 'inputs': {}}
     runtime.execution_spec.return_value = {
-        'task': {'input_slots': [], 'output_slots': ['document']},
-        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+        'task': {'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'steps': [], 'llm_config': {},
+        'params': {'step_id': 'analyze_relations', 'workflow_runtime': {'execution_limits': {
+            'analyze_relations': {'rounds': 8, 'timeout': 1}}}},
     }
     worker.runtime = runtime
-    checks = AsyncMock()
-    monkeypatch.setattr(worker, '_run_post_step_checks', checks)
-    pending = {'question': '请确认修订范围', 'request_sha256': 'a' * 64}
+    closed = []
 
-    async def stream(**kwargs):
-        yield 'data: ' + json.dumps({'type': 'done', 'status': 'interrupted',
-                                     'control': {'awaiting_input': pending}}) + '\n\n'
+    async def stream(**_kwargs):
+        try:
+            yield 'data: {"type":"task_start"}\n\n'
+            await asyncio.Event().wait()
+        finally:
+            closed.append(True)
 
+    async def acknowledge(*_):
+        assert closed == [True]
+
+    runtime.acknowledge_stop.side_effect = acknowledge
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)
-    client = object()
-    await worker._run_claim(client, {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
-    runtime.cancel.assert_awaited_once_with(client, 'attempt-1', 'lease-1', input_required=pending)
+    await worker._run_claim(object(), {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    runtime.fail.assert_awaited_once()
     runtime.complete.assert_not_awaited()
-    runtime.fail.assert_not_awaited()
-    checks.assert_not_awaited()
+    terminal = runtime.task_event.call_args.args[-1]
+    assert terminal['status'] == 'failed'
+    assert 'WORKFLOW_STEP_TIMEOUT: analyze_relations' in terminal['message']
+    runtime.acknowledge_stop.assert_awaited_once()
 
 
 def test_remote_executor_ignores_non_json_stream_frames():
@@ -1334,3 +1343,33 @@ def test_optional_public_stages_reach_core_before_terminal(monkeypatch, tmp_path
     assert ('progress', expected) in calls
     assert calls.index(('complete', None)) < next(i for i, (kind, value) in enumerate(calls)
                                                 if kind == 'event' and value['type'] == 'done')
+
+
+@pytest.mark.asyncio
+async def test_clarification_persists_question_without_failure_or_completion(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': ['document']},
+        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+    }
+    worker.runtime = runtime
+    checks = AsyncMock()
+    monkeypatch.setattr(worker, '_run_post_step_checks', checks)
+    pending = {'question': '请确认修订范围', 'request_sha256': 'a' * 64}
+
+    async def stream(**kwargs):
+        yield 'data: ' + json.dumps({'type': 'done', 'status': 'interrupted',
+                                     'control': {'awaiting_input': pending}}) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    client = object()
+    await worker._run_claim(client, {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+    runtime.cancel.assert_awaited_once_with(client, 'attempt-1', 'lease-1', input_required=pending)
+    runtime.complete.assert_not_awaited()
+    runtime.fail.assert_not_awaited()
+    checks.assert_not_awaited()

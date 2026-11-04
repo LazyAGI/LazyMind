@@ -18,7 +18,7 @@ class Policy:
 def configuration():
     values = {}
     for name, default, upper in [('CONNECT_TIMEOUT', 15, 120), ('READ_TIMEOUT', 600, 3600),
-                                  ('MAX_ATTEMPTS', 2, 3)]:
+                                 ('MAX_ATTEMPTS', 2, 3)]:
         try:
             value = int(os.environ.get('LAZYMIND_PAPER_MODEL_' + name, str(default)))
             if not 1 <= value <= upper:

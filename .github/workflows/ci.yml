@@ -59,10 +59,12 @@ jobs:
               # Rebuild and hash-check local packages using the existing frozen
               # catalog path; unchanged remote packages need no download.
               verify_args=(--catalog-only --frozen-lockfile)
-            else
+            elif ! git -C ../.. diff --quiet "$base_sha" HEAD -- skills/builtin-skills.lock.json; then
               git show "$base_sha:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
               verify_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
             fi
+            # With an unchanged lock, full verification must use pinned versions
+            # instead of regenerating entries from the latest remote packages.
           fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \
@@ -75,7 +77,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Cold module downloads must finish before setup-go can save its cache.
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -100,6 +103,16 @@ jobs:
             local/local-runtime-manager/go.sum
             local/lazymind-cli/go.sum
             tests/backend/core/go.sum
+
+      - name: Read pinned golangci-lint version
+        id: lint-version
+        run: echo "version=$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      - name: Install prebuilt golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ steps.lint-version.outputs.version }}
+          install-only: true
 
       - name: Lint
         run: make lint
@@ -317,9 +330,9 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             # Keep PowerShell lifecycle deadlines independent of concurrent
             # filesystem scans and archive extraction on the shared runner.
-            node --test --test-concurrency=1 desktop/scripts/*.test.mjs
+            node --test --test-concurrency=1 desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           else
-            node --test desktop/scripts/*.test.mjs
+            node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           fi
 
   test-auth-service:

@@ -490,6 +490,7 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     """
     from lazymind.chat.service.chat_service import _active_sessions, _active_turn_sessions
     from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
+    from lazymind.chat.engine.agent_runtime.steering import steering_registry
     try:
         sid: Optional[str] = None
         if req.conversation_id:
@@ -499,8 +500,39 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
             sid = req.task_id
 
         if not sid:
+            # In router mode the parent process receives Core callbacks while
+            # the active chat session (and steering inbox) lives in exactly one
+            # child worker. Fan the cancellation out to the current workers;
+            # non-owners answer ``ok: false`` and the owner closes steering
+            # acceptance before interrupting its ReAct loop.
+            if (
+                req.conversation_id
+                and config['enable_router']
+                and not config['router_child_proxied_only']
+            ):
+                from lazymind.router.core.registry import get_global_registry
+
+                workers = await get_global_registry().list_active_instances()
+                urls = sorted({worker.url.rstrip('/') for worker in workers})
+                headers = {
+                    'X-LazyMind-Internal-Token': str(config['core_internal_token'] or ''),
+                }
+                async with httpx.AsyncClient(timeout=5.0, trust_env=False, headers=headers) as client:
+                    for url in urls:
+                        try:
+                            response = await client.post(
+                                f'{url}/api/workflow/task-cancel',
+                                json=req.model_dump(),
+                            )
+                            body = response.json()
+                        except (httpx.HTTPError, ValueError):
+                            continue
+                        if response.status_code == 200 and body.get('ok') is True:
+                            return TaskCancelResponse(ok=True)
             return TaskCancelResponse(ok=False)
 
+        if req.conversation_id:
+            steering_registry.stop_accepting_for_session(req.conversation_id, sid)
         request_cancel(sid)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

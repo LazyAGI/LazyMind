@@ -616,6 +616,8 @@ for (const beforeShow of [false, true]) {
     const handlers = new Map();
     const context = {
       isQuitting: false, notificationSessionRevision: 0, sessionWrites: Promise.resolve(),
+      recoverySessionIdentity: undefined,
+      agentRecovery: { start() {}, async stop() {} },
       notificationSession: require("../electron/src/notification-session.js").createNotificationSession(),
       mainWindow: {}, notificationFrontendOrigin: () => FRONTEND,
       isTrustedNotificationSender: () => true, agentConnectorActionTimeoutMs: 15000,

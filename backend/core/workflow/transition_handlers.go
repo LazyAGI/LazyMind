@@ -27,7 +27,8 @@ import (
 )
 
 type transitionCommandRequest struct {
-	HostedTaskID         string `json:"-"`
+	ClarificationValues  map[string]any `json:"clarification_values,omitempty"`
+	HostedTaskID         string         `json:"-"`
 	controlAuthorized    bool
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
@@ -328,6 +329,32 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
 		writeTransitionResponse(w, response, http.StatusUnprocessableEntity)
 		return
+	}
+	clarification, clarificationErr := graphengine.ResolveClarifications(graph.Runtime.ClarificationFields, req.ClarificationValues)
+	if clarificationErr != nil || len(clarification.Missing) > 0 {
+		message := "Workflow requires clarification before starting"
+		if clarificationErr != nil {
+			message = clarificationErr.Error()
+		}
+		response := transitionCommandResponse{Accepted: false, CommandID: req.CommandID,
+			Error: &transitionError{Code: "WORKFLOW_CLARIFICATION_REQUIRED", Message: message,
+				Details: map[string]any{"missing_clarification_fields": clarification.Missing, "questions": clarification.Questions}}}
+		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
+		writeTransitionResponse(w, response, http.StatusConflict)
+		return
+	}
+	if len(clarification.Values) > 0 {
+		if req.ExternalMaterials == nil {
+			req.ExternalMaterials = map[string]any{}
+		}
+		for id, value := range clarification.Values {
+			if graph.MaterialProducers[id].Kind == "external" &&
+				(graph.MaterialTypes[id] == "text" || graph.MaterialTypes[id] == "json") {
+				req.ExternalMaterials[id] = value
+			}
+		}
+		canonical, _ := json.Marshal(clarification.Values)
+		req.UserInput += "\n\nConfirmed workflow parameters:\n" + string(canonical)
 	}
 	externalMaterials := externalMaterialFacts(graph, req.ExternalMaterials)
 	projection := projectWithApprovalPreferences(store.DB().WithContext(r.Context()), req.UserID, req.WorkflowID, graph, graphengine.RuntimeSnapshot{Materials: externalMaterials})
@@ -683,7 +710,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			}
 			// A bare retry repeats this failed attempt's confirmed request, not
 			// the workflow launch intent or a successful older attempt's request.
-			if isBareRetryInput(currentInputs[targets[0].TaskID]) {
+			if req.Operation == "retry" && session.ControllerHost != "external-agent" && isBareRetryInput(currentInputs[targets[0].TaskID]) {
 				var previous orm.SubAgentTask
 				err := tx.Select("params").Where("id = ?", latest.TaskID).First(&previous).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

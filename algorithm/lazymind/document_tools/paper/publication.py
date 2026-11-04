@@ -68,8 +68,9 @@ def validate_chart_references(body, charts):
     ):
         raise ValueError('Chart placeholder must have an adjacent unique anchor.')
     managed = re.findall(r'!\[(?:\\.|[^\]\\\r\n])*\]\((/static-files/paper-(?:charts|media)/[^\s)]+)\)', prose)
-    if sorted(managed) != sorted(m['source'] for m in objects
-                                  if m['source'].startswith(('/static-files/paper-charts/', '/static-files/paper-media/'))):
+    if sorted(managed) != sorted(
+            m['source'] for m in objects
+            if m['source'].startswith(('/static-files/paper-charts/', '/static-files/paper-media/'))):
         raise ValueError('Published chart must have an adjacent unique anchor.')
     if not ids:
         return objects
@@ -140,7 +141,6 @@ def _resolve_chart_sources(body, charts, objects):
     if 'media-placeholder://' in markdown_prose(body):
         raise ValueError('Unresolved chart media after publication.')
     return body
-
 
 
 # Literature references: stable source identities and deterministic numbering.

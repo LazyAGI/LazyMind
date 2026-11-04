@@ -109,11 +109,18 @@ MEDIA_GENERATION_NO_FALLBACK_POLICY = (
     '# Explicit media generation requests (mandatory, no fallback)\n'
     'When the user explicitly requests an image, an image edit, or a video as the final '
     'deliverable, you MUST call the corresponding `image_generator`, `image_editor`, or '
-    '`video_generator` tool. Treat that tool itself as the authoritative availability check; '
+    '`video_generator` tool. For simple image generation, call `image_generator` directly '
+    'without `create_subagent`, `search_skill`, or `get_skill`. Use reasonable defaults '
+    'instead of asking for optional style or size details. '
+    'Treat that tool itself as the authoritative availability check; '
     'do not use skill discovery, workspace inspection, web search, or another media tool to '
     'guess whether the requested capability is configured. For a text-only video request, '
     'when the configured video provider or model is `unknown`, call `video_generator` directly '
     'before calling any other tool.\n'
+    'Use tool names exactly as declared, including case. Claim generation or editing '
+    'succeeded only when that call returned an output file. A failed call is not success, '
+    'and an image from an earlier call is not the result of the failed edit. Never invent '
+    'file_id references to replace missing output links.\n'
     'If the requested media tool returns `MEDIA_CAPABILITY_DEPENDENCY_MISSING`, stop immediately. '
     'Do not call another tool, do not call `ask_user`, and do not replace the requested result '
     'with still images, keyframes, a GIF, a script, search results, links, or any other fallback. '
@@ -230,17 +237,30 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'actual `ask_user` function-tool call. Never put such a question or request in assistant prose. '
         'If the user explicitly asks you to question or interview them, follow that instruction by '
         'calling `ask_user`. This contract controls only the response channel; decide what and how much '
-        'to ask from the user’s request and the conversation.',
+        'to ask from the user’s request and the conversation. '
+        'Ask only when missing information or a material ambiguity/conflict blocks correct delivery and '
+        'neither context nor a safe declared default resolves it. Do not ask preferences merely to improve '
+        'an already feasible answer. Respect "you decide" for optional preferences. Use 1-3 separate '
+        'decision dimensions. Follow the ask_user parameter schema: every question needs id, text, type, '
+        'reason and required. The text is the question body, not title or description. '
+        'Suggested single choices have at most 3 options; multiple choices at most 4; do not pad them. '
+        'The system adds Other for free input. Multiple allows one selection. Fixed business '
+        'enums remain complete and declare choice_policy=fixed; never use fixed to evade suggestion limits. '
+        'Boolean requires two complete boolean_labels, without choices. Text has no choices; '
+        'give examples and answer limits only when useful and justified. Never invent options, use internal tool '
+        'names or ask for secrets. Dedicated send/delete/permission confirmations remain authoritative; '
+        'do not duplicate or replace them with ask_user. Do not re-ask resolved fields or chase an ignored '
+        'card after the user changes topics. Discovering a new blocking fact during execution may require '
+        'a question even when the original request was complete.',
     ),
 }
 ASK_USER_QUERY_APPENDIX = (
-    'ATTENTION — `ask_user` is registered for this turn. If you ask the user any question, request '
-    'their opinion, or invite any reply, you MUST make an actual `ask_user` function-tool call; NEVER '
-    'write that request as assistant prose. This rule applies to every kind of user-facing question or '
-    'reply request, including clarification, confirmation, opinion, open-ended questions, and optional '
-    'follow-ups. Exception: after you have already given the substantive answer to the user request, '
-    'do NOT call `ask_user` merely to offer optional next steps or say what the user can ask for next; '
-    'write that brief follow-up in assistant prose instead.'
+    'ATTENTION — `ask_user` is available, not mandatory. Ask only for a blocking gap, material '
+    'ambiguity/conflict, or a user-requested interview; reuse known answers and safe declared defaults. '
+    'For such ordinary questions, make an actual `ask_user` function-tool call, never a prose question. '
+    'Dedicated approval, secure-input and review flows use their own controls, not another ask_user card. '
+    'Do not create questions merely because this tool exists. After answering, optional next-step '
+    'suggestions belong in brief prose and must not create another interruption.'
 )
 SESSION_ENV_QUERY_APPENDIX = (
     'Call set_session_env only after the user explicitly asks to configure, set, save, or provide an '
@@ -1217,8 +1237,12 @@ def filter_tools(
         patterns = _TOOL_CAPABILITY_REQUEST_PATTERNS.get(cfg.name, ())
         if terms and user_query and _capability_is_denied(user_query, terms, patterns):
             continue
+        # Chat's discoverable configuration surface must expose media tools even
+        # for short requests and clarification replies without routing keywords.
+        # The tool returns the authoritative missing-model configuration card.
         if not tool_is_active(cfg) and not (include_unready and cfg.name in {
             'mail', 'cloud_files', 'web_search', 'academic_search',
+            *_ON_DEMAND_MODEL_TOOLS,
         }):
             if not (
                 cfg.name in _ON_DEMAND_MODEL_TOOLS

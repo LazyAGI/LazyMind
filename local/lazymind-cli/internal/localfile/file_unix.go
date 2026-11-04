@@ -3,10 +3,21 @@
 package localfile
 
 import (
+	"errors"
 	"os"
 
 	"golang.org/x/sys/unix"
 )
+
+func tryLockFile(file *os.File) (bool, error) {
+	err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	if errors.Is(err, unix.EWOULDBLOCK) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func unlockFile(file *os.File) { _ = unix.Flock(int(file.Fd()), unix.LOCK_UN) }
 
 func Lock(path string) (func(), error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)

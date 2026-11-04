@@ -89,7 +89,7 @@ func TestRecoveryPolicyValidationAndLegacyHash(t *testing.T) {
 
 func TestPaperWritingRequiresAnInputSource(t *testing.T) {
 	graph := paperGraph(t, nil)
-	for _, source := range []string{"", "paper_topic", "paper_input", "seed_pool", "literature_review_pool", "data_analysis_pool", "manuscript_text"} {
+	for _, source := range []string{"", "paper_topic", "paper_input", "seed_pool", "literature_review_pool", "data_analysis_pool", "manuscript_text", "manuscript_file", "write_outline_pool", "write_outline_document"} {
 		t.Run(source, func(t *testing.T) {
 			snapshot := RuntimeSnapshot{}
 			if source != "" {

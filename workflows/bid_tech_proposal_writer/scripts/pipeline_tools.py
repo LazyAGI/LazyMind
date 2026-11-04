@@ -560,7 +560,7 @@ def _target_number(value: Any) -> int:
 
 
 def normalize_bid_parameters(output_format: str, word_target: str,
-                             use_default_docx_template: str) -> dict[str, Any]:
+                             use_default_docx_template: str = '', effect_image_count: str = '') -> dict[str, Any]:
     """Validate and normalize user-confirmed proposal generation parameters."""
     raw_format = str(output_format or '').strip().lower()
     if raw_format in {'md', 'markdown', '.md', 'markdown文件'} or 'markdown' in raw_format:
@@ -572,10 +572,14 @@ def normalize_bid_parameters(output_format: str, word_target: str,
         raise ValueError('output_format must be md/Markdown or docx/Word.')
 
     target = _target_number(word_target)
-    raw_style = str(use_default_docx_template or '').strip().lower()
+    raw_style = str(use_default_docx_template if use_default_docx_template is not None else '').strip().lower()
     negative = ('不使用', '不用', '否', 'false', 'no', 'plain', '基础样式', '简洁样式', '不适用')
     positive = ('使用', '默认', '是', 'true', 'yes')
-    if any(token in raw_style for token in negative):
+    if normalized_format == 'md':
+        use_default = False
+    elif not raw_style:
+        use_default = True  # Approved DOCX style default, not a guessed user answer.
+    elif any(token in raw_style for token in negative):
         use_default = False
     elif any(token in raw_style for token in positive):
         use_default = True
@@ -584,9 +588,17 @@ def normalize_bid_parameters(output_format: str, word_target: str,
             'use_default_docx_template must explicitly say whether to use the default template.'
         )
 
+    image_count = None
+    if effect_image_count is not None and str(effect_image_count).strip():
+        raw_count = str(effect_image_count).strip()
+        if not raw_count.isascii() or not raw_count.isdigit() or not 1 <= int(raw_count) <= 10:
+            raise ValueError('effect_image_count must be an integer between 1 and 10.')
+        image_count = int(raw_count)
+
     return {
         'output_format': normalized_format,
         'word_target': target,
+        'effect_image_count': image_count,
         'use_default_docx_template': use_default if normalized_format == 'docx' else False,
         'docx_style_mode': (
             'default_bid_template' if normalized_format == 'docx' and use_default
@@ -929,7 +941,7 @@ def _section_character_counts(markdown_text: str, leaves: list[dict[str, Any]]) 
 def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: str,
                               requirements_markdown: str, disqualification_markdown: str,
                               word_target: str, image_manifest_json: str,
-                              output_format: str = 'docx') -> dict[str, Any]:
+                              output_format: str = 'docx', effect_image_count: int | None = None) -> dict[str, Any]:
     """Validate final Markdown and the selected delivery file produced by the workflow.
 
     Args:
@@ -1023,7 +1035,9 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
         warnings.append(
             f'兼容识别了 {len(compatible_headings)} 个非规范叶子标题；建议恢复为有效大纲中的原始标题'
         )
-    if manifest_images < 6:
+    if effect_image_count is not None and len(effect_entries) != effect_image_count:
+        failures.append(f'效果图数量不符：{len(effect_entries)}/{effect_image_count}')
+    elif effect_image_count is None and manifest_images < 6:
         warnings.append(f'图像清单仅 {manifest_images} 张，低于 1+5 的最低要求')
     if normalized_format == 'docx' and package_valid and embedded_images < manifest_images:
         warnings.append(f'DOCX 嵌入图片 {embedded_images}/{manifest_images}，存在缺图')
@@ -1234,4 +1248,5 @@ def validate_proposal_from_inputs() -> dict[str, Any]:
         word_target=str(parameters.get('word_target') or ''),
         image_manifest_json=_workflow_artifact_payload(inputs['image_manifest']),
         output_format=str(parameters.get('output_format') or ''),
+        effect_image_count=parameters.get('effect_image_count'),
     )

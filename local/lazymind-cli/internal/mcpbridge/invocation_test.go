@@ -165,8 +165,8 @@ func (r *recordingInvocationRecorder) values() ([]coreapi.InvocationStart, []cor
 }
 
 func TestWorkflowInstructionsDescribeExecutionAndArtifactMapping(t *testing.T) {
-	for _, part := range []string{"workflow.start", "open_in_codex", "interaction_url", "placement=bottom", "workflow.step.begin", "workflow.step.claim", "execution_handle", "executor_host is lazymind", "save_artifact/save_artifacts", "workflow.artifact.publish", "key becomes slot", "when execution finishes", "control.continuation", "workflow.state confirms completed"} {
-		if !strings.Contains(workflowInstructionsForHost("codex"), part) {
+	for _, part := range []string{"workflow.start", "The host displays the Workflow panel automatically", "workflow.step.begin", "workflow.step.claim", "execution_handle", "executor_host is lazymind", "save_artifact/save_artifacts", "workflow.artifact.publish", "key becomes slot", "when execution finishes", "control.continuation", "workflow.state confirms completed"} {
+		if !strings.Contains(workflowInstructions, part) {
 			t.Errorf("instructions missing %q", part)
 		}
 	}

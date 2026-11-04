@@ -9,7 +9,8 @@ import inspect
 EXAMPLES = (
     ('chi2_contingency', ('卡方', 'chi-square', 'chi2', 'chisquare'),
      'result = stats.chi2_contingency(observed_counts, correction=use_yates_correction)',
-     'Independence from a contingency COUNT table; choose correction explicitly. Preserve dof and expected counts; percentages are not counts.'),
+     'Independence from a contingency COUNT table; choose correction explicitly. '
+     'Preserve dof and expected counts; percentages are not counts.'),
     ('chisquare', ('拟合优度', 'goodness-of-fit', 'chisquare'),
      'result = stats.chisquare(f_obs=observed_counts, f_exp=expected_counts)',
      'Goodness-of-fit: matching observed/expected totals and correct fitted-parameter degrees of freedom.'),
@@ -68,7 +69,7 @@ def reference_for(plan):
     text = (' '.join(plan['questions']) + ' ' + plan['outline']).lower()
     catalog, selected = [], []
     for name, keywords, example, meaning in EXAMPLES:
-        entry = dict(function='scipy.stats.'+name, signature=str(inspect.signature(getattr(stats, name))))
+        entry = dict(function='scipy.stats.' + name, signature=str(inspect.signature(getattr(stats, name))))
         catalog.append(entry)
         if any(keyword in text for keyword in keywords):
             selected.append(dict(**entry, example=example, meaning=meaning))

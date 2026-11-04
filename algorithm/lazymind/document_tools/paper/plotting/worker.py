@@ -26,7 +26,7 @@ def wrapped_text(value, text, renderer, width):
     for paragraph in value.split('\n'):
         current = ''
         for word in paragraph.split(' '):
-            trial = (current+' '+word).strip()
+            trial = (current + ' ' + word).strip()
             measured = renderer.get_text_width_height_descent(trial, text.get_fontproperties(), False)[0]
             if current and measured > width:
                 lines.append(current)
@@ -53,10 +53,10 @@ def wrap_category_labels(figure):
         if not any(any(char.isalpha() for char in label) and not label.startswith('$') for label in labels):
             continue
         positions = [axis.transData.transform((tick, axis.get_ylim()[0]))[0] for tick in ticks]
-        gaps = [abs(right-left) for left, right in zip(positions, positions[1:]) if abs(right-left) > 1]
+        gaps = [abs(right - left) for left, right in zip(positions, positions[1:]) if abs(right - left) > 1]
         if not gaps:
             continue
-        width = min(gaps)*.88
+        width = min(gaps) * .88
         wrapped = [wrapped_text(label, text, renderer, width) for label, text in zip(labels, texts)]
         if wrapped != labels:
             axis.set_xticks(ticks, wrapped)
@@ -72,14 +72,14 @@ def fit_external_text(figure):
     bottom, top, left, right = .02, .98, 0, 1
     for item in [*figure.texts, *figure.legends]:
         box = item.get_window_extent(renderer)
-        if box.y1 < height*.2:
-            bottom = max(bottom, (box.y1+8)/height)
-        elif box.y0 > height*.8:
-            top = min(top, (box.y0-8)/height)
-        elif box.x1 < width*.2:
-            left = max(left, (box.x1+8)/width)
-        elif box.x0 > width*.8:
-            right = min(right, (box.x0-8)/width)
+        if box.y1 < height * .2:
+            bottom = max(bottom, (box.y1 + 8) / height)
+        elif box.y0 > height * .8:
+            top = min(top, (box.y0 - 8) / height)
+        elif box.x1 < width * .2:
+            left = max(left, (box.x1 + 8) / width)
+        elif box.x0 > width * .8:
+            right = min(right, (box.x0 - 8) / width)
     if bottom < top and left < right and all(axis.get_subplotspec() is not None for axis in figure.axes):
         figure.tight_layout(rect=(left, bottom, right, top), pad=.8)
         figure.canvas.draw()
@@ -89,20 +89,20 @@ def fit_external_text(figure):
     if not boxes:
         return
     bottom_edge, top_edge = min(box.y0 for box in boxes), max(box.y1 for box in boxes)
-    gap = figure.dpi*2/25.4
+    gap = figure.dpi * 2 / 25.4
     for text in figure.texts:
         x, y = text.get_position()
         if y >= .2 and y <= .8:
             continue
-        width = figure.bbox.width*.96
+        width = figure.bbox.width * .96
         text.set_text(wrapped_text(text.get_text(), text, renderer, width))
         if y < .2:
             text.set_verticalalignment('top')
-            text.set_position((x, min(y, (bottom_edge-gap)/height)))
+            text.set_position((x, min(y, (bottom_edge - gap) / height)))
             bottom_edge = text.get_window_extent(renderer).y0
         else:
             text.set_verticalalignment('bottom')
-            text.set_position((x, max(y, (top_edge+gap)/height)))
+            text.set_position((x, max(y, (top_edge + gap) / height)))
             top_edge = text.get_window_extent(renderer).y1
 
 
@@ -117,7 +117,8 @@ def render(payload):
     rc = dict(contract.get('rc', {}))
     installed = {font.name for font in font_manager.fontManager.ttflist}
     cjk = next((name for name in ('Noto Serif CJK SC', 'Noto Serif CJK JP', 'Noto Sans CJK SC',
-                                  'Noto Sans CJK JP', 'Arial Unicode MS') if name in installed), 'DejaVu Sans')
+                                  'Noto Sans CJK JP', 'Arial Unicode MS', 'SimSun', 'Microsoft YaHei',
+                                  'SimHei') if name in installed), 'DejaVu Sans')
     families = [name for name in ('STIXGeneral', 'DejaVu Serif', cjk) if name in installed]
     rc.update({'font.family': families, 'font.serif': families, 'mathtext.fontset': 'stix'})
     colors = contract.get('colors')
@@ -150,7 +151,7 @@ def render(payload):
                     metadata['Date'] = None
                 figure.savefig(stream, format=extension, dpi=300, bbox_inches='tight', metadata=metadata)
                 raw = stream.getvalue()
-                if len(raw) > (2 if extension == 'svg' else 4)*1024*1024:
+                if len(raw) > (2 if extension == 'svg' else 4) * 1024 * 1024:
                     raise ValueError(f'{extension} 图表过大，请减少图元或画布尺寸')
                 if extension == 'svg':
                     text = raw.decode('utf-8')

@@ -64,14 +64,17 @@ _CHART_OWNERS = re.compile(r'<!-- paper-charts:\s*(\[[^\n]*?\])\s*-->')
 HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
 WORD = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 
+
 def _safe(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
     except Exception:
         LOG.warning('F5 trace recording failed', exc_info=True)
 
+
 def _record(record):
     LOG.info('[PaperWritingTiming] %s', json.dumps(record, ensure_ascii=False))
+
 
 def _trace_call(phase, function, *args, **kwargs):
     """Measure business stages, leaving nested Writer LLM spans intact."""
@@ -116,6 +119,7 @@ def _trace_call(phase, function, *args, **kwargs):
         _safe(tracing.finish_span, span)
         _safe(_record, record)
 
+
 def _section_callbacks(events):
     """Capture correlation before workers run; forward original callbacks unchanged."""
     context = _safe(tracing.get_trace_context)
@@ -136,7 +140,7 @@ def _section_callbacks(events):
             state['last_reported_output_chars'] = output_chars.get(index)
         if fresh:
             _safe(_record, dict(phase='section_progress', trace_id=trace_id, **state,
-                               elapsed_ms=round((time.monotonic() - started) * 1000)))
+                                elapsed_ms=round((time.monotonic() - started) * 1000)))
         if events:
             events.section_progress(event)
 
@@ -151,11 +155,14 @@ def _section_callbacks(events):
         callbacks['on_preview_restart'] = restart
     return callbacks
 
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False)
 
+
 def _chart_caption(title):
     return re.sub(r'([\\\[\]])', r'\\\1', title).replace('\n', ' ').replace('\r', ' ')
+
 
 def _chart_directory(chart, findings):
     """Project contract-validated chart associations from a shared finding index."""
@@ -166,6 +173,7 @@ def _chart_directory(chart, findings):
     return {**{key: copy.deepcopy(chart[key]) for key in ('id', 'title', 'columns', 'caption', 'finding_ids')},
             'findings': [copy.deepcopy(findings[ref]) for ref in chart['finding_ids']]}
 
+
 def _reference_candidates(papers):
     candidates = []
     for paper in papers:
@@ -174,6 +182,7 @@ def _reference_candidates(papers):
             continue
         candidates.append({'id': paper['id'], 'citation': entry})
     return candidates
+
 
 def _validate_reference_markers(body, candidates, original=None):
     """Check reserved citation markers; preserve existing unsupported citations."""
@@ -195,6 +204,7 @@ def _validate_reference_markers(body, candidates, original=None):
         if count > existing[marker]:
             raise ValueError('Invalid or unavailable reference marker: ' + marker)
 
+
 def _outline_chart_owners(outline, charts, *, require_complete=True):
     catalog = {chart['id'] for chart in charts}
     owners = {}
@@ -212,6 +222,7 @@ def _outline_chart_owners(outline, charts, *, require_complete=True):
     if require_complete and owners.keys() != catalog:
         raise ValueError('Outline must assign every supplied chart exactly once.')
     return owners
+
 
 def _bind_chart_references(plan, prepared: dict, outline):
     """Translate outline ownership into Writer's existing cross-reference protocol."""
@@ -248,6 +259,7 @@ def _bind_chart_references(plan, prepared: dict, outline):
                              + ' Place the chart in section: ' + ' / '.join(heading_path)),
             })
 
+
 def _materialize_chart_insertions(body, charts):
     """Expand bounded revision insertions without invoking media generation."""
     catalog = {chart['id']: chart for chart in charts}
@@ -266,6 +278,7 @@ def _materialize_chart_insertions(body, charts):
         caption = _chart_caption(chart['title'])
         lines[index] = f'<a id="block-{target}"></a>\n![{caption}](media-placeholder://{target})'
     return '\n'.join(lines)
+
 
 def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
     """Adapt normalized v2 materials using the shared, model-free Writer builders.
@@ -334,14 +347,16 @@ def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
     for paper in source['papers']:
         material('paper:' + paper['id'], paper['title'], paper)
     candidates = _reference_candidates(source['papers'])
-    material('reference_candidates', 'Citation candidate catalog (only these sources may receive new citations)', candidates)
+    material('reference_candidates',
+             'Citation candidate catalog (only these sources may receive new citations)', candidates)
     material('question', 'Research question, hypotheses and validation plan', source['question'])
     material('evidence', 'Literature evidence and limitations', source['evidence'])
     material('analysis', 'Upstream analysis results (not recalculated in this step)', source['analysis'])
     findings = {item['id']: item for item in (source['analysis'] or {}).get('findings', [])}
     charts = figure_catalog(source['charts'], source.get('media_assets'))
     chart_directory = [_chart_directory(chart, findings) for chart in charts]
-    material('writing_materials', 'Uploaded writing materials (source facts, not inferred analysis)', source.get('writing_materials'))
+    material('writing_materials', 'Uploaded writing materials (source facts, not inferred analysis)',
+             source.get('writing_materials'))
     material('charts', 'Chart reference catalog', chart_directory)
     material('outline', 'Existing outline', source['outline'])
     material('manuscript', 'Current complete manuscript', source['manuscript'])
@@ -358,6 +373,7 @@ def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
         'charts': charts, 'chart_directory': chart_directory, 'selected_issues': selected_issues,
         'reference_candidates': candidates,
     }
+
 
 def prepare_writer_context(inputs: dict, *, toolkit=None) -> dict:
     """Prepare a Writer-consumable task/context, without invoking a model.
@@ -379,6 +395,7 @@ def prepare_writer_context(inputs: dict, *, toolkit=None) -> dict:
     prepared['writing_context'] = context
     return prepared
 
+
 def _heading_signature(markdown):
     """Use Writer's fence-aware parser; add only the paper hierarchy constraint."""
     get_markdown_outline_targets(markdown)
@@ -389,6 +406,7 @@ def _heading_signature(markdown):
             raise ValueError('Paper headings must not skip levels or have empty titles.')
         previous = level
     return signature
+
 
 def _strip_outline_budget(description, budget):
     """Strip only the generated suffix matching this heading's own metadata."""
@@ -407,6 +425,7 @@ def _outline_budget_descriptions(outline):
         if cleaned != description:
             replacements[description] = cleaned
     return replacements
+
 
 def _prepare_sections(plan, outline, constraints):
     """Retain Writer planning and apply language-aware paper budgets."""
@@ -458,12 +477,14 @@ def _prepare_sections(plan, outline, constraints):
         item['fact_constraints'].append(SECTION_CONTENT_INSTRUCTIONS)
     return plan
 
+
 def count_academic_units(text: str, count_unit: str) -> int:
     """Count Chinese characters or English words using the declared paper language."""
     value = str(text or '')
     if count_unit == 'words':
         return len(WORD.findall(value))
     return len(HAN.findall(value)) + len(re.findall(r'\b[A-Za-z][A-Za-z0-9_-]*\b', value))
+
 
 def _validate_manuscript_structure(body, *, signature=None, charts=None,
                                    candidates=None, original=None):
@@ -477,12 +498,13 @@ def _validate_manuscript_structure(body, *, signature=None, charts=None,
         _validate_reference_markers(body, candidates, original)
     return actual
 
+
 def _validate_manuscript(body, signature, charts, constraints, toolkit, context_json, *,
                          candidates, original=None, check_quality=True, check_length=True):
     """Validate generated Markdown before the optional model quality check."""
     report_progress(87, '正在校验稿件结构与引用')
     _trace_call('validate_structure', _validate_manuscript_structure, body,
-                 signature=signature, charts=charts, candidates=candidates, original=original)
+                signature=signature, charts=charts, candidates=candidates, original=original)
     target = constraints['word_target']
     if check_length and target is not None:
         unit = 'words' if constraints['paper_language'] == 'en' else 'chinese_characters'
@@ -493,12 +515,13 @@ def _validate_manuscript(body, signature, charts, constraints, toolkit, context_
         return
     report_progress(90, '正在检查全文一致性')
     quality = json.loads(_trace_call('consistency', toolkit.check_consistency,
-        draft_document_json=body, writing_context_json=context_json,
-    ))
+                                     draft_document_json=body, writing_context_json=context_json,
+                                     ))
     report = ReviewReport.model_validate(quality['review_report'])
     if not report.result.is_passed:
         raise ValueError('Writer consistency check failed: ' + report.result.summary)
     report_progress(95, '全文一致性检查通过')
+
 
 def validate_inputs(inputs):
     """Writing-specific prerequisites after the shared material contract."""
@@ -525,9 +548,10 @@ def validate_result(value, inputs):
         if value.get(key) is not None and len(value[key]) > 2_000_000:
             raise ValueError(f'{key} 超过长度限制')
     signature = _validate_manuscript_structure(value['manuscript'],
-        charts=figure_catalog(inputs['charts'], inputs.get('media_assets')) if inputs else None,
-        candidates=_reference_candidates(inputs['papers']) if inputs else None,
-        original=inputs['manuscript'] if inputs else None)
+                                               charts=figure_catalog(inputs['charts'], inputs.get(
+                                                   'media_assets')) if inputs else None,
+                                               candidates=_reference_candidates(inputs['papers']) if inputs else None,
+                                               original=inputs['manuscript'] if inputs else None)
     if inputs and inputs['mode'] == 'revise':
         return
     if inputs and (not inputs['outline'] or _heading_signature(inputs['outline']) != signature):

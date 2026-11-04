@@ -244,6 +244,7 @@ jobs:
           CSC_KEY_PASSWORD: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_PACKAGE_KIND: zip
           LAZYMIND_DESKTOP_SIGNING_MODE: ${{ steps.release.outputs.official_release == 'true' && 'developer-id' || 'adhoc' }}
+          LAZYMIND_MACOS_TEAM_ID: ${{ steps.release.outputs.official_release == 'true' && secrets.APPLE_TEAM_ID || '' }}
           LAZYMIND_RELEASE_BUILD: ${{ steps.release.outputs.is_tag }}
         run: |
           set -euo pipefail
@@ -471,6 +472,7 @@ jobs:
           LAZYMIND_DESKTOP_OUTPUT_DIR: ${{ github.workspace }}/desktop/dist
           LAZYMIND_DESKTOP_SIGNING_MODE: ${{ steps.release.outputs.official_release == 'true' && 'developer-id' || 'adhoc' }}
           IS_OFFICIAL_RELEASE: ${{ steps.release.outputs.official_release }}
+          LAZYMIND_MACOS_TEAM_ID: ${{ steps.release.outputs.official_release == 'true' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           set -euo pipefail
 
@@ -498,6 +500,10 @@ jobs:
           hdiutil attach "${source_dmg}" -readonly -nobrowse -mountpoint "${mount_dir}"
           trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true' EXIT
           codesign --verify --deep --strict --verbose=2 "${mount_dir}/LazyMind.app"
+          if [[ "${IS_OFFICIAL_RELEASE}" == "true" ]]; then
+            node desktop/scripts/verify-macos-privacy-identity.cjs \
+              "${mount_dir}/LazyMind.app" "${LAZYMIND_MACOS_TEAM_ID}"
+          fi
           hdiutil detach "${mount_dir}"
           trap - EXIT
 
@@ -988,6 +994,9 @@ jobs:
             --runtime-root "${smoke_root}" \
             --platform darwin \
             --timeout-ms 300000
+          # Startup must not invalidate the sealed application by writing caches
+          # or dependency links into its Resources directory.
+          codesign --verify --deep --strict --verbose=2 "${INSTALLED_APP}"
 
       - name: Remove installed application
         if: always() && steps.install.outcome == 'success'

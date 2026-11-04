@@ -14,7 +14,10 @@ from ..analysis import trace as diagnostics
 class FigureRenderError(RuntimeError):
     def __init__(self, message, history):
         self.history = history
-        super().__init__(message)
+        super().__init__(message, history)
+
+    def __str__(self):
+        return str(self.args[0])
 
 
 def limits():
@@ -55,9 +58,10 @@ def draw_one(bound, measured, spec, reference, attempts, code_generator):
                     id=spec['id'], svg_bytes=len(rendered['svg'].encode()), formats=sorted(rendered['exports']),
                     code_sha256=hashlib.sha256(runtime_code.encode()).hexdigest()))
             history.append(dict(attempt=attempt, status='passed_execution_and_file_checks'))
-            return chart, dict(id=spec['id'], code=runtime_code, code_sha256=hashlib.sha256(runtime_code.encode()).hexdigest(),
-                               attempts=history, data_contract=spec['data_contract'], style_contract=spec['style_contract'],
-                               first_attempt_passed_execution_and_file_checks=attempt == 1)
+            return chart, dict(
+                id=spec['id'], code=runtime_code, code_sha256=hashlib.sha256(runtime_code.encode()).hexdigest(),
+                attempts=history, data_contract=spec['data_contract'], style_contract=spec['style_contract'],
+                first_attempt_passed_execution_and_file_checks=attempt == 1)
         except (PlotEnvironmentError, PlotModelError):
             raise
         except (ValueError, TypeError, KeyError, SyntaxError, RuntimeError) as exc:

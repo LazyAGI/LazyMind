@@ -814,7 +814,7 @@ func workflowExecutionBoundaryPrompt(kinds []workflowExecutionBoundaryKind) stri
 	}
 	if containsWorkflowBoundaryKind(kinds, workflowBoundarySearch) {
 		lines = append(lines,
-			"- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.",
+			"- Search budget: only when no explicit per-tool execution limits are provided, use the default of at most 6 search calls; explicit execution limits take precedence. Try the strongest query first, then at most 2 additional query variants only if the target is not met.",
 		)
 	}
 	if containsWorkflowBoundaryKind(kinds, workflowBoundaryHTTP) {
@@ -839,7 +839,7 @@ func workflowExecutionBoundaryPrompt(kinds []workflowExecutionBoundaryKind) stri
 	}
 	if containsWorkflowBoundaryKind(kinds, workflowBoundaryKnowledge) {
 		lines = append(lines,
-			"- Retrieval budget: use at most 4 retrieval rounds with focused queries. Stop when enough evidence is available for the declared output.",
+			"- Retrieval budget: only when no explicit per-tool execution limits are provided, use the default of at most 4 retrieval rounds with focused queries; explicit execution limits take precedence. Stop when enough evidence is available for the declared output.",
 		)
 	}
 	if containsWorkflowBoundaryKind(kinds, workflowBoundaryPlatform) {

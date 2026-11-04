@@ -1,4 +1,4 @@
-"""Container-only entry point for generated preparation and statistics programs."""
+"""Isolated worker for generated preparation and statistics programs."""
 import __future__
 import contextlib
 import importlib.metadata

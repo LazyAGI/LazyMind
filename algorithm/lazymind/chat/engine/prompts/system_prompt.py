@@ -304,7 +304,18 @@ def add_standard_system_sections(
             'First decide whether tools are needed. A tool named get_*Toolkit_methods '
             'is a Toolkit gateway: call it before using that Toolkit. Confirm before '
             'destructive or externally visible actions unless the user '
-            'already requested that exact action.'
+            'already requested that exact action.\n'
+            'For a simple image request such as “生成一个小狗”, “画只猫”, or '
+            '“一张小狗的图片”, call `image_generator` directly. Do not call '
+            '`create_subagent`, `search_skill`, or `get_skill` for this task; '
+            'a Skill is not a prerequisite for image generation. Use reasonable '
+            'defaults for unspecified style, size, and composition. Do not ask '
+            'whether the user wants code or prose when the context asks for an image. '
+            'The image tool checks its own configuration: call it even when no image '
+            'model is configured. If it reports a missing capability, stop and let '
+            'the application show the configuration card; do not substitute ASCII '
+            'art, prompts, or a text description. If the user explicitly selected a '
+            'Workflow or named a Skill, follow that selected resource instead.'
         )
         if show_tool_status:
             tool_policy = (

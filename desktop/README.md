@@ -14,6 +14,10 @@ Desktop mode wraps the existing host-process Local runtime in an Electron shell.
 
 Desktop packages bundle the Go services, process-compose, Caddy, Pandoc 3.11, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, and shared Local dependencies. Default builds provide RAG/Milvus dependencies as a separately installable component and fetch published workflow examples during warmup. Model weights are not bundled.
 
+F4 statistics and plotting run natively on Windows 10/11 using an AppContainer and a Job Object; Docker and WSL are not required. Each execution has its own private scratch directory and AppContainer profile, receives no service credentials or network capabilities, and is limited to one process, 1 GiB of committed memory, and the configured execution timeout. A custom read-only capability grants access to the bundled Python runtime and its installed libraries, including shared `.pth` dependencies; service data and source paths from `PYTHONPATH` are not granted. Runtime ACLs must permit AppContainer reads (user-owned installations are prepared automatically). Failure to set up isolation stops execution. Linux deployments continue to use the existing service-container sandbox. Run `python -m pytest tests/algorithm/chat/workflows/test_paper_execution.py` on native Windows to check computation, SVG/PNG/PDF exports, access restrictions and cleanup; these tests are collected by the Windows algorithm CI job.
+
+On Windows, the parent checks scratch and AppContainer private storage every 50 ms and once after exit: 16 MiB per file, 64 MiB combined, and at most 1024 directory entries. Exceeding a budget aborts the job and cleans up its private storage. These are monitored budgets that may briefly overshoot between checks, not filesystem-enforced quotas; Linux retains its existing file-size rlimit.
+
 Pandoc release URLs and SHA-256 pins live in `desktop/dependencies/pandoc.json`. Desktop builds reuse verified archives from `desktop/cache/dependencies/pandoc`, try `LAZYMIND_PANDOC_MIRROR_URL` first when configured, then the project-controlled mainland mirror list, and finally the official upstream release. The packaged algorithm services receive the absolute binary path through `LAZYMIND_PANDOC_PATH`; end users do not download or configure Pandoc.
 
 Release history samples remain separate ModelScope ZIP assets, described by `desktop/history-injection-package.json`. By default, Windows/macOS builds stage only their URL, size and SHA-256 into the runtime manifest. Installer/first-launch warmup downloads and verifies the archive after Python preparation, caches it under the user runtime, extracts its `history-injection/` subtree, and then starts Core to import conversations and artifacts. Matching installed samples are reused without network access. Download failures preserve existing samples, allow normal startup and retry at the next runtime launch. The signed application directory is never modified. Set `LAZYMIND_DESKTOP_DEFER_HISTORY=false` (Actions: `defer_history=false`) to restore the bundled archive for offline distribution; publishing the sample ZIP and updating its metadata remains unchanged.
@@ -112,6 +116,23 @@ make desktop-darwin-arm64-dmg
 `electron-builder` discovers the local Developer ID identity automatically.
 The local target signs the app and DMG but does not submit them to Apple.
 
+Recorder privacy permissions depend on the signed helper's identity. Production
+packages validate both `ai.lazymind.desktop` and `ai.lazymind.recorder` after final
+signing and again inside the release DMG. Both must use Developer ID signatures
+from the expected Apple Team and retain Team/bundle-bound designated requirements;
+ad-hoc or binary-hash-bound identities fail the release check. CI takes the
+expected Team from `APPLE_TEAM_ID`. Local Developer ID builds may set
+`LAZYMIND_MACOS_TEAM_ID` to pin it explicitly.
+
+Keep the same signing Team and bundle identifiers across releases. Switching
+from an ad-hoc test package to a certificate-signed release can require one new
+authorization. Ad-hoc test helpers identify themselves by their binary hash, so
+changing their source may require renewed Screen Recording and Input Monitoring
+permissions even if System Settings still shows an older grant. The helper cache
+preserves unchanged signed artifacts; it cannot preserve identity after an ad-hoc
+helper changes. Validate authorization continuity on a native Mac with two
+successive certificate-signed builds before shipping signing-related changes.
+
 Official tag builds in `LazyAGI/LazyMind` require CI signing and notarization
 credentials. `.github/workflows/macos-installer.yml` maps them from
 `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
@@ -161,6 +182,12 @@ For source-based Local runs, setting the same environment variable before `make 
 Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-login flow through `/_local/admin-session`, while LAN auto-login remains disabled.
 
 Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Electron also enforces a single Desktop instance.
+
+Desktop stages the PPT export scripts into a content-addressed directory under
+the user runtime's `deps/editable-ppt/export-runtime` before linking Node
+dependencies. Startup and dependency preparation must not add links or files to
+the signed `.app` resources. A staging failure disables that exporter entry point
+instead of falling back to writing into the installed application.
 
 Local and Desktop also share the existing device key for auth-service cloud credentials. The identity stays in `~/Library/Application Support/lazymind-desktop/credential-device.json` on macOS and `%LOCALAPPDATA%\LazyMind\Desktop\credential-device.json` on Windows. Empty `LAZYMIND_AUTH_CLOUD_SECRET_KEY` and the old development default select this device key; existing credentials encrypted with the old default remain readable. Explicit custom keys are preserved and must be configured consistently in both modes. Keep the identity file when retaining the database. An invalid identity stops auth-service startup instead of generating a replacement key.
 

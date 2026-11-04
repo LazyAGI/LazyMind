@@ -53,7 +53,11 @@ export const getConfiguredWechatTargets = async (options?: { silentError?: boole
   unwrap<{ items: ConfiguredWechatTarget[] }>((await coreClient.apiCoreUserWechatNotificationTargetsGet(options as RawAxiosRequestConfig)).data as { items: ConfiguredWechatTarget[] } | { data: { items: ConfiguredWechatTarget[] } });
 export const patchPreferences = async (patch: Partial<Preferences> & { revision: number; confirm_running_task_ids?: string[] }) => {
   const scope = notificationEventScope();
-  const preferences = unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch({ notificationPreferencesPatch: patch })).data as Preferences | { data: Preferences });
+  // Confirmation-required responses are part of the settings review flow. The
+  // caller handles them (and real save failures) without a generic 409 toast.
+  const preferences = unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch(
+    { notificationPreferencesPatch: patch }, { silentError: true } as RawAxiosRequestConfig,
+  )).data as Preferences | { data: Preferences });
   // Consumers reload their current user's preferences instead of trusting an
   // asynchronous save response that may belong to an earlier login session.
   publishNotificationChange(NOTIFICATION_PREFERENCES_CHANGED_EVENT, scope);

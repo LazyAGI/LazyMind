@@ -72,7 +72,7 @@ def normalize_constraints(value):
     if target is not None and (type(target) is not int or target <= 0):
         raise ValueError('word_target 必须是正整数或 null')
     if result['paper_type'] not in (None, 'research', 'empirical', 'literature_review',
-                                     'theoretical', 'case_study', 'conference'):
+                                    'theoretical', 'case_study', 'conference'):
         raise ValueError('paper_type 不合法')
     text(result['citation_style'], 'citation_style')
     if not isinstance(result['focus'], list):
@@ -81,7 +81,7 @@ def normalize_constraints(value):
         text(item, 'focus')
     sections = result['required_sections']
     if (not isinstance(sections, list) or any(not isinstance(item, str) or item not in REQUIRED_SECTIONS
-                                            for item in sections)):
+                                              for item in sections)):
         raise ValueError('required_sections 必须是支持的论文章节列表')
     unique(sections, 'required_sections')
     return result
@@ -125,7 +125,8 @@ def validate_value(kind, value, *, allow_metadata=False):
         for key, asset in library.assets.items():
             if key != asset.media_asset_id or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,79}', key):
                 raise ValueError('Invalid uploaded image ID')
-            if not asset.uri or not re.fullmatch(r'/static-files/paper-media/[A-Za-z0-9_/-]+\.(?:svg|png|jpg|jpeg)', asset.uri):
+            if not asset.uri or not re.fullmatch(
+                    r'/static-files/paper-media/[A-Za-z0-9_/-]+\.(?:svg|png|jpg|jpeg)', asset.uri):
                 raise ValueError('Uploaded image must reference the saved paper media library')
         return
     if kind == 'code_files':
@@ -278,9 +279,11 @@ def validate_input(step, value):
         item = value.get(field, [] if field in ('papers', 'charts', 'selected_issue_ids') else None)
         if field == 'papers':
             item = normalize_papers(item)
-        if module in {'write_outline', 'write_document', 'revise_document'} and item is not None and field in ('question', 'evidence', 'review'):
+        if (module in {'write_outline', 'write_document', 'revise_document'} and item is not None
+                and field in ('question', 'evidence', 'review')):
             text(item, field)
-        elif module in {'write_outline', 'write_document', 'revise_document'} and field == 'analysis' and item is not None:
+        elif (module in {'write_outline', 'write_document', 'revise_document'}
+              and field == 'analysis' and item is not None):
             from .analysis.schema import validate_analysis
             validate_analysis(item)
         elif module in {'write_outline', 'write_document', 'revise_document'} and field == 'charts':
@@ -352,6 +355,7 @@ def validate_output(module, value, inputs=None):
             raise ValueError('结果列顺序必须与代码 RESULT_COLUMNS 一致')
     if module == 'revise_document' and value['review_data']['manuscript_sha256'] != text_digest(value['manuscript']):
         raise ValueError('修订后核对必须对应当前稿件')
-    if module in {'peer_review', 'revise_document'} and value['review_data']['review_sha256'] != text_digest(value['review']):
+    if (module in {'peer_review', 'revise_document'}
+            and value['review_data']['review_sha256'] != text_digest(value['review'])):
         raise ValueError('结构化审稿意见与 Markdown 报告不匹配')
     return value

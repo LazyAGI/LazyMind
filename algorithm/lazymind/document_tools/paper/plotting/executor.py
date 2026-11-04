@@ -1,4 +1,4 @@
-"""Execute generated figures in sandboxed children of the Chat container."""
+"""Execute generated figures through the platform's isolated Python backend."""
 from __future__ import annotations
 
 import json

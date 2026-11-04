@@ -627,7 +627,8 @@ export function MarkdownArtifactEditor({
   const hasOutline = Boolean(markdownOutline.title || markdownOutline.items.length);
   const referenceTargets = useMemo(
     () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown).map((target) => {
-      const numberingLabel = numbering?.entries[target.anchorId.slice('block-'.length)]?.label;
+      const numberingLabel = target.type === 'reference'
+        ? undefined : numbering?.entries[target.anchorId.slice('block-'.length)]?.label;
       return numberingLabel
         ? { ...target, label: `${numberingLabel} ${target.label}` }
         : target;
@@ -1093,6 +1094,7 @@ export function MarkdownArtifactEditor({
       dismissSelectionToolbar();
     };
     const dismissOnScroll = (event: Event) => {
+      if (event.target instanceof Node && isMarkdownToolbarInteractionTarget(event.target)) return;
       const root = rootRef.current;
       const surface = root?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
       if (event.target === surface || !root || !(event.target instanceof Node) || !root.contains(event.target)) {
@@ -1196,7 +1198,7 @@ export function MarkdownArtifactEditor({
         : serializedBaselineRef.current === undefined || sourceEditedRef.current ? nextDraft :
           preserveMarkdownSource(richSourceRef.current ?? sourceBeforeSave.markdown, serializedBaselineRef.current, nextDraft);
       const savedMarkdown = writerMarkdownForSave(numberingOnly ? sourceDraft :
-        protectWriterMarkdownAnchors(sourceBeforeSave.markdown, sourceDraft, true, true));
+        protectWriterMarkdownAnchors(numberingDocument ?? sourceBeforeSave.markdown, sourceDraft, true, true));
       const result = await onSave(savedMarkdown, revisionBeforeSave, mode, numberingUpdate);
       const savedRevision = typeof result === 'number'
         ? result
@@ -1254,7 +1256,7 @@ export function MarkdownArtifactEditor({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onSave, readOnly, savePaused, replaceMarkdownSilently, t]);
+  }, [onSave, readOnly, savePaused, replaceMarkdownSilently, numberingDocument, t]);
 
   const saveChanges = useCallback(async (mode: MarkdownSaveMode = 'draft'): Promise<boolean> => {
     if (!dirty || savingRef.current || readOnly) return false;
@@ -2193,6 +2195,7 @@ export function MarkdownArtifactEditor({
                                 >
                                   {target.type === 'image'
                                     ? <PictureOutlined />
+                                    : target.type === 'reference' ? <LinkOutlined />
                                     : <FontSizeOutlined />}
                                 </span>
                                 <span className='writer-markdown-editor__reference-option-label'>

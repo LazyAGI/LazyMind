@@ -2,7 +2,11 @@
 // for plugin workflow graphs. It intentionally has no database dependencies.
 package graphengine
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"lazymind/core/common/askuser"
+)
 
 const SchemaVersion = "3"
 
@@ -86,14 +90,31 @@ type CompiledBypass struct {
 // collect before it initializes a Workflow session. It is deliberately part of
 // the package contract: hosts must not branch on a particular workflow id.
 type ClarificationField struct {
-	ID           string                   `json:"id" yaml:"id"`
-	Label        string                   `json:"label,omitempty" yaml:"label,omitempty"`
-	Question     string                   `json:"question" yaml:"question"`
-	AskWhen      string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
-	Type         string                   `json:"type,omitempty" yaml:"type,omitempty"`
-	Choices      []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
-	ChoicePolicy string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
-	Attachment   *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
+	ID            string                   `json:"id" yaml:"id"`
+	Label         string                   `json:"label,omitempty" yaml:"label,omitempty"`
+	Question      string                   `json:"question" yaml:"question"`
+	AskWhen       string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
+	Type          string                   `json:"type,omitempty" yaml:"type,omitempty"`
+	Choices       []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
+	ChoicePolicy  string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
+	Attachment    *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
+	Reason        string                   `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Required      bool                     `json:"required,omitempty" yaml:"required,omitempty"`
+	Resolution    string                   `json:"resolution,omitempty" yaml:"resolution,omitempty"`
+	Default       any                      `json:"default,omitempty" yaml:"default,omitempty"`
+	AllowOther    *bool                    `json:"allow_other,omitempty" yaml:"allow_other,omitempty"`
+	BooleanLabels *askuser.BooleanLabels   `json:"boolean_labels,omitempty" yaml:"boolean_labels,omitempty"`
+	Validation    *askuser.Validation      `json:"validation,omitempty" yaml:"validation,omitempty"`
+	AppliesWhen   *ClarificationCondition  `json:"applies_when,omitempty" yaml:"applies_when,omitempty"`
+	ValueAliases  map[string]string        `json:"value_aliases,omitempty" yaml:"value_aliases,omitempty"`
+	Patterns      []string                 `json:"patterns,omitempty" yaml:"patterns,omitempty"`
+}
+
+// Conditions refer to normalized semantic fields, not model-written prose.
+type ClarificationCondition struct {
+	Field     string `json:"field" yaml:"field"`
+	Equals    any    `json:"equals,omitempty" yaml:"equals,omitempty"`
+	NotEquals any    `json:"not_equals,omitempty" yaml:"not_equals,omitempty"`
 }
 
 // ClarificationAttachment reuses the Chat host's normal attachment transport

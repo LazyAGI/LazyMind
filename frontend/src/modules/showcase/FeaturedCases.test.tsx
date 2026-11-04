@@ -14,12 +14,6 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("./api", () => ({
-  matchesShowcaseEntryType: (capabilityType: string, entryType: string) =>
-    entryType === "chat"
-      ? capabilityType === "chat"
-      : capabilityType === "work" || capabilityType === "workflow",
-}));
 vi.mock("./CaseCard", () => ({
   default: ({ item }: { item: { title: string } }) => <div>{item.title}</div>,
 }));
@@ -43,7 +37,7 @@ describe("FeaturedCases", () => {
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /查看更多/ })).toHaveAttribute(
       "href",
-      "/agent/chat/cases",
+      "/agent/chat/cases?showcase_entry=chat",
     );
 
     view.rerender(
@@ -57,11 +51,11 @@ describe("FeaturedCases", () => {
     expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
   });
 
-  it("shows an appended ninth chat capability after the existing eight", () => {
-    const chatCases = Array.from({ length: 9 }, (_, index) => ({
-      id: `chat-${index + 1}`,
-      title: `Chat ${index + 1}`,
-      type: "chat",
+  it.each(["chat", "work"] as const)("limits the %s home preview to eight ordered capabilities and keeps View More", (type) => {
+    const entries = Array.from({ length: 9 }, (_, index) => ({
+      id: `${type}-${index + 1}`,
+      title: `Capability ${index + 1}`,
+      type,
       featured: true,
       featured_order: index + 1,
       hot: false,
@@ -69,37 +63,17 @@ describe("FeaturedCases", () => {
 
     render(
       <MemoryRouter>
-        <FeaturedCases type="chat" items={[...chatCases].reverse()} isLoading={false} />
+        <FeaturedCases type={type} items={[...entries].reverse()} isLoading={false} />
       </MemoryRouter>,
     );
 
-    expect(screen.getAllByText(/^Chat \d+$/).map((card) => card.textContent)).toEqual(
-      chatCases.map((item) => item.title),
+    expect(screen.getAllByText(/^Capability \d+$/).map((card) => card.textContent)).toEqual(
+      entries.slice(0, 8).map((item) => item.title),
     );
-  });
-
-  it("limits the work home preview and leaves the full list behind View More", () => {
-    const workCases = Array.from({ length: 9 }, (_, index) => ({
-      id: `work-${index + 1}`,
-      title: `Work ${index + 1}`,
-      type: "work",
-      featured: true,
-      featured_order: index + 1,
-      hot: false,
-    })) as ShowcaseCase[];
-
-    render(
-      <MemoryRouter>
-        <FeaturedCases type="work" items={workCases} isLoading={false} />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("Work 1")).toBeInTheDocument();
-    expect(screen.getByText("Work 8")).toBeInTheDocument();
-    expect(screen.queryByText("Work 9")).not.toBeInTheDocument();
+    expect(screen.queryByText("Capability 9")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /查看更多/ })).toHaveAttribute(
       "href",
-      "/agent/chat/cases",
+      `/agent/chat/cases?showcase_entry=${type}`,
     );
   });
 
@@ -117,5 +91,13 @@ describe("FeaturedCases", () => {
 
     const cards = screen.getAllByText(/First|Later/);
     expect(cards.map((card) => card.textContent)).toEqual(["First", "Later"]);
+  });
+
+  it.each(["chat", "work"] as const)("shows paper reading first in the %s entry", (type) => {
+    render(<MemoryRouter><FeaturedCases type={type} items={[
+      ...cases,
+      { id: "paper-reading", title: "论文阅读", type: "page", featured: true, featured_order: 0 },
+    ] as ShowcaseCase[]} isLoading={false} /></MemoryRouter>);
+    expect(screen.getByText("论文阅读").parentElement?.firstElementChild).toHaveTextContent("论文阅读");
   });
 });

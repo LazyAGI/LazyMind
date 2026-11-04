@@ -152,6 +152,11 @@ func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
 
 	prevTransport := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		// Other dataset tests initialize ACL, which resolves group membership
+		// before applying the scan source filter.
+		if r.Method == http.MethodGet && r.URL.Path == "/api/authservice/user/user-1/groups/internal" {
+			return testJSONResponse(http.StatusOK, `{"code":200,"data":[]}`), nil
+		}
 		if r.Method != http.MethodPost {
 			t.Errorf("unexpected scan request %s %q", r.Method, r.URL.Path)
 			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
@@ -188,6 +193,54 @@ func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
 	}
 	if resp.TotalSize != 1 || len(resp.Datasets) != 1 || resp.Datasets[0].DatasetID != "ds-manual" {
 		t.Fatalf("expected only manual dataset to remain, got total=%d datasets=%+v", resp.TotalSize, resp.Datasets)
+	}
+}
+
+func TestListDatasetsPaperReadingFiltersBeforePaginationAndChecksAccess(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryAttachment{}); err != nil {
+		t.Fatal(err)
+	}
+	installDatasetCatalogScanTransport(t)
+	for _, row := range []struct{ id, owner, scene string }{
+		{"paper-1", "user-1", "academic_papers"},
+		{"paper-2", "user-1", "academic_papers"},
+		{"private-paper", "other-user", "academic_papers"},
+		{"general", "user-1", "general"},
+	} {
+		seedDocumentListDataset(t, db, row.id, row.owner)
+		if err := db.Model(&orm.Dataset{}).Where("id = ?", row.id).Update("scene", row.scene).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for token := ""; ; {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/datasets?scene=academic_papers&page_size=1&page_token="+token, nil)
+		req.Header.Set("X-User-Id", "user-1")
+		rec := httptest.NewRecorder()
+		ListDatasets(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var response ListDatasetsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.TotalSize != 2 || len(response.Datasets) != 1 {
+			t.Fatalf("paper page = %s", rec.Body.String())
+		}
+		id := response.Datasets[0].DatasetID
+		if (id != "paper-1" && id != "paper-2") || seen[id] {
+			t.Fatalf("unexpected or repeated paper collection %q", id)
+		}
+		seen[id] = true
+		token = response.NextPageToken
+		if token == "" {
+			break
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("paper collections = %#v", seen)
 	}
 }
 

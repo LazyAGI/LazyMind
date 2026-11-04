@@ -15,7 +15,6 @@ from ..runtime_events import current_events, report_progress
 from .requirements import validate_required_sections
 
 from .common import (
-    _CHART_OWNERS,
     _heading_signature,
     _json,
     _markdown_prose,
@@ -99,12 +98,14 @@ def prepare_outline(prepared, toolkit, *, on_delta=None):
         if prepared['charts']:
             outline_task['query'] += '\n' + CHART_OUTLINE_INSTRUCTIONS + _json(prepared['chart_directory'])
         if outline:
-            outline_task['query'] += '\nAdd only missing chart ownership markers. Preserve every existing image assignment. Preserve the following outline headings, hierarchy and order verbatim:\n' + outline
+            outline_task['query'] += (
+                '\nAdd only missing chart ownership markers. Preserve every existing image assignment. '
+                'Preserve the following outline headings, hierarchy and order verbatim:\n' + outline)
         generate = toolkit.stream_outline if on_delta is not None else toolkit.generate_outline
         kwargs = {'on_delta': on_delta} if on_delta is not None else {}
         outline = _trace_call('outline', generate,
-            writing_task_json=_json(outline_task), writing_context_json=context_json, **kwargs,
-        )
+                              writing_task_json=_json(outline_task), writing_context_json=context_json, **kwargs,
+                              )
         if original_signature and _heading_signature(outline) != original_signature:
             raise ValueError('Chart ownership planning changed the supplied outline structure.')
     if prepared['charts']:
@@ -114,6 +115,7 @@ def prepare_outline(prepared, toolkit, *, on_delta=None):
     _heading_signature(outline)
     validate_required_sections(outline, task.get('constraints', {}))
     return _normalize_outline_budgets(outline, task.get('constraints', {}))
+
 
 def validate_inputs(inputs):
     validate_writing_inputs(inputs)
