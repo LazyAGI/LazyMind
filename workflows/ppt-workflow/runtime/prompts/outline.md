@@ -67,6 +67,34 @@ All reader-visible text fields (`title`, `subtitle`, every `bullets[].head`/`det
 - Do **not** invent decorative AI image slots. Slide visuals are CSS / SVG / ECharts and/or Pool A/B `use_image` only.
 - JSON only, no markdown fences, no commentary.
 
+## Work reviews and historical presentation sources
+
+For internship/probation defenses and engineering work reviews, prefer a compact
+work inventory before selected deep dives: period, project, personal responsibility,
+deliverable and status. Group by project and chronology rather than listing every
+commit/PR as a slide. Describe the user's own part separately from team output.
+Deep dives explain the task and method, then show the relevant experiment or
+implementation evidence; a summary states concrete learning, limitations and next
+steps grounded in that work. Use only sections warranted by the requested length.
+Do not force profile/agenda/thank-you pages into a short deck.
+
+An earlier presentation explicitly identified by the user as their own work log
+can supply historical claims as well as layout/style references. Preserve source
+filename, page, snapshot date, original status, numbers and attribution. Template
+placeholders remain examples; a user-designated historical claim is self-reported
+evidence, not independent verification. Do not turn an old "ongoing/to date" into
+current completion or copy the old presentation date into a new report. Keep
+conflicting dates/counts as source discrepancies until reconciled, without guessing.
+Read relevant screenshots through available visual inspection; text extraction
+alone does not establish their contents. Preserve the original figure when values
+cannot be read reliably; do not fabricate a clean chart from it.
+
+For percentage metrics, a change from A% to B% is B-A percentage points; relative
+change is (B-A)/A*100% when A is nonzero. Distinguish these in on-slide copy and
+retain the original source values and experiment scope. A loss curve alone does
+not prove test-set accuracy or generalization. Do not combine results from
+different datasets, checkpoints or dates into one improvement claim.
+
 ## Content budget
 
 Explicit user requirements and source fidelity take priority over brevity. Retain required facts, metrics, citations, and checklist items. Otherwise avoid filler, repeated summaries, and invented KPI blocks. A cover normally needs only a title, optional subtitle, and visual direction. Do not inflate a short, image-led deck to a fixed word or bullet quota.
