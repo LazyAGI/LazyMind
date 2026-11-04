@@ -32,6 +32,14 @@ def test_overlapping_ranges_are_not_applied():
                                            dict(start_line=2, end_line=2, code='pass')]), 'a\nb\n')
 
 
+def test_identical_repair_is_rejected_with_original_scientific_error():
+    source = 'def analyze():\n    raise ValueError("No matched measurement")\n'
+    answer = dict(replacements=[dict(start_line=2, end_line=2, code=source.splitlines()[1])])
+    with pytest.raises(ValueError, match='修复补丁未改变源码') as failure:
+        repair_response(answer, source, 'ValueError: No matched measurement')
+    assert 'ValueError: No matched measurement' in str(failure.value)
+
+
 def test_code_is_read_from_native_body_without_merging_reasoning():
     code = 'def draw(data, statistics, spec):\n    return figure'
     response = normalize_response(dict(content=f'```python\n{code}\n```',

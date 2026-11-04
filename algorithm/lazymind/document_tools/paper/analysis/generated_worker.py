@@ -8,6 +8,27 @@ import sys
 import traceback
 
 
+def check_coordinate_snapshots(output):
+    """Reject mutable coordinate aliases before JSON erases their object identity."""
+    seen = {}
+    for index, row in enumerate(output.get('results', []) if isinstance(output, dict) else [], 1):
+        if not isinstance(row, dict) or not isinstance(row.get('coordinates'), dict) or not row['coordinates']:
+            continue
+        comparison = row.get('comparison')
+        if not comparison:
+            continue
+        key = (id(row['coordinates']), row.get('metric'), row.get('unit'), row.get('kind', 'estimate'))
+        previous = seen.get(key)
+        if previous and previous[1] != comparison:
+            raise ValueError(
+                f'SHARED_RESULT_COORDINATES: results {previous[0]} ({previous[1]!r}) and {index} '
+                f'({comparison!r}) share mutable coordinates for metric {row.get("metric")!r}. '
+                'Copy/freeze coordinates inside the result-record helper BEFORE later mutations. '
+                'Repair analysis code; preserve values, units, scope and separate estimands, '
+                'rather than changing the plot grouping to hide the conflict.')
+        seen[key] = (index, comparison)
+
+
 def run(payload):
     import numpy as np
     original = json.dumps(payload['tables'], sort_keys=True, allow_nan=False)
@@ -17,6 +38,7 @@ def run(payload):
         exec(compile(payload['code'], '<generated-analysis>', 'exec',
                      flags=__future__.annotations.compiler_flag, dont_inherit=True), namespace)
         results = namespace['analyze'](payload['tables'], payload['plan'], np.random.default_rng(payload['seed']))
+        check_coordinate_snapshots(results)
     if (original != json.dumps(payload['tables'], sort_keys=True, allow_nan=False)
             or plan != json.dumps(payload['plan'], sort_keys=True, allow_nan=False)):
         raise ValueError('生成代码修改了原始数据或锁定计划')

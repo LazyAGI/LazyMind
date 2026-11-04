@@ -40,7 +40,8 @@ def correction_model(monkeypatch, respond):
 def draft(monkeypatch, body, candidates):
     outline = '# Paper\n\n## Discussion'
     inputs = contracts.validate_input('write_document', {'topic': 'Paper', 'outline': outline})
-    prepared = dict(writing_task={'constraints': {}}, writing_context={}, outline=outline,
+    prepared = dict(writing_task={'constraints': contracts.normalize_constraints({})},
+                    writing_context={}, outline=outline,
                     charts=[], reference_candidates=candidates)
     monkeypatch.setattr(write_document, 'prepare_writer_context', lambda *a, **kw: prepared)
     toolkit = Mock()

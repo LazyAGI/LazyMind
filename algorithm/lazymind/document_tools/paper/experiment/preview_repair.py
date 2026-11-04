@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BeforeValidator, Field, create_model
 
 from lazymind.common.token_estimation import estimate_tokens
+from ..research_topic import _prompt_token_limit
 from ..prompts.experiment_prompt import PREVIEW_REPAIR_PROMPT
 from .schema import ExperimentDesign, ExperimentDraft, Metric, Preview, StrictModel, Text, code_column_types
 
@@ -93,7 +94,7 @@ def repair_preview(writer, candidate, inputs, error, on_event=None):
         'validation_error': str(error)[:1500],
     }, ensure_ascii=False)
     system_prompt = writer._structured_output_prompt(schema)
-    if estimate_tokens(request + system_prompt) > 8000:
+    if estimate_tokens(request + system_prompt) > _prompt_token_limit():
         raise ValueError('模拟预览修正超过预算，已停止；未重新生成方案或代码。') from error
     if on_event:
         on_event({'tag': 'phase', 'phase': '正在按代码声明修正模拟结果列名与类型'})

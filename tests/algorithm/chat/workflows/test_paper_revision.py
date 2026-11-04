@@ -6,6 +6,20 @@ from lazymind.document_tools.paper.writing import common, revise_document, write
 
 BODY = '# Paper\n\n## Methods\nKeep methods.\n\n## Discussion\nShorten this paragraph.'
 
+def checked_revision(body, inputs=None):
+    from lazymind.document_tools.paper.peer_review import build_output
+    from lazymind.document_tools.paper.review_schema import ReviewResult
+    return {**build_output(ReviewResult(summary='Checked revised manuscript', issues=[], limitations=[]),
+                           {'topic': 'Paper', 'manuscript': body}), 'manuscript': body}
+
+
+@pytest.fixture(autouse=True)
+def offline_revision_review(monkeypatch):
+    from lazymind.document_tools.paper import peer_review
+    monkeypatch.setattr(peer_review, 'run', lambda inputs: {
+        key: value for key, value in checked_revision(inputs['manuscript']).items() if key != 'manuscript'})
+
+
 CURRENT_REVIEW = {'current_step': 'revise_document', 'previous_completed_step': 'peer_review',
                   'review_matches_manuscript': True}
 
@@ -108,12 +122,12 @@ def test_revision_keeps_existing_outline_material_version(monkeypatch):
     outline = '# Paper\n\n## Methods\n\n## Discussion'
     pool = workflow.pool_from_business({'topic': 'Paper', 'manuscript': BODY, 'outline': outline})
     revised = BODY.replace('## Discussion', '## Limitations')
-    monkeypatch.setattr(revise_document, 'run', lambda inputs: {'manuscript': revised, 'is_demo': False})
+    monkeypatch.setattr(revise_document, 'run', lambda inputs: checked_revision(revised))
     result = workflow.execute_step('revise_document', pool, 'Rename Discussion to Limitations.')
     assert result['pool']['current']['outline'] == pool['current']['outline']
     assert workflow.material(result['pool'], 'outline')['content'] == outline
     assert workflow.material(result['pool'], 'manuscript')['content'] == revised
-    assert len(result['pool']['history'][-1]['outputs']) == 1
+    assert len(result['pool']['history'][-1]['outputs']) == 3
 
 
 def test_direct_revision_without_review_does_not_call_model(monkeypatch):
@@ -273,8 +287,10 @@ def test_missing_section_and_partial_review_use_shared_writer(monkeypatch, parti
         expected = expected.replace('Keep methods.', 'Clarified methods.')
     assert workflow.material(result['pool'], 'manuscript')['content'] == expected
     assert workflow.material(pool, 'manuscript')['content'] == BODY
-    assert workflow.material(result['pool'], 'review_data')['content'] == original_review
-    assert workflow.material(result['pool'], 'review_data')['content']['issues'][2]['action_type'] == pending_action
+    refreshed = workflow.material(result['pool'], 'review_data')['content']
+    assert refreshed['manuscript_sha256'] != original_review['manuscript_sha256']
+    assert any(i['action_type'] == pending_action for i in refreshed['issues'])
+    assert workflow.material(pool, 'review_data')['content'] == original_review
     locating = editor.locate_revision_target.call_args.kwargs
     assert '缺失章节：局限性' in locating['writing_task_json']
     assert editor.generate_modify_plan.call_args.kwargs['locate_result_json'] == locate_result
@@ -304,7 +320,7 @@ def test_revision_publication_reports_only_selected_pending_work(tmp_path, monke
     path.write_text(json.dumps(pool))
     monkeypatch.setattr(revise_document, 'AutoModel', lambda **kw: lambda prompt:
         json.dumps({'intent': 'review', 'selection': 'subset', 'issue_ids': selected}))
-    monkeypatch.setattr(revise_document, 'run', lambda inputs:
+    monkeypatch.setattr(revise_document, '_modify_manuscript', lambda *args, **kwargs:
         {'manuscript': BODY.replace('Shorten this paragraph.', 'Shortened.'), 'is_demo': False})
     previous = lazyllm.globals.get('subagent_ctx')
     events = []
@@ -322,11 +338,13 @@ def test_revision_publication_reports_only_selected_pending_work(tmp_path, monke
         result = workflow.run_paper_step()
         assert result['status'] == 'completed'
         final = result['_agent_control']['final_text']
-        assert ('R2 仍需补充材料或实验' in final) == ('R2' in selected)
+        assert '仍需补充材料或实验' in final
+        assert '新报告中的问题编号' in final
         saved = next(e['value']['path'] for e in events if e.get('slot') == 'revise_document_pool'
                      and e['type'] == 'artifact')
         persisted = workflow._read_bound(saved)
-        assert workflow.material(persisted, 'review_data')['content'] == review['review_data']
+        assert workflow.material(persisted, 'review_data')['content']['manuscript_sha256'] != review['review_data']['manuscript_sha256']
+        assert persisted['selected_issue_ids'] == []
     finally:
         if previous is None:
             lazyllm.globals.pop('subagent_ctx', None)

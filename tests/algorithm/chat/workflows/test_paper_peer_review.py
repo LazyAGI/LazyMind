@@ -233,6 +233,43 @@ def test_valid_result_needs_no_repair(example):
     assert peer_review.repair_targets(example['model_response'], example['input']['manuscript']) == {}
 
 
+def test_review_computes_fact_conflicts_and_keeps_language_advice_separate(example, monkeypatch):
+    inputs = {**example['input'], 'manuscript': '总token从 31,576 增至 34,840，成本下降。句子过长。',
+              'evidence': '总token，含失败：31,576 → 34,840。'}
+    issue = dict(example['model_response']['issues'][0], category='language', quote='句子过长。',
+                 problem='表达可精简。', suggestion='精简句子。', action_type='text_revision')
+    candidate = {'summary': '核对成本方向；另有表达建议。', 'issues': [issue], 'limitations': [], 'fact_claims': [{
+        'category': 'comparison', 'location': '结果', 'quote': inputs['manuscript'].split('句子')[0],
+        'asserted_text': '下降', 'operation': 'direction', 'sources': [
+            {'path': '/evidence', 'quote': inputs['evidence'], 'value_text': '34,840'},
+            {'path': '/evidence', 'quote': inputs['evidence'], 'value_text': '31,576'},
+        ],
+    }]}
+    monkeypatch.setattr(peer_review, 'AutoModel', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'WriterToolBase', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'call_once', lambda *args: candidate)
+    output = peer_review.run(inputs)
+    data = output['review_data']
+    assert len(data['fact_checks']) == 5
+    assert next(item for item in data['fact_checks'] if item['category'] == 'comparison')['status'] == 'conflict'
+    assert {item['disposition'] for item in data['issues']} == {'fact', 'advice'}
+    assert '### 事实问题' in output['review'] and '论证与语言建议（不阻断交付）' in output['review']
+    assert data['review_sha256'] == peer_review.text_digest(output['review'])
+    assert all(item['quote'] in inputs['manuscript'] for item in data['issues'])
+    api.contracts.validate_output('peer_review', output)
+
+
+def test_fact_claim_format_repair_preserves_existing_opinions(example):
+    candidate = {**example['model_response'], 'fact_claims': 'invalid'}
+    targets = peer_review.repair_targets(candidate, example['input']['manuscript'])
+    assert set(targets) == {'fact_claims'}
+    prompt = peer_review.repair_prompt(example['input'], targets)
+    assert 'fact_claim_schema' in prompt
+    result = peer_review.apply_repair(
+        candidate, targets, peer_review.ReviewRepair(replacements={'fact_claims': []}), example['input']['manuscript'])
+    assert [issue.model_dump() for issue in result.issues] == example['model_response']['issues']
+
+
 @pytest.mark.parametrize('start,end', [(0, 1), (3, 2), (1, 999), (True, 2)])
 def test_repair_rejects_invalid_quote_lines(example, start, end):
     issue = example['model_response']['issues'][0]
@@ -339,8 +376,8 @@ def test_long_manuscript_quote_repair_only_sends_related_source(example):
     assert len(prompt) < peer_review.MAX_REPAIR_CHARS
 
 
-@pytest.mark.parametrize('quote', [None, {'start_line': 1, 'end_line': 3},
-                                  {'start_line': 2, 'end_line': 4}, '编造的引用'])
+@pytest.mark.parametrize('quote', [
+    None, {'start_line': 1, 'end_line': 3}, {'start_line': 2, 'end_line': 4}, '编造的引用'])
 def test_local_repair_cannot_evade_source_checks(example, quote):
     issue = example['model_response']['issues'][0]
     target = {'value': dict(issue, quote='未匹配的原文'), 'errors': ['quote not found']}
@@ -354,9 +391,9 @@ def test_format_repair_preserves_original_quote(example):
     issue = example['model_response']['issues'][0]
     target = {'value': dict(issue, severity='invalid'),
               'errors': [{'field': ['issues', 0, 'severity'], 'message': 'invalid severity'}]}
-    result = peer_review.apply_repair(example['model_response'], {'issues.0': target},
-                                     peer_review.ReviewRepair(replacements={'issues.0': issue}),
-                                     example['input']['manuscript'], allowed_lines=set())
+    result = peer_review.apply_repair(
+        example['model_response'], {'issues.0': target}, peer_review.ReviewRepair(replacements={'issues.0': issue}),
+        example['input']['manuscript'], allowed_lines=set())
     assert result.issues[0].model_dump() == issue
 
 
@@ -394,8 +431,9 @@ def test_unverifiable_issue_is_disclosed_and_excluded_from_auto_revision(example
     candidate['issues'].append(dict(candidate['issues'][0], location='不存在的章节', quote='xyzzzz'))
     before = copy.deepcopy(candidate)
     monkeypatch.setattr(peer_review, 'call_once', lambda *a: pytest.fail('No source, no model call'))
-    result = peer_review.repair_result(None, example['input'], candidate,
-                                      peer_review.repair_targets(candidate, example['input']['manuscript']), 'offline')
+    result = peer_review.repair_result(
+        None, example['input'], candidate,
+        peer_review.repair_targets(candidate, example['input']['manuscript']), 'offline')
     output = peer_review.build_output(result, example['input'])
     assert len(output['review_data']['issues']) == 1
     assert '待核验意见' in output['review'] and 'xyzzzz' in output['review']
@@ -409,8 +447,9 @@ def test_bad_quote_repair_keeps_valid_review_and_cannot_publish_fake_quote(examp
     candidate['issues'].append(dict(issue, quote='比较三种证据组织方法。'))
     monkeypatch.setattr(peer_review, 'call_once', lambda *a: {
         'replacements': {'issues.1': dict(issue, quote=None)}})
-    result = peer_review.repair_result(None, example['input'], candidate,
-                                      peer_review.repair_targets(candidate, example['input']['manuscript']), 'offline')
+    result = peer_review.repair_result(
+        None, example['input'], candidate,
+        peer_review.repair_targets(candidate, example['input']['manuscript']), 'offline')
     assert len(result.issues) == 1
     assert any('不能将需要核验的原文引用改为 null' in text for text in result.limitations)
 
@@ -499,6 +538,7 @@ def test_silent_review_stream_distinguishes_runtime_and_content(monkeypatch, cap
     def build(_prompt, *, stream_output, apply_formatter):
         assert apply_formatter is False
         sink = stream_output['_stream_sink']
+
         def model(_input):
             sink({'tag': 'runtime_event', 'runtime_event': {
                 'type': 'model_call_started', 'data': {'model_call_id': 'provider-test', 'secret': 'PRIVATE'}}})
@@ -525,3 +565,349 @@ def test_unclosed_thinking_or_duplicate_json_is_still_rejected():
         peer_review.parse_response('<think>unfinished {"summary":"ok"}')
     with pytest.raises(ValueError, match='重复字段'):
         peer_review.parse_response('<think>reasoning</think>{"summary":"a","summary":"b"}')
+
+
+@pytest.mark.parametrize('verdict', ['verified', 'conflict', 'insufficient'])
+def test_review_runs_independent_fulltext_reading_and_rerender_preserves_it(monkeypatch, verdict):
+    inputs = {'topic': 'T', 'manuscript': '# T\n文献[P1]指出仅受控样本更快。',
+              'papers': [{'id': 'P1', 'title': 'Study', 'content_type': 'full_text',
+                          'text': '受控样本更快。其他环境尚不确定。'}]}
+    candidate = dict(summary='核对文献。', issues=[], limitations=[], fact_claims=[dict(
+        category='literature', location='T', quote='文献[P1]指出仅受控样本更快。', asserted_text='指出',
+        operation='citation_support', sources=[{'path': '/papers/0/text', 'quote': '受控样本更快。'}])])
+    calls = []
+
+    def response(_reviewer, prompt, schema, _trace_id):
+        calls.append(schema)
+        if schema is peer_review.ReviewResult:
+            return candidate
+        assert schema is peer_review.LiteratureReadings
+        assert '其他环境尚不确定' in prompt
+        return {'readings': [{'claim_index': 0, 'status': verdict, 'reason': '仅支持受控样本；没有推广到全部环境。',
+                              'passages': [{'path': '/papers/0/text', 'quote': '受控样本更快。'}]}]}
+
+    monkeypatch.setattr(peer_review, 'AutoModel', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'WriterToolBase', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'call_once', response)
+    output = peer_review.run(inputs)
+    assert calls == [peer_review.ReviewResult, peer_review.LiteratureReadings]
+    assert '文献全文' in output['review']
+    assert '未提供文献证据材料' not in output['review']
+    group = next(group for group in output['review_data']['fact_checks'] if group['category'] == 'literature')
+    assert group['status'] == verdict
+    assert group['checks'][0]['verification_method'] == 'semantic_read'
+    result = peer_review.ReviewResult.model_validate(candidate)
+    result.limitations.append('外部材料仍待补。')
+    rerender = peer_review.build_output(result, inputs, fact_checks=output['review_data']['fact_checks'])
+    new = next(group for group in rerender['review_data']['fact_checks'] if group['category'] == 'literature')
+    assert new == group
+    assert '外部材料仍待补' in rerender['review']
+    assert len(calls) == 2
+    api.contracts.validate_output('peer_review', rerender)
+
+
+def test_invalid_semantic_passage_and_failed_reader_keep_evidence_insufficient(monkeypatch):
+    result = peer_review.ReviewResult(summary='核对', issues=[], limitations=[], fact_claims=[dict(
+        category='literature', location='T', quote='文献[P1]支持结论。', asserted_text='支持', operation='citation_support',
+        sources=[{'path': '/papers/0/text', 'quote': '受控样本。'}])])
+    inputs = {'topic': 'T', 'manuscript': result.fact_claims[0].quote,
+              'papers': [{'content_type': 'full_text', 'text': '受控样本。'}]}
+    monkeypatch.setattr(peer_review, 'call_once', lambda *args: {'readings': [{
+        'claim_index': 0, 'status': 'verified', 'reason': '假定支持。',
+        'passages': [{'path': '/papers/0/text', 'quote': '不存在的原文。'}]}]})
+    readings = peer_review.read_literature(None, result, inputs, 'test')
+    output = peer_review.build_output(result, inputs, readings=readings)
+    group = next(g for g in output['review_data']['fact_checks'] if g['category'] == 'literature')
+    assert group['status'] == 'insufficient'
+
+    def failed(*args):
+        raise TimeoutError('reader unavailable')
+
+    monkeypatch.setattr(peer_review, 'call_once', failed)
+    assert peer_review.read_literature(None, result, inputs, 'test') == []
+    assert any('未完成' in text for text in result.limitations)
+
+
+@pytest.mark.parametrize('paper,label,limitation', [
+    ({'abstract': 'Only an abstract.'}, '文献摘要', '仅提供摘要'),
+    ({'text': 'Abstract text.', 'content_type': 'abstract'}, '文献摘要', '仅提供摘要'),
+    ({'text': 'Partial text.', 'content_type': 'full_text', 'truncated': True}, '文献文本（节选或覆盖不明）', '截断'),
+    ({'text': 'Unclear coverage.'}, '文献文本（节选或覆盖不明）', '覆盖不明'),
+    ({'title': 'Bibliography only'}, '文献题录', '仅有题录'),
+])
+def test_report_scope_distinguishes_abstract_excerpt_and_bibliography(paper, label, limitation):
+    result = peer_review.ReviewResult(summary='检查已提供材料。', issues=[], limitations=[])
+    inputs = {'topic': 'T', 'manuscript': '# T\n引用[P1]。', 'papers': [{'id': 'P1', **paper}]}
+    report = peer_review.render_review(result, inputs)
+    assert label in report and limitation in report
+    assert '本次使用：稿件、文献全文' not in report
+    assert '未提供文献证据材料' not in report
+
+
+def test_single_complete_json_with_plain_trailing_comment_is_unambiguous(example):
+    candidate = example['model_response']
+    assert peer_review.parse_response(json.dumps(candidate) + '\n以上为审稿结果。') == candidate
+    with pytest.raises(ValueError):
+        peer_review.parse_response(json.dumps(candidate) + json.dumps(candidate))
+
+
+def test_extra_data_structural_repair_preserves_every_scalar_and_records_original_failure(example, monkeypatch, caplog):
+    import logging
+    from unittest.mock import Mock
+    monkeypatch.setattr(peer_review, 'LOG', logging.getLogger(__name__))
+    caplog.set_level(logging.INFO)
+    candidate = example['model_response']
+    correct = json.dumps(candidate, ensure_ascii=False)
+    # Model closed its outer object early; all literal content remains present.
+    damaged = correct.replace(', "limitations":', '}, "limitations":', 1)
+    reviewer = Mock()
+    model = Mock(side_effect=[damaged, correct])
+    reviewer._build_structured_llm.return_value = model
+    assert peer_review.call_once(reviewer, 'input', peer_review.ReviewResult) == candidate
+    assert model.call_count == 2
+    assert 'parse_failure' in caplog.text and 'structure_repair_accepted' in caplog.text
+    changed = dict(candidate, summary='A new scientific judgment is forbidden')
+    reviewer._build_structured_llm.return_value = Mock(side_effect=[damaged, json.dumps(changed)])
+    with pytest.raises(ValueError, match='无法解析的 JSON'):
+        peer_review.call_once(reviewer, 'input', peer_review.ReviewResult)
+    assert 'structure_repair_rejected' in caplog.text
+
+
+def test_review_scope_keeps_research_notes_separate_from_literature_fulltext():
+    result = peer_review.ReviewResult(summary='检查', issues=[], limitations=[])
+    supplied, limitations = peer_review.review_scope(result, {'writing_materials': '历史素材，非论文全文。'})
+    assert '研究素材（非文献全文）' in supplied
+    assert any('未核验外部引用' in item for item in limitations)
+
+
+def _contract_candidate():
+    valid_quote = 'VALID_SENTINEL记录为19。'
+    change_quote = '总token从31,576增到34,840，增加3,264。'
+    row = '| 总token | 31,576 | 34,840 |'
+    valid = dict(category='numbers', location='T', quote=valid_quote, asserted_text='19', operation='value',
+                 sources=[{'path': '/analysis/value'}])
+    invalid = dict(category='numbers', location='T', quote=change_quote, asserted_text='增加3,264',
+                   operation='difference', sources=[dict(path='/evidence', quote=row, value_text=v)
+                                                    for v in ('31,576', '34,840')])
+    candidate = dict(summary='审查', issues=[], limitations=[], fact_claims=[valid, invalid])
+    inputs = dict(topic='T', manuscript=valid_quote + '\n' + change_quote,
+                  analysis={'value': 19}, evidence=row)
+    return candidate, inputs
+
+
+def test_generation_contract_repair_sends_only_invalid_items_and_preserves_valid_sources(monkeypatch):
+    from unittest.mock import Mock
+    candidate, inputs = _contract_candidate()
+    before = copy.deepcopy(candidate)
+    targets = peer_review.repair_targets(candidate, inputs['manuscript'], inputs)
+    assert targets['fact_claims']['indices'] == [1]
+    prompt = peer_review.repair_prompt(inputs, targets)
+    assert 'VALID_SENTINEL' not in prompt
+    replacement = dict(candidate['fact_claims'][1], asserted_text='3,264')
+    call = Mock(return_value={'replacements': {'fact_claims': [replacement]}})
+    monkeypatch.setattr(peer_review, 'call_once', call)
+    result = peer_review.repair_result(None, inputs, candidate, targets, 'T')
+    assert call.call_count == 1
+    assert candidate == before
+    assert result.fact_claims[0].model_dump(exclude_defaults=True) == peer_review.FactClaim.model_validate(
+        before['fact_claims'][0]).model_dump(exclude_defaults=True)
+    output = peer_review.build_output(result, inputs)
+    assert all(c['status'] == 'verified' for c in output['review_data']['fact_checks'][0]['checks'])
+    assert output['review_data']['issues'] == []
+
+
+@pytest.mark.parametrize('failure', ['transport', 'unchanged', 'new_source', 'valid_field_changed'])
+def test_one_failed_fact_format_repair_keeps_unverified_item_and_still_delivers(monkeypatch, failure):
+    candidate, inputs = _contract_candidate()
+    replacement = dict(candidate['fact_claims'][1], asserted_text='3,264')
+    if failure == 'unchanged':
+        replacement = candidate['fact_claims'][1]
+    elif failure == 'new_source':
+        replacement = copy.deepcopy(replacement)
+        replacement['sources'][0]['path'] = '/analysis/invented'
+    elif failure == 'valid_field_changed':
+        replacement = dict(replacement, quote='另一个稿件版本')
+    calls = []
+
+    def respond(*args):
+        calls.append(args)
+        if failure == 'transport':
+            raise TimeoutError('one bounded format attempt failed')
+        return {'replacements': {'fact_claims': [replacement]}}
+
+    monkeypatch.setattr(peer_review, 'call_once', respond)
+    targets = peer_review.repair_targets(candidate, inputs['manuscript'], inputs)
+    result = peer_review.repair_result(None, inputs, candidate, targets, 'T')
+    output = peer_review.build_output(result, inputs)
+    assert len(calls) == 1
+    assert result.fact_claims[1].asserted_text == candidate['fact_claims'][1]['asserted_text']
+    assert any(c['status'] == 'insufficient' for c in output['review_data']['fact_checks'][0]['checks'])
+    assert any('格式修复未完成' in item for item in output['review_data']['limitations'])
+    assert output['review_data']['fact_checks'][0]['checks'][0]['status'] == 'verified'
+
+
+def test_arity_category_and_scalar_state_quotation_are_generation_errors_without_breaking_saved_reader(monkeypatch):
+    candidate, inputs = _contract_candidate()
+    quote = '数据来自实测。'
+    inputs.update(manuscript=quote, result_meta={'data_origin': 'synthetic'})
+    fact = dict(category='data_status', location='T', quote=quote, asserted_text='实测', operation='status',
+                sources=[dict(path='/result_meta/data_origin', quote='data_origin="synthetic"')])
+    candidate['fact_claims'] = [fact]
+    targets = peer_review.repair_targets(candidate, quote, inputs)
+    assert targets['fact_claims']['source_snippets'] == [[{'path': '/result_meta/data_origin', 'text': 'synthetic'}]]
+    replacement = copy.deepcopy(fact)
+    replacement['sources'][0]['quote'] = 'synthetic'
+    monkeypatch.setattr(peer_review, 'call_once', lambda *args: {'replacements': {'fact_claims': [replacement]}})
+    result = peer_review.repair_result(None, inputs, candidate, targets, 'T')
+    output = peer_review.build_output(result, inputs)
+    state = next(g for g in output['review_data']['fact_checks'] if g['category'] == 'data_status')
+    assert state['checks'][0]['status'] == 'conflict'
+    malformed = peer_review.FactClaim.model_validate(dict(fact, category='numbers', operation='direction'))
+    errors, _ = peer_review.fact_claim_errors(malformed)
+    assert {'category', 'operation', 'sources'} <= set(errors)
+    # Compatibility: older saved selections remain readable; only generation is repaired.
+    from lazymind.document_tools.paper.review_schema import SavedReview, text_digest
+    saved = SavedReview(summary='历史审稿', issues=[], limitations=[], fact_claims=[malformed],
+                        manuscript_sha256=text_digest(quote), review_sha256=text_digest('历史审稿'))
+    assert saved.fact_claims[0].category == 'numbers'
+
+
+def test_missing_source_units_are_not_treated_as_format_errors_or_invented():
+    item = peer_review.FactClaim(category='numbers', location='T', quote='耗时10秒。', asserted_text='10',
+                                 operation='value', sources=[{'path': '/analysis/value'}])
+    errors, _ = peer_review.fact_claim_errors(item, {'analysis': {'value': 10}})
+    assert errors == {}
+    result = peer_review.ReviewResult(summary='T', issues=[], limitations=[], fact_claims=[item])
+    output = peer_review.build_output(result, dict(topic='T', manuscript=item.quote, analysis={'value': 10}))
+    assert output['review_data']['fact_checks'][0]['checks'][0]['status'] == 'insufficient'
+
+
+@pytest.mark.parametrize('failure', ['unchanged', 'adds_invented_figure', 'transport'])
+def test_schema_invalid_missing_figure_proposal_cannot_block_valid_facts_or_become_conflict(monkeypatch, failure):
+    candidate, inputs = _contract_candidate()
+    candidate['fact_claims'] = candidate['fact_claims'][:1]
+    invalid = dict(category='figure', location='缺失图', quote='', asserted_text='图1',
+                   operation='figure_value', sources=[])
+    candidate['fact_claims'].append(invalid)
+    targets = peer_review.repair_targets(candidate, inputs['manuscript'], inputs)
+    assert targets['fact_claims']['indices'] == [1]
+    calls = []
+
+    def respond(*args):
+        calls.append(args)
+        if failure == 'transport':
+            raise TimeoutError('one bounded attempt')
+        replacement = invalid
+        if failure == 'adds_invented_figure':
+            replacement = dict(invalid, quote='图1', sources=[dict(path='/charts/0/svg')])
+        return {'replacements': {'fact_claims': [replacement]}}
+
+    monkeypatch.setattr(peer_review, 'call_once', respond)
+    result = peer_review.repair_result(None, inputs, candidate, targets, 'T')
+    output = peer_review.build_output(result, inputs)
+    assert len(calls) == 1
+    assert len(result.fact_claims) == 1
+    notes = result.limitations
+    assert any('待核验事实提案' in note and '"sources": []' in note for note in notes)
+    figure = next(g for g in output['review_data']['fact_checks'] if g['category'] == 'figure')
+    assert figure['status'] == 'insufficient' and figure['checks'] == []
+    assert not any(i['disposition'] == 'fact' for i in output['review_data']['issues'])
+
+
+def test_real_unverified_numerical_correction_cannot_enter_automatic_revision(monkeypatch):
+    from decimal import Decimal
+    from lazymind.document_tools.paper.writing import revise_document
+    fixture = json.loads((EXAMPLE.parent / 'fact_unverified_correction.json').read_text())
+    table = fixture['table']
+    rows = [dict(zip(table['columns'], row)) for row in table['rows']]
+    selected = [r for r in rows if r['method'] == 'structured_local' and r['binding'] == 'with_binding']
+    assert len(rows) == 96 and len(selected) == 24
+    mean = sum(Decimal(str(r['target_compliance'])) for r in selected) / len(selected)
+    assert mean.quantize(Decimal('0.000001')) == Decimal('0.836833')
+    # The fixed short review sample has no H2; wrap only for the revision API's structural contract.
+    manuscript = fixture['manuscript'].replace('\n\n', '\n\n## 结果\n\n', 1)
+    inputs = dict(topic='论文写作 Agent 的真实评估', manuscript=manuscript,
+                  evidence=json.dumps({'experiment': {'results': table}}, ensure_ascii=False),
+                  result_meta=fixture['result_meta'])
+    result = peer_review.ReviewResult(
+        summary='审查', issues=[fixture['issue']], limitations=[], fact_claims=fixture['fact_claims'])
+    before = result.model_dump()
+    review = peer_review.build_output(result, inputs)
+    issue = review['review_data']['issues'][0]
+    assert issue['disposition'] == 'unverified' and issue['action_type'] == 'needs_material'
+    assert all(c['status'] == 'insufficient' for c in review['review_data']['fact_checks'][0]['checks'])
+    notes = [n for n in review['review_data']['limitations'] if n.startswith('未核实事实更正')]
+    assert json.loads(notes[0].split('：', 1)[1])['original_issue'] == fixture['issue']
+    assert result.model_dump() == before
+    monkeypatch.setattr(revise_document, 'WriterRevisionToolkit', lambda: pytest.fail('Pending R3 reached Writer'))
+    monkeypatch.setattr(peer_review, 'run', lambda *a, **kw: pytest.fail('No edit must reach model recheck'))
+    with pytest.raises(api.contracts.MissingMaterials, match='没有可执行的文本修改'):
+        api.run_algorithm('revise_document', {
+            **inputs, 'review': review['review'], 'review_data': review['review_data'],
+            'selected_issue_ids': [issue['id']], 'request': '只修改该条意见'})
+
+
+@pytest.mark.parametrize('binding', ['missing', 'verified', 'insufficient'])
+def test_unverified_numerical_correction_never_inherits_verification_from_the_manuscript(binding):
+    quote = '准确率为93.33%。'
+    issue = dict(severity='major', category='analysis', location='结果', quote=quote,
+                 problem='准确率应为100%，现数字错误。', suggestion='改为100%。', action_type='text_revision')
+    facts = [] if binding == 'missing' else [dict(
+        category='numbers', location='结果', quote=quote, asserted_text='93.33%', operation='percentage',
+        sources=[{'path': '/analysis/correct'},
+                 {'path': '/analysis/n' if binding == 'verified' else '/analysis/missing'}])]
+    output = peer_review.build_output(peer_review.ReviewResult(
+        summary='审查', issues=[issue], limitations=[], fact_claims=facts),
+        dict(topic='论文', manuscript=quote, analysis={'correct': 14, 'n': 15}))
+    saved = output['review_data']['issues'][0]
+    assert saved['disposition'] == 'unverified' and saved['action_type'] == 'needs_material'
+    assert any('original_issue' in n for n in output['review_data']['limitations'])
+
+
+@pytest.mark.parametrize('kind', ['fact', 'advice'])
+def test_checked_conflict_and_pure_advice_still_reach_atomic_revision(monkeypatch, kind):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from lazymind.document_tools.paper.writing import revise_document
+    from lazymind.document_tools.toolkits import WriterRevisionToolkit
+    quote = '准确率为100%。' if kind == 'fact' else '表达很冗长。'
+    new = '准确率为93.33%。' if kind == 'fact' else '表达简洁。'
+    body = '# 论文\n\n## 结果\n' + quote
+    issue = dict(severity='minor', category='analysis' if kind == 'fact' else 'language', location='结果',
+                 quote=quote, problem='准确率需要更正。' if kind == 'fact' else '表达可精简。',
+                 suggestion='更正准确率。' if kind == 'fact' else '精简表达。', action_type='text_revision')
+    facts = [dict(category='numbers', location='结果', quote=quote, asserted_text='100%',
+                  operation='percentage', sources=[{'path': '/evidence/correct'}, {'path': '/evidence/n'}])]
+    inputs = dict(topic='论文', manuscript=body, evidence=json.dumps({'correct': 14, 'n': 15}))
+    review = peer_review.build_output(peer_review.ReviewResult(
+        summary='审查', issues=[issue], limitations=[], fact_claims=facts if kind == 'fact' else []), inputs)
+    saved = review['review_data']['issues'][0]
+    assert saved['disposition'] == kind and saved['action_type'] == 'text_revision'
+    operation = dict(content_ref={'heading_path': ['论文', '结果']}, modify_type='update', target_scope='fragment',
+                     locator_text=quote, instruction='采用已选修订', meta={'issue_ids': [saved['id']]})
+    shared = WriterRevisionToolkit()
+    editor = SimpleNamespace(
+        locate_revision_target=Mock(return_value='{"target_title":false,"targets":[]}'),
+        generate_modify_plan=Mock(return_value=json.dumps({'scope': 'document', 'instructions': [operation]})),
+        generate_string_replace_set=Mock(return_value=json.dumps({'replacements': [dict(
+            content_ref={'heading_path': ['论文', '结果']}, old_string=quote, new_string=new)]})),
+        apply_string_replace=Mock(wraps=shared.apply_string_replace))
+    monkeypatch.setattr(revise_document, 'WriterRevisionToolkit', lambda: editor)
+    monkeypatch.setattr(peer_review, 'run', lambda current: peer_review.build_output(
+        peer_review.ReviewResult(summary='修订后检查', issues=[], limitations=[]), current))
+    output = api.run_algorithm('revise_document', {
+        **inputs, 'review': review['review'], 'review_data': review['review_data'],
+        'selected_issue_ids': [saved['id']], 'request': '只修改所选意见'})
+    assert output['manuscript'] == body.replace(quote, new)
+    assert editor.apply_string_replace.call_count == 1
+
+
+@pytest.mark.parametrize('ids', [['R2'], ['R1', 'R2']])
+def test_pending_issue_cannot_be_smuggled_into_a_mixed_revision_plan(ids):
+    from lazymind.document_tools.paper.writing import revise_document
+    plan = revise_document.MarkdownModifyPlan.model_validate(dict(scope='document', instructions=[dict(
+        content_ref={'heading_path': ['论文']}, modify_type='update', target_scope='section',
+        instruction='不能借合法修改执行待核纠错', meta={'issue_ids': ids})]))
+    with pytest.raises(ValueError, match='selected issue_ids'):
+        revise_document._validate_review_plan(plan, [
+            dict(id='R1', action_type='text_revision'), dict(id='R2', action_type='needs_material')])

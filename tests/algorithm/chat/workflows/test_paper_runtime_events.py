@@ -103,6 +103,9 @@ def test_structured_preview_replaces_revised_fields_and_does_not_emit_raw_json()
 @pytest.mark.parametrize('step', STEPS)
 def test_all_steps_use_shared_progress_preview_and_real_artifact_publication(step, monkeypatch, tmp_path):
     from lazymind.chat.engine.subagent.context import SubAgentContext
+    from lazymind.document_tools.paper import review_materials
+    monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
+    monkeypatch.setattr(review_materials, 'prepare', lambda inputs, *a, **kw: copy.deepcopy(inputs['papers']))
     if step == 'write_outline':
         example = {'input': {'topic': '方法比较', 'question': '如何比较两种方法？'},
                    'output': {'outline': '# 方法比较\n\n## 方法\n\n## 局限', 'is_demo': False}}
@@ -138,6 +141,7 @@ def test_all_steps_use_shared_progress_preview_and_real_artifact_publication(ste
         task_id=step, conversation_id='test', agent_type='workflow_step', objective='Test lifecycle',
         workspace_path=str(tmp_path), input_slots=['seed_pool'], output_slots=slots, db=None, emit=emitted.append,
         params={'step_id': step, 'current_user_input': example['input'].get('request') or '按本轮要求完善内容',
+                'user_input': example['input'].get('request') or '按本轮要求完善内容',
                 'remote_inputs': {'seed_pool': str(seed)},
                 'output_slot_types': dict.fromkeys(slots, 'file')},
     )

@@ -8,6 +8,7 @@ from lazyllm.tools.writer.tools.base import WriterToolBase
 
 from lazymind.common.token_estimation import estimate_tokens
 from ..contracts import validate_input, validate_output
+from ..research_topic import _prompt_token_limit
 from .schema import ExperimentDraft, Metric, ResultMeta, code_column_types
 from .generation import GeneratedExperiment, validate_generation
 from .stream import generation_progress
@@ -62,13 +63,16 @@ def run(inputs: dict, *, on_event=None, allow_execution=False) -> dict:
     """Generate once, then use the Runtime's execution choice within the bounded executor."""
     inputs = validate_input('experiment', inputs)
     prompt = EXPERIMENT_PROMPT + '\n\nInput JSON:\n' + json.dumps(inputs, ensure_ascii=False)
-    if estimate_tokens(prompt) > 16000:
-        raise ValueError('实验输入超过当前预算，请缩小研究材料或数据范围；未截断输入。')
     writer = WriterToolBase(llm=AutoModel(model='llm'))
+    system_prompt = writer._structured_output_prompt(GeneratedExperiment)
+    prompt_tokens, prompt_limit = estimate_tokens(prompt + system_prompt), _prompt_token_limit()
+    if prompt_tokens > prompt_limit:
+        raise ValueError(f'实验输入超过当前模型预算（预计 {prompt_tokens} / 可用 {prompt_limit} tokens），'
+                         '请缩小研究材料或数据范围；未截断输入。')
     # A private sink keeps generated JSON out of the Agent's chat/event queue.
     stream = {'_stream_sink': on_event or (lambda _event: None)}
     model = writer._build_structured_llm(
-        writer._structured_output_prompt(GeneratedExperiment), stream_output=stream, apply_formatter=False)
+        system_prompt, stream_output=stream, apply_formatter=False)
     started = time.monotonic()
     with generation_progress(on_event):
         response = model(prompt)

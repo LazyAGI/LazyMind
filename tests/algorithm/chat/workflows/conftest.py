@@ -13,7 +13,10 @@ import pytest
 
 @pytest.fixture
 def paper_simulation(monkeypatch, request):
-    from lazymind.document_tools.paper import api, workflow
+    from lazymind.document_tools.paper import api, workflow, review_materials
+    # This fixture simulates routing/publication, including F2 source selection.
+    monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
+    monkeypatch.setattr(review_materials, 'prepare', lambda inputs, *a, **kw: copy.deepcopy(inputs['papers']))
     source = json.loads((Path(__file__).resolve().parents[4] /
         'tests/fixtures/paper-writing/write_document.json').read_text())['input']
     source['analysis'] = json.loads((Path(__file__).resolve().parents[4] /
@@ -70,9 +73,13 @@ def paper_simulation(monkeypatch, request):
         result['is_demo'] = True
         return result
 
+    def revision(inputs):
+        output = writer(inputs)
+        return {**output, **reviewer({**inputs, 'manuscript': output['manuscript']})}
+
     monkeypatch.setattr(workflow, 'seed_pool', seed)
     for name, fn in [('research_topic', question), ('literature_review', literature), ('data_analysis', analysis),
-                     ('write_document', writer), ('revise_document', writer), ('peer_review', reviewer)]:
+                     ('write_document', writer), ('revise_document', revision), ('peer_review', reviewer)]:
         if name == 'research_topic' and request.module.__name__.endswith(('test_paper_writing', 'test_paper_writing_algorithms')):
             continue
         monkeypatch.setattr(api.ALGORITHMS[name], 'run', fn)

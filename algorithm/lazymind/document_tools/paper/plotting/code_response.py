@@ -104,7 +104,7 @@ def numbered_source(source):
     return '\n'.join(f'{number} | {line}' for number, line in enumerate(source.splitlines(), 1))
 
 
-def repair_response(answer, previous):
+def repair_response(answer, previous, error=''):
     """Apply nonoverlapping inclusive ranges against one immutable source version."""
     replacements = answer.get('replacements') if isinstance(answer, dict) else None
     if not isinstance(replacements, list) or not replacements:
@@ -130,7 +130,13 @@ def repair_response(answer, previous):
         if code and not code.endswith(('\n', '\r')) and (end < len(lines) or lines[end - 1].endswith(('\n', '\r'))):
             code += ending
         lines[start - 1:end] = [code] if code else []
-    return ''.join(lines)
+    source = ''.join(lines)
+    if source == previous:
+        message = '修复补丁未改变源码'
+        if error:
+            message += '；原错误仍未解决：\n' + error
+        raise ValueError(message)
+    return source
 
 
 def code_response(answer):

@@ -12,6 +12,7 @@ from lazyllm.tools.writer.utils.serialization import (
 )
 
 from ..runtime_events import current_events, report_progress
+from .requirements import validate_required_sections
 
 from .common import (
     _CHART_OWNERS,
@@ -111,6 +112,7 @@ def prepare_outline(prepared, toolkit, *, on_delta=None):
         if any(owners.get(key) != value for key, value in previous.items()):
             raise ValueError('Image planning moved an existing assignment.')
     _heading_signature(outline)
+    validate_required_sections(outline, task.get('constraints', {}))
     return _normalize_outline_budgets(outline, task.get('constraints', {}))
 
 def validate_inputs(inputs):

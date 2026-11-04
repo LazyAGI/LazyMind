@@ -123,7 +123,8 @@ def render(payload):
     colors = contract.get('colors')
     if colors:
         rc['axes.prop_cycle'] = matplotlib.cycler(color=colors)
-    rc.update({'svg.fonttype': 'path', 'pdf.fonttype': 42, 'text.usetex': False,
+    # Real text stays visible and inspectable by downstream fact checks.
+    rc.update({'svg.fonttype': 'none', 'pdf.fonttype': 42, 'text.usetex': False,
                'axes.unicode_minus': False, 'svg.hashsalt': payload['data_sha256']})
     original = json.dumps([payload['table'], payload['statistics']], sort_keys=True, allow_nan=False)
     with plt.rc_context(rc):

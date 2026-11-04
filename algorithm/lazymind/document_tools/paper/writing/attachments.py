@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import math
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -13,7 +15,7 @@ from lazyllm.tools.writer.tools.base import _WriterJsonFormatter
 
 from ..contracts import MissingMaterials
 
-SUPPORTED = {'.md', '.markdown', '.png', '.jpg', '.jpeg', '.svg'}
+SUPPORTED = {'.md', '.markdown', '.png', '.jpg', '.jpeg', '.svg', '.xlsx'}
 
 
 def select_files(config):
@@ -48,16 +50,86 @@ Respect the user's explicit file descriptions. Do not infer completed experiment
     return roles
 
 
+def read_workbook(path):
+    """Read bounded source cells, preserving locations and unknown formula caches."""
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    from lazymind.chat.engine.tools.file_resources.resolver import materialize_local_path
+    from lazymind.chat.engine.tools.host_file_resolution import open_input_file
+    from zipfile import ZipFile
+
+    with open_input_file(materialize_local_path(path)) as stream:
+        raw = stream.read(20 * 1024 * 1024 + 1)
+    if len(raw) > 20 * 1024 * 1024:
+        raise MissingMaterials('XLSX超过20 MB，请先提供所需数据范围或分析结果。')
+    with ZipFile(io.BytesIO(raw)) as archive:
+        if sum(item.file_size for item in archive.infolist()) > 64 * 1024 * 1024:
+            raise MissingMaterials('XLSX展开后过大，请先提供所需数据范围或分析结果。')
+    formulas = load_workbook(io.BytesIO(raw), read_only=True, data_only=False)
+    cached = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    sheets, cells = [], 0
+    try:
+        for sheet in formulas:
+            # Exported workbooks may falsely declare A1 while containing many rows.
+            sheet.reset_dimensions()
+            cached_sheet = cached[sheet.title]
+            cached_sheet.reset_dimensions()
+            rows, width, last_row, before_cells = [], 0, 0, cells
+            paired = zip(sheet.iter_rows(), cached_sheet.iter_rows(), strict=True)
+            for number, (row, cached_row) in enumerate(paired, 1):
+                cells += len(row)
+                if cells > 20000 or number > 20000:
+                    raise MissingMaterials('工作簿超过20000个读取单元格或行，请先分析或明确数据范围；不会使用截断预览成稿。')
+                width = max(width, len(row))
+                last_row = number
+                values = {}
+                for column, cell in enumerate(row, 1):
+                    value = cell.value
+                    if cell.data_type == 'f':
+                        value = dict(formula=value, cached_value=cached_row[column - 1].value,
+                                     cache_status='unverified')
+                        if value['cached_value'] is None:
+                            value['cache_status'] = 'missing'
+                    elif hasattr(value, 'isoformat'):
+                        value = value.isoformat()
+                    if isinstance(value, float) and not math.isfinite(value):
+                        raise ValueError('XLSX含非有限数值，不能作为可靠写作材料导入。')
+                    if value is not None:
+                        values[get_column_letter(column)] = value
+                if values:
+                    rows.append(dict(row=number, cells=values))
+            sheets.append(dict(sheet=sheet.title, visibility=sheet.sheet_state,
+                               range=f'A1:{get_column_letter(width or 1)}{last_row or 1}', rows=rows,
+                               read_rows=last_row, read_cells=cells - before_cells,
+                               nonempty_cells=sum(len(item['cells']) for item in rows)))
+    finally:
+        formulas.close()
+        cached.close()
+    body = json.dumps(dict(sheets=sheets), ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+    if len(body) > 1_000_000:
+        raise MissingMaterials('工作簿文本超过1 MB，请先分析或提供所需范围；不会静默截断。')
+    name = Path(urlsplit(path).path).name
+    return (f'## Source: {name}\nSHA256: {hashlib.sha256(raw).hexdigest()}\n'
+            'Coverage: all nonempty cell values within each listed sheet/range, with original row/column coordinates. '
+            'Within the listed range, every omitted cell is blank/null, never zero; all-blank rows are omitted. '
+            'read_rows/read_cells are parsing counts, not experimental sample sizes.\n'
+            'Status: source cells read only; not an independently verified experiment or analysis. '
+            'Formulas were not recalculated; missing caches are unknown, never zero; present caches remain unverified. '
+            'Formatting, merged ranges and hidden row/column policies were not audited.\n\n' + body)
+
+
 def import_files(files, request):
     from lazymind.chat.engine.tools.file_resources.resolver import resolve_text_target
     from lazymind.document_tools.writing import collect_document_media
     from lazymind.chat.service.utils.static_file_url import _upload_root
     from ...artifacts import validate_paper_svg
 
-    documents, images, svg_resources = [], [], []
+    documents, images, svg_resources, workbooks = [], [], [], []
     for path in files:
         suffix = Path(urlsplit(path).path).suffix.lower()
-        if suffix in {'.md', '.markdown'}:
+        if suffix == '.xlsx':
+            workbooks.append(read_workbook(path))
+        elif suffix in {'.md', '.markdown'}:
             resolved = resolve_text_target(path, resources_only=True)
             raw = Path(resolved.path).read_bytes()
             if len(raw) > 2_000_000:
@@ -87,7 +159,7 @@ def import_files(files, request):
     roles = classify_markdown(documents, request)
     value = {'topic': next((item['text'].splitlines()[0].lstrip('# ').strip()[:120]
                             for item in documents), request[:120]), 'request': request}
-    notes, papers = [], []
+    notes, papers = list(workbooks), []
     for item, role in zip(documents, roles):
         if role in {'outline', 'manuscript'}:
             if role in value:

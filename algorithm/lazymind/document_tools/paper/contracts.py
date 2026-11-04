@@ -18,18 +18,18 @@ FIELDS = {
     'data_analysis': ('data', 'experiment', 'data_context', 'study_design', 'result_meta'),
     'write_document': ('papers', 'question', 'evidence', 'analysis', 'charts', 'outline', 'manuscript',
                        'review', 'review_data', 'selected_issue_ids', 'writing_materials', 'media_assets'),
-    'peer_review': ('manuscript', 'evidence', 'analysis'),
+    'peer_review': ('manuscript', 'evidence', 'analysis', 'charts', 'papers', 'result_meta', 'writing_materials'),
     'reading_reflection': ('papers', 'evidence'),
 }
 FIELDS['write_outline'] = FIELDS['write_document']
-FIELDS['revise_document'] = FIELDS['write_document']
+FIELDS['revise_document'] = (*FIELDS['write_document'], 'result_meta')
 OUTPUTS = {
     'research_topic': ('question',), 'literature_review': ('evidence', 'papers'),
     'experiment': ('experiment', 'code_files', 'result_meta'), 'data_analysis': ('analysis', 'charts'),
     'write_outline': ('outline',), 'write_document': ('manuscript',), 'peer_review': ('review', 'review_data'),
     'reading_reflection': ('reflection',),
 }
-OUTPUTS['revise_document'] = ('manuscript',)
+OUTPUTS['revise_document'] = ('manuscript', 'review', 'review_data')
 ALIASES = {'refine_topic': 'research_topic'}
 MODES = {'research_topic': 'create', 'refine_topic': 'refine',
          'write_outline': 'draft', 'write_document': 'draft', 'revise_document': 'revise'}
@@ -39,8 +39,11 @@ CONSTRAINED_MODULES = {'write_outline', 'write_document', 'revise_document', 'da
 CURRENT_REQUEST_MODULES = {'write_outline', 'write_document', 'revise_document', 'peer_review'}
 DEFAULT_CONSTRAINTS = {
     'paper_language': 'zh-CN', 'word_target': None, 'paper_type': None,
-    'citation_style': 'GB/T 7714', 'focus': [],
+    'citation_style': 'GB/T 7714', 'focus': [], 'required_sections': [],
 }
+
+REQUIRED_SECTIONS = {'abstract', 'introduction', 'methods', 'evaluation', 'results',
+                     'discussion', 'limitations', 'conclusion'}
 
 
 class MissingMaterials(ValueError):
@@ -76,6 +79,11 @@ def normalize_constraints(value):
         raise ValueError('focus 必须是文本列表')
     for item in result['focus']:
         text(item, 'focus')
+    sections = result['required_sections']
+    if (not isinstance(sections, list) or any(not isinstance(item, str) or item not in REQUIRED_SECTIONS
+                                            for item in sections)):
+        raise ValueError('required_sections 必须是支持的论文章节列表')
+    unique(sections, 'required_sections')
     return result
 
 
@@ -110,7 +118,7 @@ def normalize_papers(papers):
     return result
 
 
-def validate_value(kind, value):
+def validate_value(kind, value, *, allow_metadata=False):
     if kind == 'media_assets':
         from lazyllm.tools.writer.data_models import MediaAssetLibrary
         library = MediaAssetLibrary.model_validate(value)
@@ -151,7 +159,7 @@ def validate_value(kind, value):
             for key in ('abstract', 'text'):
                 if paper.get(key) is not None and not isinstance(paper[key], str):
                     raise ValueError(f'paper.{key} 必须是字符串或 null')
-            if not any((paper.get(key) or '').strip() for key in ('abstract', 'text')):
+            if not allow_metadata and not any((paper.get(key) or '').strip() for key in ('abstract', 'text')):
                 raise MissingMaterials(f'论文 {paper["id"]} 缺少材料：需要摘要或全文')
             if paper.get('url') is not None and not isinstance(paper['url'], str):
                 raise ValueError('paper.url 必须是字符串')
@@ -255,7 +263,11 @@ def validate_input(step, value):
         raise ValueError('request 必须是字符串')
     result = {'topic': value['topic'], 'request': value.get('request', '')}
     if module in CONSTRAINED_MODULES:
-        result['constraints'] = normalize_constraints(value.get('constraints', {}))
+        if module in {'write_outline', 'write_document'}:
+            from .writing.requirements import resolve_constraints
+            result['constraints'] = resolve_constraints(value.get('constraints', {}), result['request'])
+        else:
+            result['constraints'] = normalize_constraints(value.get('constraints', {}))
     if step in MODES:
         if value.get('mode', MODES[step]) != MODES[step]:
             raise ValueError(f'{step} mode 必须是 {MODES[step]}')
@@ -279,7 +291,7 @@ def validate_input(step, value):
                 parse(Chart, chart, f'input.charts[{index}]')
             unique([chart['id'] for chart in item], 'chart.id')
         elif item is not None or field in ('charts', 'selected_issue_ids'):
-            validate_value(field, item)
+            validate_value(field, item, allow_metadata=module == 'peer_review')
         result[field] = copy.deepcopy(item)
     if module in {'write_outline', 'write_document', 'revise_document'} and isinstance(result['analysis'], dict):
         from .analysis.schema import validate_charts as validate_structured_charts
@@ -338,6 +350,8 @@ def validate_output(module, value, inputs=None):
         table = value['experiment']['results']
         if table is not None and table['columns'] != list(columns):
             raise ValueError('结果列顺序必须与代码 RESULT_COLUMNS 一致')
-    if module == 'peer_review' and value['review_data']['review_sha256'] != text_digest(value['review']):
+    if module == 'revise_document' and value['review_data']['manuscript_sha256'] != text_digest(value['manuscript']):
+        raise ValueError('修订后核对必须对应当前稿件')
+    if module in {'peer_review', 'revise_document'} and value['review_data']['review_sha256'] != text_digest(value['review']):
         raise ValueError('结构化审稿意见与 Markdown 报告不匹配')
     return value

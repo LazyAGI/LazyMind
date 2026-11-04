@@ -76,7 +76,8 @@ def call_model(prompt) -> dict:
     raw = request_model(prompt)
     if isinstance(raw, dict):
         return raw
-    text = str(raw).strip()
+    from lazyllm.tools.writer.tools.base import WriterToolBase
+    text = WriterToolBase._strip_leading_think_blocks(str(raw)).strip()
     result = json.loads(json_body(text))
     if not isinstance(result, dict):
         raise ValueError('绘图模型必须返回 JSON 对象')

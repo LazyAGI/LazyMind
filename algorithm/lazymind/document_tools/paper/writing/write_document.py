@@ -3,6 +3,7 @@ from ...toolkits import WriterCreateToolkit
 from ..publication import validate_chart_references as _validate_chart_references
 from ..publication import normalize_source_citations
 from ..runtime_events import current_events, report_progress
+from ..shared_facts import bind_shared_facts, check_fact_relations
 import json
 
 from .common import (
@@ -21,6 +22,7 @@ from .common import (
 )
 
 from .write_outline import prepare_outline
+from .requirements import validate_required_sections
 
 def validate_inputs(inputs):
     validate_writing_inputs(inputs)
@@ -47,8 +49,11 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
     planned = json.loads(_trace_call('section_plan', toolkit.generate_section_instructions,
         writing_task_json=task_json, outline_json=_CHART_OWNERS.sub('', outline), writing_context_json=context_json,
     ))
-    plan = _prepare_sections(planned['section_instructions'], outline, inputs['constraints'])
+    plan = _prepare_sections(planned['section_instructions'], outline, task['constraints'])
+    report_progress(27, '正在整理全篇共享事实与章节论证任务')
+    _trace_call('shared_facts', bind_shared_facts, plan, prepared)
     _bind_chart_references(plan, prepared, outline)
+    context_json = _json(prepared['writing_context'])
     events = current_events()
     # Capture bound methods explicitly: parallel workers need not inherit ContextVars.
     callbacks = _section_callbacks(events)
@@ -70,6 +75,8 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
     ))
     body = normalize_source_citations(result['draft_document'], prepared['reference_candidates'])
     body = _materialize_chart_insertions(body, prepared['charts'])
+    report_progress(85, '正在核对来源事实与正文中的比较关系')
+    body = _trace_call('shared_fact_relations', check_fact_relations, body, prepared)
     objects = _validate_chart_references(body, prepared['charts'])
     if {match[1] for match in objects} != {chart['id'] for chart in prepared['charts']}:
         raise ValueError('Draft must insert every planned chart exactly once.')
@@ -77,9 +84,18 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
         raise ValueError('Internal chart ownership leaked into manuscript.')
     # Publish a structurally valid draft for F6 to review; semantic criticism must not
     # prevent the manuscript from reaching the review/revision stages.
-    _validate_manuscript(body, signature, prepared['charts'], inputs['constraints'], toolkit, context_json,
+    validate_required_sections(body, task['constraints'])
+    _validate_manuscript(body, signature, prepared['charts'], task['constraints'], toolkit, context_json,
                          candidates=prepared['reference_candidates'], check_quality=False)
     return {'manuscript': body, 'is_demo': False}
 
 def run(inputs):
-    return _write_draft(inputs)
+    from ..analysis import trace as diagnostics
+    if diagnostics.enabled():
+        return _write_draft(inputs)
+    from lazymind.chat.engine.subagent.context import get_context
+    context = get_context()
+    if context is None:
+        return _write_draft(inputs)
+    with diagnostics.capture(context.workspace_path, context.task_id):
+        return _write_draft(inputs)

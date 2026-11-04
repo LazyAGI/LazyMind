@@ -28,7 +28,8 @@ def generation_contract():
                 runtime_plan=dict(questions='host-assigned research questions', outline='short analysis outline',
                                   facts='complete supplied research context, identical to generation input'),
                 top_level='imports, function definitions and literal constants only',
-                randomness='use supplied rng; no filesystem/network/environment access')
+                randomness='use supplied rng; no filesystem/network/environment access',
+                result_coordinates='Each emitted row owns a copied/frozen coordinate snapshot before later mutations.')
 
 
 class AnalysisEnvironmentError(RuntimeError):

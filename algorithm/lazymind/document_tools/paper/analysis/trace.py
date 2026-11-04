@@ -23,7 +23,7 @@ MILESTONES = {'input_validation': 10, 'plan_validation': 30, 'result_contract_va
 LABELS = {
     'input_binding': '读取输入', 'input_validation': '校验输入', 'environment_validation': '检查执行环境',
     'plan_generation': '生成简短分析提纲', 'figure_planning': '根据分析结果安排图表',
-    'plan_validation': '校验分析计划',
+    'plan_validation': '校验分析计划', 'redraw_intent': '确认是否仅重画图表',
     'analysis_code_generation': '生成分析代码', 'analysis_code_validation': '校验分析代码',
     'analysis_execution': '执行分析代码', 'result_contract_validation': '检查执行结果结构',
     'interpretation': '生成结论与图下分析',

@@ -22,7 +22,8 @@ def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect)
     from lazymind.document_tools.paper.writing import write_document
 
     inputs = contracts.validate_input('write_document', {'topic': '方法比较', 'outline': OUTLINE})
-    prepared = dict(writing_task={'constraints': {}}, writing_context={}, outline=OUTLINE,
+    prepared = dict(writing_task={'constraints': contracts.normalize_constraints({})},
+                    writing_context={}, outline=OUTLINE,
                     charts=[], reference_candidates=[])
     monkeypatch.setattr(write_document, 'prepare_writer_context', lambda *a, **k: prepared)
     toolkit = Mock()
@@ -470,12 +471,15 @@ def test_review_without_executable_edits_stops_before_replacement(action):
 
 
 @pytest.mark.parametrize('action', ['needs_material', 'needs_experiment'])
-def test_pending_issue_can_add_marker_without_claiming_completion(action):
+def test_pending_issue_stays_in_report_instead_of_inserting_a_manuscript_marker(action):
     data = prepared([('R1', '缺失内容：验证', action)])
     marker = '原结果。\n\n[待补实验：独立验证尚未完成。]'
     tools = editor([instruction('结果')], [replacement('原结果。', marker, '结果')])
-    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
-    assert result['manuscript'] == SOURCE.replace('原结果。', marker)
+    with pytest.raises(contracts.MissingMaterials, match='没有可执行的文本修改'):
+        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    tools.locate_revision_target.assert_not_called()
+    tools.generate_string_replace_set.assert_not_called()
+    tools.apply_string_replace.assert_not_called()
     assert data['selected_issues'][0]['action_type'] == action
 
 

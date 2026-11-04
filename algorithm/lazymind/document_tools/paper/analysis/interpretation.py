@@ -21,6 +21,8 @@ Connect related findings across figures, including adverse results, interactions
 For an interaction or comparison with an interval spanning zero, explain the unresolved research claim rather
 than just listing the interval or claiming no effect. Discuss mechanisms only when the supplied design/evidence
 supports them; label tentative explanations as possibilities, never established causes.
+Research questions marked unavailable were not estimated. State their concrete missing-evidence limits without
+claiming a zero effect, agreement or improvement. They are not failed measured outcomes or numerical findings.
 Ground claims in executed results and actually displayed comparisons. Keep units and comparison direction clear.
 Do not run new calculations or invent evidence. Do not repeat all values, intervals or captions, divide the
 narrative by figure, or turn the empirical questions into a checklist. Preserve the relevant empirical hypotheses;

@@ -252,6 +252,8 @@ def _handoff_tool(
                     ),
                 ))
                 result = dict(response.result)
+                if result.get('accepted') is True:
+                    cfg.pop('user_authorized_workflow_retry', None)
                 if state_refreshed:
                     result.update(_state_refresh_notice())
                 if step_id in rewindable:
@@ -389,6 +391,15 @@ def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
     pending = _input_required_result(result)
     if pending:
         return {**result, **pending}
+    # A material boundary needs a user-visible result, not guessed replacement input.
+    reasons = result.get('failure_reasons') or {}
+    if (result.get('status') == 'failed' and result.get('outcome') == 'step_failed'
+            and isinstance(reasons, dict)
+            and any('MISSING_MATERIAL:' in str(reason) for reason in reasons.values())):
+        return {**result, '_agent_control': {
+            'stop': True, 'reason': 'workflow_material_check_failed',
+            'final_text': '本步骤的材料检查未通过，已停止自动推进并保留原输入。请在工作流查看失败原因；检查材料或修复后可重试。',
+        }}
     workflow_state = result.get('workflow_state')
     workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
     projection = result.get('projection')
@@ -530,6 +541,7 @@ def _safe_session_tools(
                         return pending
                 if recovery_instruction:
                     focus_hints.append(recovery_instruction)
+                user_retry = bool(cfg.get('user_authorized_workflow_retry'))
                 result = toolkit.advance_step(
                     selected_session_id, int(frontier.get('state_version') or 0),
                     [
@@ -551,6 +563,13 @@ def _safe_session_tools(
                 if state_refreshed:
                     result = {**result, **_state_refresh_notice()}
                 result = _with_terminal_agent_control(result)
+                if user_retry:
+                    # One user retry must not authorize further model-initiated attempts.
+                    cfg.pop('user_authorized_workflow_retry', None)
+                    result.setdefault('_agent_control', {
+                        'stop': True, 'reason': 'workflow_retry_completed',
+                        'final_text': '本次重试已执行，请在工作流中查看结果。',
+                    })
                 if any(value in rewindable for value in requested):
                     result = _compact_transition_result(result)
                 return _compact_model_frontier(result)

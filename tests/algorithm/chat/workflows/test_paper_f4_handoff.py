@@ -71,7 +71,13 @@ def test_f4_materials_reach_writing_review_and_revision(f4_result, monkeypatch, 
         manuscript=(value['manuscript'] or '# 稿件\n\n## 结果\n\n当前样本平均得分为二分。') + '\n补充样本范围。',
         is_demo=False))
     monkeypatch.setattr(write_document, 'run', writing)
-    monkeypatch.setattr(revise_document, 'run', writing)
+    def revision(value):
+        from lazymind.document_tools.paper import contracts
+        result = writing(value)
+        review_inputs = {key: value.get(key) for key in contracts.FIELDS['peer_review']}
+        review_inputs.update(topic=value['topic'], manuscript=result['manuscript'])
+        return {**result, **peer_review.run(review_inputs)}
+    monkeypatch.setattr(revise_document, 'run', revision)
     monkeypatch.setattr(peer_review, 'AutoModel', lambda **_: object())
     monkeypatch.setattr(peer_review, 'WriterToolBase', lambda **_: object())
     review_call = Mock(return_value=dict(summary='结论需限定到当前样本。', issues=[dict(severity='minor', category='language', location='全文',

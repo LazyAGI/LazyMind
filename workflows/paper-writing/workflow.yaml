@@ -77,6 +77,17 @@ runtime:
         - 允许受限运行，条件不足时使用模拟数据
   transactional_outputs: true
   recovery_inputs:
+    data_analysis:
+      recovery_data_analysis_pool: data_analysis_pool
+      recovery_data_analysis_document: data_analysis_document
+      recovery_write_outline_pool: write_outline_pool
+      recovery_write_outline_document: write_outline_document
+      recovery_write_document_pool: write_document_pool
+      recovery_write_document_document: write_document_document
+      recovery_peer_review_pool: peer_review_pool
+      recovery_peer_review_document: peer_review_document
+      recovery_revise_document_pool: revise_document_pool
+      recovery_revise_document_document: revise_document_document
     literature_review:
       recovery_literature_pool: literature_review_pool
       recovery_literature_document: literature_review_document
@@ -108,6 +119,16 @@ slots:
   - {id: review_request, label: 审稿要求, type: text, cardinality: single, external: true, exposed: false}
   - {id: paper_input, type: json, cardinality: single, external: true, exposed: false}
   - {id: experiment_execution, label: 实验运行偏好, type: text, cardinality: single, external: true, exposed: false}
+  - {id: recovery_data_analysis_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_data_analysis_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_outline_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_outline_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_document_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_write_document_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_peer_review_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_peer_review_document, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_revise_document_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_revise_document_document, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_research_pool, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_literature_pool, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_literature_document, type: file, cardinality: single, external: true, exposed: false}
@@ -127,6 +148,7 @@ slots:
   - {id: experiment_results, label: "实验结果与来源", type: file, cardinality: single}
   - {id: data_analysis_pool, label: "数据分析材料池", type: file, cardinality: single, exposed: false}
   - {id: data_analysis_document, label: "数据分析", type: file, cardinality: single}
+  - {id: redrawn_manuscript_document, label: "重画后的论文", type: file, cardinality: single}
   - {id: write_outline_pool, label: "论文大纲材料池", type: file, cardinality: single, exposed: false}
   - {id: write_outline_document, label: "论文大纲", type: file, cardinality: single}
   - {id: write_document_pool, label: "论文写作材料池", type: file, cardinality: single, exposed: false}
@@ -136,6 +158,7 @@ slots:
   - {id: peer_review_data, label: "结构化审稿意见", type: file, cardinality: single, exposed: false}
   - {id: revise_document_pool, label: "论文修订材料池", type: file, cardinality: single, exposed: false}
   - {id: revise_document_document, label: "论文修订", type: file, cardinality: single}
+  - {id: revision_fact_check_document, label: "修订后事实核对", type: file, cardinality: single}
   - {id: reading_reflection_pool, label: "阅读心得材料池", type: file, cardinality: single, exposed: false}
   - {id: reading_reflection_document, label: "阅读心得", type: file, cardinality: single}
   - {id: analysis_chart, label: 分析图表, type: file, cardinality: list, ordered: true}
@@ -152,10 +175,12 @@ ui:
     refine_topic_document: {widgetType: text-markdown, readOnly: false}
     experiment_document: {widgetType: text-markdown, readOnly: false}
     data_analysis_document: {widgetType: text-markdown, readOnly: false}
+    redrawn_manuscript_document: {widgetType: text-markdown, readOnly: true}
     write_outline_document: {widgetType: text-markdown, readOnly: false}
     write_document_document: {widgetType: text-markdown, readOnly: false}
     peer_review_document: {widgetType: text-markdown, readOnly: false}
     revise_document_document: {widgetType: text-markdown, readOnly: false}
+    revision_fact_check_document: {widgetType: text-markdown, readOnly: true}
     reading_reflection_document: {widgetType: text-markdown, readOnly: false}
     finish_document: {widgetType: text-markdown, readOnly: true}
   tabs:
@@ -197,6 +222,7 @@ ui:
       allow_download: true
       slots:
         - {id: data_analysis_document}
+        - {id: redrawn_manuscript_document}
         - {id: analysis_chart}
     - id: write_outline
       step_id: write_outline
@@ -226,6 +252,7 @@ ui:
       allow_download: true
       slots:
         - {id: revise_document_document}
+        - {id: revision_fact_check_document}
     - id: reading_reflection
       step_id: reading_reflection
       label: "阅读心得"

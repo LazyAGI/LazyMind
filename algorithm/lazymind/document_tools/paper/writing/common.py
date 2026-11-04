@@ -36,6 +36,7 @@ from ..publication import (
 from ..runtime_events import report_progress
 
 from ...toolkits import WriterCreateToolkit
+from .requirements import resolve_constraints
 
 
 from ..prompts.write_document_prompt import (
@@ -276,6 +277,9 @@ def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
     toolkit = toolkit if toolkit is not None else WriterCreateToolkit()
     source = copy.deepcopy(inputs)
     constraints = source['constraints']
+    if source['mode'] == 'draft':
+        constraints = resolve_constraints(constraints, source['request'])
+        source['constraints'] = constraints
     selected_issues = []
     review = None
     if source.get('review_data') is not None:

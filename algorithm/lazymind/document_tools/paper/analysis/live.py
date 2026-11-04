@@ -5,7 +5,7 @@ import re
 import time
 
 PUBLIC_STAGES = {
-    'input_binding', 'input_validation', 'environment_validation', 'plan_generation', 'figure_planning',
+    'input_binding', 'input_validation', 'environment_validation', 'redraw_intent', 'plan_generation', 'figure_planning',
     'analysis_code_generation', 'analysis_execution', 'result_contract_validation',
     'figure_code_generation', 'figure_execution', 'figure_validation',
     'interpretation', 'output_publication',
@@ -65,7 +65,8 @@ class PublicProgress:
         self.recorder._guard(lambda: self.recorder._write_json(self.recorder.root / 'public.json', dict(
             schema_version=1, task_id=summary['task_id'], execution_id=summary['trace_id'],
             revision=sum(s['revision'] for s in steps), process_steps=steps, error=error,
-            timing=dict(started_at=summary['started_at'], finished_at=summary.get('ended_at'), measured_at=timestamp()))))
+            timing=dict(started_at=summary['started_at'], finished_at=summary.get('ended_at'),
+                        measured_at=timestamp()))))
 
     def owner(self, item):
         while item and item['id'] not in self.steps:
@@ -76,7 +77,8 @@ class PublicProgress:
         if item['stage'] in PUBLIC_STAGES and item.get('parent_id') is None:
             suffix = (f" · {self.figures.get(item['figure_id'], item['figure_id'])}" if item.get('figure_id') else '')
             suffix += f" · 第 {item['attempt']} 次" if item.get('attempt') else ''
-            self.steps[item['id']] = dict(step_id='f4-' + item['id'], revision=0, order=len(self.steps),
+            self.steps[item['id']] = dict(
+                step_id='f4-' + item['id'], revision=0, order=len(self.steps),
                 title=(label + suffix)[:100], status='running', summary='', started_at=item['started_at'],
                 finished_at=None, elapsed_ms=None)
             self.send(item['id'])
@@ -84,7 +86,8 @@ class PublicProgress:
             owner = self.owner(item)
             if owner:
                 attempt = item.get('attempt', 1)
-                self.steps[owner]['summary'] = ('等待模型返回内容' if attempt == 1 else
+                self.steps[owner]['summary'] = (
+                    '等待模型返回内容' if attempt == 1 else
                     f'前次请求尚未返回内容且连接已断开，正在第 {attempt} 次请求；已完成的步骤保留。')
                 self.send(owner)
 
@@ -118,7 +121,11 @@ class PublicProgress:
         elif name == 'analysis-plan.json':
             summary = f"分析提纲已确定：{len(value.get('questions', []))} 个研究问题，具体结果由分析代码生成。"
         else:
-            summary = f"已根据执行结果安排 {len(value.get('figures', []))} 张图，将分别生成绘图代码。"
+            summary = f"已根据执行结果安排 {len(value.get('figures', []))} 张图；可检查比较、来源、单位和实际样本量。"
+            from .trace import redact
+            raw = redact(json.dumps(value, ensure_ascii=False, indent=2)).encode('utf-8')
+            self.steps[identifier]['output'] = dict(text=raw[:MAX_OUTPUT].decode('utf-8', errors='ignore'),
+                                                    format='json', mode='final', truncated=len(raw) > MAX_OUTPUT)
         self.steps[identifier]['summary'] = summary
         self.send(identifier)
 
@@ -139,7 +146,8 @@ class ResponsePreview:
         self.received_reasoning = False
         from ..runtime_events import current_events
         owner = next((s for s in recorder.summary['stages'] if s['id'] == self.owner), {})
-        self.document_preview = current_events() if owner.get('stage') == 'interpretation' and self.format == 'markdown' else None
+        self.document_preview = (current_events() if owner.get('stage') == 'interpretation'
+                                 and self.format == 'markdown' else None)
 
     def _append_reasoning(self, text):
         if not text:

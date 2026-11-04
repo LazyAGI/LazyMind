@@ -221,8 +221,9 @@ def pool_from_business(value: dict) -> dict:
     contracts.text(value.get('topic'), 'topic')
     if not isinstance(value.get('request', ''), str):
         raise ValueError('request 必须是字符串')
+    from .writing.requirements import resolve_constraints
     pool = {'schema': SCHEMA, 'topic': value['topic'], 'request': value.get('request', ''),
-            'constraints': contracts.normalize_constraints(value.get('constraints', {})),
+            'constraints': resolve_constraints(value.get('constraints', {}), value.get('request', '')),
             'selected_issue_ids': copy.deepcopy(value.get('selected_issue_ids', [])),
             'sequence': 0, 'materials': [], 'current': {}, 'history': []}
     value = copy.deepcopy(value)
@@ -361,15 +362,23 @@ def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *
     """Infrastructure owns lineage and atomic validation; algorithms own content."""
     validate_pool(pool)
     node = STEP_NODE[step]
+    redraw_only = False
+    if step == 'data_analysis' and material(pool, 'analysis') and request.strip():
+        from .data_analysis import redraw_requested
+        redraw_only = redraw_requested(request)
     previous = pool['history'][-1]['node'] if pool['history'] else None
-    if previous and node != previous and node not in routes_after(pool):
+    if previous and node != previous and node not in routes_after(pool) and not redraw_only:
         raise ValueError(f'不允许的流程路径: {previous}→{node}')
     if fail:
         raise RuntimeError('[示例] 模拟执行失败；可重试。')
     if step == 'write_outline':
         # Commit one paper-length target with the outline so drafting inherits it.
         pool = copy.deepcopy(pool)
-        pool['constraints'] = contracts.normalize_constraints(pool.get('constraints', {}))
+        from .writing.requirements import resolve_constraints
+        pool['constraints'] = resolve_constraints(
+            pool.get('constraints', {}), pool.get('request', ''),
+            current_request=request if request != pool.get('request', '') else '',
+        )
         if pool['constraints']['word_target'] is None:
             pool['constraints']['word_target'] = 5000 if pool['constraints']['paper_language'] == 'en' else 8000
     module = contracts.ALIASES.get(step, step)
@@ -395,9 +404,18 @@ def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *
     inputs = [copy.deepcopy(pool['current'][kind]) for kind in relevant if kind in pool['current']]
     execution_records = []
     if module == 'data_analysis':
+        from . import data_analysis
         from .analysis.pipeline import capture_execution
         with capture_execution() as execution_records:
-            output = run_algorithm(step, business_input(step, pool, request))
+            current_analysis = material(pool, 'analysis')
+            if redraw_only:
+                current_charts = material(pool, 'charts')
+                inputs.extend(pool['current'][kind] for kind in ('analysis', 'charts') if kind in pool['current'])
+                output = data_analysis.redraw(
+                    business_input(step, pool, request), copy.deepcopy(current_analysis['content']),
+                    copy.deepcopy(current_charts['content']) if current_charts else [])
+            else:
+                output = run_algorithm(step, business_input(step, pool, request))
         provenance = material(pool, 'result_meta')
         if provenance:
             from .experiment.handoff import mark_analysis
@@ -410,6 +428,18 @@ def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *
             if on_event is not None else run_algorithm(step, business_input(step, pool, request))
     is_demo = output['is_demo'] or any(material(pool, k)['mock'] for k in relevant if material(pool, k))
     generated = {key: copy.deepcopy(output[key]) for key in contracts.OUTPUTS[module]}
+    if redraw_only and material(pool, 'manuscript'):
+        from .publication import figure_catalog, refresh_chart_sources
+        media = (material(pool, 'media_assets') or {}).get('content')
+        old_catalog = figure_catalog((material(pool, 'charts') or {}).get('content', []), media)
+        new_catalog = figure_catalog(generated['charts'], media)
+        original = material(pool, 'manuscript')['content']
+        updated = refresh_chart_sources(original, old_catalog, new_catalog)
+        if generated['charts'] != (material(pool, 'charts') or {}).get('content', []):
+            generated.update(review=None, review_data=None)
+        if updated != original:
+            inputs.append(copy.deepcopy(pool['current']['manuscript']))
+            generated['manuscript'] = updated
     main = {'F1': 'question', 'F2': 'evidence', 'F3': 'experiment', 'F4': 'analysis',
             'F5': 'manuscript', 'F6': 'review', 'F7': 'reflection'}[node]
     if step == 'write_outline':
@@ -436,7 +466,7 @@ def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *
             result['current'].pop(kind, None)
         else:
             outputs.append(add_material(result, kind, content, inputs, sorted(sources), is_demo=is_demo))
-    if step == 'peer_review':
+    if step in {'peer_review', 'revise_document'} or redraw_only:
         result['selected_issue_ids'] = []
     result['sequence'] += 1
     result['history'].append({'node': node, 'step': step, 'request': request, 'inputs': inputs, 'outputs': outputs})
@@ -495,7 +525,7 @@ def pool_from_inputs(inputs: dict[str, Any]) -> dict:
         node = pool['history'][-1]['node'] if pool['history'] else None
         kind = {'F1': 'question', 'F2': 'evidence', 'F3': 'experiment', 'F4': 'analysis', 'F5': 'manuscript',
                 'F6': 'review', 'F7': 'reflection'}.get(node)
-        if key == 'write_outline_pool':
+        if key.removeprefix('recovery_') == 'write_outline_pool':
             kind = 'outline'
         current = material(pool, kind) if kind else None
         if current:
@@ -664,6 +694,10 @@ def _step_request(step: str, pool: dict, params: dict, bound: dict | None = None
         recovery = instruction.partition('Recovery request for this rerun only:')[2].strip()
         if _business_request(recovery):
             return request
+        if material(pool, 'analysis'):
+            current = _business_request(params.get('current_user_input'))
+            if current:
+                return current
         # Restore the pre-PR input contract: only recovery can override materials.
         previous = ''
         if recovery:
@@ -854,6 +888,16 @@ def _run_paper_step(context, stream=None) -> dict:
                 'launch_user_input': handoff_request,
                 'current_user_input': handoff_request if request == launch_request else request,
             }
+        if step == 'data_analysis' and not material(pool, 'analysis'):
+            recovery = _business_request(instruction.partition('Recovery request for this rerun only:')[2])
+            current = _business_request(request_params.get('current_user_input'))
+            launch = _business_request(request_params.get('launch_user_input') or request_params.get('user_input'))
+            followup = recovery or (current if current != launch else '')
+            if followup:
+                from .data_analysis import redraw_requested
+                if redraw_requested(followup):
+                    raise MissingMaterials('未绑定已有分析与图表，无法只重画；请补充已有分析材料，'
+                                           '或在启用恢复输入的新会话完成分析后再重画。')
         request = _step_request(step, pool, request_params, bound)
         if step == 'literature_review':
             import lazyllm
@@ -899,6 +943,10 @@ def _run_paper_step(context, stream=None) -> dict:
             original = publish_citations(manuscript['content'], papers['content'] if papers else [])
             media = material(result['pool'], 'media_assets')
             published = publish_charts(original, figure_catalog(charts['content'] if charts else [], media['content'] if media else None))
+            if step == 'revise_document':
+                checked = material(result['pool'], 'review_data')['content']
+                if checked['manuscript_sha256'] != text_digest(published):
+                    raise ValueError('发布后的修订稿与事实核对版本不一致')
             manuscript['content'] = published
             # Slots and the frontend receive canonical Markdown with resolved image URLs.
             result['document'] = published
@@ -923,9 +971,24 @@ def _run_paper_step(context, stream=None) -> dict:
             path.write_text(json.dumps(material(result['pool'], 'review_data')['content'],
                                        ensure_ascii=False, indent=2), encoding='utf-8')
             artifacts.append({'key': 'peer_review_data', 'content_type': 'file', 'value': str(path)})
+        if step == 'revise_document' and 'revision_fact_check_document' in context.output_slots:
+            artifacts.append({'key': 'revision_fact_check_document', 'content_type': 'text',
+                              'value': material(result['pool'], 'review')['content']})
         if step == 'data_analysis':
-            execution = result['pool']['history'][-1].get('analysis_execution', [])
-            figure_exports = {f['id']: f.get('exports', {}) for record in execution for f in record.get('figures', [])}
+            updated_manuscript = material(result['pool'], 'manuscript')
+            if (updated_manuscript
+                    and result['pool']['current'].get('manuscript') != pool['current'].get('manuscript')):
+                from .publication import publish_charts, figure_catalog
+                media = (material(result['pool'], 'media_assets') or {}).get('content')
+                published = publish_charts(updated_manuscript['content'], figure_catalog(
+                    material(result['pool'], 'charts')['content'], media))
+                if 'redrawn_manuscript_document' in context.output_slots:
+                    artifacts.append({'key': 'redrawn_manuscript_document', 'content_type': 'text', 'value': published})
+            figure_exports = {}
+            for entry in result['pool']['history']:
+                for record in entry.get('analysis_execution', []):
+                    for figure in record.get('figures', []):
+                        figure_exports[figure['id']] = figure.get('exports', {})
             for figure in material(result['pool'], 'charts')['content']:
                 chart = Path(context.workspace_path) / f'分析图表-{figure["id"]}.svg'
                 chart.write_text(figure['svg'], encoding='utf-8')
@@ -952,7 +1015,9 @@ def _run_paper_step(context, stream=None) -> dict:
                                   created_by='paper-writing')
             artifact.update(content_type='file', value=str(path))
         elif artifact['key'].endswith('_document'):
-            path = publication_dir / markdown_filename(STEP_LABELS[step])
+            label = {'revision_fact_check_document': '修订后事实核对',
+                     'redrawn_manuscript_document': '重画后的论文'}.get(artifact['key'], STEP_LABELS[step])
+            path = publication_dir / markdown_filename(label)
             path.write_text(artifact['value'], encoding='utf-8')
             artifact.update(content_type='file', value=str(path))
     from .runtime_events import report_progress
@@ -965,12 +1030,11 @@ def _run_paper_step(context, stream=None) -> dict:
         ])
     final_text = '产物已保存，请在工作流中查看。'
     if step == 'revise_document':
-        review = material(result['pool'], 'review_data')
-        selected = set(result['pool'].get('selected_issue_ids', []))
-        pending = [issue['id'] for issue in review['content']['issues']
-                   if issue['id'] in selected and issue['action_type'] != 'text_revision'] if review else []
+        review = material(result['pool'], 'review_data')['content']
+        pending = [issue['id'] for issue in review['issues'] if issue['action_type'] != 'text_revision']
+        final_text += ' 已生成修订后事实核对报告；请以新报告中的问题编号为准。'
         if pending:
-            final_text += ' ' + '、'.join(pending) + ' 仍需补充材料或实验；本轮文字修改不代表这些事项已完成。'
+            final_text += ' ' + '、'.join(pending) + ' 仍需补充材料或实验；文字修改不代表这些事项已完成。'
     return {
         'status': 'completed', 'step': step, 'saved': saved,
         **({'control': {'next_step': 'write_document'}} if step == 'write_outline' else {}),

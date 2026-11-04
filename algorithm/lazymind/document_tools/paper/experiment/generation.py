@@ -6,6 +6,7 @@ import time
 from pydantic import ConfigDict, Field, ValidationError, create_model, field_validator
 
 from lazymind.common.token_estimation import estimate_tokens
+from ..research_topic import _prompt_token_limit
 from ..prompts.experiment_prompt import DESIGN_REPAIR_PROMPT
 from .preview_repair import repair_preview
 from .schema import ExperimentDraft, ExperimentPlan, ExperimentPreview, StrictModel, Text, code_column_types
@@ -89,7 +90,7 @@ def repair_design(writer, candidate, error, on_event=None):
         'validation_errors': error.errors(include_url=False, include_context=False, include_input=False),
     }, ensure_ascii=False)
     system = writer._structured_output_prompt(schema)
-    if estimate_tokens(request + system) > 16000:
+    if estimate_tokens(request + system) > _prompt_token_limit():
         raise ValueError('实验局部修复超过预算；未重新生成整步') from error
     if on_event:
         on_event({'tag': 'phase', 'phase': '正在局部修正实验字段：' + ', '.join(names)})

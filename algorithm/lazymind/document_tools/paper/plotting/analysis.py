@@ -8,6 +8,7 @@ from .code import ALLOWED_IMPORTS, FORBIDDEN, FORBIDDEN_ATTRIBUTES
 from .skills import PlotSkills
 from .labels import display_unit
 from .pipeline import draw_one, limits, FigureRenderError
+from .standard import STANDARD_STYLES, check_encoding, evidence_caption, generate_standard_code
 from ..analysis.results import result_rows
 from ..analysis.schema import prompt_tables, table_map
 from ..analysis.model import facts
@@ -31,7 +32,7 @@ rows_omitted only by row_count, column_profiles and sample_rows; draw still rece
 data.facts supplies the research topic and context.
 spec.purpose/requirements describe this figure; spec.finding_ids identifies its focus. Other results are context.
 These requirements are generated planning hints, not additional observations. Actual result rows are authoritative
-if a hint implies an incorrect value/direction. Derive numeric annotations from runtime values, not literal planning text.
+if a hint implies an incorrect value/direction. Derive annotations from runtime values, not literal planning text.
 Use actual runtime values, never hardcoded example numbers. Do not recompute estimates/tests/intervals.
 Keep data/statistics unchanged; construct local label lists or copied frames for presentation.
 Raw rows can be used for real distributions/paired observations when appropriate; do not fabricate missing observations.
@@ -79,10 +80,10 @@ Keep the explanation specific to this figure; the final narrative synthesizes ac
 limits and simulation disclosure. Do not invent mechanisms, significance or causal effects, or put hardcoded
 result judgments on the canvas.
 In-figure numeric labels use the actual values.
-Keep full figure titles/captions outside the canvas; axis names, panel identifiers and scientific annotations belong inside.
-No file/network/process access, installation, save/show calls or extra statistical computation. Return the figure; the host exports it.
-Use only the actual allowed imports below. The three function arguments are dictionaries. No attribute-compatibility readers,
-schema guards or validation frameworks. On repair use the specific error and preserve evidence; a simpler honest layout is allowed.
+Keep full titles/captions outside the canvas; axis names, panel identifiers and scientific annotations belong inside.
+No file/network/process access, installation, save/show or extra computation. Return the figure; the host exports it.
+Use only the actual allowed imports below. Arguments are dictionaries. No attribute-compatibility readers,
+schema guards or validation frameworks. On repair preserve evidence; a simpler honest layout is allowed.
 '''
     request = call_model if previous else call_code_model
     rows = [{key: value for key, value in row.items() if key != 'display_unit'} for row in data['analysis_results']]
@@ -97,7 +98,7 @@ schema guards or validation frameworks. On repair use the specific error and pre
                   previous_code=numbered_source(previous) if previous else '', error=error,
                   caption=spec.get('caption', '')),
         response_instruction=REPAIR_INSTRUCTION if previous else CODE_INSTRUCTION))
-    source = repair_response(answer, previous) if previous else code_response(answer)
+    source = repair_response(answer, previous, error) if previous else code_response(answer)
     if isinstance(answer.get('caption'), str) and answer['caption'].strip():
         spec['caption'] = answer['caption'].strip()
     return source
@@ -116,14 +117,28 @@ def prepare_figures(analysis, figures, inputs, shared=None):
                 facts=facts(inputs), shared_style=base)
     for row in data['analysis_results']:
         row['display_unit'] = display_unit(row['unit'], base['terminology'])
-    statistics = {key: copy.deepcopy(analysis[key]) for key in ('methods', 'models', 'limitations', 'targets',
-                                                               'data_sha256', 'input_sha256')}
+    statistics = {key: copy.deepcopy(analysis[key]) for key in (
+        'methods', 'models', 'limitations', 'targets', 'data_sha256', 'input_sha256')}
     prepared = []
     for figure in figures:
         contract = skills.style_contract(figure['style'], figure.get('base_style'))
         spec = dict(copy.deepcopy(figure), columns=[ref['table_id'] + '.' + ref['column'] for ref in figure['columns']],
                     style_contract=contract, data_contract={'results': 'executed', 'tables': 'complete_original'})
-        reference = skills.reference(figure['style'], figure.get('base_style'))
+        standard = figure['style'] in STANDARD_STYLES
+        reference = '' if standard else skills.reference(figure['style'], figure.get('base_style'))
+        spec['renderer'] = 'standard_estimates_v2' if standard else 'generated'
+        spec['paper_language'] = inputs.get('constraints', {}).get('paper_language', 'zh-CN')
+        bundle = (inputs.get('data') or {}).get('tables', [])
+        spec['source_names'] = {item['id']: item.get('description', '').split('。', 1)[0].split('\n', 1)[0]
+                                for item in bundle if item.get('description')}
+        spec['limitations'] = copy.deepcopy(analysis['limitations'])
+        if standard:
+            selected = [row for row in data['analysis_results'] if row['id'] in spec['finding_ids']]
+            check_encoding(spec, selected)
+            # Older saved plans contain generated English provenance inventories as captions.
+            local_caption = any('\u4e00' <= char <= '\u9fff' for char in spec.get('caption', ''))
+            if len(spec.get('caption', '')) > 300 or (spec['paper_language'] == 'zh-CN' and not local_caption):
+                spec['caption'] = ''
         # Each task receives private copies; generated code/repair cannot alter another figure's context.
         prepared.append((copy.deepcopy(figure), copy.deepcopy(data), copy.deepcopy(statistics),
                          spec, reference, dict(skills.hashes)))
@@ -142,7 +157,9 @@ def draw(analysis, figures, inputs, shared=None):
         figure, data, statistics, spec, reference, hashes = item
         fallback, original_attempts = None, []
         try:
-            chart, trace = draw_one(data, statistics, spec, reference, attempts, generate_code)
+            standard = spec['renderer'] == 'standard_estimates_v2'
+            generator = generate_standard_code if standard else generate_code
+            chart, trace = draw_one(data, statistics, spec, reference, 1 if standard else attempts, generator)
         except (FigureRenderError, PlotModelError) as exc:
             from .simple import fallback_style, generate_simple_code
             original_attempts = getattr(exc, 'history', [])
@@ -163,10 +180,15 @@ def draw(analysis, figures, inputs, shared=None):
                 diagnostics.save(f"figure-{diagnostics.figure_name(figure['id'])}-failed.json", trace)
                 return None, trace
             diagnostics.save(f"figure-{diagnostics.figure_name(figure['id'])}-fallback.json", fallback)
+        selected = [row for row in data['analysis_results'] if row['id'] in figure['finding_ids']]
+        description = spec.get('caption') or ('' if standard else figure['purpose'])
+        caption = '\n\n'.join(filter(None, (description, evidence_caption(
+            spec, selected, spec['paper_language']))))
         result = dict(id=figure['id'], title=figure['title'], columns=figure['columns'], svg=chart['svg'],
-                      finding_ids=figure['finding_ids'], caption=spec.get('caption') or figure['purpose'])
+                      finding_ids=figure['finding_ids'], caption=caption)
         trace.update(exports=chart['exports'], skill_resources_sha256=hashes,
-                     concurrency=min(concurrency, len(figures)), caption=result['caption'])
+                     concurrency=min(concurrency, len(figures)), caption=result['caption'], renderer=spec['renderer'],
+                     evidence=figure.get('evidence', []))
         if fallback:
             trace.update(fallback=fallback, original_attempts=original_attempts,
                          first_attempt_passed_execution_and_file_checks=False)

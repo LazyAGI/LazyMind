@@ -219,10 +219,21 @@ steps:
       - {material: literature_review_document, required: false, transport: path}
       - {material: experiment_pool, required: false, transport: path}
       - {material: experiment_document, required: false, transport: path}
+      - {material: recovery_data_analysis_pool, required: false, transport: path}
+      - {material: recovery_data_analysis_document, required: false, transport: path}
+      - {material: recovery_write_outline_pool, required: false, transport: path}
+      - {material: recovery_write_outline_document, required: false, transport: path}
+      - {material: recovery_write_document_pool, required: false, transport: path}
+      - {material: recovery_write_document_document, required: false, transport: path}
+      - {material: recovery_peer_review_pool, required: false, transport: path}
+      - {material: recovery_peer_review_document, required: false, transport: path}
+      - {material: recovery_revise_document_pool, required: false, transport: path}
+      - {material: recovery_revise_document_document, required: false, transport: path}
     outputs:
       - {material: data_analysis_pool, required: true}
       - {material: data_analysis_document, required: true}
       - {material: analysis_chart, required: false}
+      - {material: redrawn_manuscript_document, required: false}
     acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
   write_outline:
     label: "论文大纲"
@@ -383,6 +394,7 @@ steps:
     outputs:
       - {material: revise_document_pool, required: true}
       - {material: revise_document_document, required: true}
+      - {material: revision_fact_check_document, required: true}
     acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
   reading_reflection:
     label: "阅读心得"

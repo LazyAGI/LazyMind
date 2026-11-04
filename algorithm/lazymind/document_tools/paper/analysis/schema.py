@@ -39,6 +39,7 @@ class Object(BaseModel):
 class Constraints(Object):
     paper_language: Literal['zh-CN', 'en'] = 'zh-CN'
     word_target: Annotated[int, Field(gt=0)] | None = None
+    required_sections: list[str] = Field(default_factory=list)
     paper_type: Literal[
         'research', 'empirical', 'literature_review', 'theoretical', 'case_study', 'conference'
     ] | None = None
@@ -62,7 +63,8 @@ class DataTable(Object):
             raise ValueError('表格超过 100 万单元格')
         for row_number, row in enumerate(self.rows, 1):
             if len(row) != len(self.columns):
-                raise ValueError(f'第 {row_number} 行有 {len(row)} 个字段，但 columns 定义了 {len(self.columns)} 列；请核对原始数据，系统不会自动补值或删列')
+                raise ValueError(f'第 {row_number} 行有 {len(row)} 个字段，但 columns 定义了 {len(self.columns)} 列；'
+                                 '请核对原始数据，系统不会自动补值或删列')
             for value, kind in zip(row, self.column_types):
                 if value is None:
                     continue
@@ -178,6 +180,14 @@ class AnalysisTarget(Object):
     estimand: Text
     scope: Text
     columns: Annotated[list[ColumnRef], Field(min_length=1)]
+    status: Literal['answered', 'unavailable'] = 'answered'
+    reason: Text | None = None
+
+    @model_validator(mode='after')
+    def availability(self):
+        if (self.status == 'unavailable') != (self.reason is not None):
+            raise ValueError('不可估目标必须明确原因；有结果目标不能标记不可估原因')
+        return self
 
 
 class PriorSpec(Object):
@@ -479,8 +489,9 @@ def validate_analysis(value, inputs=None):
                 raise ContractError('INVALID_OUTPUT', 'output.analysis.' + key, '输入摘要或来源不一致')
     for target in targets.values():
         refs_exist(target['columns'], sources, 'output.analysis.targets.columns')
+    answered = {key for key, target in targets.items() if target['status'] == 'answered'}
     for model in models.values():
-        if len(set(model['target_ids'])) != len(model['target_ids']) or not set(model['target_ids']) <= targets.keys():
+        if len(set(model['target_ids'])) != len(model['target_ids']) or not set(model['target_ids']) <= answered:
             raise ContractError('INVALID_OUTPUT', 'output.analysis.models', '模型引用的目标不存在或重复')
         for prior in model['priors']:
             if not set(prior['source_table_ids']) <= sources.keys():
@@ -488,7 +499,7 @@ def validate_analysis(value, inputs=None):
     for finding in findings.values():
         refs_exist(finding['columns'], sources, 'output.analysis.findings.columns')
         mid, tid = finding['model_id'], finding['target_id']
-        if tid not in targets or mid is not None and (mid not in models or tid not in models[mid]['target_ids']):
+        if tid not in answered or mid is not None and (mid not in models or tid not in models[mid]['target_ids']):
             raise ContractError('INVALID_OUTPUT', 'output.analysis.findings', '目标或模型引用错误')
         if finding['probability'] or finding['interval'] and finding['interval']['kind'] == 'credible':
             if mid is None or not models[mid]['priors'] or not models[mid]['likelihood']:
@@ -499,7 +510,7 @@ def validate_analysis(value, inputs=None):
         for count in counts:
             if count['table_id'] not in sources or count['count'] > sources[count['table_id']]['row_count']:
                 raise ContractError('INVALID_OUTPUT', 'output.analysis.findings.sample_size', '来源计数超过原始表')
-    if {f['target_id'] for f in findings.values()} != targets.keys():
+    if {f['target_id'] for f in findings.values()} != answered:
         raise ContractError('INVALID_OUTPUT', 'output.analysis.targets', '有分析目标未产生结果')
     for diagnostic in result['diagnostics']:
         if diagnostic['model_id'] is not None and diagnostic['model_id'] not in models:

@@ -16,7 +16,7 @@ from lazyllm.tools.writer.utils.serialization import markdown_section_range
 from .recovery import repair_locators, repair_replacements
 from .matching import resolve_locator
 
-from .common import (
+from .common import (  # noqa: F401 - validate_* are public algorithm entries
     _heading_signature,
     _markdown_prose,
     _json,
@@ -179,8 +179,10 @@ def _operation_ranges(source, plan):
         operations.append(ranges)
     return operations
 
+
 def _within_range(start, end, allowed):
     return any(left <= start and end <= right for left, right in allowed)
+
 
 def _bounded_replacements(source, allowed, generated):
     """Reject ambiguous/out-of-plan edits before the shared atomic application.
@@ -229,9 +231,10 @@ def _bounded_replacements(source, allowed, generated):
     replacements.replacements = [item[2] for item in reversed(located)]
     return replacements.model_dump(), located
 
+
 def _validate_review_plan(plan, issues):
     """Check selected-issue coverage; public Writer owns manuscript locating."""
-    selected = {issue['id'] for issue in issues}
+    selected = {issue['id'] for issue in issues if issue['action_type'] == 'text_revision'}
     covered = set()
     for item in plan.instructions:
         ids = item.meta.get('issue_ids')
@@ -296,13 +299,16 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
     _heading_signature(source)
     task = copy.deepcopy(prepared['writing_task'])
     reviewing = task['meta'].get('review_driven', False)
-    editor = editor if editor is not None else WriterRevisionToolkit()
     context_json = _json(prepared['writing_context'])
     issues = prepared['selected_issues'] if reviewing else []
     if reviewing:
         if not issues:
             raise ValueError('Review revision requires selected issues; empty is not all.')
+        if not any(issue['action_type'] == 'text_revision' for issue in issues):
+            raise contracts.MissingMaterials('所选意见仍需补充材料或实验，已保留为待补事项；'
+                                             '本轮没有可执行的文本修改，稿件未修改。')
         task['query'] += REVIEW_REVISION_INSTRUCTIONS + _json(issues)
+    editor = editor if editor is not None else WriterRevisionToolkit()
     try:
         report_progress(20, '正在定位修改范围')
         located = editor.locate_revision_target(
@@ -357,8 +363,8 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
             allowed = [bounds for item, ranges in zip(plan.instructions, operation_ranges)
                        if issue['id'] in item.meta['issue_ids'] for bounds in ranges]
             effective = any(
-                replacement.old_string.replace('\r\n', '\n').replace('\r', '\n') !=
-                replacement.new_string.replace('\r\n', '\n').replace('\r', '\n')
+                replacement.old_string.replace('\r\n', '\n').replace('\r', '\n')
+                != replacement.new_string.replace('\r\n', '\n').replace('\r', '\n')
                 and _within_range(start, end, allowed)
                 for start, end, replacement in located_changes
             )
@@ -384,10 +390,42 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
         events.completed_preview(body)
     return {'manuscript': body, 'is_demo': False}
 
+
 def run(inputs):
     """Revise a manuscript from the current request or selected current review issues."""
     report_progress(10, '正在准备修订材料')
     toolkit = WriterCreateToolkit()
     prepared = prepare_writer_context(inputs, toolkit=toolkit)
     prepared['writing_task']['constraints']['visual_policy'] = {'allow_visuals': False}
-    return _modify_manuscript(prepared, inputs['constraints'], toolkit)
+    output = _modify_manuscript(prepared, inputs['constraints'], toolkit)
+    from ..publication import publish_citations, resolve_chart_sources
+    from .. import peer_review
+    from ..review_schema import ReviewResult, ReviewIssue
+    # Check the same canonical Markdown that publication will deliver.
+    body = publish_citations(output['manuscript'], inputs.get('papers') or [])
+    body = resolve_chart_sources(body, prepared['charts'])
+    review_inputs = {key: copy.deepcopy(inputs.get(key)) for key in contracts.FIELDS['peer_review']}
+    review_inputs.update(topic=inputs['topic'], manuscript=body,
+                         request='核对修订后稿件的五类事实，特别检查改动是否引入新错误；不得把文字修改等同于事实已验证。')
+    report_progress(88, '正在核对修订后的事实')
+    fresh = peer_review.run(review_inputs)
+    reviewed = ReviewResult.model_validate({
+        **{key: fresh['review_data'][key] for key in ReviewResult.model_fields if key != 'issues'},
+        'issues': [{key: issue[key] for key in ReviewIssue.model_fields}
+                   for issue in fresh['review_data']['issues']],
+    })
+    # Missing experiments/materials cannot be supplied by editing prose. Keep them
+    # visible even if their old quotation disappeared from the revised manuscript.
+    previous = inputs.get('review_data') or {}
+    for issue in previous.get('issues', []):
+        if issue['action_type'] == 'text_revision':
+            continue
+        if any(item.problem == issue['problem'] for item in reviewed.issues):
+            continue
+        pending = {key: issue[key] for key in ReviewIssue.model_fields}
+        if pending['quote'] and pending['quote'] not in body:
+            pending['quote'] = None
+        pending['problem'] = f"原 {issue['id']} 待补事项，尚未独立核实：" + pending['problem']
+        reviewed.issues.append(ReviewIssue.model_validate(pending))
+    fresh = peer_review.build_output(reviewed, review_inputs, fact_checks=fresh['review_data']['fact_checks'])
+    return {**fresh, 'manuscript': body}

@@ -59,15 +59,14 @@ def runtime_state():
 @pytest.fixture
 def replay(monkeypatch, tmp_path):
     request = '只执行 F4，分析上传的 input.json，输出分析、结论和图表。'
-    inputs = dict(topic='模拟：方法得分比较', request=request,
-                  data=dict(columns=['method', 'score'], column_types=['string', 'number'],
-                            units=[None, 'point'], rows=[['baseline', 1.], ['baseline', 3.],
-                                                       ['candidate', 4.], ['candidate', 6.]]))
+    inputs = dict(topic='模拟：方法得分比较', request=request, data=dict(
+        columns=['method', 'score'], column_types=['string', 'number'], units=[None, 'point'],
+        rows=[['baseline', 1.], ['baseline', 3.], ['candidate', 4.], ['candidate', 6.]]))
     plan = dict(questions=['各组平均得分如何？'], outline='按方法计算得分均值，仅作模拟描述。')
-    arrangement = dict(figures=[dict(title='Mean scores', purpose='Compare group means.',
-                                    style='bar_grouped_hatch', result_indices=[0, 1])],
-                       terminology={'baseline': 'Baseline', 'candidate': 'Candidate'},
-                       series_order=['baseline', 'candidate'])
+    arrangement = dict(
+        figures=[dict(title='Mean scores', purpose='Compare group means.', style='custom',
+                      base_style='bar_grouped_hatch', result_indices=[0, 1])],
+        terminology={'baseline': 'Baseline', 'candidate': 'Candidate'}, series_order=['baseline', 'candidate'])
     conclusion = '候选组均值为 5 分，基线为 2 分；仅反映当前模拟样本。'
     structured = Mock(side_effect=[plan, arrangement])
     analysis = Mock(return_value={'code': ANALYSIS_CODE})
@@ -85,9 +84,9 @@ def replay(monkeypatch, tmp_path):
     monkeypatch.delenv('LAZYMIND_PAPER_PLOT_SKILLS', raising=False)
     source = tmp_path / 'input.json'
     source.write_text(json.dumps(inputs), encoding='utf-8')
-    lazyllm.globals['agentic_config'] = dict(user_id='f4-test', conversation_id='f4-test',
-                                          query=request, files=[str(source)],
-                                          history_files_per_turn={'1': [str(source)]})
+    lazyllm.globals['agentic_config'] = dict(
+        user_id='f4-test', conversation_id='f4-test', query=request, files=[str(source)],
+        history_files_per_turn={'1': [str(source)]})
     from lazymind.document_tools.paper.analysis.attachments import workflow_input_bindings
     events = []
     slots = ['data_analysis_pool', 'data_analysis_document', 'analysis_chart']
@@ -120,8 +119,8 @@ def published(replay):
             pool['history'][-1]['analysis_execution'][0], paths)
 
 
-@pytest.mark.parametrize('fault', ['none', 'plan', 'figure_plan', 'analysis', 'plot',
-                                 'fallback', 'missing_plot', 'no_figures'])
+@pytest.mark.parametrize('fault', [
+    'none', 'plan', 'figure_plan', 'analysis', 'plot', 'fallback', 'missing_plot', 'no_figures'])
 def test_f4_workflow_publishes_executed_files(replay, fault, monkeypatch):
     if fault == 'plan':
         replay.structured.side_effect = [{}, replay.plan, replay.arrangement]
@@ -144,11 +143,12 @@ def test_f4_workflow_publishes_executed_files(replay, fault, monkeypatch):
     elif fault == 'fallback':
         replay.plot.return_value = {'code': PLOT_CODE.replace('return fig', 'return missing_name')}
         line = PLOT_CODE.splitlines().index('    return fig') + 1
-        replay.repair.return_value = dict(replacements=[dict(start_line=line, end_line=line,
-                                                           code='    return missing_name')])
+        replay.repair.return_value = dict(replacements=[dict(
+            start_line=line, end_line=line, code='    return missing_name')])
     elif fault == 'missing_plot':
         replay.arrangement['figures'].append(dict(replay.arrangement['figures'][0], title='Missing comparison'))
         original = plots.draw_one
+
         def draw(*args):
             if args[2]['id'] == 'fig2':
                 raise plots.FigureRenderError('injected unavailable figure', [])
@@ -252,6 +252,42 @@ def test_four_local_repairs_then_success_or_explicit_failure(replay, monkeypatch
     assert replay.plot.call_count == (0 if stage == 'analysis' and not recover else 1)
 
 
+def test_unchanged_analysis_repair_never_reexecutes_failed_source(replay, monkeypatch):
+    from lazymind.document_tools.paper.analysis import pipeline
+    line = ANALYSIS_CODE.splitlines().index('    return dict(results=results)') + 1
+    replay.analysis.return_value = {'code': ANALYSIS_CODE.replace('return dict(results=results)', 'return missing_name')}
+    unchanged = dict(replacements=[dict(start_line=line, end_line=line, code='    return missing_name')])
+    replay.structured.side_effect = [replay.plan, unchanged]
+    execute = Mock(wraps=pipeline.executor.execute)
+    monkeypatch.setattr(pipeline.executor, 'execute', execute)
+    with pytest.raises(ContractError, match='修复补丁未改变源码') as failure:
+        workflow.run_paper_step()
+    assert 'missing_name' in str(failure.value) and f'line {line}' in str(failure.value)
+    assert execute.call_count == 1
+    assert replay.analysis.call_count == 1 and replay.structured.call_count == 2
+    replay.plot.assert_not_called()
+    replay.narrative.assert_not_called()
+    assert not any(event['type'] == 'artifact' for event in replay.events)
+
+
+def test_uncovered_research_question_is_named_without_inventing_provenance(replay):
+    from lazymind.document_tools.paper.analysis import pipeline
+    from lazymind.document_tools.paper.analysis.schema import normalize_input
+    inputs = normalize_input(replay.inputs)
+    plan = copy.deepcopy(replay.plan)
+    plan['questions'].append('Compare matched metrics across datasets?')
+    result = dict(results=[dict(question_id='q1', label='Observed score', metric='score', method='Supplied value',
+                                value=1., unit='point', columns=[dict(table_id='data', column='score')],
+                                scope='One supplied observation', sample_size=dict(
+                                    source_rows=[dict(table_id='data', count=1)], n=1,
+                                    unit='observation', excluded_n=0))])
+    original = copy.deepcopy((inputs, plan, result))
+    with pytest.raises(ContractError, match='q2: Compare matched metrics across datasets') as failure:
+        pipeline.build_analysis(inputs, plan, result)
+    assert 'targets.1.columns' not in str(failure.value)
+    assert (inputs, plan, result) == original
+
+
 @pytest.mark.parametrize('stage,limit', [('plan', 3), ('figure_plan', 2)])
 def test_code_repair_budget_does_not_expand_planning_retries(replay, monkeypatch, stage, limit):
     monkeypatch.delenv('LAZYMIND_PAPER_GENERATED_ANALYSIS_ATTEMPTS')
@@ -265,8 +301,8 @@ def test_code_repair_budget_does_not_expand_planning_retries(replay, monkeypatch
 
 
 def test_parallel_figures_keep_full_evidence_private_context_and_order(replay, monkeypatch):
-    replay.arrangement['figures'] = [dict(replay.arrangement['figures'][0], result_indices=[index],
-                                        title=f'Mean {index + 1}') for index in range(2)]
+    replay.arrangement['figures'] = [
+        dict(replay.arrangement['figures'][0], result_indices=[index], title=f'Mean {index + 1}') for index in range(2)]
     monkeypatch.setenv('LAZYMIND_PAPER_PLOT_CONCURRENCY', '2')
     barrier, second_done = Barrier(2), Event()
     request = ContextVar('f4_test_request', default=None)
@@ -437,7 +473,7 @@ def test_skill_override_requires_the_actual_skill_root(tmp_path):
     from lazymind.document_tools.paper.plotting.skills import PlotSkills
 
     root = tmp_path / 'plot-from-data'
-    shutil.copytree(PlotSkills().root, root)
+    shutil.copytree(PlotSkills().root, root, ignore=shutil.ignore_patterns('__pycache__'))
     with pytest.raises(RuntimeError, match='缺少绘图 skill'):
         PlotSkills(str(tmp_path))
     assert 'bar_grouped_hatch' in PlotSkills(str(root)).catalog()
@@ -474,3 +510,39 @@ def test_json_attachment_binding_stays_in_analysis(tmp_path, monkeypatch):
     writing = workflow.business_input('write_outline', pool, value['request'])
     assert writing['papers'] == value['papers']
     assert writing['evidence'] == value['evidence']
+
+
+def test_partial_evidence_generates_and_redraws_without_losing_unavailable_question(replay, monkeypatch):
+    from lazymind.document_tools.paper.analysis import pipeline
+    from lazymind.document_tools.paper.analysis.schema import digest, normalize_input
+    question = 'Are paired per-case gains supported?'
+    reason = 'Only group summaries are supplied; per-case pairing identifiers are unavailable.'
+    replay.plan['questions'].append(question)
+    replacement = """return dict(results=results, unavailable_questions=[dict(
+        question_id=plan['questions'][1]['id'], reason='""" + reason + """',
+        columns=[dict(table_id='data', column='method')])])"""
+    code = ANALYSIS_CODE.replace('return dict(results=results)', replacement)
+    replay.analysis.return_value = {'code': code}
+    assert workflow.run_paper_step()['status'] == 'completed'
+    analysis, charts, _, _ = published(replay)
+    assert [row['value'] for row in analysis['findings']] == [2., 5.]
+    assert analysis['targets'][1]['status'] == 'unavailable'
+    assert question in analysis['summary'] and reason in analysis['summary']
+    narrative = payload(replay.narrative.call_args.args[0])
+    assert narrative['research_questions'][1]['reason'] == reason
+    frozen = digest(analysis)
+    forbidden = Mock(side_effect=AssertionError('redraw recalculated statistics or rewrote interpretation'))
+    for name in ('make_plan', 'generate_program', 'interpret_results'):
+        monkeypatch.setattr(model, name, forbidden)
+    monkeypatch.setattr(pipeline.executor, 'execute', forbidden)
+    monkeypatch.setattr(plots, 'call_code_model', forbidden)
+    monkeypatch.setattr(model, 'plan_figures', Mock(return_value=dict(figures=[dict(
+        title='Readable observed means', purpose='Preserve observed means.', style='bar_grouped_hatch',
+        result_indices=[0, 1], category='method', source_chart_id=charts[0]['id'])])))
+    inputs = normalize_input(replay.inputs)
+    inputs['request'] = 'Only shorten labels and move the legend.'
+    output = pipeline.redraw(inputs, analysis, charts)
+    assert digest(output['analysis']) == frozen == digest(analysis)
+    assert output['charts'][0]['finding_ids'] == charts[0]['finding_ids']
+    assert '<text' in output['charts'][0]['svg'] and '2' in output['charts'][0]['svg']
+    forbidden.assert_not_called()

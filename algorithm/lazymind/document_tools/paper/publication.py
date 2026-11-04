@@ -117,6 +117,13 @@ def publish_charts(body, charts):
     return _resolve_chart_sources(body, charts, objects)
 
 
+def refresh_chart_sources(body, previous, current):
+    """Rebind only validated figure destinations after a visual-only redraw."""
+    objects = validate_chart_references(body, previous)
+    updated = _resolve_chart_sources(body, current, objects)
+    return updated
+
+
 def resolve_chart_sources(body, charts):
     """Resolve validated destinations without changing captions or display notices."""
     objects = validate_chart_references(body, charts)

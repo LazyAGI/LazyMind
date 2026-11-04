@@ -22,12 +22,81 @@ class ReviewIssue(BaseModel):
     action_type: Literal['text_revision', 'needs_material', 'needs_experiment']
 
 
+FactCategory = Literal['numbers', 'comparison', 'literature', 'data_status', 'figure']
+FactStatus = Literal['verified', 'conflict', 'insufficient', 'not_applicable']
+
+
+class FactSource(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    path: NonEmptyText = Field(description='JSON Pointer into supplied analysis/evidence/charts/papers/result_meta')
+    quote: NonEmptyText | None = Field(default=None, description='Exact excerpt when the source is text')
+    value_text: NonEmptyText | None = Field(default=None, description='Exact quantity within source quote')
+    column: NonEmptyText | None = Field(default=None, description='Numeric column in supplied columns/rows table')
+    where: dict[str, str | int | float | bool] = Field(default_factory=dict, description=(
+        'Exact equality filters in that table; group values must be explicit in the manuscript, not guessed aliases'))
+
+
+class FactClaim(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    category: FactCategory
+    location: NonEmptyText
+    quote: NonEmptyText = Field(description='Exact contiguous manuscript excerpt, never a source quotation')
+    asserted_text: NonEmptyText = Field(description='Exact number, direction word or status label within quote')
+    operation: Literal['value', 'sum', 'mean', 'difference', 'ratio', 'percentage',
+                       'percentage_points', 'relative_change', 'direction', 'denominator',
+                       'status', 'citation_support', 'figure_value']
+    sources: list[FactSource] = Field(min_length=1)
+
+
+class CheckedFact(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    category: FactCategory
+    status: FactStatus
+    location: NonEmptyText
+    quote: NonEmptyText
+    evidence_locations: list[str]
+    calculation: NonEmptyText
+    suggestion: NonEmptyText
+    verification_method: Literal['deterministic', 'semantic_read'] = 'deterministic'
+    reading: 'LiteratureReading | None' = None
+
+
+class LiteratureReading(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    claim_index: int = Field(ge=0)
+    status: Literal['verified', 'conflict', 'insufficient']
+    reason: NonEmptyText
+    passages: list[FactSource]
+
+
+class LiteratureReadings(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    readings: list[LiteratureReading]
+
+
+class FactCheck(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    category: FactCategory
+    status: FactStatus
+    reason: NonEmptyText
+    evidence_locations: list[str]
+    checks: list[CheckedFact] = Field(default_factory=list)
+
+
 class ReviewResult(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
 
     summary: NonEmptyText
     issues: list[ReviewIssue]
     limitations: list[NonEmptyText]
+    fact_claims: list[FactClaim] = Field(default_factory=list, description=(
+        'Claims to check, not verification verdicts. Only host code assigns fact-check status.'))
 
 
 class ReviewRepair(BaseModel):
@@ -51,18 +120,23 @@ class RepairedIssue(ReviewIssue):
 
 class SavedReviewIssue(ReviewIssue):
     id: Annotated[str, Field(pattern=r'^R[1-9][0-9]*$')]
+    disposition: Literal['fact', 'advice', 'unverified'] = 'unverified'
 
 
 class SavedReview(ReviewResult):
     issues: list[SavedReviewIssue]
     manuscript_sha256: Digest
     review_sha256: Digest
+    fact_checks: list[FactCheck] = Field(default_factory=list)
 
     @model_validator(mode='after')
     def unique_ids(self):
         ids = [issue.id for issue in self.issues]
         if len(ids) != len(set(ids)):
             raise ValueError('审稿问题编号不能重复')
+        categories = [check.category for check in self.fact_checks]
+        if categories and (len(categories) != 5 or len(set(categories)) != 5):
+            raise ValueError('事实核对必须完整包含五类且不能重复')
         return self
 
 
