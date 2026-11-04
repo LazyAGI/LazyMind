@@ -91,7 +91,10 @@ it('saves only a new section and a later text edit, retaining untouched README s
 
 it('retains an unsaved edit, blocks publication and allows retry after mapping aborts', async () => {
   let flush: (() => Promise<boolean>) | undefined;
-  const onSave = vi.fn(async (markdown: string) => ({ markdown, revision: 2 }));
+  let finishSave: (() => void) | undefined;
+  const onSave = vi.fn((markdown: string) => new Promise<{ markdown: string; revision: number }>(resolve => {
+    finishSave = () => resolve({ markdown, revision: 2 });
+  }));
   render(<SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFooterAction: () => () => {},
     registerFlush: (_key, callback) => { flush = callback; return () => {}; },
   }}><MarkdownArtifactEditor editingKey='readme' markdown={source} sourceRevision={1} onSave={onSave} resolveImageUrl={resolveImageUrl} /></SlotEditingContext.Provider>);
@@ -112,8 +115,13 @@ it('retains an unsaved edit, blocks publication and allows retry after mapping a
   capture.abortDiff = false;
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-  expect(publishedSource(onSave.mock.calls[0][0])).toBe(source.replace('Original paragraph.', 'Unsaved paragraph.'));
-  expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(onSave.mock.calls[0][0]);
+  const savedMarkdown = onSave.mock.calls[0][0];
+  const unsavedMarkdown = source.replace('Original paragraph.', 'Unsaved paragraph.');
+  expect(publishedSource(savedMarkdown)).toBe(unsavedMarkdown);
+  // Calling onSave starts persistence; its receipt updates the source preview.
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(unsavedMarkdown));
+  await act(async () => { finishSave!(); });
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '源码' })).toHaveValue(savedMarkdown));
   expect(screen.getByRole('textbox', { name: '源码' })).toHaveAttribute('readonly');
 }, 15000);
 
