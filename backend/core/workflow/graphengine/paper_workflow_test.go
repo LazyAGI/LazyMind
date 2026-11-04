@@ -34,10 +34,12 @@ func TestPaperGraphAllForwardScenarios(t *testing.T) {
 	paths := [][]string{
 		{"research_topic", "literature_review", "refine_topic"},
 		{"literature_review", "write_document", "peer_review", "revise_document"},
-		{"data_analysis", "write_document"}, {"revise_document"}, {"write_document", "revise_document"}, {"reading_reflection"}, {"literature_review", "reading_reflection"},
+		{"experiment", "data_analysis"},
+		{"experiment", "data_analysis", "write_document"},
+		{"revise_document"}, {"write_document", "revise_document"}, {"reading_reflection"}, {"literature_review", "reading_reflection"},
 		{"literature_review", "experiment", "data_analysis"},
 	}
-	for _, node := range []string{"research_topic", "literature_review", "experiment", "data_analysis", "write_document", "peer_review", "reading_reflection"} {
+	for _, node := range []string{"research_topic", "literature_review", "experiment", "write_document", "peer_review", "reading_reflection"} {
 		paths = append(paths, []string{node})
 	}
 	for _, path := range paths {

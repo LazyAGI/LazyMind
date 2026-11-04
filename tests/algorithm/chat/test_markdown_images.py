@@ -1,5 +1,7 @@
+from types import SimpleNamespace
+
+from lazymind.chat.service.utils import static_file_url
 from lazymind.chat.service.utils.markdown_images import rewrite_markdown_image_urls
-from lazymind.chat.service.utils.static_file_url import static_file_url_from_full_path
 
 
 def test_rewrite_markdown_image_urls_replaces_hallucinated_host(tmp_path, monkeypatch):
@@ -10,13 +12,14 @@ def test_rewrite_markdown_image_urls_replaces_hallucinated_host(tmp_path, monkey
 
     monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload_root))
     monkeypatch.setenv('LAZYMIND_FILE_URL_SIGN_SECRET', 'test-secret')
+    monkeypatch.setattr(static_file_url, 'time', SimpleNamespace(time=lambda: 1_700_000_000))
 
     raw_url = (
         'https://ext.lazymind.ai:19537/var/lib/lazymind/uploads/'
         'normalized_images/exp9/frame.jpg'
     )
     markdown = f'![frame]({raw_url})'
-    expected = static_file_url_from_full_path(str(image))
+    expected = static_file_url.static_file_url_from_full_path(str(image))
     rewritten = rewrite_markdown_image_urls(
         markdown,
         url_map={'frame.jpg': expected},
