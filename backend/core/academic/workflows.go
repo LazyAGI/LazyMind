@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/conversationgroup"
+	"lazymind/core/log"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
@@ -395,7 +396,13 @@ func init() {
 				payload.CompletedArtifacts = artifacts
 			}
 		}
-		asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, MaxAttempts: 5})
+		req := asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, MaxAttempts: 5}
+		if err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+			_, err := asyncjob.EnqueueInTransaction(ctx, tx, req)
+			return err
+		}); err != nil {
+			log.Logger.Error().Err(err).Str("session_id", session).Msg("enqueue paper expansion projection")
+		}
 	}
 }
 func runAcademicChat(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
