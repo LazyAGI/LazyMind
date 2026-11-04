@@ -970,7 +970,10 @@ func TestExpansionLaunchDirectionSelection(t *testing.T) {
 		{"deep default", "expansion", "deep", "", "all", 200},
 		{"manual", "expansion", "balanced", "manual", "manual", 200},
 		{"review standard default", "review", "balanced", "", "all", 200},
-		{"review deep manual", "review", "deep", "manual", "manual", 200},
+		{"review standard manual", "review", "balanced", "manual", "manual", 200},
+		{"review deep manual", "review", "deep", "manual", "", 400},
+		{"review fast", "review", "fast", "", "", 200},
+		{"review fast with direction selection", "review", "fast", "manual", "", 400},
 		{"fast", "expansion", "fast", "", "", 200},
 		{"invalid", "expansion", "balanced", "unknown", "", 400},
 	} {
@@ -982,6 +985,10 @@ func TestExpansionLaunchDirectionSelection(t *testing.T) {
 				t.Fatalf("%d %s", w.Code, w.Body.String())
 			}
 			if w.Code != 200 {
+				var count int64
+				if err := db.Model(&orm.AcademicExpansion{}).Where("request_key=?", "directions").Count(&count).Error; err != nil || count != 0 {
+					t.Fatalf("rejected request created an expansion: %d, %v", count, err)
+				}
 				return
 			}
 			var record orm.AcademicExpansion
@@ -996,6 +1003,24 @@ func TestExpansionLaunchDirectionSelection(t *testing.T) {
 				t.Fatalf("selection not saved: %+v", preparation)
 			}
 		})
+	}
+}
+
+func TestReviewLaunchRetriesExistingDeepExpansion(t *testing.T) {
+	db := paperFixture(t)
+	record := orm.AcademicExpansion{ID: "existing", UserID: "u", RequestOwner: "u", RequestKey: "deep-review", DatasetID: "papers", Goal: "review", BudgetMode: "deep", Status: "preparing",
+		ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "agents"})}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	LaunchPaperWorkflow(w, paperRequest(`{"kind":"review","dataset_id":"papers","direction":"agents","request_key":"deep-review","budget_mode":"deep","direction_selection":"manual"}`))
+	var result struct {
+		ExpansionID string `json:"expansion_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != http.StatusOK || result.ExpansionID != record.ID {
+		t.Fatalf("retry did not return the existing review: %d %s (%v)", w.Code, w.Body.String(), err)
 	}
 }
 

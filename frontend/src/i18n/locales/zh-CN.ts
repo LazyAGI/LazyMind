@@ -35,6 +35,7 @@ const zhCN = {
     "backgroundNotice": "确认后在后台处理，关闭页面不影响已创建的任务。",
     "unavailableSuffix": "（状态暂时无法获取）",
     "history": "入库记录",
+    "noOriginalLink": "暂无原文链接",
     "openOriginal": "打开原文",
     "results": "Agent 执行结果",
     "closeResults": "关闭 Agent 执行结果",
@@ -10589,7 +10590,15 @@ const zhCN = {
       "deep": {"label": "深入研究", "summary": "筛选相关论文，阅读关键内容，比较主要方法并生成研究报告"}
     },
     "reviewFlow": {
-      "entry": {"inputs": "确认论文与主题", "inputsHint": "当前步骤", "research": "初步调研", "researchHint": "按所选深度梳理方向", "directions": "确认研究方向", "directionsHint": "多个方向时选择，单一方向自动继续", "selectedFulltext": "检查已选全文", "selectedFulltextHint": "仅使用本次确认的论文", "expandedFulltext": "检索与全文准备", "expandedFulltextHint": "扩展相关论文，准备可用材料", "handoff": "综述材料交接", "handoffHint": "携带论文、主题与补充要求", "generate": "阅读与生成综述", "generateHint": "输出综述正文与引用"},
+      "entry": {
+        "inputs": "确认论文与主题",
+        "topic": "确认综述主题",
+        "prepareDirections": "初调与确定方向",
+        "targetedSearch": "定向检索核心论文",
+        "search": "检索论文",
+        "stepCount": "{{count}} 步",
+        "fulltextBatchHint": "发布清单后自动准备全文，整批结束且至少有两篇可用全文时交接。"
+      },
       "label": "论文综述流程",
       "preparationTitle": "论文综述 · 资料准备",
       "stage": { "expand": "论文扩展", "prepareFulltext": "准备全文", "handoff": "交接综述材料" },
@@ -10811,6 +10820,10 @@ const zhCN = {
     "newReviewHint": "创建一份新的综述，已有综述保留。",
     "confirmReview": "确认使用 {{count}} 篇生成",
     "reviewSummary": "已选 {{selected}} 篇：使用 {{count}} 篇全文可用论文，{{skipped}} 篇不参与本次生成。",
+    "reviewSelectionTitle": "已选论文",
+    "reviewLaunchSummary": "已选 {{selected}} 篇 · {{count}} 篇全文可用",
+    "reviewExpansionSeeds": "{{count}} 篇作为扩展起点",
+    "reviewMaterialStatus": {"ready": "全文可用", "processing": "全文处理中", "unavailable": "全文不可用", "checking": "正在检查全文", "unchecked": "全文待确认"},
     "reviewIncluded": "全文可用 · 本次用于生成综述",
     "reviewExcluded": "本次不参与生成",
     "reviewConfirmHint": "确认后仅使用上方标明可用的 {{count}} 篇论文，在新的会话中生成综述。",

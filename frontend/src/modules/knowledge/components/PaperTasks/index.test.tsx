@@ -243,7 +243,12 @@ describe('paper task startup routes', () => {
         await submit();
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: [], direction: 'tool agents', user_instruction: undefined }), false);
     });
-    it.each([['基于选中论文生成综述', false], ['指定方向生成', true]] as const)('starts review through %s', async (label, direction) => {
+    it.each([
+        ['基于选中论文生成综述', false, 'fast'],
+        ['基于选中论文生成综述', false, 'balanced'],
+        ['指定方向生成', true, 'fast'],
+        ['指定方向生成', true, 'balanced'],
+    ] as const)('starts review through %s (%s, %s)', async (label, direction, budgetMode) => {
         mount(direction ? [] : ['a']);
         fireEvent.click(screen.getByRole('button', { name: /论文综述/ }));
         const menu = within(await screen.findByRole('menu'));
@@ -253,14 +258,30 @@ describe('paper task startup routes', () => {
         else fireEvent.click(screen.getByRole('switch', { name: '开启论文扩展' }));
         expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
         const modes = within(screen.getByRole('radiogroup', { name: '扩展方式' }));
-        const standard = within(modes.getByRole('radio', { name: /^标准扩展/ }).closest<HTMLElement>('.paper-research-depth-option')!);
-        await waitFor(() => {
-            for (const stage of ['初步调研', '确定研究方向', '筛选与补充', '自动准备全文', '交接综述材料']) expect(standard.getByText(stage)).toBeVisible();
-        });
+        expect(modes.queryByRole('radio', { name: '深入研究' })).not.toBeInTheDocument();
+        const standard = within(modes.getByRole('radiogroup', { name: '标准扩展 · 研究方向' }));
+        expect(standard.getByRole('radio', { name: '默认全选' })).toBeChecked();
+        const flow = within(screen.getByRole('region', { name: '论文综述流程' }));
+        const first = direction ? '确认综述主题' : '确认论文与主题';
+        const steps = flow.getAllByRole('listitem');
+        expect(steps).toHaveLength(6);
+        await waitFor(() => [
+            first, '初调与确定方向', '检索论文', '筛选与补充', '自动准备全文', '交接综述材料',
+        ].forEach((stage, index) => expect(within(steps[index]).getByText(stage)).toBeVisible()));
         fireEvent.click(standard.getByRole('radio', { name: '人工选择' }));
+        if (budgetMode === 'fast') {
+            fireEvent.click(modes.getByRole('radio', { name: '快速扩展' }));
+            expect(flow.getByText('4 步')).toBeVisible();
+            expect(flow.getByText('定向检索核心论文')).toBeVisible();
+            expect(flow.queryByText('筛选与补充')).not.toBeInTheDocument();
+            expect(standard.getByRole('radio', { name: '人工选择' })).toBeDisabled();
+        }
         expect(screen.getAllByRole('textbox')).toHaveLength(direction ? 1 : 2);
         await submit();
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'review', document_ids: direction ? [] : ['a'], direction_selection: 'manual' }), false);
+        const [request] = vi.mocked(launchPaperTask).mock.calls[0];
+        expect(request).toMatchObject({ kind: 'review', budget_mode: budgetMode, document_ids: direction ? [] : ['a'] });
+        if (budgetMode === 'balanced') expect(request.direction_selection).toBe('manual');
+        else expect(request).not.toHaveProperty('direction_selection');
     });
     it('hands off usable selected papers and labeled review instructions without expansion', async () => {
         vi.mocked(resolvePaperSelection).mockResolvedValue({ papers: [...input.papers, third], invalid: [], materials: [
@@ -272,12 +293,20 @@ describe('paper task startup routes', () => {
         expect(await screen.findByRole('menuitem', { name: '指定方向生成' })).toHaveAttribute('aria-disabled', 'true');
         fireEvent.click(screen.getByText('基于选中论文生成综述'));
         expect(screen.getByRole('switch', { name: '开启论文扩展' })).not.toBeChecked();
-        await waitFor(() => expect(screen.getByText('全文解析失败')).toBeVisible());
+        const flow = within(screen.getByRole('region', { name: '论文综述流程' }));
+        expect(flow.getAllByRole('listitem')).toHaveLength(2);
+        const selectedPapers = within(screen.getByRole('region', { name: '已选论文' }));
+        await waitFor(() => expect(selectedPapers.getByText('全文解析失败')).toBeVisible());
+        expect(flow.getByText('确认论文与主题')).toBeVisible();
+        expect(flow.getByText('交接综述材料')).toBeVisible();
+        expect(selectedPapers.getAllByText('全文可用')).toHaveLength(2);
+        expect(selectedPapers.getByText('已选 3 篇 · 2 篇全文可用')).toBeVisible();
         expect(screen.queryByText('扩展深度')).not.toBeInTheDocument();
         expect(screen.queryByText('文献范围')).not.toBeInTheDocument();
         fireEvent.change(screen.getByRole('textbox', { name: /综述主题/ }), { target: { value: '工具学习方法比较' } });
         fireEvent.click(screen.getByRole('button', { name: '确认并继续' }));
         await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ skip_expansion: true, review_scope: 'selected', paper_ids: ['a', 'b'], document_ids: ['a', 'b', 'c'], user_instruction: '综述主题：工具学习方法比较' }), false));
+        expect(vi.mocked(launchPaperTask).mock.calls[0][0]).not.toHaveProperty('budget_mode');
     });
     it('collapses long selected-paper lists without hiding the totals', async () => {
         const papers = ['a', 'b', 'c', 'd', 'e'].map(id => ({ paper: { paper_id: id, title: id.toUpperCase(), abstract: null }, is_seed: true, is_important: false }));
@@ -286,7 +315,7 @@ describe('paper task startup routes', () => {
         fireEvent.click(screen.getByRole('button', { name: /论文综述/ }));
         fireEvent.click(await screen.findByText('基于选中论文生成综述'));
         const toggle = await screen.findByRole('button', { name: '展开全部（5 篇）' });
-        await screen.findByText('已选 5 篇：使用 5 篇全文可用论文，0 篇不参与本次生成。');
+        await screen.findByText('已选 5 篇 · 5 篇全文可用');
         expect(screen.queryByText('D', { selector: '.ant-list-item-meta-title' })).not.toBeInTheDocument();
         fireEvent.click(toggle);
         await waitFor(() => expect(screen.getByText('D', { selector: '.ant-list-item-meta-title' })).toBeVisible());

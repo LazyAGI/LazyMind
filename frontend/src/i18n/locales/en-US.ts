@@ -35,6 +35,7 @@ const enUS = {
     "backgroundNotice": "Processing continues in the background after confirmation. Closing this page does not cancel created tasks.",
     "unavailableSuffix": " (status unavailable)",
     "history": "Import history",
+    "noOriginalLink": "No original link available",
     "openOriginal": "Open original",
     "results": "Agent execution results",
     "closeResults": "Close Agent execution results",
@@ -10846,7 +10847,15 @@ const enUS = {
       "deep": {"label": "Deep research", "summary": "Select relevant papers, read key sections, compare methods and write a research report"}
     },
     "reviewFlow": {
-      "entry": {"inputs": "Confirm papers and topic", "inputsHint": "Current step", "research": "Initial research", "researchHint": "Explore directions at the selected depth", "directions": "Confirm research directions", "directionsHint": "Choose among multiple directions; a single direction continues automatically", "selectedFulltext": "Check selected full texts", "selectedFulltextHint": "Use only the confirmed papers", "expandedFulltext": "Search and prepare full texts", "expandedFulltextHint": "Expand related papers and prepare usable materials", "handoff": "Hand off review materials", "handoffHint": "Include papers, topic and requirements", "generate": "Read and generate review", "generateHint": "Produce the review text and references"},
+      "entry": {
+        "inputs": "Confirm papers and topic",
+        "topic": "Confirm review topic",
+        "prepareDirections": "Research and set directions",
+        "targetedSearch": "Find key papers",
+        "search": "Search for papers",
+        "stepCount": "{{count}} steps",
+        "fulltextBatchHint": "Full-text preparation starts when the list is published. The handoff follows when the batch finishes and at least two full texts are usable."
+      },
       "label": "Literature review workflow",
       "preparationTitle": "Literature review · Preparation",
       "stage": { "expand": "Paper expansion", "prepareFulltext": "Prepare full text", "handoff": "Hand off review materials" },
@@ -11069,6 +11078,10 @@ const enUS = {
     "newReviewHint": "Create a new review. Existing reviews will be kept.",
     "confirmReview": "Confirm review with {{count}} papers",
     "reviewSummary": "{{selected}} selected: use {{count}} papers with usable full text; exclude {{skipped}} papers from this review.",
+    "reviewSelectionTitle": "Selected papers",
+    "reviewLaunchSummary": "{{selected}} selected · {{count}} with usable full text",
+    "reviewExpansionSeeds": "{{count}} starting papers for expansion",
+    "reviewMaterialStatus": {"ready": "Full text available", "processing": "Preparing full text", "unavailable": "Full text unavailable", "checking": "Checking full text", "unchecked": "Full text unconfirmed"},
     "reviewIncluded": "Full text available · Included in this review",
     "reviewExcluded": "Excluded from this review",
     "reviewConfirmHint": "Use only the {{count}} eligible papers listed above to generate a review in a new conversation.",

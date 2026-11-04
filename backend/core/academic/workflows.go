@@ -47,6 +47,8 @@ type ReviewWorkflowInput struct {
 
 const ChatLaunchJobType = "academic.chat_launch"
 
+var errUnsupportedReviewExpansionMode = errors.New("new reviews support only quick or standard expansion")
+
 type paperLaunch struct {
 	SkipExpansion      bool     `json:"skip_expansion"`
 	ReviewScope        string   `json:"review_scope,omitempty"`
@@ -273,6 +275,9 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			if _, valid := depthFor(req.BudgetMode); !valid {
 				return errors.New("invalid research depth")
 			}
+			if req.Kind == "review" && req.BudgetMode == "deep" {
+				return errUnsupportedReviewExpansionMode
+			}
 			seeds, e := seedSources(tx, req.DatasetID, papers)
 			if e != nil {
 				return e
@@ -316,6 +321,10 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, errUnsupportedReviewExpansionMode) {
+			replyError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
 		replyError(w, 409, "LAUNCH_FAILED", err.Error())
 		return
 	}

@@ -14,12 +14,14 @@ import ExpansionDetails from './ExpansionDetails';
 import GeneratedContents from './GeneratedContents';
 import ResearchRecords from './ResearchRecords';
 import ReviewRecordDrawer from './ReviewRecordDrawer';
-import ReviewFlow from './ReviewFlow';
+import ReviewFlow, { ReviewEntryFlow } from './ReviewFlow';
 import ReviewTopic from './ReviewTopic';
 import ResearchDepth from './ResearchDepth';
 import PaperTaskStatus from './PaperTaskStatus';
 import { getExpansionCapabilities, type BudgetMode, type DirectionSelection } from '../../api/paperWorkflows';
 import type { PaperNotification } from '../../paper/usePaperNotifications';
+
+const pendingReviewMaterialStatuses = new Set(['preparing', 'processing', 'pending']);
 
 interface Props {
     dataset: string;
@@ -91,7 +93,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [reviewSelection, setReviewSelection] = useState<PaperSelection>();
     const [selectionLoading, setSelectionLoading] = useState(false);
     const [selectionFailure, setSelectionFailure] = useState('');
-    const directReview = launch?.kind === 'review' && !launch.direction && !expansionEnabled;
+    const selectedReview = launch?.kind === 'review' && !launch.direction;
+    const directReview = selectedReview && !expansionEnabled;
+    const launchesExpansion = launch?.kind === 'expansion' || (launch?.kind === 'review' && !directReview);
     const eligibleReviewPapers = reviewSelection?.papers.filter(paper => reviewSelection.materials?.some(material => material.paper_id === paper.paper.paper_id && material.eligible)) || [];
     useEffect(() => {
         if (!directReview) { setReviewSelection(undefined); setSelectionLoading(false); return; }
@@ -106,7 +110,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 if (!active) return;
                 setReviewSelection(result);
                 setSelectionFailure('');
-                if (result.materials?.some(item => ['preparing', 'processing', 'pending'].includes(item.status))) timer = setTimeout(() => void refresh(), 4000);
+                if (result.materials?.some(item => pendingReviewMaterialStatuses.has(item.status))) timer = setTimeout(() => void refresh(), 4000);
             } catch (error) {
                 if (active) setSelectionFailure(axios.isAxiosError(error) && typeof error.response?.data?.message === 'string' ? error.response.data.message : t('paperTasks.reviewSelectionFailed'));
             } finally { if (active) setSelectionLoading(false); }
@@ -115,6 +119,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         return () => { active = false; clearTimeout(timer); };
     }, [directReview, dataset, JSON.stringify(selected), selectionRetry, t]);
     const [budgetMode, setBudgetMode] = useState<BudgetMode>('balanced');
+    const reviewBudgetMode = budgetMode === 'fast' ? 'fast' : 'balanced';
+    const launchBudgetMode = launch?.kind === 'review' ? reviewBudgetMode : budgetMode;
     const [directionSelection, setDirectionSelection] = useState<DirectionSelection>('all');
     const [capabilities, setCapabilities] = useState<{openalex_key: boolean; sciverse: boolean; web_search: boolean}>();
     useEffect(() => { if (launch) void getExpansionCapabilities().then(setCapabilities).catch(() => setCapabilities(undefined)); }, [launch]);
@@ -316,8 +322,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const body = {
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
-                user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: reflectionFirst, budget_mode: budgetMode,
-                ...(!directReview && (launch.kind === 'expansion' || launch.kind === 'review') && budgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
+                user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: reflectionFirst,
+                ...(launchesExpansion ? { budget_mode: launchBudgetMode } : {}),
+                ...(launchesExpansion && launchBudgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
                 ...(directReview ? { skip_expansion: true, review_scope: 'selected' as const, paper_ids: eligibleReviewPapers.map(item => item.paper.paper_id) } : {}),
             };
             const fingerprint = JSON.stringify(body);
@@ -578,36 +585,47 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             },
         });
     };
-    const reviewPaperRows = reviewSelection ? [
+    const reviewSelectedCount = reviewSelection ? reviewSelection.papers.length + reviewSelection.invalid.length : selected.length;
+    const reviewPaperRows = directReview && reviewSelection ? [
         ...reviewSelection.papers.map(item => {
             const material = reviewSelection.materials?.find(value => value.paper_id === item.paper.paper_id);
-            return { id: item.paper.paper_id, title: item.paper.title || item.paper.paper_id,
-                description: material?.eligible ? t('paperTasks.reviewIncluded') : material?.reason || t('paperTasks.reviewPreparing') };
+            const status = material?.eligible ? 'ready' : material && pendingReviewMaterialStatuses.has(material.status) ? 'processing' : 'unavailable';
+            return { id: item.paper.paper_id, title: item.paper.title || item.paper.paper_id, status, description: material?.reason };
         }),
-        ...reviewSelection.invalid.map(item => ({ id: item.document_id, title: item.document_id, description: item.reason })),
+        ...reviewSelection.invalid.map(item => ({ id: item.document_id, title: item.document_id, status: 'unavailable', description: item.reason })),
     ] : selected.map((id, index) => ({ id, title: selectedTitles[index] || id,
-        description: t(selectionFailure ? 'paperTasks.materialPending' : 'paperTasks.reviewPreparing') }));
+        status: selectionFailure ? 'unchecked' : 'checking', description: undefined }));
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
         <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' || launch?.kind === 'review' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy} onCancel={() => !busy && !topicBusy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
-            {directReview && <ReviewFlow entry />}
-            {directReview && <>
-                <List id="review-selected-papers" loading={selectionLoading} rowKey="id"
+            {launch?.kind === 'review' && <ReviewEntryFlow mode={directReview ? 'direct' : reviewBudgetMode} directionOnly={launch.direction} />}
+            {selectedReview && <section className="paper-review-selected" aria-label={t('paperTasks.reviewSelectionTitle')}>
+                <div className="paper-review-selected-heading">
+                    <h3>{t('paperTasks.reviewSelectionTitle')}</h3>
+                    {!directReview && <Typography.Text type="secondary">{t('paperTasks.reviewExpansionSeeds', { count: selected.length })}</Typography.Text>}
+                    {directReview && reviewSelection && <Typography.Text type="secondary">{t('paperTasks.reviewLaunchSummary', { selected: reviewSelectedCount, count: eligibleReviewPapers.length })}</Typography.Text>}
+                </div>
+                <List id="review-selected-papers" size="small" loading={directReview && selectionLoading} rowKey="id"
                     dataSource={reviewPapersExpanded ? reviewPaperRows : reviewPaperRows.slice(0, 3)}
-                    renderItem={item => <List.Item><List.Item.Meta title={item.title} description={item.description} /></List.Item>} />
+                    renderItem={item => {
+                        const statusLabel = t(`paperTasks.reviewMaterialStatus.${item.status}`);
+                        const statusColor = item.status === 'ready' ? 'success' : item.status === 'processing' ? 'processing' : 'default';
+                        return <List.Item extra={directReview && <Tag color={statusColor}>{statusLabel}</Tag>}>
+                            <List.Item.Meta title={item.title} description={item.description !== statusLabel ? item.description : undefined} />
+                        </List.Item>;
+                    }} />
                 {reviewPaperRows.length > 3 && <Button type="link" aria-expanded={reviewPapersExpanded} aria-controls="review-selected-papers"
                     onClick={() => setReviewPapersExpanded(value => !value)}>
                     {t(reviewPapersExpanded ? 'paperTasks.collapseSelectedPapers' : 'paperTasks.expandSelectedPapers', { count: reviewPaperRows.length })}
                 </Button>}
-                {!reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
-                {selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
-                {!selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
-                {reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.reviewSummary', { count: eligibleReviewPapers.length, selected: (reviewSelection?.papers.length || 0) + (reviewSelection?.invalid.length || 0), skipped: (reviewSelection?.papers.length || 0) + (reviewSelection?.invalid.length || 0) - eligibleReviewPapers.length })}</Typography.Paragraph>}
-            </>}
-            {launch && !launch.direction && !directReview && <div className="paper-task-launch-selection">
+                {directReview && !reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
+                {directReview && selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
+                {directReview && !selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
+            </section>}
+            {launch && !launch.direction && !selectedReview && <div className="paper-task-launch-selection">
                 <Typography.Text type="secondary">{t('paperTasks.selectedLibraryPapers', { count: selected.length })}</Typography.Text>
                 {selectedTitles.length > 0 && <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: true }}>{selectedTitles.join(' · ')}</Typography.Paragraph>}
             </div>}
@@ -618,8 +636,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <div><Typography.Text>{t('paperTasks.enableExpansion')}</Typography.Text><div><Typography.Text type="secondary">{t(expansionEnabled ? 'paperTasks.enableExpansionHint' : 'paperTasks.noExpansionHint')}</Typography.Text></div></div>
                 <Switch checked={expansionEnabled} onChange={setExpansionEnabled} disabled={busy || topicBusy} aria-label={t('paperTasks.enableExpansion')} />
             </div>}
-            {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <ResearchDepth value={budgetMode} onChange={setBudgetMode} autoReview={launch.kind === 'review'}
+            {launchesExpansion && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
+                <ResearchDepth value={launchBudgetMode} onChange={setBudgetMode} forReview={launch?.kind === 'review'}
                     directionSelection={directionSelection} onDirectionSelectionChange={setDirectionSelection} disabled={busy || topicBusy} />
                 {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message={t(capabilities.openalex_key ? 'paperTasks.expansionDepth.searchConfiguration' : 'paperTasks.expansionDepth.basicSearch')} description={<>
                   {!capabilities.openalex_key && <div>{t('paperTasks.expansionDepth.openalexBenefits')} <Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">{t('paperTasks.expansionDepth.configureOpenalex')}</Link></div>}
