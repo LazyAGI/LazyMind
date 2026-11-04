@@ -201,7 +201,7 @@ export interface ChatMessage {
     intent_context: Record<string, unknown>;
     steering_segment_id?: string;
   };
-  knowledge_operations?: import("../../utils/knowledgeOperations").KnowledgeOperation[];
+  knowledge_confirmations?: import("@/modules/chat/types/knowledgeConfirmation").KnowledgeConfirmation[];
   ask_pending?: {
     env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;

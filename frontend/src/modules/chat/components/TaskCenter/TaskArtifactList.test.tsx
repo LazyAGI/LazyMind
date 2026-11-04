@@ -30,30 +30,19 @@ function PreviewHarness({ children, shared }: { children: ReactNode; shared: boo
 }
 
 describe("ordinary stage artifacts", () => {
-  it.each([false, true])("uses the producing Work task for actual citation import in a result preview (shared: %s)", async shared => {
+  it.each([false, true])("uses the producing Work task for source import in a result preview (shared: %s)", async shared => {
     const source = { source_type: "external" as const, citation_id: "1.1", title: "ReAct", url: "https://arxiv.org/abs/2210.03629" };
     vi.mocked(sourceAPI.inspectSources).mockResolvedValue([{ source_id: "1.1", title: "ReAct", url: source.url, eligible: true, paper_key: "arxiv:2210.03629" }]);
     vi.mocked(sourceAPI.listSourceImports).mockResolvedValue([]);
     render(<MemoryRouter><PreviewHarness shared={shared}><TaskArtifactList artifacts={[file({ inline_content: "ReAct [1](#source-1.1)" })]} sourceContexts={{ "task-1": { context: { task_id: "task-1" }, sources: [source] } }} /></PreviewHarness></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
     expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
-    const citation = await waitFor(() => { const element = document.querySelector("a.md-source-chip"); expect(element).toBeTruthy(); return element!; });
-    expect(citation).toBeTruthy();
-    fireEvent.focus(citation);
+    fireEvent.click(await screen.findByRole("button", { name: /^chat\.references/ }));
     await waitFor(() => expect(sourceAPI.inspectSources).toHaveBeenCalledWith({ task_id: "task-1" }));
+    const references = screen.getByRole("dialog", { name: "chat.references" });
+    fireEvent.click(within(references).getByRole("button", { name: /ReAct/ }));
     expect(await screen.findByRole("button", { name: /加入(?:知识库|资料库)/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
-  });
-  it.each([false, true])("passes durable operation receipts into the Work preview (shared: %s)", async shared => {
-    render(<MemoryRouter><PreviewHarness shared={shared}><TaskArtifactList artifacts={[file()]} sourceContexts={{ "task-1": {
-      context: { task_id: "task-1" }, sources: [], operations: [{ call_id: "operation", action: "knowledge.create", status: "success", items: [
-        { name: "Created library", resource_ref: { kind: "knowledge_base", knowledge_base_id: "created" }, resource_status: "created" },
-      ] }],
-    } }} /></PreviewHarness></MemoryRouter>);
-    fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Agent 执行结果" }));
-    expect(await screen.findByRole("link", { name: "Created library" })).toHaveAttribute("href", "/lib/knowledge/detail/created");
-    expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
   });
   it("passes the producing workflow step with the exact artifact revision", () => {
     const preview = { target: null, open: vi.fn(), close: vi.fn(), onVersions: undefined };

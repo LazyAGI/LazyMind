@@ -2,14 +2,13 @@ import { tr } from "./translations";
 import { knowledgeCreationDefaults, knowledgeCreationMetadata } from "@/modules/knowledge/utils/creation";
 import { sourceContextKey, useSourceImportState } from "./state";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Alert, Button, Checkbox, Form, Input, Modal, Pagination, Popover, Progress, Radio, Select, Space, Tag, message, theme } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Modal, Pagination, Progress, Radio, Select, Space, Tag, message, theme } from "antd";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
-import { CloseOutlined, DatabaseOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { v4 as uuid } from "uuid";
-import { type ChatSource, type ChatSourceCollection, openSource } from "../../utils/sourceAdapter";
-import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
-import KnowledgeOperationCards, { importStatusLabel } from "../KnowledgeOperationCards";
+import { type ChatSource, type ChatSourceCollection, getSourceOriginalHref, openSource } from "../../utils/sourceAdapter";
+import ImportHistoryCards, { importStatusLabel } from "./ImportHistoryCards";
 import { getKnowledgeOptions, type KnowledgeOptions } from "@/modules/knowledge/utils/request";
 import { KNOWLEDGE_BASE_NAME_MAX_LENGTH, KNOWLEDGE_BASE_NAME_PATTERN, KNOWLEDGE_BASE_DESCRIPTION_MAX_LENGTH, KNOWLEDGE_BASE_TAG_MAX_LENGTH, KNOWLEDGE_BASE_TAG_MAX_COUNT } from "@/modules/knowledge/constants/validation";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
@@ -40,7 +39,9 @@ export function findInspectedSource(rows: api.InspectedSource[], source: ChatSou
 export function uniquePapers(rows: api.InspectedSource[]) {
   const papers = new Map<string, api.InspectedSource>();
   for (const row of rows) {
-    if (row.eligible && row.paper_key && (!papers.has(row.paper_key) || papers.get(row.paper_key)?.needs_pdf_lookup)) {
+    if (!row.eligible || !row.paper_key) continue;
+    const previous = papers.get(row.paper_key);
+    if (!previous || (previous.needs_pdf_lookup && !row.needs_pdf_lookup)) {
       papers.set(row.paper_key, row);
     }
   }
@@ -91,13 +92,12 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
   const [outcomes, setOutcomes] = useState<api.InspectedSource[]>([]);
   const [page, setPage] = useState(1);
   const [lookupProgress, setLookupProgress] = useState<{ done: number; total: number }>();
+  const [lookupSummary, setLookupSummary] = useState<{ found: number; notFound: number; failed: number }>();
   const lookupRequest = useRef<AbortController>();
   const found = outcomes.filter(row => row.eligible && !row.needs_pdf_lookup);
   const fulltexts = [...found, ...ready];
   const selected = fulltexts.filter(row => checked.has(row.source_id));
   const pending = candidates.filter(row => !outcomes.some(outcome => outcome.source_id === row.source_id && !outcome.pdf_lookup_failed));
-  const lookupFailed = outcomes.filter(row => row.pdf_lookup_failed).length;
-  const notFound = outcomes.filter(row => row.needs_pdf_lookup && !row.pdf_lookup_failed).length;
   const [form] = Form.useForm();
   const targetID = Form.useWatch("target", form);
   const targetName = Form.useWatch("name", form);
@@ -119,13 +119,23 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
     lookupRequest.current = controller;
     setError("");
     setLookupProgress({ done: 0, total: pending.length });
-    setPage(1);
+    const summary = { found: 0, notFound: 0, failed: 0 };
     try {
       for (let i = 0; i < pending.length; i += lookupBatchSize) {
         const ids = pending.slice(i, i + lookupBatchSize).map(row => row.source_id);
-        const results = await api.lookupSourcePDFs(context, ids, controller.signal);
+        let results: api.InspectedSource[];
+        try {
+          results = await api.lookupSourcePDFs(context, ids, controller.signal);
+        } catch (e) {
+          summary.failed += ids.length;
+          throw e;
+        }
         if (controller.signal.aborted) return;
         const added = results.filter(row => row.eligible && !row.needs_pdf_lookup);
+        const failed = results.filter(row => row.pdf_lookup_failed).length;
+        summary.found += added.length;
+        summary.failed += failed;
+        summary.notFound += results.length - added.length - failed;
         onFound(added);
         setOutcomes(current => [...current.filter(row => !ids.includes(row.source_id)), ...results]);
         setChecked(current => new Set([...current, ...added.map(row => row.source_id)]));
@@ -135,7 +145,11 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
       if (!controller.signal.aborted) setError(errorText(e));
     } finally {
       lookupRequest.current = undefined;
-      if (!controller.signal.aborted) setLookupProgress(undefined);
+      if (!controller.signal.aborted) {
+        setPage(1);
+        setLookupProgress(undefined);
+        setLookupSummary(summary);
+      }
     }
   };
   const submit = async () => {
@@ -182,18 +196,18 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
     <div className="source-fulltext-summary" style={{ background: token.colorFillQuaternary, borderRadius: token.borderRadius }}>
       <div className="source-fulltext-heading">
         <strong>{tr("fulltextLookup")}</strong>
-        {pending.length > 0 && <Button icon={<SearchOutlined aria-hidden />} loading={Boolean(lookupProgress)} disabled={busy || Boolean(createdTarget)} onClick={() => void lookup()}>
-          {tr(outcomes.length && lookupFailed ? "retryFulltext" : "lookupFulltext")}
-        </Button>}
+        <Button icon={<SearchOutlined aria-hidden />} loading={Boolean(lookupProgress)} disabled={!pending.length || busy || Boolean(createdTarget)} onClick={() => void lookup()}>
+          {tr("lookupFulltext")}
+        </Button>
       </div>
       <div role="status" style={{ color: token.colorTextSecondary }}>
         {lookupProgress
           ? tr("lookupProgress", lookupProgress)
-          : outcomes.length
-            ? tr("lookupResult", { found: found.length })
+          : lookupSummary
+            ? tr("lookupResult", { found: lookupSummary.found })
             : tr(candidates.length ? "lookupSummary" : "lookupReady", { ready: ready.length, candidates: candidates.length })}
-        {!lookupProgress && notFound > 0 && <> {tr("lookupNotFound", { count: notFound })}</>}
-        {!lookupProgress && lookupFailed > 0 && <> {tr("lookupFailedCount", { count: lookupFailed })}</>}
+        {!lookupProgress && lookupSummary?.notFound ? <> {tr("lookupNotFound", { count: lookupSummary.notFound })}</> : null}
+        {!lookupProgress && lookupSummary?.failed ? <> {tr("lookupFailedCount", { count: lookupSummary.failed })}</> : null}
       </div>
       {lookupProgress && <Progress percent={Math.round(lookupProgress.done / lookupProgress.total * 100)} size="small" showInfo={false} />}
     </div>
@@ -202,21 +216,26 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
         <strong>{tr("availableFulltext", { count: fulltexts.length })}</strong>
         <span role="status" style={{ color: token.colorTextSecondary }}>{tr("selectedFulltext", { count: selected.length })}</span>
       </div>
-      {fulltexts.length > 0 && <ul className="source-fulltext-rows">
-        {fulltexts.slice((page - 1) * fulltextPageSize, page * fulltextPageSize).map(row => <li key={row.source_id} style={{ borderColor: token.colorBorderSecondary }}>
-          <Checkbox checked={checked.has(row.source_id)} disabled={busy || Boolean(createdTarget)} onChange={(event: CheckboxChangeEvent) => {
-            const isChecked = event.target.checked;
-            setChecked(current => {
-              const next = new Set(current);
-              if (isChecked) next.add(row.source_id);
-              else next.delete(row.source_id);
-              return next;
-            });
-          }}>{row.title || row.url}</Checkbox>
-          {found.includes(row) && <Tag color="blue">{tr("newFulltext")}</Tag>}
-        </li>)}
-      </ul>}
-      {fulltexts.length > fulltextPageSize && <Pagination className="source-fulltext-pagination" current={page} pageSize={fulltextPageSize} total={fulltexts.length} size="small" showSizeChanger={false} onChange={setPage} />}
+      <ul className="source-fulltext-rows" style={{ height: `calc(${fulltextPageSize} * var(--source-fulltext-row-height))` }}>
+        {fulltexts.slice((page - 1) * fulltextPageSize, page * fulltextPageSize).map(row => {
+          const title = row.title || row.url;
+          return <li key={row.source_id} style={{ borderColor: token.colorBorderSecondary }}>
+            <Checkbox checked={checked.has(row.source_id)} disabled={busy || Boolean(createdTarget)} onChange={(event: CheckboxChangeEvent) => {
+              const isChecked = event.target.checked;
+              setChecked(current => {
+                const next = new Set(current);
+                if (isChecked) next.add(row.source_id);
+                else next.delete(row.source_id);
+                return next;
+              });
+            }}><span className="source-fulltext-title" title={title}>{title}</span></Checkbox>
+            {found.includes(row) && <Tag color="blue">{tr("newFulltext")}</Tag>}
+          </li>;
+        })}
+      </ul>
+      <div className="source-fulltext-pagination">
+        {fulltexts.length > fulltextPageSize && <Pagination current={page} pageSize={fulltextPageSize} total={fulltexts.length} size="small" showSizeChanger={false} onChange={setPage} />}
+      </div>
     </section>
     <Radio.Group value={mode} disabled={busy || Boolean(createdTarget)} onChange={(e: { target: { value: string } }) => setMode(e.target.value)} style={{ margin: "16px 0" }}><Radio.Button value="existing">{tr("existingLibrary")}</Radio.Button><Radio.Button value="new">{tr("newLibrary")}</Radio.Button></Radio.Group>
     <Form className="source-target-form" form={form} layout="vertical" disabled={busy || Boolean(createdTarget)}>
@@ -238,20 +257,12 @@ export function SourceImportActions({ source }: { source: ChatSource }) {
   const inspected = ctx && findInspectedSource(ctx.inspections, source);
   const matching = ctx?.items.filter(item => item.paper_key === inspected?.paper_key) || [];
   const latest = matching[matching.length - 1];
+  const originalHref = getSourceOriginalHref(source);
   return <>
     {latest && <small className="source-import-current-state">{latest.target_name} · {importStatusLabel(latest)}{latest.state_unavailable && tr("unavailableSuffix")}<Button type="link" size="small" onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.setOpened(true)}>{tr("history")}</Button></small>}
     {inspected?.needs_pdf_lookup && <small className="source-import-current-state">{tr("canLookupFulltext")}</small>}
-    <div className="source-import-actions"><Button onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => openSource(source)}>{tr("openOriginal")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
+    <div className="source-import-actions"><Button disabled={!originalHref} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => openSource(source)}>{tr(originalHref ? "openOriginal" : "noOriginalLink")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
   </>;
-}
-
-export function ExecutionResults({ operations = [] }: { operations?: KnowledgeOperation[] }) {
-  const [opened, setOpened] = useState(false);
-  if (!operations.some(operation => operation.items.length > 0)) return null;
-  return <Popover trigger="click" placement="topLeft" open={opened} onOpenChange={setOpened} destroyOnHidden overlayClassName="chat-sources-popover" content={<div className="execution-results-panel" role="dialog" aria-label={tr("results")}>
-    <div className="chat-source-panel-header"><h2 className="chat-source-panel-title">{tr("results")}</h2><Button type="text" aria-label={tr("closeResults")} icon={<CloseOutlined />} onClick={() => setOpened(false)} /></div>
-    <KnowledgeOperationCards operations={operations} />
-  </div>}><Button className="tool-btn source-btn" icon={<DatabaseOutlined aria-hidden />} aria-label={tr("results")} aria-expanded={opened}>{tr("results")}</Button></Popover>;
 }
 
 function SourceImportResults() {
@@ -265,8 +276,8 @@ function SourceImportResults() {
   useEffect(() => {
     if (!opened || document.hidden) { observed.current.clear(); return; }
     if (ctx?.submittedBatch && submitted.current !== ctx.submittedBatch) { observed.current.add(ctx.submittedBatch); submitted.current = ctx.submittedBatch; }
-    for (const row of items) if (["pending", "running"].includes(row.status)) observed.current.add(row.batch_id);
-    const finished = [...observed.current].filter(batch => items.some(row => row.batch_id === batch) && !items.some(row => row.batch_id === batch && (["pending", "running", "unknown"].includes(row.status) || row.state_unavailable)));
+    for (const row of items) if (["pending", "running", "waiting_retry"].includes(row.status)) observed.current.add(row.batch_id);
+    const finished = [...observed.current].filter(batch => items.some(row => row.batch_id === batch) && !items.some(row => row.batch_id === batch && (["pending", "running", "waiting_retry", "unknown"].includes(row.status) || row.state_unavailable)));
     finished.forEach(batch => observed.current.delete(batch));
     const failures = items.filter(row => finished.includes(row.batch_id) && row.status === "failed");
     if (failures.length) Modal.error({ title: tr("importFailed"), content: <ul>{failures.map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> });
@@ -290,7 +301,7 @@ function SourceImportResults() {
   };
   return <Modal title={tr("paperHistory")} open={opened} onCancel={() => ctx?.setOpened(false)} footer={null} width={480} destroyOnHidden>
     {ctx?.queryError && <Alert type="warning" message={tr("keepLastStatus")} action={<Button size="small" onClick={() => void ctx.refresh()}>{tr("retryQuery")}</Button>} />}
-    <KnowledgeOperationCards imports={items} onRetry={rows => void retry(rows)} retrying={retrying} onRefreshImports={ctx?.refresh} />
-    {items.some(row => row.retryable) && <Space className="execution-results-footer"><Button loading={retrying} onClick={() => void retry(items)}>{tr("retryFailedOnly")}</Button><Button onClick={() => Modal.error({ title: tr("importFailed"), content: <ul>{items.filter(row => row.status === "failed" || row.processing_status === "failed").map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> })}>{tr("failureDetails")}</Button></Space>}
+    <ImportHistoryCards imports={items} onRetry={rows => void retry(rows)} retrying={retrying} onRefreshImports={ctx?.refresh} />
+    {items.some(row => row.retryable) && <Space className="import-history-footer"><Button loading={retrying} onClick={() => void retry(items)}>{tr("retryFailedOnly")}</Button><Button onClick={() => Modal.error({ title: tr("importFailed"), content: <ul>{items.filter(row => row.status === "failed" || row.processing_status === "failed").map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> })}>{tr("failureDetails")}</Button></Space>}
   </Modal>;
 }

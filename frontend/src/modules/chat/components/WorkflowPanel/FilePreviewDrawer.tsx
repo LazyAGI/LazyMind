@@ -1,11 +1,10 @@
-import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
 import { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import FileViewer from '@/modules/knowledge/components/FileViewer';
 import { resolveCoreAssetUrl } from '@/modules/knowledge/utils/imageUrl';
 import { useTranslation } from 'react-i18next';
 import MarkdownViewer from '../MarkdownViewer';
-import { SourceImportProvider, ExecutionResults } from '../SourceImports';
+import { SourceImportProvider } from '../SourceImports';
 import { ReferenceSourcesButton } from '../SourceImports/ReferenceSources';
 import type { SourceContext } from '../SourceImports/api';
 import type { ChatSource } from '../../utils/sourceAdapter';
@@ -18,10 +17,9 @@ interface FilePreviewDrawerProps {
   content?: string;
   sourceContext?: SourceContext;
   sources?: ChatSource[];
-  operations?: KnowledgeOperation[];
 }
 
-export function FilePreviewDrawer({ open, filename, url, onClose, content, sourceContext, sources, operations }: FilePreviewDrawerProps) {
+export function FilePreviewDrawer({ open, filename, url, onClose, content, sourceContext, sources }: FilePreviewDrawerProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -60,7 +58,7 @@ export function FilePreviewDrawer({ open, filename, url, onClose, content, sourc
     {content !== undefined ? renderMarkdown ? renderMarkdown(content) : <pre className="ordinary-inline-preview">{content}</pre> : resolvedUrl ? (
       <FileViewer file={resolvedUrl} fileName={filename} renderMarkdown={renderMarkdown} />
     ) : <div className='file-preview-drawer__loading'>{t('common.loading')}</div>}
-    {sourceContext && <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults operations={operations} /></div>}
+    {sourceContext && <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /></div>}
   </>;
 
   return ReactDOM.createPortal(

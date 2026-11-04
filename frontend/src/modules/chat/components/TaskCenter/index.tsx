@@ -1,6 +1,5 @@
-import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
-import { SourceImportProvider, ExecutionResults } from "../SourceImports";
+import { SourceImportProvider } from "../SourceImports";
 import MarkdownViewer from '../MarkdownViewer';
 import { mergeRun } from "../../utils/ordinaryTaskState";
 import i18n from "i18next";
@@ -484,8 +483,8 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
   );
 }
 
-function ReferenceSources({ sources, operations }: { sources: ChatSource[]; operations?: KnowledgeOperation[] }) {
-  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults operations={operations} /></div>;
+function ReferenceSources({ sources }: { sources: ChatSource[] }) {
+  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /></div>;
 }
 
 function StatusBadge({ status }: { status: TaskStatus }) {
@@ -655,16 +654,11 @@ function publicTaskTitle(item: OrdinaryTaskItem, t: TFunction): string {
     ? title : t("taskCenter.ordinaryTaskLabel", { index: item.ordinal });
 }
 
-function OrdinaryReferenceSources({ sources, operations }: { sources: ChatSource[]; operations?: KnowledgeOperation[] }) {
-  return <ReferenceSources sources={sources} operations={operations} />;
-}
-
 function artifactSourceContext(item: OrdinaryTaskItem): ArtifactSourceContext {
   const view = item.ordinary;
   return {
     context: view?.session_id ? { workflow_session_id: view.session_id, work_display_key: view.display_key } : { task_id: view?.task_id ?? item.task?.task_id },
     sources: view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? [],
-    operations: view?.knowledge_operations,
   };
 }
 
@@ -714,9 +708,8 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         {view?.timing.thinking_elapsed_ms != null && <span>{t("taskCenter.ordinaryMeasuredThinkingDuration", { duration: formatDuration(Math.round(view.timing.thinking_elapsed_ms / 1000)) })}</span>}
       </span>
     </div>
-    <OrdinaryReferenceSources operations={view?.knowledge_operations} sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
+    <ReferenceSources sources={sources} />
     {more("sources")}
-    {more("knowledge_operations")}
     <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()}
       workflow={view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || item.step?.step_id || '' } : undefined} />
     {more("stage_artifacts")}

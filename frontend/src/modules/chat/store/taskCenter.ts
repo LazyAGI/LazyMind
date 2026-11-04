@@ -1400,14 +1400,14 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               );
             }
             scheduleWorkflowSessionRefresh(conversationId);
-          } else if (type === 'ask_pending') {
+          } else if (type === 'knowledge_confirmation' || type === 'ask_pending') {
             if (payload.history_id && payload.confirmation_id) {
               window.dispatchEvent(new CustomEvent(CHAT_KNOWLEDGE_CONFIRMATION_EVENT, {
                 detail: { conversationId, historyId: payload.history_id, confirmationId: payload.confirmation_id },
               }));
               return;
             }
-            if (replayed) return;
+            if (type !== 'ask_pending' || replayed) return;
             // ask_pending is persisted in chat history. Resuming the chat turn
             // reuses the normal message reducer and renders the AskCard.
             window.dispatchEvent(new CustomEvent(CHAT_AUTO_ADVANCE_EVENT, {

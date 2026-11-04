@@ -2474,6 +2474,8 @@ async def _handle_chat_impl(
                     # for this run and must be available to the same tool.
                     append_intentwrite_guidance(intentwriter, [item.content for item in late_guidance])
                     current_query = current_plan.prompt.current_input
+                    if knowledge_management is not None:
+                        knowledge_management.steering_segment += len(late_guidance)
                     for frame in translator.begin_steering_segment():
                         yield log_and_emit_frame(
                             frame, round(time.time() - start_time, 3), query,

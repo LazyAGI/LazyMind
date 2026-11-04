@@ -16,6 +16,7 @@ from lazyllm.tools.agent import HostFile, ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.agent.tool_runtime import _set_tool_runtime_metadata
 
+from lazymind.chat.engine.agent_runtime.steering import SteeringInterruptedError, steering_registry
 from lazymind.chat.engine.agent_runtime.workspace_authorization import digest, response_data
 from lazymind.chat.engine.tools.infra.core_api_client import CoreAPIError, post_core_api
 from lazymind.chat.engine.tools.workspace_context import thaw
@@ -30,6 +31,10 @@ MANAGEMENT_TOOLS = READ_ONLY_TOOLS + (
     PAPER_IMPORT_TOOL,
 )
 _REQUEST = ContextVar('knowledge_management_request', default=None)
+
+
+class KnowledgeConfirmationUnavailable(Exception):
+    """The runtime could not arbitrate guidance against a pending confirmation."""
 
 
 class _CoreManagementError(ToolExecutionError):
@@ -109,6 +114,7 @@ class KnowledgeManagementRuntime:
         self.allowed_tools = tuple(name for name in MANAGEMENT_TOOLS
                                    if allowed_tools is None or name in allowed_tools)
         self.cancel_check = cancel_check
+        self.steering_segment = 0
         self._tools = {}
         self._uncertain_calls = set()
 
@@ -202,9 +208,13 @@ class KnowledgeManagementRuntime:
                 _REQUEST.reset(token)
             return
         payload = {'execution': dict(self.execution), 'wire_name': wire_name,
-                   'arguments': arguments, 'call_id': prepared.call_id}
+                   'arguments': arguments, 'call_id': prepared.call_id,
+                   'steering_segment': self.steering_segment}
         self._check_cancel()
-        prepared_state = self._post('prepare', payload)
+        run_id = self.execution.get('run_id', '') if not self.execution.get('task_id') else ''
+        prepared_state = steering_registry.prepare_confirmation(
+            run_id, lambda: self._post('prepare', payload), self._supersede_confirmation,
+        )
         needs_confirmation = prepared_state.get('requires_confirmation')
         if (prepared_state.get('arguments_digest') != arguments_digest or not prepared_state.get('operation_key')
                 or not prepared_state.get('snapshot')
@@ -215,29 +225,24 @@ class KnowledgeManagementRuntime:
         if needs_confirmation and not confirmation_id:
             raise ToolExecutionError('Knowledge management confirmation unavailable')
         if status == 'pending':
-            if not needs_confirmation:
-                raise ToolExecutionError('Unexpected knowledge management confirmation')
-            preview = prepared_state.get('preview') or {}
-            _write_agent_data('ask_pending', ask_id=confirmation_id,
-                              title=preview.get('title') or 'Confirm knowledge management operation',
-                              description=preview.get('description') or '',
-                              knowledge_management_preview=copy.deepcopy(preview),
-                              questions=[{'text': preview.get('title') or 'Proceed with this operation?',
-                                          'type': 'boolean', 'choices': ['__ask_user_yes__', '__ask_user_no__']}],
-                              knowledge_management={'confirmation_id': confirmation_id,
-                                                    'arguments_digest': arguments_digest,
-                                                    'snapshot': prepared_state['snapshot']})
-            deadline = time.monotonic() + 300
-            while status == 'pending' and time.monotonic() < deadline:
-                self._check_cancel()
-                response = self._post('status', {'execution': dict(self.execution),
-                                                 'confirmation_id': confirmation_id})
-                if (response.get('snapshot') != prepared_state['snapshot']
-                        or response.get('arguments_digest') != arguments_digest):
-                    raise ToolExecutionError('Knowledge management confirmation snapshot changed')
-                status = response.get('status')
-                if status == 'pending':
-                    time.sleep(1)
+            try:
+                if not needs_confirmation:
+                    raise ToolExecutionError('Unexpected knowledge management confirmation')
+                deadline = time.monotonic() + 300
+                while status == 'pending' and time.monotonic() < deadline:
+                    self._check_cancel()
+                    response = self._post('status', {'execution': dict(self.execution),
+                                                     'confirmation_id': confirmation_id})
+                    if (response.get('snapshot') != prepared_state['snapshot']
+                            or response.get('arguments_digest') != arguments_digest):
+                        raise ToolExecutionError('Knowledge management confirmation snapshot changed')
+                    status = response.get('status')
+                    if status == 'pending':
+                        time.sleep(1)
+            finally:
+                guidance_pending = steering_registry.finish_confirmation(run_id, confirmation_id)
+            if status == 'superseded' and guidance_pending:
+                raise SteeringInterruptedError('Knowledge confirmation superseded by guidance')
         if status != 'allowed':
             raise ToolExecutionError('Knowledge management confirmation ' + str(status or 'unavailable'))
         self._check_cancel()
@@ -288,6 +293,13 @@ class KnowledgeManagementRuntime:
                 and wire_name not in READ_ONLY_TOOLS):
             self._uncertain_calls.add((wire_name, digest(thaw(prepared.validated_arguments))))
         return {**result, 'ok': False}
+
+    def _supersede_confirmation(self, confirmation_id):
+        try:
+            self._post('supersede', {'execution': dict(self.execution),
+                                     'confirmation_id': confirmation_id})
+        except _CoreManagementError as error:
+            raise KnowledgeConfirmationUnavailable(confirmation_id) from error
 
     def _check_cancel(self):
         if self.cancel_check is not None:

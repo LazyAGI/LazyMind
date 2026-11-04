@@ -17,7 +17,7 @@ func addKnowledgeManagementTools(server *mcp.Server, s *capability.Service) {
 	if !s.SupportsKnowledgeManagement() {
 		return
 	}
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.reparse", Title: "Retry document processing", Description: "Explicitly retry failed documents in place. Requires write permission and exact document IDs; never retry automatically. Existing running tasks are reused; successful documents are skipped. Return task IDs and submission states, not a claim of parsing success. Query document.list/get for current status and failure diagnostics.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.ReparseKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.reparse", Title: "Retry document processing", Description: "Explicitly retry failed documents in place. Requires write permission and exact document IDs; never retry automatically. Existing running tasks are reused; successful documents are skipped. Submitting a reparse does not mean processing is complete. Query document.list/get for current status and failure diagnostics.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.ReparseKnowledgeDocumentsInput) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.ReparseKnowledgeDocuments(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
@@ -26,27 +26,27 @@ func addKnowledgeManagementTools(server *mcp.Server, s *capability.Service) {
 		v, e := s.AggregateKnowledgeDocuments(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.create", Title: "Create knowledge base", Description: "Create a library with name and tags. The built-in Chat/Work runtime requires explicit user confirmation before creation. Configuration defaults are in parameter descriptions. Report resource/processing states immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateKnowledgeRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.create", Title: "Create knowledge base", Description: "Create a library with name and tags. The built-in Chat/Work runtime requires explicit user confirmation before creation. Configuration defaults are in parameter descriptions. Do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateKnowledgeRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.CreateKnowledge(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.folder.create", Title: "Create logical folders", Description: "Create logical folders transactionally after explicit user confirmation in Chat/Work. Existing name conflicts fail; shared prefixes created in this batch are reused. Report results immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateFoldersRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.folder.create", Title: "Create logical folders", Description: "Create logical folders transactionally after explicit user confirmation in Chat/Work. Existing name conflicts fail; shared prefixes created in this batch are reused. Do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.CreateFoldersRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.CreateFolders(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.resource.update_metadata", Title: "Update resource metadata", Description: "Update existing metadata without creating resources or replacing originals. Report states and downstream sync errors immediately; do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.UpdateMetadataRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.resource.update_metadata", Title: "Update resource metadata", Description: "Update existing metadata without creating resources or replacing originals. Do not sleep or poll.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.UpdateMetadataRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.UpdateMetadata(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.resource.move", Title: "Move resources", Description: "Move folders/documents; each independent tree is atomic, batches may partially succeed. Same-library IDs remain; cross-library moves assign new IDs and logically remove sources. Confirm cross-library scope/impact with the user. Report states/ID mappings immediately; do not sleep or poll.", Annotations: executionAnnotations(true)}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.MoveResourcesRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.resource.move", Title: "Move resources", Description: "Move folders/documents; each independent tree is atomic, batches may partially succeed. Same-library IDs remain; cross-library moves assign new IDs and logically remove sources. Confirm cross-library scope/impact with the user. Do not sleep or poll.", Annotations: executionAnnotations(true)}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.MoveResourcesRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.Move(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.resource.delete", Title: "Delete resources", Description: "Logically delete resources, invalidating active bindings. Whole-library deletion requires ownership. Confirm scope/impact with the user. Report resource_status, cleanup_status and per-item errors separately; do not sleep or poll for physical cleanup.", Annotations: executionAnnotations(true)}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.DeleteResourcesRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.resource.delete", Title: "Delete resources", Description: "Logically delete resources, invalidating active bindings. Whole-library deletion requires ownership. Confirm scope/impact with the user. Physical cleanup runs in the background. Do not sleep or poll for it.", Annotations: executionAnnotations(true)}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.DeleteResourcesRequest) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.Delete(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})
-	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.upload", Title: "Import original documents", Description: "Import originals from shared-filesystem paths; resolve attachments and download/export URLs or artifacts first. Uploaded does not mean parsed/ready. Report resource/processing states immediately; do not sleep, poll or re-upload to wait.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.UploadKnowledgeDocumentInput) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
+	addCloudTool(server, &mcp.Tool{Name: "knowledge.document.upload", Title: "Import original documents", Description: "Import originals from shared-filesystem paths; resolve attachments and download/export URLs or artifacts first. Uploaded does not mean parsed/ready. Do not sleep, poll or re-upload to wait.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.UploadKnowledgeDocumentInput) (*mcp.CallToolResult, capability.ResourceOperationResult, error) {
 		v, e := s.Upload(ctx, invocation(ctx, r), in)
 		return nil, v, e
 	})

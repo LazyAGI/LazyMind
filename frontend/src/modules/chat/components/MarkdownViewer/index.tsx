@@ -1,4 +1,3 @@
-import { SourceImportActions } from "../SourceImports";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -73,7 +72,7 @@ import {
   getSourceCitationId,
   getSourceEvidenceText,
   getSourceFaviconUrl,
-  getSourceHref,
+  getSourceOriginalHref,
   getSourceLabel,
   getSourceSubtitle,
   isExternalSource,
@@ -158,12 +157,15 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
   if (!source) {
     return null;
   }
-  const sourceHref = getSourceHref(source);
-  const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
-    ? sourceHref
-    : "";
+  const sourceHref = getSourceOriginalHref(source);
+  const sourceUrl = isExternalSource(source) ? sourceHref : null;
   const previewText = getSourcePreviewText(source);
   const hasMultipleSources = sources.length > 1;
+  const preview = <>
+    <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
+    {previewText && <p className="md-source-preview-summary">{previewText}</p>}
+    {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
+  </>;
 
   return (
     <div className="md-source-preview">
@@ -194,17 +196,14 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
           </span>
         )}
       </div>
-      <a
+      {sourceHref ? <a
         className="md-source-preview-link"
         href={sourceHref}
         target="_blank"
         rel="noopener noreferrer"
       >
-        <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
-        {previewText && <p className="md-source-preview-summary">{previewText}</p>}
-        {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
-      </a>
-      <SourceImportActions source={source} />
+        {preview}
+      </a> : <div className="md-source-preview-link">{preview}</div>}
     </div>
   );
 }
@@ -361,6 +360,27 @@ const CodeComponent = (props: any) => {
   );
 };
 
+function LegacyPaperList({ code, isStreaming }: { code: string; isStreaming: boolean }) {
+  let data: unknown;
+  try { data = JSON.parse(code); } catch {
+    return isStreaming ? null : <pre>{code}</pre>;
+  }
+  if (!Array.isArray(data) || data.length === 0 || data.length > 500 ||
+      data.some(row => typeof row?.title !== "string" || !row.title.trim())) {
+    return <pre>{code}</pre>;
+  }
+  const rows = data as { title: string; authors?: string[]; year?: number; doi?: string; arxiv_id?: string }[];
+  return <ol>{rows.map((row, index) => {
+    const details = [
+      Array.isArray(row.authors) ? row.authors.filter(name => typeof name === "string").join(", ") : "",
+      typeof row.year === "number" && row.year ? String(row.year) : "",
+      typeof row.doi === "string" ? row.doi : "",
+      typeof row.arxiv_id === "string" ? row.arxiv_id : "",
+    ].filter(Boolean).join(" · ");
+    return <li key={index}>{row.title}{details && <small> · {details}</small>}</li>;
+  })}</ol>;
+}
+
 const PreComponent = (props: any) => {
   const {
     isStreaming,
@@ -379,6 +399,11 @@ const PreComponent = (props: any) => {
     const rawLanguage = getRawLanguageFromClassName(childProps.className);
     const language = getLanguageFromClassName(childProps.className);
     const code = String(childProps.children ?? "").replace(/\n$/, "");
+
+    if (rawLanguage === "paper-list") {
+      // Previously saved answers may contain this block.
+      return <LegacyPaperList code={code} isStreaming={isStreaming} />;
+    }
 
     if (rawLanguage === "editable" && !isStreaming && conversationId && historyId) {
       return (
@@ -625,7 +650,7 @@ const LinkComponent = (props: any) => {
     const source = sources[0];
     const resolvedSources = sources.filter((item): item is ChatSource => Boolean(item));
     const overflowCount = sourceCitationIds.length - 1;
-    const sourceHref = source ? getSourceHref(source) : "";
+    const sourceHref = source ? getSourceOriginalHref(source) : null;
     const chipLabel = source
       ? getSourceBrandName(source)
       : "Source";
@@ -638,7 +663,7 @@ const LinkComponent = (props: any) => {
         )}
       </>
     );
-    const chip = source ? (
+    const chip = sourceHref ? (
       <a
         className={classnames("md-source-chip", {
           "md-source-chip--pending": isStreaming,
@@ -653,7 +678,8 @@ const LinkComponent = (props: any) => {
         {chipContent}
       </a>
     ) : (
-      <span className="md-source-chip md-source-chip--pending">
+      <span className={classnames("md-source-chip", { "md-source-chip--pending": !source || isStreaming })}
+        tabIndex={source && !isStreaming ? 0 : undefined}>
         {chipContent}
       </span>
     );

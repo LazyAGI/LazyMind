@@ -86,7 +86,7 @@ def test_direct_call_without_prepared_dispatch_cannot_get_metadata(monkeypatch):
     assert requests == []
 
 
-def test_pending_confirmation_emits_bound_card_then_claims_before_dispatch(monkeypatch):
+def test_pending_confirmation_claims_before_dispatch(monkeypatch):
     from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
     call = prepared()
     summary = {'operation_key': 'op', 'arguments_digest': digest(call.validated_arguments),
@@ -102,9 +102,7 @@ def test_pending_confirmation_emits_bound_card_then_claims_before_dispatch(monke
     assert requests[0][1]['execution'] == EXECUTION
     assert requests[0][1]['call_id'] == 'call-1'
     assert requests[-1][1]['snapshot'] == 'version-1'
-    assert events[0][0] == 'ask_pending'
-    assert events[0][1]['knowledge_management'] == {
-        'confirmation_id': 'confirm', 'arguments_digest': summary['arguments_digest'], 'snapshot': 'version-1'}
+    assert events == []
     with pytest.raises(ToolExecutionError):
         asyncio.run(host.request_metadata('knowledge.resource.delete', call.validated_arguments))
 
@@ -400,22 +398,46 @@ def test_private_http_error_survives_copy_and_pickle(body):
         assert str(restored) == str(error)
 
 
-def test_pending_confirmation_keeps_complete_preview_for_live_and_persisted_card(monkeypatch):
+def test_pending_confirmation_is_superseded_before_guidance_is_applied(monkeypatch):
+    from threading import Event
+    from concurrent.futures import ThreadPoolExecutor
+    from lazymind.chat.engine.agent_runtime.steering import SteeringInterruptedError, steering_registry
     from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
+
     call = prepared()
-    preview = {'title': 'Delete folder', 'description': 'Papers / Archive',
-               'resources': [{'kind': 'folder', 'knowledge_base_id': 'kb', 'directory_id': 'folder'}],
-               'document_count': 12, 'folder_count': 2, 'total_bytes': 8192,
-               'impact': ['Remove source documents and index entries'], 'counts': {'references': 3}}
     pending = {'operation_key': 'op', 'arguments_digest': digest(call.validated_arguments),
-               'snapshot': 'v', 'requires_confirmation': True, 'confirmation_id': 'c', 'status': 'pending',
-               'preview': preview}
-    events = []
-    host, _ = runtime(monkeypatch, {'prepare': pending, 'status': {**pending, 'status': 'rejected'}}, events)
-    with pytest.raises(ToolExecutionError):
-        with host.execution_context(call):
-            pytest.fail('rejected')
-    assert events[0][1]['knowledge_management_preview'] == preview
+               'snapshot': 'v', 'requires_confirmation': True, 'confirmation_id': 'c', 'status': 'pending'}
+    waiting = Event()
+    superseded = Event()
+
+    def status(_):
+        waiting.set()
+        assert superseded.wait(3)
+        return {**pending, 'status': 'superseded'}
+
+    def supersede(payload):
+        assert payload == {'execution': EXECUTION, 'confirmation_id': 'c'}
+        superseded.set()
+        return {'status': 'superseded'}
+
+    def dispatch():
+        with pytest.raises(SteeringInterruptedError):
+            with host.execution_context(call):
+                pytest.fail('superseded tool must not dispatch')
+
+    host, requests = runtime(monkeypatch, {'prepare': pending, 'status': status, 'supersede': supersede})
+    steering_registry.register(EXECUTION['run_id'], EXECUTION['conversation_id'], 'session')
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            result = pool.submit(dispatch)
+            assert waiting.wait(3)
+            assert steering_registry.accept(EXECUTION['run_id'], EXECUTION['conversation_id'],
+                                            'guide', 'Keep this resource') == (True, '')
+            result.result(timeout=3)
+        assert [path.split(':')[-1] for path, _, _ in requests] == ['prepare', 'status', 'supersede']
+        assert steering_registry.drain_or_close(EXECUTION['run_id'])[0].content == 'Keep this resource'
+    finally:
+        steering_registry.unregister(EXECUTION['run_id'])
 
 
 @pytest.mark.parametrize('fail_at', ['prepare', 'credential'])

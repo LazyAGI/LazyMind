@@ -154,45 +154,7 @@ func knowledgeWorkflowTools(ctx context.Context, db *gorm.DB, e knowledgeruntime
 }
 
 func persistKnowledgeConfirmation(ctx context.Context, e knowledgeruntime.Execution, p knowledgeruntime.Prepared) error {
-	db := store.DB()
-	historyID := e.HistoryID
-	if e.TaskID != "" {
-		var task orm.SubAgentTask
-		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND conversation_id = ?", e.TaskID, e.UserID, e.ConversationID).Take(&task).Error; err != nil {
-			return err
-		}
-		historyID = task.TriggerHistoryID
-	}
-	if historyID == "" {
-		return errors.New("confirmation history unavailable")
-	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ?", historyID, e.ConversationID).UpdateColumn("update_time", gorm.Expr("update_time")).Error; err != nil {
-			return err
-		}
-		var history orm.ChatHistory
-		if err := tx.Where("id = ? AND conversation_id = ?", historyID, e.ConversationID).Take(&history).Error; err != nil {
-			return err
-		}
-		ext := map[string]any{}
-		if len(history.Ext) > 0 {
-			if err := json.Unmarshal(history.Ext, &ext); err != nil {
-				return err
-			}
-		}
-		previous, _ := ext["ask_pending"].(map[string]any)
-		if previous["ask_id"] == p.ConfirmationID && ext["ask_answered"] == true {
-			return nil // A delayed duplicate prepare cannot reopen a decided card.
-		}
-		delete(ext, "ask_saved_answers")
-		ext["ask_pending"] = map[string]any{"knowledge_management_preview": p.Preview, "ask_id": p.ConfirmationID, "title": p.Preview["title"], "description": p.Preview["description"], "questions": []any{map[string]any{"text": "确认执行此操作？", "type": "boolean", "choices": []string{"__ask_user_yes__", "__ask_user_no__"}}}, "knowledge_management": map[string]string{"confirmation_id": p.ConfirmationID, "arguments_digest": p.ArgumentsDigest, "snapshot": p.Snapshot}}
-		ext["ask_answered"] = false
-		raw, err := json.Marshal(ext)
-		if err != nil {
-			return err
-		}
-		return tx.Model(&orm.ChatHistory{}).Where("id = ?", historyID).UpdateColumn("ext", raw).Error
-	})
+	return persistKnowledgeCard(ctx, store.DB(), e, p, "pending")
 }
 
 // Only a trusted execution constraint narrows management access. Retrieval
@@ -209,14 +171,15 @@ func knowledgeExecutionDatasetScope(metadata map[string]any) []string {
 	return values
 }
 
-// persistKnowledgeDecision updates only the exact card the user answered.
 func persistKnowledgeDecision(ctx context.Context, e knowledgeruntime.Execution, p knowledgeruntime.Prepared, decision string) error {
 	return persistKnowledgeDecisionDB(ctx, store.DB(), e, p, decision)
 }
+
 func persistKnowledgeDecisionDB(ctx context.Context, db *gorm.DB, e knowledgeruntime.Execution, p knowledgeruntime.Prepared, decision string) error {
-	if db == nil || (decision != "approved" && decision != "rejected") {
-		return errors.New("invalid knowledge decision persistence")
-	}
+	return persistKnowledgeCard(ctx, db, e, p, decision)
+}
+
+func persistKnowledgeCard(ctx context.Context, db *gorm.DB, e knowledgeruntime.Execution, p knowledgeruntime.Prepared, status string) error {
 	historyID := e.HistoryID
 	if e.TaskID != "" {
 		var task orm.SubAgentTask
@@ -225,37 +188,86 @@ func persistKnowledgeDecisionDB(ctx context.Context, db *gorm.DB, e knowledgerun
 		}
 		historyID = task.TriggerHistoryID
 	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ?", historyID, e.ConversationID).UpdateColumn("update_time", gorm.Expr("update_time")).Error; err != nil {
+	if historyID == "" {
+		return errors.New("confirmation history unavailable")
+	}
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ?", historyID, e.ConversationID)
+		if err := query.Session(&gorm.Session{}).UpdateColumn("update_time", gorm.Expr("update_time")).Error; err != nil {
 			return err
 		}
 		var history orm.ChatHistory
-		if err := tx.Where("id = ? AND conversation_id = ?", historyID, e.ConversationID).Take(&history).Error; err != nil {
+		if err := query.Session(&gorm.Session{}).Take(&history).Error; err != nil {
 			return err
 		}
-		ext := map[string]any{}
-		if err := json.Unmarshal(history.Ext, &ext); err != nil {
-			return err
+		ext := map[string]json.RawMessage{}
+		if len(history.Ext) > 0 {
+			if err := json.Unmarshal(history.Ext, &ext); err != nil {
+				return err
+			}
 		}
-		pending, _ := ext["ask_pending"].(map[string]any)
-		confirmation, _ := pending["knowledge_management"].(map[string]any)
-		// A newer card is authoritative; an old decision must never answer it.
-		if pending["ask_id"] != p.ConfirmationID || confirmation["confirmation_id"] != p.ConfirmationID {
-			return nil
+		var cards []knowledgeruntime.Confirmation
+		if raw := ext["knowledge_confirmations"]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &cards); err != nil {
+				return err
+			}
 		}
-		if confirmation["arguments_digest"] != p.ArgumentsDigest || confirmation["snapshot"] != p.Snapshot {
-			return errors.New("knowledge decision history binding changed")
+		i := slices.IndexFunc(cards, func(card knowledgeruntime.Confirmation) bool { return card.ID == p.ConfirmationID })
+		if i >= 0 {
+			card := &cards[i]
+			if card.ArgumentsDigest != p.ArgumentsDigest || card.Snapshot != p.Snapshot {
+				return errors.New("knowledge decision history binding changed")
+			}
+			if card.Status != "pending" {
+				return nil // A late prepare or repeated decision cannot reopen the card.
+			}
+			card.Status = status
+		} else if p.Action != "" {
+			cards = append(cards, knowledgeruntime.Confirmation{
+				ID: p.ConfirmationID, ArgumentsDigest: p.ArgumentsDigest, Snapshot: p.Snapshot,
+				Action: p.Action, Status: status, Preview: p.Preview, Segment: p.Segment, ExpiresAt: p.ExpiresAt,
+			})
+		} else {
+			if status == "pending" {
+				return nil
+			}
+			// A prepared operation from the previous protocol may still have a
+			// live decision slot during a rolling upgrade.
+			var legacy struct {
+				ID      string            `json:"ask_id"`
+				Binding map[string]string `json:"knowledge_management"`
+			}
+			_ = json.Unmarshal(ext["ask_pending"], &legacy)
+			if legacy.ID != p.ConfirmationID || legacy.Binding["confirmation_id"] != p.ConfirmationID {
+				return nil
+			}
+			if legacy.Binding["arguments_digest"] != p.ArgumentsDigest || legacy.Binding["snapshot"] != p.Snapshot {
+				return errors.New("knowledge decision history binding changed")
+			}
+			answer := "__ask_user_no__"
+			if status == "approved" {
+				answer = "__ask_user_yes__"
+			}
+			ext["ask_answered"] = json.RawMessage("true")
+			ext["ask_saved_answers"], _ = json.Marshal(map[string]any{"0": map[string]string{"type": "boolean", "value": answer}})
 		}
-		answer := "__ask_user_no__"
-		if decision == "approved" {
-			answer = "__ask_user_yes__"
+		var err error
+		if len(cards) > 0 {
+			ext["knowledge_confirmations"], err = json.Marshal(cards)
+			if err != nil {
+				return err
+			}
 		}
-		ext["ask_answered"] = true
-		ext["ask_saved_answers"] = map[string]any{"0": map[string]any{"type": "boolean", "value": answer}}
 		raw, err := json.Marshal(ext)
 		if err != nil {
 			return err
 		}
-		return tx.Model(&orm.ChatHistory{}).Where("id = ?", history.ID).UpdateColumn("ext", raw).Error
+		return query.Session(&gorm.Session{}).UpdateColumn("ext", raw).Error
+	})
+	if err != nil {
+		return err
+	}
+	return chat.PublishConversationEvent(ctx, store.State(), e.ConversationID, historyID, "knowledge_confirmation", map[string]any{
+		"confirmation_id": p.ConfirmationID,
 	})
 }
