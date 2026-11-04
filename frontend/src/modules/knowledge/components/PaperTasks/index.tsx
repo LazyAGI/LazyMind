@@ -410,10 +410,13 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 }
             });
             setActionError(!onNotification && failedTitles.length ? t('paperTasks.retryContentsFailed', { titles: failedTitles.join('、') }) : '');
-            await openDetail(target.record.id);
+            if (detailTarget.current === target.record.id) await openDetail(target.record.id);
         } catch (error) {
             if (!onNotification) setActionError(error instanceof Error ? error.message : t('paperTasks.retryContentFailed'));
-        } finally { setRetryingContents(false); }
+        } finally {
+            if (history && detailTarget.current !== target.record.id) void refreshHistory(true);
+            setRetryingContents(false);
+        }
     };
     const refreshImportPreview = async (target: ExpansionDetail) => {
         if (!canImport || !resultReady || target.record.status !== 'completed') return;

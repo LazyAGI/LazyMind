@@ -552,6 +552,27 @@ describe('result paper title navigation', () => {
     });
 });
 describe('result list actions', () => {
+    it('updates the research record without reopening a detail closed during a full-text retry', async () => {
+        const published = { ...record, material_progress: { processing_count: 0 } };
+        vi.mocked(listResearchRecords).mockResolvedValueOnce({ items: [published], reviews: [] })
+            .mockResolvedValue({ items: [{ ...published, material_progress: { processing_count: 1 } }], reviews: [] });
+        vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: published,
+            contents: [detail.contents[0], { ...detail.contents[1], status: 'failed', content_hash: '' }],
+        });
+        let finishRetry!: () => void;
+        vi.mocked(retryPaperContent).mockImplementationOnce(() => new Promise<void>(resolve => { finishRetry = resolve; }));
+        mount();
+        fireEvent.click(screen.getByRole('button', { name: '研究记录' }));
+        const row = await screen.findByRole('button', { name: /^查看扩展成果:/ });
+        fireEvent.click(row);
+        fireEvent.click(await screen.findByRole('button', { name: '重试未就绪全文（1）' }));
+        const result = screen.getByText('论文扩展成果').closest('[role=dialog]') as HTMLElement;
+        fireEvent.click(within(result).getByRole('button', { name: /close/i }));
+        await act(async () => { finishRetry(); });
+        expect(row).toHaveTextContent('正在补齐论文正文');
+        expect(screen.queryByRole('button', { name: '生成综述' })).not.toBeInTheDocument();
+    });
+
     it('refreshes research records until full text and review handoff have finished', async () => {
         vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
         const expansion = { ...record, title: '扩展记录', material_progress: { processing_count: 1 } };
