@@ -752,7 +752,20 @@ func OnSubAgentDone(
 	onSSE func(eventType string, payload map[string]any),
 	pctx *WorkflowChatContext,
 ) {
-	_ = UpdateStepStatus(ctx, db, taskID, status)
+	reportStatusWriteError := func(target string, err error) {
+		fmt.Printf("[plugin] persist workflow %s status failed task=%s err=%v\n", target, taskID, err)
+		if pctx != nil && onSSE != nil {
+			onSSE("workflow_error", map[string]any{
+				"session_id": pctx.SessionID,
+				"step_id":    pctx.StepID,
+				"message":    "Failed to save workflow status",
+			})
+		}
+	}
+	if err := UpdateStepStatus(ctx, db, taskID, status); err != nil {
+		reportStatusWriteError("step", err)
+		return
+	}
 	if step, err := GetStepByTaskID(ctx, db, taskID); err == nil && step != nil {
 		if step.TerminalCode == "WORKFLOW_STOP_REQUESTED" {
 			// Canonical workers acknowledge after executor cleanup through the
@@ -807,7 +820,10 @@ func OnSubAgentDone(
 		// and mark the session failed. Auto mode still asks DriverAgent to diagnose
 		// and recommend retry/rewind; dynamic mode leaves the failure for the user.
 		if pctx != nil && pctx.SessionID != "" {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
+			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed); err != nil {
+				reportStatusWriteError("session", err)
+				return
+			}
 			_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "failed")
 			clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)

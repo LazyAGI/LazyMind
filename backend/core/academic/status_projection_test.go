@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
+
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -96,6 +98,23 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 				}
 			}
 			if scenario == "failure" || scenario == "timeout" {
+				contend := scenario == "failure" && db.Dialector.Name() == orm.DriverSQLite
+				wrote := false
+				if contend {
+					// Commit an independent write after the step read to invalidate the
+					// SQLite snapshot before the terminal status is written.
+					if err := db.Callback().Query().After("gorm:query").Register("test:concurrent_step_status_write", func(tx *gorm.DB) {
+						if tx.Statement.Table != "plugin_session_steps" || tx.Error != nil || wrote {
+							return
+						}
+						wrote = true
+						if err := db.Model(&orm.Dataset{}).Where("id = ?", "papers").Update("display_name", "Concurrent write").Error; err != nil {
+							t.Fatal(err)
+						}
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
 				message := "model request failed"
 				if scenario == "timeout" {
 					message = "WORKFLOW_STEP_TIMEOUT: analyze_relations exceeded its declared timeout"
@@ -105,6 +124,17 @@ func TestExpansionStatusFollowsWorkflowLifecycle(t *testing.T) {
 						SessionID: session.ID, StepID: "analyze_relations", WorkflowID: "paper_expansion", ConvID: conversation, WorkflowMode: "dynamic",
 					})
 				assertProjected("failed")
+				if contend && !wrote {
+					t.Fatal("concurrent write did not run")
+				}
+				var events int64
+				if err := db.Model(&orm.WorkflowEvent{}).
+					Where("session_id = ? AND entity_id = ? AND event_type = ?", session.ID, "attempt", "attempt.patch").Count(&events).Error; err != nil {
+					t.Fatal(err)
+				}
+				if events != 1 {
+					t.Fatalf("expected one terminal step event, got %d", events)
+				}
 				return
 			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
