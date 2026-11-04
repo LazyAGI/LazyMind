@@ -2,6 +2,7 @@ import copy
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
@@ -367,12 +368,24 @@ def test_postcheck_rejects_forged_analysis(lineage):
         module.academic_validate_relations(analysis)
 
 
-def test_report_call_obeys_remaining_execution_time(lineage):
+def test_report_call_obeys_remaining_execution_time(lineage, monkeypatch):
+    from lazymind.chat.service import llm_task
+
     module, ctx, _, _, args = lineage
-    ctx.execution_deadline = time.monotonic() + 60
+    start = 1000.0
+    ctx.execution_deadline = start + 60
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: start + 15))
+    monkeypatch.setattr(llm_task, 'time', SimpleNamespace(monotonic=lambda: start + 16))
+    report_model = llm_task._call_model
+
+    def check_deadline(request, prompt, **kwargs):
+        assert kwargs['call_control'].deadline == ctx.execution_deadline
+        return report_model(request, prompt, **kwargs)
+
+    monkeypatch.setattr(llm_task, '_call_model', check_deadline)
     module.academic_submit_relations(**args)
-    request = ctx.report_requests[0]
-    assert 0 < request.options['wall_timeout_seconds'] <= 60
+    request, = ctx.report_requests
+    assert request.options['timeout_seconds'] == request.options['wall_timeout_seconds'] == 45
 
 
 @pytest.mark.asyncio

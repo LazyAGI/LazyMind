@@ -10,6 +10,7 @@ import (
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/paperlibrary"
@@ -36,7 +37,7 @@ func sourceJobFence(tx *gorm.DB, job asyncjob.Job, batchID string) error {
 	return nil
 }
 func sourceItemUpdate(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, itemID string, updates map[string]any) error {
-	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, store.DB(), func(tx *gorm.DB) error {
 		if e := sourceJobFence(tx, job, b.ID); e != nil {
 			return e
 		}
@@ -45,7 +46,7 @@ func sourceItemUpdate(ctx context.Context, job asyncjob.Job, b orm.PaperImportBa
 	})
 }
 func completePresentImport(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, item orm.PaperImportItem, workID, documentID string) error {
-	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, store.DB(), func(tx *gorm.DB) error {
 		if e := sourceJobFence(tx, job, b.ID); e != nil {
 			return e
 		}
@@ -187,7 +188,7 @@ func handleImportBatchJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		}
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		persistErr := store.DB().WithContext(recovery).Transaction(func(tx *gorm.DB) error {
+		persistErr := common.TransactionWithSQLiteBusyRetry(recovery, store.DB(), func(tx *gorm.DB) error {
 			if e := sourceJobFence(tx, job, b.ID); e != nil {
 				return e
 			}
@@ -211,7 +212,7 @@ func handleImportBatchJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		}
 		caller.TenantID = target.TenantID
 	}
-	if err := store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := common.TransactionWithSQLiteBusyRetry(ctx, store.DB(), func(tx *gorm.DB) error {
 		if err := sourceJobFence(tx, job, b.ID); err != nil {
 			return err
 		}
@@ -263,7 +264,7 @@ func handleImportBatchJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 		}
 	}
 	summary := map[string]any{"batch_id": b.ID}
-	err = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = common.TransactionWithSQLiteBusyRetry(ctx, store.DB(), func(tx *gorm.DB) error {
 		if e := sourceJobFence(tx, job, b.ID); e != nil {
 			return e
 		}
@@ -422,7 +423,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			return err
 		}
 		if selected.VerifiedPaper != nil {
-			err = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			err = common.TransactionWithSQLiteBusyRetry(ctx, store.DB(), func(tx *gorm.DB) error {
 				if err := sourceJobFence(tx, job, b.ID); err != nil {
 					return err
 				}
