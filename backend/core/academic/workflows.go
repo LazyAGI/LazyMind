@@ -1150,12 +1150,17 @@ func ListExpansions(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{"items": rows}
 	if r.URL.Query().Get("include_reviews") == "true" {
+		items, err := listExpansionRecords(store.DB().WithContext(r.Context()), user, rows)
+		if err != nil {
+			replyError(w, 500, "READ_FAILED", err.Error())
+			return
+		}
 		reviews, err := listReviewRecords(store.DB(), user, dataset, rows)
 		if err != nil {
 			replyError(w, 500, "READ_FAILED", err.Error())
 			return
 		}
-		response["reviews"] = reviews
+		response["items"], response["reviews"] = items, reviews
 	}
 	common.ReplyJSON(w, response)
 }
@@ -1189,24 +1194,16 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 			chatStatus = "trashed"
 		}
 	}
-	contents := []orm.AcademicPaperContent{}
 	var input ReviewWorkflowInput
 	_ = json.Unmarshal(record.ResultJSON, &input)
 	ids := []string{}
 	for _, p := range input.Papers {
 		ids = append(ids, p.Paper.PaperID)
 	}
-	for _, id := range ids {
-		source, e := expansionSource(store.DB(), record, id)
-		if e != nil {
-			continue
-		}
-		if content, e := findSourceContent(store.DB(), user, source); e == nil {
-			contents = append(contents, content)
-		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
-			replyError(w, 500, "READ_FAILED", e.Error())
-			return
-		}
+	contents, err := readExpansionContents(store.DB().WithContext(r.Context()), record, ids)
+	if err != nil {
+		replyError(w, 500, "READ_FAILED", err.Error())
+		return
 	}
 
 	presence, err := presenceForWorks(r.Context(), r, user, ids, record.DatasetID, true)
@@ -1264,7 +1261,32 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	common.ReplyJSON(w, map[string]any{"record": record, "research_guidance": depth.Guidance, "source_queries": searchQueryReceipts(searches), "rounds": rounds, "chat_status": chatStatus, "contents": contents, "handoffs": handoffs, "presence": presence, "paper_importance": importance, "user_updates": updates, "interactions": interactions})
+	steps, err := expansionStepProgress(r.Context(), store.DB(), record)
+	if err != nil {
+		replyError(w, 500, "READ_FAILED", err.Error())
+		return
+	}
+	response := map[string]any{"record": record, "research_guidance": depth.Guidance, "source_queries": searchQueryReceipts(searches), "rounds": rounds, "chat_status": chatStatus, "contents": contents, "material_progress": summarizeExpansionContents(contents), "handoffs": handoffs, "presence": presence, "paper_importance": importance, "user_updates": updates, "interactions": interactions}
+	if len(steps) > 0 {
+		response["workflow_steps"] = steps
+	}
+	common.ReplyJSON(w, response)
+}
+
+func expansionStepProgress(ctx context.Context, db *gorm.DB, record orm.AcademicExpansion) ([]workflow.StepProgress, error) {
+	if record.ConversationID == "" || slices.Contains([]string{"preparing", "awaiting_info", "awaiting_confirmation", "preparation_failed"}, record.Status) {
+		return nil, nil
+	}
+	var session orm.WorkflowSession
+	err := db.WithContext(ctx).Where("conversation_id=? AND create_user_id=? AND plugin_id=?", record.ConversationID, record.UserID, "paper_expansion").
+		Order("created_at DESC").Take(&session).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return workflow.ReadStepProgress(ctx, db, &session)
 }
 func DeleteExpansion(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)

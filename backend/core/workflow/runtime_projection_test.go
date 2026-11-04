@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,34 @@ import (
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/graphengine"
 )
+
+func TestReadStepProgressKeepsHistoricalAttemptsAfterRevisionRemoval(t *testing.T) {
+	db, _ := setupBatchTransitionSession(t)
+	session, err := GetSession(t.Context(), db.DB, "batch-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&orm.WorkflowRevision{}, "id = ?", session.WorkflowRevisionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	attempts := []orm.WorkflowSessionStep{
+		{ID: "search", SessionID: session.ID, StepID: "search", Attempt: 1, Status: "succeeded", Validity: "effective"},
+		{ID: "screen-1", SessionID: session.ID, StepID: "screen", Attempt: 1, Status: "failed", Validity: "stale"},
+		{ID: "screen-2", SessionID: session.ID, StepID: "screen", Attempt: 2, Status: "interrupted", Validity: "effective"},
+		{ID: "analysis", SessionID: session.ID, StepID: "analysis", Attempt: 1, Status: "succeeded", Validity: "stale"},
+	}
+	for i := range attempts {
+		attempts[i].CreatedAt = time.Unix(int64(i+1), 0).UTC()
+	}
+	if err := db.Create(&attempts).Error; err != nil {
+		t.Fatal(err)
+	}
+	steps, err := ReadStepProgress(t.Context(), db.DB, session)
+	want := []StepProgress{{StepID: "search", Status: "succeeded"}, {StepID: "screen", Status: "interrupted"}}
+	if err != nil || !reflect.DeepEqual(steps, want) {
+		t.Fatalf("progress=%#v, error=%v, want %#v", steps, err, want)
+	}
+}
 
 func TestSuccessfulStepHandoffPreservesExecutionClock(t *testing.T) {
 	for _, tc := range []struct {
