@@ -43,7 +43,9 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 }
 ```
 
-返回新任务的 `conversation_id` 和 `handoff_id`。所选论文须属于该轮成果，至少两篇不同论文的正文通过身份和解析质量检查（相同 PDF 哈希不重复计数）。直接从论文集发起 `review` 会先运行拓展，满足条件后再建立综述 Chat。
+返回新任务的 `conversation_id` 和 `handoff_id`。所选论文须属于该轮成果，至少两篇不同论文的正文通过身份和解析质量检查（相同 PDF 哈希不重复计数）。
+
+从论文集直接发起综述时，传 `kind: "review"`、`skip_expansion: true`、`dataset_id`、`document_ids` 和 `request_key`，可用 `paper_ids` 确认其中的论文。此入口不运行拓展，所选论文须全部通过正文检查，且至少有两篇不同正文。可选 `review_scope` 为 `selected`（默认，仅所选论文）或 `direct_references`（允许下游引用其直接参考文献）；范围随业务输入交接。返回 `conversation_id`，再通过上下文取得 `handoff_id`。不传 `skip_expansion` 的论文集综述入口会先运行拓展。
 
 ## 2. 输入结构
 
@@ -77,6 +79,7 @@ interface WorkflowPaper {
 
 interface ReviewWorkflowInput {
   user_instruction: string;
+  review_scope?: "selected" | "direct_references";
   candidate_directions: string[];
   selected_directions: string[];
   papers: WorkflowPaper[];

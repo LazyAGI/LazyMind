@@ -123,73 +123,83 @@ func TestPPTReceiptUsesCompletedReflectionAndKeepsItFrozen(t *testing.T) {
 	}
 }
 
-func TestReadingHandoffIncludesOnlySelectedNotesAndFreezesInput(t *testing.T) {
-	db := paperFixture(t)
-	for _, id := range []string{"a", "b"} {
-		var work orm.AcademicWork
-		if err := db.Where("id=?", id).Take(&work).Error; err != nil {
-			t.Fatal(err)
-		}
-		entry, err := importedLibraryEntry(t.Context(), db.DB, "papers", work, nil, "", "bibliography", true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		content := "Durable note"
-		if id == "b" {
-			content = "Do not include"
-		}
-		if err = db.Create(&orm.PaperLibraryNote{DatasetID: "papers", ID: "note-" + id, PaperID: entry.ID, Title: "Note", Content: content, Kind: "note"}).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	body := `{"kind":"reflection","dataset_id":"papers","document_ids":["a"],"user_instruction":"关注方法贡献","request_key":"reading-notes"}`
-	w := httptest.NewRecorder()
-	LaunchPaperWorkflow(w, paperRequest(body))
-	if w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	var handoff orm.AcademicHandoff
-	if err := db.Where("request_key=?", "reading-notes").Take(&handoff).Error; err != nil {
-		t.Fatal(err)
-	}
-	var input PaperTaskInput
-	if err := json.Unmarshal(handoff.InputJSON, &input); err != nil {
-		t.Fatal(err)
-	}
-	if input.UserInstruction != "关注方法贡献" || len(input.Papers) != 1 || input.Papers[0].PaperID != "a" || len(input.Notes) != 1 || input.Notes[0].PaperID != "a" || input.Notes[0].Content != "Durable note" {
-		t.Fatalf("reading-note contract mismatch: %+v", input)
-	}
-	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(handoff.InputJSON, &fields)
-	if fields["candidate_directions"] != nil || fields["selected_directions"] != nil {
-		t.Fatal("reading notes received literature-review directions")
-	}
-	w = httptest.NewRecorder()
-	r := paperRequest("")
-	r.URL.RawQuery = "conversation_id=" + handoff.ConversationID
-	AcademicChatContext(w, r)
-	var taskContext struct {
-		DatasetID string          `json:"dataset_id"`
-		Input     json.RawMessage `json:"input"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &taskContext)
-	if w.Code != 200 || taskContext.DatasetID != "papers" || string(taskContext.Input) != string(handoff.InputJSON) {
-		t.Fatal("Workflow context lost the original input", w.Code, w.Body.String())
-	}
-	db.Model(&orm.PaperLibraryNote{}).Where("dataset_id=? AND id=?", "papers", "note-a").Update("content", "Edited after launch")
-	w = httptest.NewRecorder()
-	LaunchPaperWorkflow(w, paperRequest(body))
-	if w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	SubmitMockHandoff(w, mux.SetURLVars(paperRequest(`{}`), map[string]string{"handoff_id": handoff.ID}))
-	var receipt struct {
-		Input PaperTaskInput `json:"input"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &receipt)
-	if w.Code != 200 || len(receipt.Input.Notes) != 1 || receipt.Input.Notes[0].Content != "Durable note" {
-		t.Fatal("replay rewrote the frozen notes", w.Code, w.Body.String())
+func TestPaperTaskHandoffIncludesApplicableNotesAndFreezesInput(t *testing.T) {
+	for _, kind := range []string{"reflection", "ppt"} {
+		t.Run(kind, func(t *testing.T) {
+			db := paperFixture(t)
+			for _, id := range []string{"a", "b"} {
+				var work orm.AcademicWork
+				if err := db.Where("id=?", id).Take(&work).Error; err != nil {
+					t.Fatal(err)
+				}
+				entry, err := importedLibraryEntry(t.Context(), db.DB, "papers", work, nil, "", "bibliography", true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				content := "Durable note"
+				if id == "b" {
+					content = "Do not include"
+				}
+				if err = db.Create(&orm.PaperLibraryNote{DatasetID: "papers", ID: "note-" + id, PaperID: entry.ID, Title: "Note", Content: content, Kind: "note"}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			body := string(marshal(map[string]any{"kind": kind, "dataset_id": "papers", "document_ids": []string{"a"}, "user_instruction": "关注方法贡献", "request_key": "reading-notes"}))
+			w := httptest.NewRecorder()
+			LaunchPaperWorkflow(w, paperRequest(body))
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			var handoff orm.AcademicHandoff
+			if err := db.Where("request_key=?", "reading-notes").Take(&handoff).Error; err != nil {
+				t.Fatal(err)
+			}
+			var input PaperTaskInput
+			if err := json.Unmarshal(handoff.InputJSON, &input); err != nil {
+				t.Fatal(err)
+			}
+			if input.UserInstruction != "关注方法贡献" || len(input.Papers) != 1 || input.Papers[0].PaperID != "a" {
+				t.Fatalf("paper task contract mismatch: %+v", input)
+			}
+			if kind == "reflection" && (len(input.Notes) != 1 || input.Notes[0].PaperID != "a" || input.Notes[0].Content != "Durable note") {
+				t.Fatalf("reflection lost its selected notes: %+v", input)
+			}
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(handoff.InputJSON, &fields)
+			if fields["candidate_directions"] != nil || fields["selected_directions"] != nil {
+				t.Fatal("paper task received literature-review directions")
+			}
+			if kind == "ppt" && fields["notes"] != nil {
+				t.Fatal("direct PPT received reflection notes")
+			}
+			w = httptest.NewRecorder()
+			r := paperRequest("")
+			r.URL.RawQuery = "conversation_id=" + handoff.ConversationID
+			AcademicChatContext(w, r)
+			var taskContext struct {
+				DatasetID string          `json:"dataset_id"`
+				Input     json.RawMessage `json:"input"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &taskContext)
+			if w.Code != 200 || taskContext.DatasetID != "papers" || string(taskContext.Input) != string(handoff.InputJSON) {
+				t.Fatal("Workflow context lost the original input", w.Code, w.Body.String())
+			}
+			db.Model(&orm.PaperLibraryNote{}).Where("dataset_id=? AND id=?", "papers", "note-a").Update("content", "Edited after launch")
+			w = httptest.NewRecorder()
+			LaunchPaperWorkflow(w, paperRequest(body))
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			w = httptest.NewRecorder()
+			SubmitMockHandoff(w, mux.SetURLVars(paperRequest(`{}`), map[string]string{"handoff_id": handoff.ID}))
+			var receipt struct {
+				Input json.RawMessage `json:"input"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &receipt)
+			if w.Code != 200 || string(receipt.Input) != string(handoff.InputJSON) {
+				t.Fatal("replay rewrote the frozen input", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
