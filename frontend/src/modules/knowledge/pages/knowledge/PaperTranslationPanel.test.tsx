@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import PaperTranslationPanel from "./PaperTranslationPanel";
 
@@ -21,16 +21,65 @@ describe("paper translation panel", () => {
     const result = screen.getByRole("region", { name: "翻译结果" });
     const source = screen.getByRole("region", { name: "翻译原文" });
     expect(result.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(composer.closest("form")).toContainElement(screen.getByRole("button", { name: "设置翻译引擎" }));
+    expect(composer.closest("form")).toContainElement(screen.getByRole("button", { name: /选择翻译引擎/ }));
   });
 
-  it("shows the Chinese provider name in the reader's translation settings", () => {
+  it("opens an anchored menu with the selected engine instead of a dialog", async () => {
     render(<PaperTranslationPanel source="" result="" loading={false}
       providers={[{ group_id: "google", provider_name: "Google Translate Web", group_name: "Google Translate Web" }]}
       providerGroupId="google" providerSaving={false} providersLoading={false}
       onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "设置翻译引擎" }));
-    expect(within(screen.getByRole("dialog")).getByText("谷歌翻译（网页）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /选择翻译引擎/ }));
+    const menu = await screen.findByRole("menu");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /谷歌翻译（网页）/ })).toHaveClass("ant-dropdown-menu-item-selected");
+    expect(within(menu).getByRole("link", { name: "管理翻译服务和密钥" })).toHaveAttribute("href", "/settings?section=model_defaults&service=translation");
+  });
+
+  it("changes the translation engine directly from the menu", async () => {
+    const onProviderChange = vi.fn();
+    render(<PaperTranslationPanel source="" result="" loading={false}
+      providers={[
+        { group_id: "google", provider_name: "Google Translate Web", group_name: "Google Translate Web" },
+        { group_id: "tencent", provider_name: "Tencent Transmart Web", group_name: "Tencent Transmart Web" },
+      ]}
+      providerGroupId="google" providerSaving={false} providersLoading={false}
+      onProviderChange={onProviderChange} onTranslate={vi.fn()} onRetranslateWithLLM={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /选择翻译引擎/ }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: /腾讯翻译君（网页）/ }));
+    expect(onProviderChange).toHaveBeenCalledTimes(1);
+    expect(onProviderChange).toHaveBeenCalledWith("tencent");
+    await waitFor(() => expect(screen.getByRole("button", { name: /选择翻译引擎/ })).toHaveAttribute("aria-expanded", "false"));
+  });
+
+  it("keeps service configuration available when no engine is configured", async () => {
+    render(<PaperTranslationPanel source="" result="" loading={false}
+      providers={[]} providerSaving={false} providersLoading={false}
+      onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /选择翻译引擎/ }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("暂无可用翻译引擎")).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "管理翻译服务和密钥" })).toBeInTheDocument();
+  });
+
+  it("distinguishes connections and lets users search a longer engine list", async () => {
+    const providers = Array.from({ length: 9 }, (_, index) => ({
+      group_id: `google-${index + 1}`,
+      provider_name: "Google Translate Web",
+      group_name: `连接 ${index + 1}`,
+    }));
+    render(<PaperTranslationPanel source="" result="" loading={false}
+      providers={providers} providerGroupId="google-1" providerSaving={false} providersLoading={false}
+      onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /选择翻译引擎/ })).toHaveAttribute("title", "谷歌翻译（网页） · 连接 1");
+    fireEvent.click(screen.getByRole("button", { name: /选择翻译引擎/ }));
+    await act(async () => {
+      fireEvent.change(screen.getByRole("searchbox", { name: "搜索翻译引擎" }), { target: { value: "连接 9" } });
+    });
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: /连接 9/ })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /连接 1/ })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "管理翻译服务和密钥" })).toBeInTheDocument();
   });
 
   it("retranslates the current source with an LLM from the result header", () => {
