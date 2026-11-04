@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -198,7 +199,8 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_KIND", "invalid paper task")
 		return
 	}
-	if req.DirectionSelection != "" && (req.Kind != "expansion" || req.BudgetMode == "fast" ||
+	expands := req.Kind == "expansion" || req.Kind == "review" && !req.SkipExpansion && req.ExpansionID == ""
+	if req.DirectionSelection != "" && (!expands || req.BudgetMode == "fast" ||
 		(req.DirectionSelection != "all" && req.DirectionSelection != "manual")) {
 		replyError(w, 400, "INVALID_REQUEST", "direction_selection must be all or manual for standard or deep expansion")
 		return
@@ -258,7 +260,7 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	var convID, recordID string
 	err = conversationgroup.UserTransaction(r.Context(), store.DB(), user, func(tx *gorm.DB) error {
-		if req.Kind == "expansion" || req.Kind == "review" {
+		if expands {
 			var existing orm.AcademicExpansion
 			if tx.Where("request_owner=? AND request_key=?", user, req.RequestKey).Take(&existing).Error == nil {
 				if existing.DeletedAt != nil {
@@ -277,11 +279,11 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			}
 			mode := firstNonEmpty(req.BudgetMode, "balanced")
 			preparation := expansionPreparation{OriginalInstruction: instruction, UserInstruction: instruction, Answers: map[string]string{}, Questions: []preparationQuestion{}, Directions: []preparationDirection{}}
-			if req.Kind == "expansion" && mode != "fast" {
+			if mode != "fast" {
 				preparation.DirectionSelection = firstNonEmpty(req.DirectionSelection, "all")
 			}
 			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, Title: truncateTitle(instruction), Goal: req.Kind, Status: "preparing", ResultJSON: marshal(input), PreparationRevision: 1, PreparationJSON: marshal(preparation), BudgetMode: mode, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-			if req.Kind == "expansion" && mode == "fast" {
+			if mode == "fast" {
 				scope := firstNonEmpty(strings.TrimSpace(req.Direction), "围绕所选论文")
 				input.CandidateDirections = []string{scope}
 				input.SelectedDirections = []string{scope}
@@ -476,6 +478,9 @@ func createPaperHandoff(ctx context.Context, tx *gorm.DB, user, dataset, record 
 	}
 	return handoff, enqueueAcademicChat(ctx, tx, user, conv, workflowID, query, key)
 }
+
+var errReviewInsufficientContents = errors.New("至少两篇不同论文全文解析成功后才能生成综述")
+
 func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, input ReviewWorkflowInput, requireAllContents bool) (ReviewWorkflowInput, []orm.AcademicPaperContent, error) {
 	seen := map[string]bool{}
 	papers := []WorkflowPaper{}
@@ -540,7 +545,7 @@ func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, inpu
 	}
 	input.Papers = papers
 	if ready < 2 {
-		return input, contents, errors.New("至少两篇不同论文全文解析成功后才能生成综述")
+		return input, contents, errReviewInsufficientContents
 	}
 	return input, contents, nil
 }
@@ -758,7 +763,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	}
 	finalSlot, finalStep := "expansion_result", "compose_result"
 	var listMarker *workflowstore.Artifact
-	if record.Goal == "expansion" && (record.BudgetMode == "fast" || record.BudgetMode == "balanced") {
+	if record.BudgetMode == "fast" || record.BudgetMode == "balanced" {
 		for i := range finalArtifacts {
 			artifact := &finalArtifacts[i]
 			if artifact.ProducerAttemptID == "" || artifact.Validity != "effective" || !artifact.Selected || artifact.Deleted {
@@ -781,7 +786,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if err != nil {
 				return asyncjob.Result{}, err
 			}
-			if record.Goal == "expansion" && (artifact.Slot == "candidate_set" || artifact.Slot == "screened_candidates") {
+			if artifact.Slot == "candidate_set" || artifact.Slot == "screened_candidates" {
 				var candidate map[string]any
 				if json.Unmarshal(value, &candidate) == nil && (artifact.Slot == "screened_candidates" || candidate["screening_pending"] == true || candidate["list_mode"] == "deep") {
 					stepID := "expand_and_screen"
@@ -845,7 +850,10 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 		return asyncjob.Result{}, e
 	}
 	currentSession := latestSession.ID == session.ID
-	if currentSession && !(listMarker != nil && status == "completed") {
+	publishingFinal := status == "completed" && slices.ContainsFunc(finalArtifacts, func(artifact workflowstore.Artifact) bool {
+		return artifact.Slot == finalSlot && artifact.Validity == "effective" && !artifact.Deleted && artifact.Selected
+	})
+	if currentSession && !publishingFinal {
 		if err = db.Model(&orm.AcademicExpansion{}).Where("id=? AND deleted_at IS NULL", record.ID).Where("EXISTS (SELECT 1 FROM plugin_sessions WHERE id=? AND state_version=?)", session.ID, session.StateVersion).Updates(map[string]any{"status": status, "progress_json": marshal(progress), "updated_at": time.Now().UTC()}).Error; err != nil {
 			return asyncjob.Result{}, err
 		}
@@ -860,6 +868,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			}
 		}
 	}
+	var effectiveResultID string
 	for _, artifact := range finalArtifacts {
 		if !completedSnapshot && session.Status != "completed" {
 			break
@@ -921,6 +930,12 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				return rejectExpansionResult(db, record, session, artifact, errors.New("selected direction is not a candidate"))
 			}
 		}
+		if slices.ContainsFunc(artifacts, func(current workflowstore.Artifact) bool {
+			return current.ID == artifact.ID && current.Validity == "effective" && current.Selected && !current.Deleted
+		}) {
+			effectiveResultID = artifact.ID
+		}
+		roundInput := input
 		err = conversationgroup.UserTransaction(ctx, db, record.UserID, func(tx *gorm.DB) error {
 			if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&record).Error; e != nil {
 				return e
@@ -930,9 +945,13 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				return e
 			}
 			if exists > 0 {
+				if currentSession && publishingFinal && effectiveResultID == artifact.ID {
+					return tx.Model(&record).Where("EXISTS (SELECT 1 FROM plugin_sessions WHERE id=? AND state_version=?)", session.ID, session.StateVersion).
+						Updates(map[string]any{"status": status, "progress_json": marshal(progress)}).Error
+				}
 				return nil
 			}
-			roundInput := input
+			input := roundInput
 			var newest orm.AcademicExpansionRound
 			newestErr := tx.Where("expansion_id=? AND status='completed'", record.ID).Order("version DESC").Take(&newest).Error
 			if newestErr != nil && !errors.Is(newestErr, gorm.ErrRecordNotFound) {
@@ -948,6 +967,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				}
 			}
 			merged := map[string]WorkflowPaper{}
+			sources := map[string]paperSource{}
 			order := []string{}
 			for _, p := range input.Papers {
 				id := p.Paper.PaperID
@@ -963,6 +983,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 					return fmt.Errorf("%w: %v", errUnregisteredExpansionPaper, sourceErr)
 				}
 				p.Paper, p.IsSeed = source.Paper, source.IsSeed
+				sources[id] = source
 
 				var mark orm.AcademicUserPaperState
 				if e := tx.Where("user_id=? AND dataset_id=? AND paper_id=?", record.UserID, record.DatasetID, id).Take(&mark).Error; e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
@@ -1000,8 +1021,17 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if e := tx.Create(&round).Error; e != nil {
 				return e
 			}
+			for _, id := range order {
+				if _, err := findSourceContent(tx, record.UserID, sources[id]); errors.Is(err, gorm.ErrRecordNotFound) {
+					if _, err = enqueuePaperContent(ctx, tx, record.UserID, sources[id]); err != nil {
+						return err
+					}
+				} else if err != nil {
+					return err
+				}
+			}
 			updates := map[string]any{"version": version, "result_json": marshal(input), "report_json": report, "updated_at": now}
-			if listMarker != nil && currentSession && status == "completed" {
+			if currentSession && publishingFinal && effectiveResultID == artifact.ID {
 				var current int64
 				if e := tx.Model(&orm.WorkflowSession{}).Where("id=? AND state_version=?", session.ID, session.StateVersion).Count(&current).Error; e != nil {
 					return e
@@ -1019,76 +1049,81 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			return asyncjob.Result{}, err
 		}
 	}
-	if listMarker != nil {
-		return asyncjob.Result{}, nil
-	}
-	// Full text uses only the expansion sources verified above.
-	var latest orm.AcademicExpansion
-	if err = db.Where("id=? AND deleted_at IS NULL", record.ID).Take(&latest).Error; err != nil {
-		return asyncjob.Result{}, err
-	}
-	var input ReviewWorkflowInput
-	if err = json.Unmarshal(latest.ResultJSON, &input); err != nil {
-		return asyncjob.Result{}, err
-	}
-	processing := false
-	for _, paper := range input.Papers {
-		if latest.Version == 0 {
-			break
-		}
-		source, e := expansionSource(db, latest, paper.Paper.PaperID)
-		if e != nil {
-			continue
-		} // Legacy histories remain visible; a continued round must discover candidates again.
-		content, e := ensurePaperContent(ctx, db, record.UserID, paper.Paper.PaperID, source)
-		if e != nil {
-			return asyncjob.Result{}, e
-		}
-		processing = processing || content.Status == "processing"
-	}
-	research, err := readExpansionResearchState(latest.ReportJSON)
-	if err != nil {
-		return asyncjob.Result{}, err
-	}
-	canAutoReview := research.ResearchComplete == nil || *research.ResearchComplete
-	if latest.Version > 0 && latest.Goal == "review" && latest.AutoReviewID == "" && canAutoReview {
-		err = conversationgroup.UserTransaction(ctx, db, record.UserID, func(tx *gorm.DB) error {
-			if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&latest).Error; e != nil {
-				return e
-			}
-			if latest.AutoReviewID != "" {
-				return nil
-			}
-			research, err := readExpansionResearchState(latest.ReportJSON)
-			if err != nil {
-				return err
-			}
-			if research.ResearchComplete != nil && !*research.ResearchComplete {
-				return nil
-			}
-			if e := json.Unmarshal(latest.ResultJSON, &input); e != nil {
-				return e
-			}
-			snapshot, contents, e := snapshotReview(ctx, tx, record.UserID, record.DatasetID, input, false)
-			if e != nil {
-				return nil
-			}
-			handoff, e := createPaperHandoff(ctx, tx, record.UserID, record.DatasetID, record.ID, latest.Version, "review", "auto:"+record.ID, snapshot, contents, false)
-			if e != nil {
-				return e
-			}
-			return tx.Model(&latest).Update("auto_review_id", handoff.ID).Error
-		})
-		if err != nil {
-			return asyncjob.Result{}, err
-		}
-	}
-	if processing && session.Status == "completed" && latest.Goal == "review" && canAutoReview {
-		// A short rescheduled job releases the worker while downloads/parsing run.
-		_, err = asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, RunAt: time.Now().Add(5 * time.Second), MaxAttempts: 3})
+	if currentSession && status == "completed" && session.Status == "completed" && effectiveResultID != "" && record.Goal == "review" && record.AutoReviewID == "" {
+		err = advanceAutomaticReview(ctx, db, record, session, effectiveResultID)
 	}
 	return asyncjob.Result{}, err
 }
+
+func advanceAutomaticReview(ctx context.Context, db *gorm.DB, record orm.AcademicExpansion, session orm.WorkflowSession, artifactID string) error {
+	return conversationgroup.UserTransaction(ctx, db, record.UserID, func(tx *gorm.DB) error {
+		var latest orm.AcademicExpansion
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&latest).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if latest.Status != "completed" || latest.AutoReviewID != "" {
+			return nil
+		}
+		var current orm.WorkflowSession
+		if err := tx.Where("conversation_id=?", latest.ConversationID).Order("created_at DESC").Take(&current).Error; err != nil {
+			return err
+		}
+		if current.ID != session.ID || current.StateVersion != session.StateVersion || current.Status != "completed" {
+			return nil
+		}
+		var round orm.AcademicExpansionRound
+		if err := tx.Where("expansion_id=? AND version=? AND status='completed'", latest.ID, latest.Version).Take(&round).Error; err != nil {
+			return err
+		}
+		if round.RequestKey != artifactID || round.SessionID != session.ID {
+			return nil
+		}
+		research, err := readExpansionResearchState(round.ReportJSON)
+		if err != nil || research.ResearchComplete != nil && !*research.ResearchComplete {
+			return err
+		}
+		var input ReviewWorkflowInput
+		if err := json.Unmarshal(round.ResultJSON, &input); err != nil {
+			return err
+		}
+		snapshot, contents, snapshotErr := snapshotReview(ctx, tx, latest.UserID, latest.DatasetID, input, false)
+		if snapshotErr != nil && !errors.Is(snapshotErr, errReviewInsufficientContents) {
+			return snapshotErr
+		}
+		if slices.ContainsFunc(contents, paperContentProcessing) {
+			// Recheck the effective result, since a new round may start while we wait.
+			const interval = 5 * time.Second
+			runAt := time.Now().Truncate(interval).Add(interval)
+			_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{
+				JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: latest.ID, CreateUserID: latest.UserID,
+				IdempotencyKey: fmt.Sprintf("review:%s:%d:%d", latest.ID, latest.Version, runAt.Unix()),
+				Payload:        expansionProjectionPayload{SessionID: session.ID}, RunAt: runAt, MaxAttempts: 3,
+			})
+			return err
+		}
+		if snapshotErr != nil {
+			return nil
+		}
+		contents = slices.DeleteFunc(contents, func(content orm.AcademicPaperContent) bool { return !usablePaperContent(content) })
+		paperIDs := make([]string, 0, len(contents))
+		for _, content := range contents {
+			paperIDs = append(paperIDs, content.PaperID)
+		}
+		snapshot, err = selectReviewPapers(snapshot, paperIDs)
+		if err != nil {
+			return err
+		}
+		handoff, err := createPaperHandoff(ctx, tx, latest.UserID, latest.DatasetID, latest.ID, round.Version, "review", "auto:"+latest.ID, snapshot, contents, false)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&latest).Update("auto_review_id", handoff.ID).Error
+	})
+}
+
 func ListExpansions(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)
 	if !ok {
@@ -1346,18 +1381,21 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 		}
 		var input ReviewWorkflowInput
 		_ = json.Unmarshal(record.ResultJSON, &input)
-		ready := 0
-		ids := []string{}
+		ready, processing := 0, 0
+		readyHashes := map[string]bool{}
 		for _, paper := range input.Papers {
-			ids = append(ids, paper.Paper.PaperID)
-		}
-		for _, id := range ids {
-			source, e := expansionSource(store.DB(), record, id)
+			source, e := expansionSource(store.DB(), record, paper.Paper.PaperID)
 			if e != nil {
 				continue
 			}
-			if content, e := findSourceContent(store.DB(), user, source); e == nil && usablePaperContent(content) {
-				ready++
+			if content, e := findSourceContent(store.DB(), user, source); e == nil {
+				hash := content.SourceHash + content.ContentHash
+				if usablePaperContent(content) && !readyHashes[hash] {
+					ready++
+					readyHashes[hash] = true
+				} else if paperContentProcessing(content) {
+					processing++
+				}
 			}
 		}
 
@@ -1373,7 +1411,7 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 500, "READ_FAILED", err.Error())
 			return
 		}
-		common.ReplyJSON(w, academicChatSummary{expansionResearchState: research, Kind: "expansion", Goal: record.Goal, ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, PaperCount: len(input.Papers)})
+		common.ReplyJSON(w, academicChatSummary{expansionResearchState: research, Kind: "expansion", Goal: record.Goal, ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, ProcessingCount: processing, PaperCount: len(input.Papers)})
 		return
 	}
 	var handoff orm.AcademicHandoff

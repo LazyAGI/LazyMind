@@ -13,7 +13,7 @@ export function expansionProgressStages(record: Expansion) {
   const candidate = record.progress?.candidate_set;
   const mode = candidate?.list_mode;
   const split = candidate?.screening_pending || record.progress?.screened_candidates
-    || (!candidate && record.status !== 'completed' && record.goal === 'expansion' && ['balanced', 'deep'].includes(record.budget_mode || ''));
+    || (!candidate && record.status !== 'completed' && (record.goal === 'expansion' || record.preparation?.direction_selection) && ['balanced', 'deep'].includes(record.budget_mode || ''));
   if (split) {
     return record.budget_mode === 'deep'
       ? ['candidate_set', 'screened_candidates', 'relation_analysis'] as const
@@ -86,6 +86,9 @@ export default function PreparationPanel({ detail, onRefresh, onStart }: {
   const record = detail.record;
   const review = record.goal === 'review';
   const preparation = record.preparation;
+  const legacyReview = review && !preparation?.direction_selection && !preparation?.skipped;
+  const mode = record.budget_mode || 'balanced';
+  const modeLabel = legacyReview ? `${researchDepthLabels[mode]}调研` : t(`paperTasks.expansionDepth.${mode}.label`);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [instruction, setInstruction] = useState('');
@@ -147,18 +150,18 @@ export default function PreparationPanel({ detail, onRefresh, onStart }: {
       {compact && confirmedChoices.length > 1 && <Button type="link" size="small" className="paper-preparation-all-directions" aria-expanded={directionsExpanded} onClick={() => setDirectionsExpanded(value => !value)}>{t(directionsExpanded ? 'paperTasks.overview.hideDirections' : 'paperTasks.overview.showDirections', { count: confirmedChoices.length })}</Button>}
     </section>;
   const content = <section className="paper-preparation" aria-label="初步调研与方向确认">
-    {!compact && <div className="paper-preparation-meta"><LockOutlined />{record.goal === 'expansion' ? t(`paperTasks.expansionDepth.${record.budget_mode || 'balanced'}.label`) : `${researchDepthLabels[record.budget_mode || 'balanced']}调研`}</div>}
+    {!compact && <div className="paper-preparation-meta"><LockOutlined />{modeLabel}</div>}
     {compact && confirmedDirections}
     {!review && !compact && <Steps className="paper-preparation-steps" size="small" current={preparationPhase}
       items={[{ title: '初步调研' }, { title: preparation.auto_confirmed ? '方向已确定' : '确认方向' }, { title: '正式拓展' }]} />}
-    {record.status === 'preparing' && <div className="paper-preparation-working" role="status"><Spin size="small" /><div><strong>正在调研研究问题</strong><p>{review ? t('paperTasks.reviewFlow.researchingHint') : t(`paperTasks.expansionDepth.${preparation.direction_selection === 'manual' ? 'preparingManual' : 'preparingAll'}`)}</p></div></div>}
+    {record.status === 'preparing' && <div className="paper-preparation-working" role="status"><Spin size="small" /><div><strong>正在调研研究问题</strong><p>{legacyReview ? t('paperTasks.reviewFlow.researchingHint') : t(`paperTasks.expansionDepth.${preparation.direction_selection === 'manual' ? 'preparingManual' : 'preparingAll'}`)}</p></div></div>}
     {preparation.summary && !compact && <section className="paper-preparation-findings">
       <h3><ReadOutlined />{record.status === 'preparing' ? '已有调研材料' : '初步调研成果'}</h3>
       <Typography.Paragraph ellipsis={{ rows: 2 }}>{summaryPreview}</Typography.Paragraph>
       <details><summary>查看调研详情</summary><MarkdownViewer>{preparation.summary}</MarkdownViewer></details>
     </section>}
     {compact && preparation.summary && <details className="paper-preparation-background"><summary>{t('paperTasks.overview.showResearch')}</summary>
-      <div className="paper-preparation-meta"><LockOutlined />{record.goal === 'expansion' ? t(`paperTasks.expansionDepth.${record.budget_mode || 'balanced'}.label`) : `${researchDepthLabels[record.budget_mode || 'balanced']}调研`}</div>
+      <div className="paper-preparation-meta"><LockOutlined />{modeLabel}</div>
       <MarkdownViewer>{preparation.summary}</MarkdownViewer>
     </details>}
     {preparation.error && <Alert type="error" showIcon message={preparation.error} />}

@@ -73,7 +73,7 @@ describe('paper Chat navigation', () => {
 
     it('keeps waiting for automatic review after expansion completes and then navigates', async () => {
         const completed = { ...summary, kind: 'expansion', goal: 'review', status: 'completed', ready_count: 2 };
-        get.mockResolvedValueOnce({ data: completed }).mockResolvedValueOnce({
+        get.mockResolvedValueOnce({ data: { ...completed, processing_count: 1 } }).mockResolvedValueOnce({ data: completed }).mockResolvedValueOnce({
             data: { ...completed, next_conversation_id: 'review-chat' },
         });
         render(<MemoryRouter initialEntries={['/?paper_auto_review=1']}><Routes>
@@ -81,10 +81,12 @@ describe('paper Chat navigation', () => {
             <Route path="*" element={<CurrentLocation />} />
         </Routes></MemoryRouter>);
         await tick();
-        expect(screen.getByText('文献准备已完成')).toBeVisible();
+        expect(screen.getByText('正在准备全文')).toBeVisible();
         expect(screen.queryByText('还需要补充可用全文')).not.toBeInTheDocument();
         await tick(3000);
+        expect(screen.getByText('正在交接综述材料')).toBeVisible();
         expect(get).toHaveBeenCalledTimes(2);
+        await tick(3000);
         expect(screen.getByTestId('location').textContent).toContain('review-chat');
     });
     it('restores review progress without a URL flag and preserves manual navigation', async () => {
@@ -95,7 +97,7 @@ describe('paper Chat navigation', () => {
         expect(screen.getByText('论文综述 · 资料准备')).toBeVisible();
         expect(screen.getByText('还需要补充可用全文')).toBeVisible();
         const flow = within(screen.getByRole('region', { name: '论文综述流程' }));
-        for (const stage of ['初步调研', '确认方向', '检索与阅读', '生成综述']) expect(flow.getByText(stage)).toBeVisible();
+        for (const stage of ['论文扩展', '准备全文', '交接综述材料']) expect(flow.getByText(stage)).toBeVisible();
         await tick(3000);
         expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/);
         fireEvent.click(screen.getByRole('button', { name: '查看论文综述' }));

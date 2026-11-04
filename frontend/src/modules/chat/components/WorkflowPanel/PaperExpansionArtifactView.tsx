@@ -105,15 +105,16 @@ function PaperList({ papers, analysis = false, reading, recommendations }: {
   </details>)}</div>;
 }
 
-function SelectionChanges({ selection, screening = false, reading }: {
-  selection: PaperSelectionChanges; screening?: boolean; reading?: unknown;
+function SelectionChanges({ selection, finalCount, reading }: {
+  selection: PaperSelectionChanges; finalCount?: number; reading?: unknown;
 }) {
   const { t } = useTranslation();
   const tr = (key: string) => t(`paperTasks.workflowResult.${key}`);
   const additions = selection.changes.filter(change => change.action === 'added');
   const removals = selection.changes.filter(change => change.action === 'removed');
+  const screening = finalCount !== undefined;
   const summary = t(`paperTasks.workflowResult.${screening ? 'screeningSummary' : 'selectionSummary'}`, {
-    before: selection.before_count, retained: selection.before_count - removals.length, added: additions.length, removed: removals.length,
+    before: selection.before_count, retained: selection.before_count - removals.length, added: additions.length, removed: removals.length, finalCount,
   });
   return <Section title={screening ? summary : tr('selectionChanges')} aside={screening ? undefined : summary} centered={screening}>
     {additions.length ? <>
@@ -192,7 +193,7 @@ export function PaperExpansionArtifactView({ slotId, data, baseline }: {
       {finalList}
     </> : listMode === 'fast' || listMode === 'balanced' || listMode === 'deep' ? <>
       {slotId === 'screened_candidates' && (screeningSelection
-        ? <SelectionChanges selection={screeningSelection} screening />
+        ? <SelectionChanges selection={screeningSelection} finalCount={papers.length} />
         : <p className='paper-workflow-muted'>{tr('selectionUnavailable')}</p>)}
       <details className='paper-workflow-notes' open={listMode === 'fast'}><summary>{tr('finalPapers')} · {count(papers.length)}<DownOutlined aria-hidden /></summary>
         {seedList}

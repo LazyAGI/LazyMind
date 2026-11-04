@@ -98,13 +98,15 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 func TestFastExpansionLaunchesWithoutPreparation(t *testing.T) {
 	db := paperFixture(t)
 	for _, tc := range []struct {
-		key, direction string
-		documents      []string
+		key, goal, direction string
+		documents            []string
 	}{
-		{"seed", "", []string{"a"}},
-		{"topic", "KV 缓存", []string{}},
+		{"seed", "expansion", "", []string{"a"}},
+		{"review seed", "review", "", []string{"a"}},
+		{"topic", "expansion", "KV 缓存", []string{}},
+		{"review topic", "review", "KV 缓存", []string{}},
 	} {
-		body := string(marshal(map[string]any{"kind": "expansion", "budget_mode": "fast", "dataset_id": "papers", "direction": tc.direction, "document_ids": tc.documents, "request_key": tc.key}))
+		body := string(marshal(map[string]any{"kind": tc.goal, "budget_mode": "fast", "dataset_id": "papers", "direction": tc.direction, "document_ids": tc.documents, "request_key": tc.key}))
 		var first map[string]string
 		for i := 0; i < 2; i++ {
 			w := httptest.NewRecorder()
@@ -126,7 +128,7 @@ func TestFastExpansionLaunchesWithoutPreparation(t *testing.T) {
 		var prep expansionPreparation
 		var input ReviewWorkflowInput
 		if json.Unmarshal(record.PreparationJSON, &prep) != nil || json.Unmarshal(record.ResultJSON, &input) != nil ||
-			!prep.Skipped || record.Status != "pending" || len(input.SelectedDirections) != 1 || len(input.Papers) != len(tc.documents) {
+			!prep.Skipped || record.Goal != tc.goal || record.Status != "pending" || len(input.SelectedDirections) != 1 || len(input.Papers) != len(tc.documents) {
 			t.Fatalf("invalid direct launch: %+v %+v", prep, input)
 		}
 		var count int64
@@ -878,18 +880,32 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 	launch("inaccessible", 2, []string{"a", "b"}, 422)
 }
 
-func TestListExpansionPublishesCompletedRoundWithoutFetchingFullText(t *testing.T) {
-	for _, tc := range []struct{ step, slot, marker string }{
-		{"expand_and_screen", "candidate_set", "expansion_list_ready"},
-		{"screen_and_supplement", "screened_candidates", "screened_list_ready"},
+func TestListExpansionPublishesCompletedRoundAndQueuesFullText(t *testing.T) {
+	for _, tc := range []struct{ mode, step, slot, marker string }{
+		{"fast", "expand_and_screen", "candidate_set", "expansion_list_ready"},
+		{"balanced", "screen_and_supplement", "screened_candidates", "screened_list_ready"},
 	} {
-		t.Run(tc.step, func(t *testing.T) {
-			testListExpansionPublication(t, tc.step, tc.slot, tc.marker)
-		})
+		for _, goal := range []string{"expansion", "review"} {
+			t.Run(tc.mode+"/"+goal, func(t *testing.T) {
+				testListExpansionPublication(t, goal, tc.mode, tc.step, tc.slot, tc.marker)
+			})
+		}
 	}
 }
 
-func testListExpansionPublication(t *testing.T, stepID, resultSlot, readySlot string) {
+func saveResultArtifact(t *testing.T, db *orm.DB, session orm.WorkflowSession, step orm.WorkflowSessionStep, id, slot string, value any) {
+	t.Helper()
+	human := orm.WorkflowHumanArtifact{ID: id + "-value", SessionID: session.ID, Slot: slot, Value: marshal(value), ContentType: "json"}
+	if err := db.Create(&human).Error; err != nil {
+		t.Fatal(err)
+	}
+	artifact := orm.WorkflowSlotRevision{ID: id, SessionID: session.ID, SlotID: slot, Slot: slot, StepID: step.StepID, Attempt: step.Attempt, Revision: 1, Selected: true, Validity: "effective", ProducerAttemptID: step.ID, HumanArtifactID: &human.ID}
+	if err := db.Create(&artifact).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testListExpansionPublication(t *testing.T, goal, mode, stepID, resultSlot, readySlot string) {
 	db := paperFixture(t)
 	conversation, err := newAcademicConversation(db.DB, "u", "papers", "list", "expansion")
 	if err != nil {
@@ -904,9 +920,9 @@ func testListExpansionPublication(t *testing.T, stepID, resultSlot, readySlot st
 		t.Fatal(err)
 	}
 	input := map[string]any{"user_instruction": "Find related papers", "candidate_directions": []string{"method"},
-		"selected_directions": []string{"method"}, "papers": papers, "list_mode": "balanced", "recommendations": []any{}}
+		"selected_directions": []string{"method"}, "papers": papers, "list_mode": mode, "recommendations": []any{}}
 	record := orm.AcademicExpansion{ID: "list", UserID: "u", RequestOwner: "u", RequestKey: "list", DatasetID: "papers",
-		ConversationID: conversation, Title: "Find related papers", Goal: "expansion", BudgetMode: "balanced", Status: "running",
+		ConversationID: conversation, Title: "Find related papers", Goal: goal, BudgetMode: mode, Status: "running",
 		ResultJSON: marshal(input), SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: marshal([]paperDiscovery{}), PreparationJSON: marshal(expansionPreparation{})}
 	session := orm.WorkflowSession{ID: "list-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
 	step := orm.WorkflowSessionStep{ID: "list-search", SessionID: session.ID, StepID: stepID, Status: "succeeded", Validity: "effective", Attempt: 1}
@@ -915,12 +931,10 @@ func testListExpansionPublication(t *testing.T, stepID, resultSlot, readySlot st
 			t.Fatal(err)
 		}
 	}
-	artifacts := []workflowstore.Artifact{}
-	for slot, value := range map[string]any{resultSlot: input, readySlot: map[string]string{"mode": "balanced"}} {
-		artifacts = append(artifacts, workflowstore.Artifact{ID: "list-" + slot, Slot: slot, Attempt: 1, Revision: 1,
-			ProducerAttemptID: step.ID, CreatedAt: time.Now().UTC(), Validity: "effective", Selected: true, Value: marshal(value)})
+	for slot, value := range map[string]any{resultSlot: input, readySlot: map[string]string{"mode": mode}} {
+		saveResultArtifact(t, db, session, step, "list-"+slot, slot, value)
 	}
-	job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: artifacts})}
+	job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID})}
 	for i := 0; i < 2; i++ {
 		if _, err := projectAcademicResult(t.Context(), job, nil); err != nil {
 			t.Fatal(err)
@@ -934,30 +948,36 @@ func testListExpansionPublication(t *testing.T, stepID, resultSlot, readySlot st
 		t.Fatalf("completed list unavailable: %s, version %d, %+v, %v", record.Status, record.Version, saved, err)
 	}
 	var report map[string]any
-	if err := json.Unmarshal(record.ReportJSON, &report); err != nil || report["list_mode"] != "balanced" || report["narrative"] != nil {
+	if err := json.Unmarshal(record.ReportJSON, &report); err != nil || report["list_mode"] != mode || report["narrative"] != nil {
 		t.Fatalf("expected list metadata without a research report: %s, %v", record.ReportJSON, err)
 	}
-	var fetched int64
-	if err := db.Model(&orm.AcademicPaperContent{}).Where("user_id=?", "u").Count(&fetched).Error; err != nil || fetched != 0 {
-		t.Fatalf("finishing a list must not prepare full text: %d, %v", fetched, err)
+	var content orm.AcademicPaperContent
+	if err := db.Where("user_id=? AND paper_id=?", "u", "a").Take(&content).Error; err != nil || content.Status != "processing" {
+		t.Fatalf("completed list is missing its queued full text: %+v, %v", content, err)
+	}
+	var queued int64
+	if err := db.Model(&orm.AsyncJob{}).Where("job_type=? AND resource_id=?", "academic.paper_content", content.ID).Count(&queued).Error; err != nil || queued != 1 || record.AutoReviewID != "" {
+		t.Fatalf("expected one full-text job and no handoff yet: %d, %v, %+v", queued, err, record)
 	}
 }
 
 func TestExpansionLaunchDirectionSelection(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode, selection, want string
-		status                      int
+		name, goal, mode, selection, want string
+		status                            int
 	}{
-		{"standard default", "balanced", "", "all", 200},
-		{"deep default", "deep", "", "all", 200},
-		{"manual", "balanced", "manual", "manual", 200},
-		{"fast", "fast", "", "", 200},
-		{"invalid", "balanced", "unknown", "", 400},
+		{"standard default", "expansion", "balanced", "", "all", 200},
+		{"deep default", "expansion", "deep", "", "all", 200},
+		{"manual", "expansion", "balanced", "manual", "manual", 200},
+		{"review standard default", "review", "balanced", "", "all", 200},
+		{"review deep manual", "review", "deep", "manual", "manual", 200},
+		{"fast", "expansion", "fast", "", "", 200},
+		{"invalid", "expansion", "balanced", "unknown", "", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := paperFixture(t)
 			w := httptest.NewRecorder()
-			LaunchPaperWorkflow(w, paperRequest(string(marshal(map[string]any{"kind": "expansion", "dataset_id": "papers", "direction": "agents", "request_key": "directions", "budget_mode": tc.mode, "direction_selection": tc.selection}))))
+			LaunchPaperWorkflow(w, paperRequest(string(marshal(map[string]any{"kind": tc.goal, "dataset_id": "papers", "direction": "agents", "request_key": "directions", "budget_mode": tc.mode, "direction_selection": tc.selection}))))
 			if w.Code != tc.status {
 				t.Fatalf("%d %s", w.Code, w.Body.String())
 			}
@@ -976,5 +996,95 @@ func TestExpansionLaunchDirectionSelection(t *testing.T) {
 				t.Fatalf("selection not saved: %+v", preparation)
 			}
 		})
+	}
+}
+
+func TestAutomaticReviewWaitsForFullTextBatchAndHandsOffOnlyUsablePapers(t *testing.T) {
+	db := paperFixture(t)
+	ctx := t.Context()
+	conversation, err := newAcademicConversation(db.DB, "u", "papers", "review", "expansion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.AcademicWork{ID: "c", CanonicalTitle: "c", NormalizedTitle: "c", AuthorsJSON: marshal([]string{}), ExternalIDsJSON: marshal(map[string]string{}), ProvenanceJSON: marshal(map[string]string{})}).Error; err != nil {
+		t.Fatal(err)
+	}
+	directions := []string{"method"}
+	input := ReviewWorkflowInput{UserInstruction: "Compare methods", CandidateDirections: directions, SelectedDirections: directions}
+	var discovered []PaperRef
+	for _, id := range []string{"a", "b", "c"} {
+		paper := PaperRef{PaperID: id, Title: id, SourceVersion: "v1", SourceProvider: "arxiv"}
+		discovered = append(discovered, paper)
+		input.Papers = append(input.Papers, WorkflowPaper{Paper: paper})
+	}
+	record := orm.AcademicExpansion{ID: "batch", UserID: "u", RequestOwner: "u", RequestKey: "batch", DatasetID: "papers",
+		ConversationID: conversation, Title: input.UserInstruction, Goal: "review", BudgetMode: "balanced", Status: "running",
+		ResultJSON: marshal(input), DiscoveryJSON: marshal([]paperDiscovery{{Papers: discovered}})}
+	session := orm.WorkflowSession{ID: "batch-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
+	step := orm.WorkflowSessionStep{ID: "batch-screen", SessionID: session.ID, StepID: "screen_and_supplement", Status: "succeeded", Validity: "effective", Attempt: 1}
+	for _, row := range []any{&record, &session, &step} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := map[string]any{}
+	if err := json.Unmarshal(marshal(input), &result); err != nil {
+		t.Fatal(err)
+	}
+	result["list_mode"] = "balanced"
+	saveResultArtifact(t, db, session, step, "batch-result", "screened_candidates", result)
+	saveResultArtifact(t, db, session, step, "batch-marker", "screened_list_ready", map[string]string{"mode": "balanced"})
+
+	job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID})}
+	project := func(wantHandoffs int64) {
+		t.Helper()
+		if _, err := projectAcademicResult(ctx, job, nil); err != nil {
+			t.Fatal(err)
+		}
+		var count int64
+		if err := db.Model(&orm.AcademicHandoff{}).Where("expansion_id=?", record.ID).Count(&count).Error; err != nil || count != wantHandoffs {
+			t.Fatalf("handoffs=%d, want %d: %v", count, wantHandoffs, err)
+		}
+	}
+	setContent := func(id, status string) {
+		t.Helper()
+		updates := map[string]any{"status": status}
+		if status == "ready" {
+			updates["quality_json"] = marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"})
+			updates["pages_json"] = marshal([]ContentPage{{Page: 1, Text: "Body of " + id}})
+			updates["content_hash"] = id
+		}
+		if err := db.Model(&orm.AcademicPaperContent{}).Where("user_id=? AND paper_id=?", "u", id).Updates(updates).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	project(0)
+	setContent("a", "ready")
+	setContent("b", "ready")
+	project(0) // Two usable papers are not enough while c is processing.
+	setContent("b", "failed")
+	setContent("c", "unavailable")
+	project(0) // The completed batch has only one usable paper.
+
+	w := httptest.NewRecorder()
+	RetryPaperContent(w, paperRequest(string(marshal(map[string]string{"expansion_id": record.ID, "paper_id": "b"}))))
+	if w.Code != 200 {
+		t.Fatalf("could not retry full text: %d %s", w.Code, w.Body.String())
+	}
+	project(0)
+	setContent("b", "ready")
+	project(1)
+	project(1)
+
+	var handoff orm.AcademicHandoff
+	if err := db.Where("expansion_id=?", record.ID).Take(&handoff).Error; err != nil {
+		t.Fatal(err)
+	}
+	var frozen ReviewWorkflowInput
+	var materials handoffContentSnapshot
+	if json.Unmarshal(handoff.InputJSON, &frozen) != nil || json.Unmarshal(handoff.ContentsJSON, &materials) != nil ||
+		handoff.Version != 1 || len(frozen.Papers) != 2 || len(materials.Contents) != 2 ||
+		frozen.Papers[0].Paper.PaperID != "a" || frozen.Papers[1].Paper.PaperID != "b" {
+		t.Fatalf("handoff did not freeze the usable papers from the completed round: %+v %s %s", handoff.Version, handoff.InputJSON, handoff.ContentsJSON)
 	}
 }

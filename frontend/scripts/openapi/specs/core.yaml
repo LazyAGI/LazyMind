@@ -73,6 +73,8 @@ components:
                     type: string
                 paper_count:
                     type: integer
+                processing_count:
+                    type: integer
                 ready_count:
                     type: integer
                 research_complete:

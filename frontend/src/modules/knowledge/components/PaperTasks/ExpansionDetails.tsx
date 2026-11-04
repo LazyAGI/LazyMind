@@ -62,8 +62,8 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
                 : running ? t('paperTasks.overview.working', { stage: stageTitle(expansionStages[currentStage]) })
                     : record.status === 'pending' ? t('paperTasks.overview.waiting') : t('paperTasks.overview.interrupted')}</Typography.Paragraph>}
             {!completed && <Typography.Text type="secondary">{t('paperTasks.overview.resultsAfterCompletion')}</Typography.Text>}
+            {children}
             <div id={processId} hidden={!processOpen}>
-                {children}
                 <ol className="paper-expansion-timeline">{expansionStages.map((slot, index) => {
                     const done = stageDone(index);
                     const active = running && index === currentStage;
@@ -85,6 +85,9 @@ export default function ExpansionDetails({ detail, statusLabel, onRefresh, onSta
         {completed && report?.narrative && <details className="paper-expansion-section" open>
             <summary>{t('paperTasks.researchReading')}<span>{t('paperTasks.researchReadingHint')}</span></summary>
             <section className="paper-expansion-reading" aria-label={t('paperTasks.researchReadingHint')}>
+                {!!report.coverage_gaps?.length && <section aria-label={t('paperTasks.reviewFlow.incompleteResearch')}>
+                    <ul>{report.coverage_gaps.map((gap, index) => <li key={index}>{[gap.direction, gap.clue_name, gap.reason].filter(Boolean).join(' · ')}</li>)}</ul>
+                </section>}
                 {report.relations && <PaperLineageView papers={report.input?.papers || record.result.papers}
                     relations={report.relations} structure={report.research_structure}
                     renderDetail={item => <PaperDetail item={item} analysis reading={report.reading} />} />}

@@ -317,7 +317,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
                 user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: reflectionFirst, budget_mode: budgetMode,
-                ...(launch.kind === 'expansion' && budgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
+                ...(!directReview && (launch.kind === 'expansion' || launch.kind === 'review') && budgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
                 ...(directReview ? { skip_expansion: true, review_scope: 'selected' as const, paper_ids: eligibleReviewPapers.map(item => item.paper.paper_id) } : {}),
             };
             const fingerprint = JSON.stringify(body);
@@ -351,8 +351,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const source = detail && selection?.source.record.id === detail.record.id
         ? (detail.record.version === selection.source.record.version ? { ...detail, record: selection.source.record } : selection.source) : detail;
     const listMode = source?.record.report?.list_mode;
-    const groupedList = listMode === 'balanced' || (source?.record.goal === 'expansion'
-        && source.record.budget_mode === 'deep' && Array.isArray(source.record.report?.recommendations));
+    const groupedList = listMode === 'balanced' || (source?.record.budget_mode === 'deep' && Array.isArray(source.record.report?.recommendations));
     const recommendations = new Map(source?.record.report?.recommendations?.map(item => [item.paper_id, item]));
     const papers = source ? distinctPapers(source.record.result.papers || []) : [];
     const paperDirections = source?.record.result.selected_directions || [];
@@ -544,6 +543,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         }
     };
     const available = source ? papers.filter(item => contentReady(source, item.paper.paper_id)).length : 0;
+    const processing = source?.contents.filter(content => ['pending', 'processing'].includes(content.status)).length ?? 0;
     const confirmationPapers = confirmation ? distinctPapers(confirmation.source.record.result.papers || []).filter(item => confirmation.selected.includes(item.paper.paper_id)) : [];
     const confirmationEligible = confirmation ? confirmationPapers.filter(item => confirmation.kind === 'review'
         ? contentReady(confirmation.source, item.paper.paper_id) : !importReason(confirmation.source, item)) : [];
@@ -589,11 +589,11 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         description: t(selectionFailure ? 'paperTasks.materialPending' : 'paperTasks.reviewPreparing') }));
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' ? t('paperTasks.expansionDepth.start') : launch?.kind === 'review' ? t('paperTasks.expansionDepth.startResearch') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
+        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' || launch?.kind === 'review' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy} onCancel={() => !busy && !topicBusy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
-            {launch?.kind === 'review' && <ReviewFlow entry direct={directReview} />}
+            {directReview && <ReviewFlow entry />}
             {directReview && <>
                 <List id="review-selected-papers" loading={selectionLoading} rowKey="id"
                     dataSource={reviewPapersExpanded ? reviewPaperRows : reviewPaperRows.slice(0, 3)}
@@ -619,9 +619,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <Switch checked={expansionEnabled} onChange={setExpansionEnabled} disabled={busy || topicBusy} aria-label={t('paperTasks.enableExpansion')} />
             </div>}
             {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'}
-                    directionSelection={directionSelection} onDirectionSelectionChange={setDirectionSelection} disabled={busy} />
-                {launch.kind === 'review' && <p className="paper-task-launch-flow-hint"><BranchesOutlined />{t('paperTasks.reviewFlow.directionsHint')}</p>}
+                <ResearchDepth value={budgetMode} onChange={setBudgetMode} autoReview={launch.kind === 'review'}
+                    directionSelection={directionSelection} onDirectionSelectionChange={setDirectionSelection} disabled={busy || topicBusy} />
                 {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message={t(capabilities.openalex_key ? 'paperTasks.expansionDepth.searchConfiguration' : 'paperTasks.expansionDepth.basicSearch')} description={<>
                   {!capabilities.openalex_key && <div>{t('paperTasks.expansionDepth.openalexBenefits')} <Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">{t('paperTasks.expansionDepth.configureOpenalex')}</Link></div>}
                   {!capabilities.sciverse && <div>Sciverse 检索未启用。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=sciverse">配置 Sciverse</Link></div>}
@@ -647,7 +646,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     <div className="paper-expansion-result-heading">
                         <div className="paper-expansion-title-group">
                             <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
-                            {!reviewDetail && detail.record.budget_mode && <Tag color="blue">{t(`paperTasks.expansionDepth.${detail.record.budget_mode}.label`)}</Tag>}
+                            {detail.record.budget_mode && (!reviewDetail || detail.record.preparation?.direction_selection || detail.record.preparation?.skipped || detail.record.report?.list_mode) && <Tag color="blue">{t(`paperTasks.expansionDepth.${detail.record.budget_mode}.label`)}</Tag>}
                         </div>
                         {['preparing', 'awaiting_info', 'awaiting_confirmation', 'preparation_failed'].includes(detail.record.status) && <PaperTaskStatus status={detail.record.status}>{statusLabel(detail.record.status)}</PaperTaskStatus>}
                     </div>
@@ -657,16 +656,18 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     </div>
                     <ExpansionDetails key={`details-${detail.record.id}`} detail={detail} statusLabel={statusLabel} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')}>
                         {reviewDetail && <ReviewFlow status={detail.record.status} reviewStarted={!!detail.record.auto_review_id}
-                        readyCount={detail.record.result.papers.filter(item => contentReady(detail, item.paper.paper_id)).length} />}
+                            processingCount={detail.contents.filter(content => ['pending', 'processing'].includes(content.status)).length}
+                            readyCount={new Set(detail.contents.filter(content => contentReady(detail, content.paper_id)).map(content => `${content.source_hash || ''}:${content.content_hash}`)).size}
+                            researchIncomplete={detail.record.report?.research_complete === false} />}
                     </ExpansionDetails>
                     {resultReady && <GeneratedContents key={detail.record.id} items={detail.handoffs} onOpen={goChat} onReview={openReviewRecord} />}
                     {resultReady && source && <>
-                    <div className="paper-expansion-papers-summary"><Typography.Text strong>{t('paperTasks.paperCount', { count: papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.downloadedCount', { count: papers.filter(item => source.contents.some(content => content.paper_id === item.paper.paper_id && content.quality?.downloaded)).length })} · {t('paperTasks.availableCount', { count: available })}</Typography.Text></div>
+                    <div className="paper-expansion-papers-summary"><Typography.Text strong>{t('paperTasks.paperCount', { count: papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.downloadedCount', { count: papers.filter(item => source.contents.some(content => content.paper_id === item.paper.paper_id && content.quality?.downloaded)).length })} · {t('paperTasks.availableCount', { count: available })}{processing > 0 && <> · {t('paperTasks.processingFulltextCount', { count: processing })}</>}</Typography.Text></div>
                     <div className="paper-expansion-result-toolbar">
                         <Tooltip title={reviewReason} trigger={['hover', 'focus']}><span tabIndex={reviewReason ? 0 : undefined}><Button type="primary" disabled={!!reviewReason} onClick={() => openConfirmation('review')}>{t('paperTasks.generateReview')}</Button></span></Tooltip>
                         <Tooltip title={bulkImportReason} trigger={['hover', 'focus']}><span tabIndex={bulkImportReason ? 0 : undefined}><Button disabled={!!bulkImportReason} onClick={() => openConfirmation('import')}>{t('paperTasks.bulkImport', { count: importable.length })}</Button></span></Tooltip>
                         {!!retryableContents.length && <Button loading={retryingContents} disabled={busy || !!confirmation || source.record.version !== detail.record.version}
-                            onClick={() => void retryContents(source, retryableContents.map(item => item.paper.paper_id))}>{t(listMode ? 'paperTasks.prepareMissingContents' : 'paperTasks.retryMissingContents', { count: retryableContents.length })}</Button>}
+                            onClick={() => void retryContents(source, retryableContents.map(item => item.paper.paper_id))}>{t(retryableContents.some(item => !source.contents.some(content => content.paper_id === item.paper.paper_id)) ? 'paperTasks.prepareMissingContents' : 'paperTasks.retryMissingContents', { count: retryableContents.length })}</Button>}
                         <span className="paper-expansion-result-selection" aria-live="polite">{t('paperTasks.selectedCount', { count: selection?.selected.length || 0 })}</span>
                     </div>
 

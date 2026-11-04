@@ -8,7 +8,7 @@ func academicWorkflowSchemas() map[string]any {
 	chatSummary := objReq([]string{"kind", "dataset_id", "status", "version"},
 		prop("kind", strSchema()), prop("goal", strSchema()), prop("dataset_id", strSchema()), prop("status", strSchema()), prop("version", int64Schema()),
 		prop("handoff_id", strSchema()), prop("expansion_id", strSchema()), prop("next_conversation_id", strSchema()),
-		prop("source_conversation_id", strSchema()), prop("source_available", boolSchema()), prop("ready_count", intSchema()), prop("paper_count", intSchema()),
+		prop("source_conversation_id", strSchema()), prop("source_available", boolSchema()), prop("ready_count", intSchema()), prop("processing_count", intSchema()), prop("paper_count", intSchema()),
 		prop("completion", refSchema("AcademicResearchCompletion")), prop("research_complete", boolSchema()), prop("coverage_gaps", array(refSchema("AcademicCoverageGap"))))
 	budgetMode := enumStringSchema("fast", "balanced", "deep")
 	budgetMode["description"] = "Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget."

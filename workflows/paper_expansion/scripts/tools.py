@@ -562,14 +562,15 @@ def academic_publish_stage(paper_ids: list[str], decisions: list[str], gaps: lis
                             for row in context['record'].get('preparation', {}).get('directions', [])
                             if row['name'] in body['selected_directions']])
     mode = context['record'].get('budget_mode')
-    standalone = context['record'].get('goal') == 'expansion' and mode in {'fast', 'balanced', 'deep'}
+    if mode not in {'fast', 'balanced', 'deep'}:
+        _invalid('invalid expansion mode')
     screened = step == 'screen_and_supplement'
-    draft = not screened and standalone and mode in {'balanced', 'deep'}
-    if screened and (not standalone or mode == 'fast'):
-        _invalid('standalone screening requires standard expansion or deep analysis')
+    draft = not screened and mode != 'fast'
+    if screened and mode == 'fast':
+        _invalid('screening requires standard expansion or deep analysis')
     if draft:
         body['screening_pending'] = True
-    if standalone and not draft:
+    if not draft:
         expected = {row['paper']['paper_id'] for row in body['papers'] if not row['is_seed']}
         by_paper = {}
         for row in recommendations or []:

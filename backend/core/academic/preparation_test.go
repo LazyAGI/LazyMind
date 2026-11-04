@@ -553,14 +553,34 @@ func TestExpansionSessionHasPlannedStagesBeforeExecution(t *testing.T) {
 		mode, goal string
 		markers    []string
 		next       []string
+		legacy     bool
 	}{
-		{"fast", "expansion", []string{"analysis_not_required", "screening_not_required"}, nil},
-		{"balanced", "expansion", []string{"analysis_not_required"}, []string{"screen_and_supplement"}},
-		{"deep", "expansion", []string{}, []string{"screen_and_supplement"}},
-		{"balanced", "review", []string{"screening_not_required"}, []string{"analyze_relations"}},
+		{"fast", "expansion", []string{"analysis_not_required", "screening_not_required"}, nil, false},
+		{"balanced", "expansion", []string{"analysis_not_required"}, []string{"screen_and_supplement"}, false},
+		{"deep", "expansion", []string{}, []string{"screen_and_supplement"}, false},
+		{"fast", "review", []string{"analysis_not_required", "screening_not_required"}, nil, false},
+		{"balanced", "review", []string{"analysis_not_required"}, []string{"screen_and_supplement"}, false},
+		{"deep", "review", []string{}, []string{"screen_and_supplement"}, false},
+		{"balanced", "review", []string{"screening_not_required"}, []string{"analyze_relations"}, true},
 	} {
-		t.Run(tc.goal+"_"+tc.mode, func(t *testing.T) {
-			id := tc.goal + "_" + tc.mode
+		id := tc.goal + "_" + tc.mode
+		if tc.legacy {
+			id += "_legacy"
+		}
+		t.Run(id, func(t *testing.T) {
+			pkg := pkg
+			graph := compiled.Graph
+			if tc.legacy {
+				legacy := graphengine.Compile(
+					strings.Replace(string(definition), academicExpansionHost, legacyAcademicExpansionHost, 1),
+					strings.Replace(string(state), "material: screened_candidates\n      required: true\n      transport: path", "material: screened_candidates\n      required: false\n      transport: path", 1),
+					"", graphengine.ProfileRuntimeLoad)
+				if !legacy.Valid {
+					t.Fatal(legacy.Diagnostics)
+				}
+				graph = legacy.Graph
+				pkg.CompiledGraph = marshal(graph)
+			}
 			if err := db.Create(&orm.Conversation{ID: id, BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -586,12 +606,12 @@ func TestExpansionSessionHasPlannedStagesBeforeExecution(t *testing.T) {
 			if !reflect.DeepEqual(markers, tc.markers) {
 				t.Fatalf("startup materials: got %v, want %v", markers, tc.markers)
 			}
-			if initial := graphengine.Project(compiled.Graph, snapshot); initial.Completed || !reflect.DeepEqual(initial.Ready, []string{"expand_and_screen"}) {
+			if initial := graphengine.Project(graph, snapshot); initial.Completed || !reflect.DeepEqual(initial.Ready, []string{"expand_and_screen"}) {
 				t.Fatalf("startup must still run search: %+v", initial)
 			}
 			snapshot.Attempts = []graphengine.AttemptFact{{StepID: "expand_and_screen", Status: "succeeded", Validity: "effective"}}
 			snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: "candidate_set", RevisionID: "candidate", Valid: true})
-			next := graphengine.Project(compiled.Graph, snapshot)
+			next := graphengine.Project(graph, snapshot)
 			if len(next.Ready) != len(tc.next) || len(tc.next) > 0 && !reflect.DeepEqual(next.Ready, tc.next) {
 				t.Fatalf("after search: %+v", next)
 			}

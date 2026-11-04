@@ -88,32 +88,44 @@ func internalAcademic(ctx context.Context, action string, input, output any) err
 }
 func init() { asyncjob.Register("academic.paper_content", runPaperContent) }
 
+func paperContentProcessing(content orm.AcademicPaperContent) bool {
+	return content.Status == "pending" || content.Status == "processing"
+}
+
 func ensurePaperContent(ctx context.Context, db *gorm.DB, userID, paperID string, source paperSource) (orm.AcademicPaperContent, error) {
 	if source.Paper.PaperID != paperID || source.DatasetID == "" {
 		return orm.AcademicPaperContent{}, errors.New("paper source context required")
 	}
 	if row, err := findSourceContent(db.WithContext(ctx), userID, source); err == nil {
-
 		return row, err
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return row, err
 	}
+	var row orm.AcademicPaperContent
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		row, err = enqueuePaperContent(ctx, tx, userID, source)
+		return err
+	})
+	return row, err
+}
+
+// enqueuePaperContent creates the content and its job in the caller's transaction.
+func enqueuePaperContent(ctx context.Context, tx *gorm.DB, userID string, source paperSource) (orm.AcademicPaperContent, error) {
 	kind := "external"
 	if source.DocumentID != "" {
 		kind = "kb"
 	}
-	row := orm.AcademicPaperContent{ID: uuid.NewString(), UserID: userID, PaperID: paperID, SourceKind: kind, SourceProvider: source.Paper.SourceProvider, SourceKey: source.key(), SourceVersion: source.Paper.SourceVersion, SourceDatasetID: source.DatasetID, SourceDocumentID: source.DocumentID, SourceHash: source.Hash, ParserVersion: orm.AcademicPaperParserVersion, Status: "processing", PagesJSON: json.RawMessage(`[]`), UpdatedAt: time.Now().UTC()}
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return tx.Where("user_id=? AND paper_id=? AND parser_version=? AND source_key=?", userID, paperID, orm.AcademicPaperParserVersion, source.key()).Take(&row).Error
-		}
-		_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: userID, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3})
-		return err
-	})
+	row := orm.AcademicPaperContent{ID: uuid.NewString(), UserID: userID, PaperID: source.Paper.PaperID, SourceKind: kind, SourceProvider: source.Paper.SourceProvider, SourceKey: source.key(), SourceVersion: source.Paper.SourceVersion, SourceDatasetID: source.DatasetID, SourceDocumentID: source.DocumentID, SourceHash: source.Hash, ParserVersion: orm.AcademicPaperParserVersion, Status: "processing", PagesJSON: json.RawMessage(`[]`), UpdatedAt: time.Now().UTC()}
+	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if res.Error != nil {
+		return row, res.Error
+	}
+	if res.RowsAffected == 0 {
+		err := tx.Where("user_id=? AND paper_id=? AND parser_version=? AND source_key=?", userID, row.PaperID, row.ParserVersion, row.SourceKey).Take(&row).Error
+		return row, err
+	}
+	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: userID, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3})
 	return row, err
 }
 
@@ -581,18 +593,28 @@ func RetryPaperContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if row.Status == "failed" || row.Status == "unavailable" || row.Status == "needs_review" {
-		err = store.DB().Transaction(func(tx *gorm.DB) error {
+		err = common.ImmediateTransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=?", row.ID).Take(&orm.AcademicPaperContent{}).Error; err != nil {
+				return err
+			}
+			var err error
+			row, err = findSourceContent(tx, user, source)
+			if err != nil || (row.Status != "failed" && row.Status != "unavailable" && row.Status != "needs_review") {
+				return err
+			}
 			if err := tx.Model(&row).Updates(map[string]any{"status": "processing", "error": ""}).Error; err != nil {
 				return err
 			}
-			_, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: user, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3, SkipSucceeded: true})
-			return err
+			if _, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: user, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3, SkipSucceeded: true}); err != nil {
+				return err
+			}
+			row.Status = "processing"
+			return nil
 		})
 		if err != nil {
 			replyError(w, 500, "RETRY_FAILED", fmt.Sprint(err))
 			return
 		}
-		row.Status = "processing"
 	}
 	notifyPaperRecords(r.Context(), store.DB(), user, req.PaperID)
 	common.ReplyJSON(w, map[string]string{"status": row.Status})
