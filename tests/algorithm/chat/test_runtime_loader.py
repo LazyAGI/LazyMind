@@ -131,6 +131,7 @@ elapsed = time.perf_counter() - started
 cpu_elapsed = time.process_time() - cpu_started
 result = {
     "elapsed": elapsed,
+    "fastapi_loaded": "fastapi" in sys.modules,
     "rag_loaded": "lazyllm.tools.rag" in sys.modules,
     "sql_runtime_loaded": "lazyllm.tools.sql" in sys.modules,
     "sqlalchemy_loaded": "sqlalchemy" in sys.modules,
@@ -164,7 +165,7 @@ result["environment"] = {
     "cpu_count": os.cpu_count(),
     "installed_dependency_versions": versions,
     "module_paths": {
-        name: str(Path(sys.modules[name].__file__).resolve())
+        name: str(Path(sys.modules[name].__file__).resolve()) if name in sys.modules else None
         for name in ("lazyllm", "fastapi", "lazymind.chat.runtime_loader", "lazymind.chat.service.chat_service")
     },
 }
@@ -174,6 +175,7 @@ print(json.dumps(result))
     # Pytest only renders this captured report if a startup requirement fails.
     diagnostics = 'Chat startup diagnostics:\n' + json.dumps(result, indent=2, sort_keys=True)
     assert result['elapsed'] < 3.0, diagnostics
+    assert result['fastapi_loaded'] is False, diagnostics
     assert result['rag_loaded'] is False, diagnostics
     assert result['sql_runtime_loaded'] is False, diagnostics
     assert result['sqlalchemy_loaded'] is False, diagnostics
