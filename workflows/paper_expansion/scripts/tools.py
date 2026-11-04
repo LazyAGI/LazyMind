@@ -785,9 +785,10 @@ def academic_submit_relations(analyses: list[PaperAnalysis] | None = None,
     Submit only key findings and supported relationships, not three fields per paper or a fixed investigation
     matrix. Deep expansion retains the entire frozen list automatically, including papers without analysis.
     Cite real read positions for each scientific finding; never guess blocks or infer facts from titles.
-    Normal comparison conditions belong in limitations or relation.conditions, not investigation.gaps.
-    Optional investigation records outstanding work; missing evidence stays explicit in a partial report,
-    without requiring exhaustive searches before delivery. Query text and source versions come from the server.
+    Put normal comparison conditions and evidence outside the confirmed scope in limitations or
+    relation.conditions. Optional investigation records outstanding work within the confirmed scope.
+    Keep in-scope material gaps explicit in a partial report without requiring exhaustive searches.
+    Query text and source versions come from the server.
     All academic tools use the Workflow binding; do not pass expansion_id.
 
     Submissions are drafted within this execution before business checks. After a rejection, resend only
@@ -801,8 +802,9 @@ def academic_submit_relations(analyses: list[PaperAnalysis] | None = None,
         claims: Evidence for key analysis fields only; omit claims that duplicate a relation's statement.
             Use cross-paper evidence with separate source paper IDs and their own actual read positions.
         relations: Only supported relationships with explicit conditions; no edge for missing evidence.
-        limitations: Normal limits of comparison and applicability, such as differing experimental baselines.
-        investigation: Optional unresolved questions or actual material gaps, not a mandatory matrix.
+        limitations: Limits of comparison and applicability, including evidence outside the confirmed scope.
+        investigation: Optional unresolved questions or material gaps within the confirmed scope. An excluded
+            question is not required for completion. Use limitations to describe evidence outside the scope.
             clue_resolutions belongs inside an investigation entry, never at the top level. Copy full query_ids;
             do not supply query text. Omit this argument if no additional investigation record is needed.
     """
@@ -943,9 +945,11 @@ def _submit_research_draft(draft):
     if candidate.get('list_mode') == 'deep':
         analysis.update(list_mode='deep', recommendations=candidate['recommendations'])
     # Completion describes the evidence delivered, not whether every possible follow-up was exhausted.
-    # Ordinary limitations do not become tasks. Actual unresolved work remains visible in a partial report.
+    # Only outstanding work inside the confirmed scope can keep a report incomplete.
     missing = []
     for item in investigation:
+        if item['status'] == 'excluded':
+            continue
         reasons = [*item['unresolved_clues'], *item['gaps']]
         for clue in item.get('clue_resolutions', []):
             if clue['status'] in {'open', 'blocked'}:
@@ -994,7 +998,7 @@ findings 是本轮研究分析及其引用，未经独立事实审核，不得�
 paper_analyses 用于理解研究背景与材料不足，无引用的描述不能扩写为事实论断。允许归纳、重组与通顺改写，但不添加材料没有的机制、
 数值、因果关系、优劣排名或未来趋势；每项发现的 conditions 是事实的一部分，必须随相关结论保留。
 背景引用不能改写为方法继承或设计启发；设计启发不意味着共享实现或实验收益；不同条件下的实验不能直接排名。
-研究完成程度以 completion 为准，limitations 给出实际材料缺口。材料不足的方向在研究局限中集中说明，不用空章节或重复的“尚未核实”占位。
+研究完成程度以 completion 为准。在研究局限中区分确认范围内的材料缺口与范围外的证据限制，不用空章节或重复的“尚未核实”占位。
 没有可用研究发现时，明确说明目前不足以形成实质性结论，不能从论文标题补写内容或声称不存在相关研究。
 
 只展示读者关心的研究内容，不展示关系核验记录、关系类型标签、核验计数、调查矩阵、检索过程、预算、

@@ -218,6 +218,20 @@ func TestPreprintTemplateDOIDoesNotConflictWithPublishedIdentity(t *testing.T) {
 	}
 }
 
+func TestPaperQualityMatchesPDFTitleLigatures(t *testing.T) {
+	paper := PaperRef{Title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness", ArxivID: "2205.14135"}
+	body := "FlashAttention: Fast and Memory-Eﬃcient Exact Attention\nwith IO-Awareness\n\nAbstract\n" +
+		strings.Repeat("This paper presents an exact attention algorithm and measures its memory and runtime costs. ", 4)
+	if q := checkPaperQuality(paper, []ContentPage{{Page: 1, Text: body}}, "external", "hash"); !q.Eligible {
+		t.Fatalf("matching paper title with a PDF ligature was rejected: %+v", q)
+	}
+
+	body = "arXiv:2307.08691\n" + body
+	if q := checkPaperQuality(paper, []ContentPage{{Page: 1, Text: body}}, "external", "hash"); q.Eligible || q.Identity != "mismatch" {
+		t.Fatalf("conflicting arXiv identifier was accepted despite the matching title: %+v", q)
+	}
+}
+
 func TestRetryContentRequeuesCompletedQualityCheck(t *testing.T) {
 	db := paperFixture(t)
 	paper := PaperRef{PaperID: "a", Title: "A matching paper"}

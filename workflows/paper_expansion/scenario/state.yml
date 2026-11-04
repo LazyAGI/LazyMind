@@ -101,11 +101,11 @@ steps:
       mechanism_comparison 为研究者的机制比较，background_citation 为背景引用。前三种由来源指向使用方，
       背景引用由被引论文指向引用方；比较没有继承方向。区分原文陈述与研究推断，保留适用条件和实验基线。
 
-      正常局限写入 limitations，例如不同基线不能直接排名、结果不能外推到未测规模；不要把这些写成待完成的 gaps。
-      investigation 可省略，只按需记录真实未解决问题或材料缺口，不填固定调查矩阵。
+      正常局限与确认范围外的证据写入 limitations，例如不同基线不能直接排名、范围外的第三方原文未单独核对。
+      investigation 可省略，只记录确认范围内的未解决问题或材料缺口，不填固定调查矩阵。标为 excluded 的问题不计入完成条件。
       如需记录 clue_resolutions，必须放在对应 investigation 条目内部，不能放顶层。
       只复制完整 query_ids；查询文字、题录和来源版本由服务取得，不再传 queries。
-      未覆盖范围会在部分报告中明确说明，不冒充完成，也不等待穷尽调查或耗尽预算才交付。
+      确认范围内的缺口会在部分报告中明确说明，无需等到穷尽调查或耗尽预算才交付。
 
       就绪后调用 academic_submit_relations，首次提交关键 analyses、claims、relations 和 limitations 即可。
       工具使用当前执行的草稿保存提交内容。业务检查失败后只重传变化的数组或对象；省略表示保留，[] 表示清空，

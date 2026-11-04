@@ -324,6 +324,18 @@ def test_incomplete_report_preserves_actual_material_gap(lineage):
     assert ctx.report_requests[0].input.data['limitations'] == report['coverage_gaps']
 
 
+def test_excluded_question_does_not_block_completion(lineage):
+    module, ctx, events, _, args = lineage
+    limit = '仅比较本次确认的两篇原文，第三方实现不单独取证。'
+    args['limitations'] = [limit]
+    args['investigation'][0].update(status='excluded', unresolved_clues=['第三方实现的原始依据'], gaps=[])
+    module.academic_submit_relations(**args)
+    report = _artifact(events, 'expansion_report')
+    assert report['completion'] == {'status': 'complete', 'reason': 'scope_covered'}
+    assert report['coverage_gaps'] == []
+    assert ctx.report_requests[0].input.data['limitations'] == [{'reason': limit}]
+
+
 def test_unresolved_work_is_disclosed_without_exhausting_research_budget(lineage):
     module, ctx, events, _, args = lineage
     args['investigation'][0].update(status='open', gaps=['尚未读取原文方法章节，相关机制不作结论'])

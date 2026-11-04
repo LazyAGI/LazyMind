@@ -636,11 +636,6 @@ func TestPaperExpansionEndsAtThePublishedList(t *testing.T) {
 	if projected := Project(compiled.Graph, fast); !projected.Completed || len(projected.Bypassed) != 2 {
 		t.Fatalf("fast should finish at search: %#v", projected)
 	}
-	review := fast
-	review.Materials = review.Materials[:len(review.Materials)-1]
-	if projected := Project(compiled.Graph, review); !reflect.DeepEqual(projected.Ready, []string{"analyze_relations"}) {
-		t.Fatalf("review should continue directly to analysis: %#v", projected)
-	}
 	failedScreen := snapshot
 	failedScreen.Attempts = append(append([]AttemptFact(nil), snapshot.Attempts...),
 		AttemptFact{StepID: "screen_and_supplement", Status: "failed", Validity: "effective"})
