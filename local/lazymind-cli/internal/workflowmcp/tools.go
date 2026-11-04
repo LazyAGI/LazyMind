@@ -69,7 +69,7 @@ type SessionLifecycleInput struct {
 }
 
 type InputImportInput struct {
-	LocalPath string `json:"local_path" jsonschema:"required,File inside the current Agent workspace"`
+	LocalPath string `json:"local_path" jsonschema:"required,Absolute regular-file path on the Connector machine; resolve or download host attachments first"`
 }
 
 type InputGetInput struct {
@@ -98,7 +98,7 @@ type ArtifactGetResult struct {
 	Rendered bool     `json:"rendered_as_mcp_content,omitempty"`
 }
 
-const workflowStartDescription = "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. The host displays the Workflow panel automatically for the bound conversation. Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
+const workflowStartDescription = "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. For source files, pass inputs keyed by declared external material ID, each an ordered array of {local_path} or {resource_id, revision, content_hash}; local_path must be absolute on the Connector machine. Files are imported and bound before session creation; preparation failure does not start a run. Prefer inputs over separate import calls. Existing input_bindings remain supported for other material IDs. The host displays the Workflow panel automatically for the bound conversation. Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
 
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
@@ -116,7 +116,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.input.import", Title: "Import a Workflow input",
-		Description: "Import one file from the current Agent workspace as an immutable LazyMind input resource. Use the returned binding under its material ID in workflow.start input_bindings.", Annotations: write},
+		Description: "Import one explicit absolute file path on the Connector machine as an immutable LazyMind input resource, subject to its system file permissions and configured workflow_input_roots. Resolve or download host attachments first. This does not attach the file to a run: use the returned binding under its material ID in workflow.start input_bindings. For starting with files, prefer workflow.start inputs to import and bind in one call.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input InputImportInput) (*mcp.CallToolResult, InputImportResult, error) {
 			file, err := readLocalFile(input.LocalPath)
 			if err != nil {
@@ -285,7 +285,7 @@ func slotContentType(output Output) string {
 }
 
 func readLocalFile(path string) (localFile, error) {
-	return loadLocalFile(path, false)
+	return readLocalInputFile(path)
 }
 
 func loadLocalFile(path string, allowAbsoluteOutside bool) (localFile, error) {

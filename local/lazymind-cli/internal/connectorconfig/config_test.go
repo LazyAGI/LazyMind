@@ -1,12 +1,38 @@
 package connectorconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestWorkflowInputRootsSurviveReconnectAndRejectRelativePaths(t *testing.T) {
+	c := Config{Home: t.TempDir(), Provider: "cursor", HostID: "host", WorkflowInputRoots: []string{t.TempDir(), t.TempDir()}}
+	path, err := Save(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reconnection rewrites identity fields but preserves the user's file policy.
+	if _, err := Save(Config{Home: c.Home, Provider: c.Provider, HostID: c.HostID}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil || !reflect.DeepEqual(got.WorkflowInputRoots, c.WorkflowInputRoots) {
+		t.Fatalf("input roots lost: %+v %v", got, err)
+	}
+	got.WorkflowInputRoots = []string{"relative/project"}
+	body, _ := json.Marshal(got)
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "workflow_input_roots") {
+		t.Fatalf("relative authorization root accepted: %v", err)
+	}
+}
 
 func TestManagedConfigurationIgnoresInheritedOverridesAndReadsUpdates(t *testing.T) {
 	home := t.TempDir()

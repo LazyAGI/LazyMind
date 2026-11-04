@@ -79,12 +79,13 @@ type Projection struct {
 }
 
 type StartInput struct {
-	WorkflowID      string         `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
-	RequestContext  string         `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
-	InputBindings   map[string]any `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
-	IdempotencyKey  string         `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it on retries"`
-	SessionID       string         `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
-	DriverSessionID string         `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
+	WorkflowID      string                   `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
+	RequestContext  string                   `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
+	Inputs          map[string][]InputSource `json:"inputs,omitempty" jsonschema:"Files to import and bind before starting; keys are declared external material IDs and values are ordered source arrays (use one item for a single material). Each source uses local_path or resource_id. Do not also name the same material in input_bindings."`
+	InputBindings   map[string]any           `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
+	IdempotencyKey  string                   `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it on retries"`
+	SessionID       string                   `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
+	DriverSessionID string                   `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
 }
 
 type InputResource struct {
@@ -476,6 +477,10 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		if capability.Protocol != ControlProtocol || !capability.SchemaReady {
 			return StartResult{}, errors.New("LazyMind Core does not support controlled workflow sessions; update the server before starting")
 		}
+	}
+	input.InputBindings, err = c.prepareStartInputs(ctx, input.Inputs, input.InputBindings)
+	if err != nil {
+		return StartResult{}, err
 	}
 	request := map[string]any{
 		"control_protocol": ControlProtocol, "host_binding_required": c.RequireHostBinding, "host_provider": c.HostProvider,
