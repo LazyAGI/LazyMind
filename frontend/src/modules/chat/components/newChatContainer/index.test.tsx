@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   messageScrollBy: vi.fn(),
   regenerate: vi.fn(),
   conversationSendMessage: vi.fn(() => Promise.resolve(true)),
+  submitAskAnswer: vi.fn(() => Promise.resolve(true)),
+  enqueue: vi.fn(() => Promise.resolve(true)),
+  askAnswerPending: false,
+  latestFollowUpOptions: null as any,
   getHistory: vi.fn(),
   mergeHistoryPage: vi.fn(),
   error: vi.fn(),
@@ -176,12 +180,21 @@ vi.mock("./hooks/useChatConversation", () => ({
       unreadCount: 0,
     },
     sendMessage: mocks.conversationSendMessage,
+    submitAskAnswer: mocks.submitAskAnswer,
+    askAnswerPending: mocks.askAnswerPending,
     setContent: vi.fn(),
     setMessageList: vi.fn(),
     stopGeneration: vi.fn(),
     streamRecovery: {},
     updateAssistantMessage: vi.fn(),
     };
+  },
+}));
+
+vi.mock("./hooks/useConversationFollowUps", () => ({
+  useConversationFollowUps: (options: any) => {
+    mocks.latestFollowUpOptions = options;
+    return { items: [], enqueue: mocks.enqueue, supportsSteering: true };
   },
 }));
 
@@ -237,6 +250,9 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.regenerate.mockReset();
     mocks.conversationSendMessage.mockReset();
     mocks.conversationSendMessage.mockResolvedValue(true);
+    mocks.submitAskAnswer.mockClear();
+    mocks.enqueue.mockClear();
+    mocks.askAnswerPending = false;
     mocks.getHistory.mockReset();
     mocks.mergeHistoryPage.mockReset();
     mocks.error.mockReset();
@@ -248,6 +264,29 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.canStopGeneration = false;
     mocks.loading = false;
     mocks.runtimeWaiting = false;
+  });
+
+  it("submits Ask answers separately while ordinary messages remain queued", async () => {
+    mocks.isStreaming = true;
+    render(<ChatContainerComponent sessionId="conversation-1" setIsChatContent={vi.fn()}
+      onOpenSSE={vi.fn()} parseErrorData={vi.fn()} setChatConfigFn={vi.fn()} />);
+    const answer = { text: "PPTX", ask_answers_structured: { ask_id: "format-card", questions: [] } };
+    await act(async () => { await mocks.latestChatInputProps.onSend(answer); });
+    expect(mocks.submitAskAnswer).toHaveBeenCalledWith(answer);
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.conversationSendMessage).not.toHaveBeenCalled();
+    await act(async () => { await mocks.latestChatInputProps.onSend({ text: "追加要求" }); });
+    expect(mocks.enqueue).toHaveBeenCalledWith({ text: "追加要求" }, "conversation-1");
+  });
+
+  it("holds ordinary queue dispatch while a card answer is pending", async () => {
+    mocks.askAnswerPending = true;
+    render(<ChatContainerComponent sessionId="conversation-1" setIsChatContent={vi.fn()}
+      onOpenSSE={vi.fn()} parseErrorData={vi.fn()} setChatConfigFn={vi.fn()} />);
+    expect(mocks.latestFollowUpOptions.isStreaming).toBe(true);
+    await act(async () => { await mocks.latestChatInputProps.onSend({ text: "追加要求" }); });
+    expect(mocks.enqueue).toHaveBeenCalledWith({ text: "追加要求" }, "conversation-1");
+    expect(mocks.conversationSendMessage).not.toHaveBeenCalled();
   });
 
   it('updates skill deposit counts live and excludes archived regeneration attempts', () => {

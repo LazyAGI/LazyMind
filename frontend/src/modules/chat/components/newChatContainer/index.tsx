@@ -431,17 +431,20 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const followUps = useConversationFollowUps({
       conversationId: sessionId,
-      isStreaming: conversation.isStreaming,
+      isStreaming: conversation.isStreaming || conversation.askAnswerPending,
       sendNow,
       onSteerAccepted: conversation.showAcceptedSteering,
     });
 
     const sendMessage = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
+        if (params.ask_answers_structured) {
+          return conversation.submitAskAnswer(params);
+        }
         const activeConversationId =
           conversation.currentConversationIdRef.current || sessionId;
         if (
-          (conversation.isStreaming || conversation.activeStreamRef.current) &&
+          (conversation.isStreaming || conversation.activeStreamRef.current || conversation.askAnswerPending) &&
           activeConversationId &&
           !activeConversationId.startsWith("temp_")
         ) {
@@ -453,6 +456,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         conversation.activeStreamRef,
         conversation.currentConversationIdRef,
         conversation.isStreaming,
+        conversation.askAnswerPending,
+        conversation.submitAskAnswer,
         followUps.enqueue,
         sendNow,
         sessionId,

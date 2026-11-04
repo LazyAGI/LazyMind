@@ -59,6 +59,7 @@ import { getFileUrls } from "../utils/fileInputs";
 import type { ChatContainerProps, ChatImperativeProps } from "../types";
 import type { useUserMessageEdit } from "./useUserMessageEdit";
 import { useChatScroll } from "./useChatScroll";
+import { useAskAnswerSubmission } from "./useAskAnswerSubmission";
 import { waitForRuntimeCapability } from "@/runtime/readiness";
 import {
   idleStreamRecoveryState,
@@ -2544,7 +2545,17 @@ export function useChatConversation({
     streamManager.saveMessageList(item.conversation_id, list);
   }
 
+  const askAnswerSubmission = useAskAnswerSubmission({
+    conversationId: currentConversationIdRef.current,
+    busy: isStreaming || loading || runtimeWaiting,
+    activeStreamRef,
+    messageListRef,
+    sendNow: sendMessage,
+  });
+
   return {
+    submitAskAnswer: askAnswerSubmission.submit,
+    askAnswerPending: askAnswerSubmission.pending,
     modelFallbackNotificationHolder,
     showAcceptedSteering,
     creationError,

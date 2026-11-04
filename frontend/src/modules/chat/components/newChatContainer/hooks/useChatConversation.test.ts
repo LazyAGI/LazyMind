@@ -162,6 +162,33 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it("waits for the terminal frame before opening the Ask answer's ordinary request", async () => {
+    const { stream, listeners } = createMockStream();
+    const onOpenSSE = vi.fn<Parameters<typeof useChatConversation>[0]["onOpenSSE"]>(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList("ask-chat", []));
+    await act(async () => { await result.current.sendMessage({ text: "生成 PPT" }); });
+    await act(async () => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "ask-chat", history_id: "ask-history", seq: 1,
+      ask_pending: { ask_id: "format-card", questions: [{ text: "输出格式", type: "single", choices: ["PPTX"] }] },
+    } }) }));
+    const answer = { text: "PPTX", ask_answers_structured: { ask_id: "format-card", questions: [
+      { text: "输出格式", type: "single" as const, choices: ["PPTX"], custom_choices: ["PPTX"],
+        answer: { type: "single" as const, value: "PPTX" } },
+    ] } };
+    let submitted!: Promise<boolean>;
+    act(() => { submitted = result.current.submitAskAnswer(answer); });
+    expect(result.current.askAnswerPending).toBe(true);
+    expect(onOpenSSE).toHaveBeenCalledTimes(1);
+    await act(async () => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "ask-chat", history_id: "ask-history", seq: 1,
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+    } }) }));
+    await waitFor(() => expect(onOpenSSE).toHaveBeenCalledTimes(2));
+    expect(await submitted).toBe(true);
+    expect(onOpenSSE.mock.calls[1][3]).toMatchObject({ ask_answers_structured: answer.ask_answers_structured });
+  });
+
   it('keeps terminal tool counts live and replaces them with zero on regeneration', async () => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
