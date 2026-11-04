@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import lazyllm
 
@@ -7,6 +7,11 @@ from lazymind.chat.workflow.workflow_manager import (
     build_workflow_discovery_context,
     resolve_workflow_injection,
 )
+
+
+def _tool_names(tools):
+    return {tool.__name__ for entry in tools
+            for tool in (entry['tools'] if isinstance(entry, dict) else [entry])}
 
 
 def _catalog():
@@ -72,13 +77,13 @@ def test_non_mentioned_workflows_are_available_for_chatagent_routing():
         else:
             lazyllm.globals['agentic_config'] = previous
 
-    tool_names = {getattr(tool, '__name__', '') for tool in contribution.tools}
+    tool_names = _tool_names(contribution.tools)
     group_names = {tool.get('name') for tool in contribution.tools if isinstance(tool, dict)}
     authoring_group = next(
         tool for tool in contribution.tools
         if isinstance(tool, dict) and tool.get('name') == 'workflow_authoring'
     )
-    assert group_names == {'workflow_authoring'}
+    assert group_names == {'workflow_authoring', 'workflow_launch', 'workflow_session'}
     assert 'trigger_image_workflow' in tool_names
     assert 'trigger_test_workflow' in tool_names
     assert authoring_group['lazy'] is True
@@ -118,13 +123,13 @@ def test_selected_workflow_expands_trigger_and_execution_tools():
         else:
             lazyllm.globals['agentic_config'] = previous
 
-    tool_names = {getattr(tool, '__name__', '') for tool in contribution.tools}
+    tool_names = _tool_names(contribution.tools)
     assert 'trigger_image_workflow' in tool_names
     assert 'trigger_test_workflow' not in tool_names
     assert 'advance_step' in tool_names
     assert 'advance_step_and_hand_off' in tool_names
     assert 'resume_workflow' not in tool_names
-    assert not any(isinstance(tool, dict) for tool in contribution.tools)
+    assert {tool['name'] for tool in contribution.tools} == {'workflow_launch', 'workflow_session'}
     assert 'Explicit Workflow Selection' in contribution.runtime_context
 
 
@@ -156,7 +161,9 @@ def test_active_workflow_hides_triggers_and_resume():
                     build_workflow_discovery_context(_catalog()).activations[0],
                 ],
             )
-        client_factory.return_value.get_workflow.assert_called_once_with('image-workflow', 'rev-image')
+        assert client_factory.return_value.get_workflow.call_args_list == [
+            call('image-workflow', 'rev-image'), call('image-workflow', ''),
+        ]
         client_factory.return_value.get_state.assert_called_once_with('workflow-session-1')
         http_get.assert_not_called()
     finally:
@@ -165,7 +172,7 @@ def test_active_workflow_hides_triggers_and_resume():
         else:
             lazyllm.globals['agentic_config'] = previous
 
-    tool_names = {getattr(tool, '__name__', '') for tool in contribution.tools}
+    tool_names = _tool_names(contribution.tools)
     assert not any(name.startswith('trigger_') for name in tool_names)
     assert 'advance_step' in tool_names
     assert 'advance_step_and_hand_off' in tool_names

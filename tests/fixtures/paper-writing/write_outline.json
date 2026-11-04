@@ -1,0 +1,10 @@
+{
+  "input": {
+    "topic": "测试论文",
+    "question": "比较已有方法与验证证据。"
+  },
+  "output": {
+    "outline": "# 测试论文\n\n## 方法\n说明研究方法。\n\n## 局限\n说明证据范围。",
+    "is_demo": true
+  }
+}

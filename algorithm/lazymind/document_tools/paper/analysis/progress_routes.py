@@ -54,7 +54,7 @@ def read_snapshot(task_id, task):
     pointers = list(WORKSPACES.glob(f'*/{task_id}/f4-trace/latest.json'))
     if len(pointers) == 1:
         try:
-            pointer = json.loads(pointers[0].read_text())
+            pointer = json.loads(pointers[0].read_text(encoding='utf-8'))
             trace_id = pointer.get('trace_id', '')
             if not re.fullmatch(r'[0-9a-f]{32}', trace_id):
                 raise ValueError('Invalid trace')
@@ -63,7 +63,7 @@ def read_snapshot(task_id, task):
                 raise ValueError('Invalid progress path')
             if source.stat().st_size > 1024 * 1024:
                 raise ValueError('Progress exceeds its display limit')
-            public = json.loads(source.read_text())
+            public = json.loads(source.read_text(encoding='utf-8'))
             if public.get('task_id') != task_id or public.get('execution_id') != trace_id:
                 raise ValueError('Progress belongs to another execution')
             steps = []
@@ -91,7 +91,7 @@ def read_snapshot(task_id, task):
                 summary_path = source.with_name('summary.json')
                 if (summary_path.resolve().is_relative_to(WORKSPACES.resolve())
                         and summary_path.stat().st_size <= 2 * 1024 * 1024):
-                    saved = json.loads(summary_path.read_text())
+                    saved = json.loads(summary_path.read_text(encoding='utf-8'))
                     if saved.get('task_id') == task_id and saved.get('trace_id') == trace_id:
                         value['error'] = public_error(saved.get('error'))
         except (OSError, ValueError, KeyError, TypeError):

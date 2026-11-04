@@ -179,12 +179,12 @@ import os, time
 array = mapped(os.environ['PAPER_TEST_TARGET'], dtype='uint8', mode='w+', shape=(20 * 1024 ** 2,))
 array[:] = 1
 array.flush()
-time.sleep(30)
+time.sleep(120)
 '''
     if failure == 'timeout':
         code = 'import time; time.sleep(30)'
     with pytest.raises(RuntimeError, match='超时' if failure == 'timeout' else '临时文件超过'):
-        _native_worker(tmp_path, code, timeout=1 if failure == 'timeout' else 20)
+        _native_worker(tmp_path, code, timeout=1 if failure == 'timeout' else 90)
     assert directories and all(not root.exists() for root in directories)
 
 

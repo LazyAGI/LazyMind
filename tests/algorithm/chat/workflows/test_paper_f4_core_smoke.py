@@ -1,4 +1,4 @@
-"""Compact offline F4 checks using the real generated-code executors."""
+"""Offline F4 checks executing trusted test programs without platform isolation."""
 import copy
 import json
 import shutil
@@ -46,7 +46,7 @@ def draw(data, statistics, spec) -> matplotlib.figure.Figure:
 
 
 @pytest.fixture(autouse=True)
-def runtime_state():
+def runtime_state(paper_execution):
     previous = {key: lazyllm.globals.get(key) for key in ('agentic_config', 'subagent_ctx')}
     yield
     for key, value in previous.items():

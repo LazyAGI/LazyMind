@@ -34,10 +34,9 @@ def paper_simulation(monkeypatch, request):
     # This fixture simulates routing/publication, including F2 source selection.
     monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
     monkeypatch.setattr(review_materials, 'prepare', lambda inputs, *a, **kw: copy.deepcopy(inputs['papers']))
-    source = json.loads((Path(__file__).resolve().parents[4] /
-        'tests/fixtures/paper-writing/write_document.json').read_text())['input']
-    source['analysis'] = json.loads((Path(__file__).resolve().parents[4] /
-        'tests/fixtures/paper-writing/data_analysis.json').read_text())['output']['analysis']
+    examples = Path(__file__).resolve().parents[4] / 'tests/fixtures/paper-writing'
+    source = json.loads((examples / 'write_document.json').read_text(encoding='utf-8'))['input']
+    source['analysis'] = json.loads((examples / 'data_analysis.json').read_text(encoding='utf-8'))['output']['analysis']
     original_seed = workflow.seed_pool
 
     def seed():
@@ -80,6 +79,15 @@ def paper_simulation(monkeypatch, request):
                        columns=refs, finding_ids=[value['findings'][0]['id']])]
         return {'analysis': value, 'charts': charts, 'is_demo': True}
 
+    def outline(inputs):
+        return {'outline': inputs.get('outline') or '# 测试论文\n\n## 方法\n已确认大纲。', 'is_demo': True}
+
+    def experiment(inputs, **kwargs):
+        from lazymind.document_tools.paper.experiment.algorithm import build_output
+        from lazymind.document_tools.paper.experiment.schema import ExperimentDraft
+        example = json.loads((examples / 'experiment.json').read_text(encoding='utf-8'))
+        return build_output(ExperimentDraft.model_validate(example['model_response']), inputs)
+
     def writer(inputs):
         body = inputs['manuscript'] or ((inputs['outline'] or '# 测试论文\n\n## 方法') + '\n测试正文。')
         result = {'manuscript': body + '\n测试修订。', 'is_demo': True}
@@ -99,8 +107,82 @@ def paper_simulation(monkeypatch, request):
         return {**output, **reviewer({**inputs, 'manuscript': output['manuscript']})}
 
     monkeypatch.setattr(workflow, 'seed_pool', seed)
-    for name, fn in [('research_topic', question), ('literature_review', literature), ('data_analysis', analysis),
-                     ('write_document', writer), ('revise_document', revision), ('peer_review', reviewer)]:
+    substitutes = [('research_topic', question), ('literature_review', literature), ('data_analysis', analysis),
+                   ('write_outline', outline), ('experiment', experiment), ('write_document', writer),
+                   ('revise_document', revision), ('peer_review', reviewer)]
+    for name, fn in substitutes:
         if name == 'research_topic' and request.module.__name__.endswith(('test_paper_writing', 'test_paper_writing_algorithms')):
             continue
         monkeypatch.setattr(api.ALGORITHMS[name], 'run', fn)
+
+
+@pytest.fixture
+def paper_execution(monkeypatch):
+    """Run the suite's trusted programs in children without production sandbox requirements."""
+    import subprocess
+    import sys
+    from lazymind.document_tools.paper.execution import container
+
+    def execute(payload, worker, timeout, *, label):
+        result = subprocess.run(
+            [sys.executable, '-I', '-B', '-X', 'utf8', str(worker)],
+            input=json.dumps(payload, ensure_ascii=False, allow_nan=False),
+            capture_output=True, text=True, encoding='utf-8', timeout=timeout,
+        )
+        value = json.loads(result.stdout)
+        if result.returncode or 'error' in value:
+            raise RuntimeError(label + '执行失败: ' + value.get('error', result.stderr))
+        return value
+
+    monkeypatch.setattr(container, 'validate_environment', lambda: None)
+    monkeypatch.setattr(container, 'execute', execute)
+
+
+@pytest.fixture
+def offline_paper_model(monkeypatch):
+    """Keep dynamic routing and SDK parsing real, with deterministic provider responses."""
+    from lazyllm.common import new_session
+    from lazyllm.module.llms.model_config_inject import inject_model_config
+
+    responses, requests = [], []
+
+    class Response:
+        status_code = 200
+        raw = None
+
+        def __init__(self, content):
+            self.content_text = json.dumps(content, ensure_ascii=False)
+            message = {'role': 'assistant', 'content': self.content_text}
+            self.text = json.dumps({'choices': [{'index': 0, 'finish_reason': 'stop', 'message': message}]})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def iter_lines(self):
+            value = {'choices': [{'index': 0, 'delta': {'content': self.content_text}}]}
+            yield ('data: ' + json.dumps(value)).encode('utf-8')
+            yield b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}'
+            yield b'data: [DONE]'
+
+    def post(url, **kwargs):
+        assert url.startswith('http://paper-provider.test/v1/')
+        assert responses, 'Unexpected additional model call'
+        assert kwargs['json']['model'] == 'offline-paper'
+        requests.append(kwargs['json'])
+        return Response(responses.pop(0))
+
+    def configure(*values):
+        responses.extend(copy.deepcopy(values))
+        return requests
+
+    monkeypatch.setattr('requests.post', post)
+    with new_session():
+        inject_model_config({'llm': {
+            'source': 'openai', 'model': 'offline-paper',
+            'base_url': 'http://paper-provider.test/v1/', 'api_key': 'offline-test',
+        }})
+        yield configure
+    assert not responses, 'Expected model responses were not consumed'

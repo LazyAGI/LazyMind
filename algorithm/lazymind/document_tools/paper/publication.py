@@ -97,7 +97,10 @@ def _save_svg(chart):
         staged.write(data)
         staged.flush()
         # Core may serve the shared upload directory under a different UID.
-        os.fchmod(staged.fileno(), 0o644)
+        if hasattr(os, 'fchmod'):
+            os.fchmod(staged.fileno(), 0o644)
+        else:
+            os.chmod(staged.name, 0o644)
         try:
             os.link(staged.name, target)
         except FileExistsError:

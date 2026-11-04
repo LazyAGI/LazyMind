@@ -76,7 +76,8 @@
         "doi": null,
         "content_type": "excerpt",
         "source": "upload",
-        "truncated": false
+        "truncated": false,
+        "citation": "方法比较示例[Z]."
       }
     ]
   }

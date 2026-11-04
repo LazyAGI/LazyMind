@@ -1,4 +1,4 @@
-"""F3 pure contract checks and explicit real-model integration (no model substitutes)."""
+"""F3 contracts and dynamic SDK integration with offline provider responses."""
 import copy
 import csv
 import json
@@ -712,8 +712,10 @@ def test_ask_user_answer_keeps_original_goal():
     assert field['choices'][0] in merged
 
 
-def test_real_model_experiment_to_f4_contract_and_downloads(example, tmp_path):
-    """Run explicitly with configured real llm; never runs generated experiment code."""
+def test_dynamic_model_experiment_to_f4_contract_and_downloads(example, tmp_path, offline_paper_model):
+    """Exercise the dynamic SDK boundary and real contracts without a live provider."""
+    offline_paper_model({'action': 'simulation', 'table_ids': [], 'reason': '本轮只生成模拟实验。'},
+                        example['model_response'])
     pool = workflow.pool_from_business({**example['input'], 'request': '明确进行模拟研究，比较均值与中位数。'})
     result = workflow.execute_step('experiment', pool)
     output = {key: workflow.material(result['pool'], key)['content'] for key in contracts.OUTPUTS['experiment']}

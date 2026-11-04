@@ -1,4 +1,4 @@
-"""Real-model F6 integration, plus direct schema and report-rendering checks."""
+"""Dynamic SDK F6 integration, plus direct schema and report-rendering checks."""
 import copy
 import json
 import re
@@ -25,7 +25,8 @@ def test_review_instructions_are_english_with_explicit_output_language():
         assert not re.search(r'[\u4e00-\u9fff]', json.dumps(schema.model_json_schema(), ensure_ascii=False))
 
 
-def test_real_model_review_preserves_input_and_output_contract(example):
+def test_dynamic_model_review_preserves_input_and_output_contract(example, offline_paper_model):
+    offline_paper_model(example['model_response'])
     before = copy.deepcopy(example['input'])
     output = api.run_algorithm('peer_review', example['input'])
     assert example['input'] == before
@@ -36,7 +37,8 @@ def test_real_model_review_preserves_input_and_output_contract(example):
     assert output['review_data']['manuscript_sha256'] == peer_review.text_digest(before['manuscript'])
 
 
-def test_real_review_reaches_revision_contract(example):
+def test_dynamic_review_reaches_revision_contract(example, offline_paper_model):
+    offline_paper_model(example['model_response'])
     pool = workflow.pool_from_business(example['input'])
     result = workflow.execute_step('peer_review', pool, '只检查结论是否超出证据')
     assert result['status'] == 'completed'

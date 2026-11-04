@@ -130,7 +130,7 @@ def test_middle_entry_needs_only_business_data(step, fields):
 
 
 @pytest.mark.parametrize('step,inputs', [
-    ('peer_review', {'topic': 'T'}), ('revise_document', {'topic': 'T', 'manuscript': '# 稿件'}),
+    ('peer_review', {'topic': 'T'}), ('revise_document', {'topic': 'T', 'manuscript': '# 稿件\n\n## 方法\n正文。'}),
     ('refine_topic', {'topic': 'T'}), ('reading_reflection', {'topic': 'T', 'papers': []}),
     ('data_analysis', {'topic': 'T', 'experiment': {
         'executed': False, 'plan': '方案', 'results': None, 'report': '仅方案', 'code': None, 'logs': None}}),
@@ -139,8 +139,10 @@ def test_missing_business_materials_stop_before_algorithm(step, inputs, monkeypa
     module = tools.contracts.ALIASES.get(step, step)
     def must_not_run(_):
         pytest.fail('missing materials reached algorithm')
-    monkeypatch.setattr(api.ALGORITHMS[module], 'run', must_not_run)
-    with pytest.raises(tools.MissingMaterials, match='缺少'):
+    boundary = 'generated_analysis' if module == 'data_analysis' else 'run'
+    monkeypatch.setattr(api.ALGORITHMS[module], boundary, must_not_run)
+    message = '请明确' if step == 'revise_document' else '缺少'
+    with pytest.raises(tools.MissingMaterials, match=message):
         tools.run_algorithm(step, inputs)
 
 
@@ -183,7 +185,7 @@ def test_f1_long_paper_condenses_without_mutating_source_pool(monkeypatch):
     monkeypatch.setattr(research_topic, 'AutoModel', lambda **_kwargs: model)
     result = tools.execute_step('research_topic', pool)
     final_input = json.loads(prompts[-1].split('Input materials (JSON):\n', 1)[1])
-    assert final_input['papers'] == [{'id': 'P1', 'title': '长论文', 'abstract': '[P1] 方法与结果仍需核验。'}]
+    assert final_input['papers'] == [{'id': 'M1', 'title': '长论文', 'abstract': '[M1] 方法与结果仍需核验。'}]
     assert pool == before
     prepared = tools.material(result['pool'], 'papers')
     assert prepared['content'] == [{**paper, 'abstract': '[P1] 方法与结果仍需核验。'}]
@@ -609,8 +611,8 @@ def test_f7_rejects_invalid_model_output_without_publishing(invalid, monkeypatch
 
 def test_f2_feedback_refines_f1_question_without_overwriting_evidence(monkeypatch):
     old_question = '# 旧选题\n\n## 研究问题\n原方法能否改善效果？'
-    papers = [{'id': 'P1', 'title': '论文一', 'abstract': '原有摘要'}]
-    added = {'id': 'P2', 'title': '论文二', 'text': '摘要：新证据\n关键词：检索'}
+    papers = [{'id': 'P1', 'title': '论文一', 'abstract': '原有摘要', 'citation': '论文一[Z].'}]
+    added = {'id': 'P2', 'title': '论文二', 'text': '摘要：新证据\n关键词：检索', 'citation': '论文二[Z].'}
     pool = tools.pool_from_business({'topic': 'T', 'question': old_question, 'papers': papers})
     monkeypatch.setattr(api.ALGORITHMS['literature_review'], 'run', lambda inputs: {
         'evidence': '# 初始综述\n尚待人工核对。', 'papers': [*inputs['papers'], added], 'is_demo': False,
@@ -637,7 +639,7 @@ def test_one_real_algorithm_replacement_preserves_storage_and_next_input(monkeyp
     pool = tools.pool_from_business({'topic': '实际主题', 'papers': [
         {'id': 'ref-001', 'title': '原文', 'text': '真实输入正文', 'abstract': '已有摘要', 'url': None,
          'authors': [], 'year': None, 'doi': None, 'content_type': 'excerpt',
-         'source': 'test', 'truncated': False}]})
+         'source': 'test', 'truncated': False, 'citation': '原文[Z].'}]})
     before = copy.deepcopy(pool)
     seen = []
     def research(inputs):
@@ -687,9 +689,10 @@ def test_every_path_supplies_exact_current_business_values(path, monkeypatch):
             expected['papers'] = research_topic.prepare_papers(expected['papers'])
         original = module.run
         received = []
-        def capture(value):
-            received.append(copy.deepcopy(value))
-            return original(value)
+
+        def capture(value, *, _received=received, _original=original, **kwargs):
+            _received.append(copy.deepcopy(value))
+            return _original(value, **kwargs)
         with monkeypatch.context() as patch:
             patch.setattr(module, 'run', capture)
             pool = tools.execute_step(step, pool, '本轮要求')['pool']

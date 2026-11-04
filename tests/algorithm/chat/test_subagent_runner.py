@@ -1940,6 +1940,8 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
 
     monkeypatch.setattr(runner_mod, 'set_context', capture_context)
 
+    artifact_delivered = asyncio.Event()
+
     class ProgressiveArtifactExecutor:
         async def stream(self, llm, plan):
             yield 'event', {
@@ -1961,7 +1963,7 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
             })
             # Model a publisher that keeps generating more pages after page one
             # has already been made available to the UI.
-            await asyncio.sleep(0.01)
+            await asyncio.wait_for(artifact_delivered.wait(), timeout=5)
             yield 'event', {
                 'tag': 'tool_results',
                 'tool_results': [{'id': 'ppt-1', 'name': 'ppt_generate_pages', 'result': 'ok'}],
@@ -1970,10 +1972,14 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
 
     monkeypatch.setattr(runner_mod, 'AgentExecutor', ProgressiveArtifactExecutor)
 
+    def delivered(chunk):
+        if any(item.get('type') == 'artifact' for item in _sse_to_events(chunk)):
+            artifact_delivered.set()
+
     async def run():
         return await _collect(runner_mod.run_subagent_stream(
             _DEFAULT_TASK_ID, task_spec=workflow_task,
-        ))
+        ), on_chunk=delivered)
 
     events_out = _sse_to_events(asyncio.run(run()))
     event_types = [event.get('type') for event in events_out]
