@@ -745,6 +745,16 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	plan := json.RawMessage(`{"status":"ready"}`)
 	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, ""); packageErr == nil {
+		if err := workflowcore.RequireWorkflowReady(r.Context(), h.Store.Database(), owner, workflow.WorkflowRef, workflow.RevisionID); err != nil {
+			var invalid *workflowcore.WorkflowNotReadyError
+			if errors.As(err, &invalid) {
+				failWorkflowReadiness(w, invalid.Result)
+			} else {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_CHECK_UNAVAILABLE", "Unable to check workflow configuration", true)
+			}
+			return
+		}
+
 		if _, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare"); err != nil {
 			fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
 			return
@@ -860,6 +870,16 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 	}
 	revisionID, _ := preparedResult["workflow_revision"].(string)
 	if workflowPackage, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, prepared.WorkflowID, revisionID); packageErr == nil {
+		if err := workflowcore.RequireWorkflowReady(r.Context(), h.Store.Database(), owner, workflowPackage.WorkflowRef, workflowPackage.RevisionID); err != nil {
+			var invalid *workflowcore.WorkflowNotReadyError
+			if errors.As(err, &invalid) {
+				failWorkflowReadiness(w, invalid.Result)
+			} else {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_CHECK_UNAVAILABLE", "Unable to check workflow configuration", true)
+			}
+			return
+		}
+
 		var original prepareRequest
 		_ = json.Unmarshal(prepared.RequestJSON, &original)
 		conversationID := strings.TrimSpace(original.ConversationID)
@@ -1110,4 +1130,8 @@ func (c *capture) Write(value []byte) (int, error) {
 		c.status = 200
 	}
 	return c.body.Write(value)
+}
+
+func failWorkflowReadiness(w http.ResponseWriter, readiness workflowcore.WorkflowReadiness) {
+	writeJSON(w, http.StatusUnprocessableEntity, envelope{Error: &Error{Code: "WORKFLOW_CONFIGURATION_INVALID", Message: "Workflow configuration requires repair", Details: map[string]any{"readiness": readiness}}})
 }

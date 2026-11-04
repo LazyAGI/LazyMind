@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CHANNEL_ACCOUNTS_CHANGED_EVENT, archiveChannelAccount, channelAccountConnectionStatus, isChannelAccountAvailable, cancelConnectionSession, createConnectionSession, listChannelAccounts, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
+import { CHANNEL_ACCOUNTS_CHANGED_EVENT, archiveChannelAccount, channelAccountConnectionStatus, channelAccountStatusKey, channelProviderStatusKey, channelStatusLabelKey, channelStatusHintKey, isChannelAccountAvailable, isChannelAccountPendingActivation, cancelConnectionSession, createConnectionSession, listChannelAccounts, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
 
 const http = vi.hoisted(() => ({ request: vi.fn(), post: vi.fn(), defaults: {} }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
@@ -135,4 +135,52 @@ it('distinguishes WeCom authorization requirements from a network disconnection'
   expect(channelAccountConnectionStatus({ ...account, capabilities: { authorization_required: false } })).toBe('connected');
   expect(channelAccountConnectionStatus({ ...account, binding_status: 'paused', status: 'disconnected' })).toBe('disconnected');
   expect(channelAccountConnectionStatus({ ...account, capabilities: {}, runtime_status: 'failed' })).toBe('disconnected');
+});
+
+
+describe('shared connection status labels', () => {
+  it.each(['disconnected', 'stopped', 'failed'] as const)('uses notConnected for a %s account', state => {
+    const account = { ...feishu('Bot'), ...(state === 'disconnected' ? { status: state } : { runtime_status: state }) } as ChannelAccount;
+    expect(channelAccountStatusKey(account)).toBe('notConnected');
+    expect(channelProviderStatusKey([account])).toBe('notConnected');
+  });
+  it('recognizes activation metadata without requiring a second flag', () => {
+    const account = { ...feishu('Bot'), provider: 'wechat', capabilities: { connection_check_status: 'activation_required' } } as ChannelAccount;
+    expect(isChannelAccountPendingActivation(account)).toBe(true);
+    expect(isChannelAccountAvailable(account)).toBe(false);
+    expect(channelAccountStatusKey(account)).toBe('pendingActivation');
+  });
+  it.each([
+    { capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED', notification_ready: false }, expected: 'wechatReconnectRequired' },
+  ])('does not show $expected as connected or pending activation', ({ capabilities, expected }) => {
+    const account = { ...feishu('Bot'), provider: 'wechat', capabilities } as ChannelAccount;
+    expect(isChannelAccountPendingActivation(account)).toBe(false);
+    expect(isChannelAccountAvailable(account)).toBe(false);
+    expect(channelAccountStatusKey(account)).toBe(expected);
+    expect(channelProviderStatusKey([account])).toBe(expected);
+  });
+  it('keeps an aggregate connected when another account remains usable', () => {
+    const offline = { ...feishu('Offline'), status: 'disconnected' } as ChannelAccount;
+    expect(channelProviderStatusKey([offline, feishu('Online')])).toBe('connected');
+    expect(channelAccountStatusKey(offline)).toBe('notConnected');
+  });
+});
+
+it('keeps recipient check failures separate from the account transport connection', () => {
+  const account = { ...feishu('Bot'), provider: 'wechat', capabilities: { connection_check_status: 'unavailable', notification_ready: false } } as ChannelAccount;
+  expect(channelAccountStatusKey(account)).toBe('connected');
+  expect(isChannelAccountPendingActivation(account)).toBe(false);
+});
+
+
+it('uses one primary label while preserving the actionable connection cause', () => {
+  const expired = { ...feishu('Bot'), provider: 'wechat', capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED' } } as ChannelAccount;
+  const cause = channelAccountStatusKey(expired);
+  expect(cause).toBe('wechatReconnectRequired');
+  expect(channelStatusLabelKey(cause)).toBe('notConnected');
+  expect(channelStatusHintKey(cause)).toBe('wechatReconnectHint');
+  expect(channelStatusLabelKey('wecomAuthorizationExpired')).toBe('notAuthorized');
+  expect(channelStatusHintKey('wecomAuthorizationExpired')).toBe('wecomReauthorizeStepHint');
+  expect(channelStatusLabelKey('wechatConnectionUnavailable')).toBe('unavailable');
+  expect(channelStatusHintKey('wechatConnectionUnavailable')).toBe('wechatConnectionUnavailableHint');
 });

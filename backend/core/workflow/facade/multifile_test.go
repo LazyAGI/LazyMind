@@ -25,6 +25,7 @@ func TestPrepareConsumeOrderedFilesAndRejectInvalidBindings(t *testing.T) {
 	if err := db.Create(&orm.WorkflowRevision{ID: "files-revision", WorkflowResourceID: "files-workflow", RevisionNo: 1, CreatedAt: now, CompiledGraph: json.RawMessage(`{"nodes":{},"material_producers":{"files":{"kind":"external"},"brief":{"kind":"external","optional":true}},"material_cardinalities":{"files":"list","brief":"single"}}`)}).Error; err != nil {
 		t.Fatal(err)
 	}
+	seedFacadeSources(t, db, "files-revision", "id: files\nslots:\n  - {id: files, external: true, cardinality: list}\n  - {id: brief, external: true}\n  - {id: result}\nsteps:\n  - {id: write}\n", "transitions:\n  __start__: [{to: write}]\n  write: [{to: __end__}]\nsteps:\n  write:\n    input_expression: {material: files}\n    optional_inputs: [{material: brief}]\n    outputs: [result]\n    prompt: Read all files\n")
 	refs := []any{}
 	for index := range 13 {
 		resource, _, err := h.Store.ImportInputResource(t.Context(), "owner", "same-name.txt", "text/plain", fmt.Sprintf("sha256:%d", index), []byte(fmt.Sprintf("file %d", index)))

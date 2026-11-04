@@ -23,6 +23,9 @@ import { useTranslation } from 'react-i18next';
 import {
   CHANNEL_ACCOUNTS_CHANGED_EVENT,
   channelAccountLabel,
+  channelAccountStatusKey,
+  channelStatusLabelKey,
+  channelStatusHintKey,
   isChannelAccountAvailable,
   isChannelAccountAuthorizationRequired,
   isChannelAccountPendingActivation,
@@ -274,7 +277,7 @@ export default function TerminalConnectionQuickPanel({
       if (accountRequestRef.current === requestId) {
         setAccounts(
           results.flatMap((result) => result.items)
-            .filter((account) => isChannelAccountAvailable(account) || isChannelAccountPendingActivation(account) || isChannelAccountAuthorizationRequired(account))
+            .filter((account) => isChannelAccountAvailable(account) || isChannelAccountPendingActivation(account) || isChannelAccountAuthorizationRequired(account) || channelAccountStatusKey(account) === 'wechatReconnectRequired')
             .sort((left, right) => (
               dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
             )),
@@ -414,8 +417,9 @@ export default function TerminalConnectionQuickPanel({
               <ul className="terminal-quick-account-list">
                 {providerAccounts.map((account) => {
                   const itemProvider = accountProvider(account);
-                  const pendingActivation = isChannelAccountPendingActivation(account);
                   const authorizationRequired = isChannelAccountAuthorizationRequired(account);
+                  const accountStatus = channelAccountStatusKey(account);
+                  const accountHint = channelStatusHintKey(accountStatus);
                   return (
                     <li key={account.id}>
                       <button
@@ -432,15 +436,14 @@ export default function TerminalConnectionQuickPanel({
                         <span className="terminal-quick-account-copy">
                           <strong>{channelAccountLabel(account, accounts) || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
                           <small>
-                            {authorizationRequired ? t('notifications.wecomAuthorizationExpired') : t(`channelGateway.${itemProvider}.accountStatusMap.${pendingActivation ? 'pendingActivation' : account.status}`, {
-                              defaultValue: pendingActivation ? t('notifications.pendingActivation') : account.status,
-                            })}
+                            {t('notifications.' + channelStatusLabelKey(accountStatus))}
                             {!authorizationRequired && <> · {t(`channelGateway.${itemProvider}.runtimeStatusMap.${account.runtime_status}`, {
                               defaultValue: account.runtime_status,
                             })}</>}
                             {' · '}
                             {t('channelGateway.terminal.connectedAt')}: {formatAccountTime(account.connected_at)}
                           </small>
+                          {accountHint && <small>{t('notifications.' + accountHint)}</small>}
                         </span>
                         <span className="terminal-quick-account-action">
                           {authorizationRequired ? <SettingOutlined aria-hidden="true" /> : <QrcodeOutlined aria-hidden="true" />}

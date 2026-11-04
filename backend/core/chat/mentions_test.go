@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -205,7 +206,7 @@ func TestConversationWorkflowBindingSurvivesFollowUpAndClearsAtSessionEnd(t *tes
 	}
 }
 
-func TestExplicitWorkflowMentionOverridesDisabledConversationToggle(t *testing.T) {
+func TestWorkflowMentionRequiresEnabledConversation(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.WorkflowSession{})
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{ID: "conversation-1",
@@ -213,20 +214,42 @@ func TestExplicitWorkflowMentionOverridesDisabledConversationToggle(t *testing.T
 		t.Fatal(err)
 	}
 
-	refs, err := resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1",
-		[]string{"builtin:test-workflow"}, nil, false, true)
-	if err != nil || len(refs) != 1 || refs[0] != "builtin:test-workflow" {
-		t.Fatalf("explicit mention refs=%v err=%v", refs, err)
+	for _, conversationID := range []string{"", "conversation-1"} {
+		refs, err := resolveConversationWorkflowBinding(context.Background(), db.DB, conversationID,
+			[]string{"builtin:test-workflow"}, nil, false, true)
+		if !errors.Is(err, errConversationWorkflowsDisabled) || len(refs) != 0 {
+			t.Fatalf("disabled selection refs=%v err=%v", refs, err)
+		}
 	}
 	bound, err := readConversationWorkflowBinding(context.Background(), db.DB, "conversation-1")
-	if err != nil || bound != "builtin:test-workflow" {
-		t.Fatalf("persisted binding=%q err=%v", bound, err)
+	if err != nil || bound != "" {
+		t.Fatalf("disabled selection persisted binding=%q err=%v", bound, err)
 	}
 
-	refs, err = resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1",
-		nil, nil, false, true)
-	if err != nil || len(refs) != 1 || refs[0] != "builtin:test-workflow" {
-		t.Fatalf("disabled follow-up must preserve explicit binding refs=%v err=%v", refs, err)
+	refs, err := resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1",
+		[]string{"builtin:test-workflow"}, nil, true, true)
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("enabled selection refs=%v err=%v", refs, err)
+	}
+	refs, err = resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1", nil, nil, false, true)
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("disabled follow-up restored binding refs=%v err=%v", refs, err)
+	}
+	refs, err = resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1", nil, nil, true, true)
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("enabled follow-up lost binding refs=%v err=%v", refs, err)
+	}
+}
+
+func TestWorkflowSelectionDoesNotOverrideDisabledConversation(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserUIPreferences{}, &orm.UserWorkflowSetting{})
+	body := map[string]any{"enable_workflow": false}
+	err := applyWorkflowSelection(context.Background(), db.DB, "user-1", body, []string{"builtin:test-workflow"}, nil)
+	if !errors.Is(err, errConversationWorkflowsDisabled) {
+		t.Fatalf("selection error=%v", err)
+	}
+	if body["enable_workflow"] != false || body["allowed_workflow_refs"] != nil || body["workflow_activations"] != nil {
+		t.Fatalf("disabled conversation was enabled: %#v", body)
 	}
 }
 

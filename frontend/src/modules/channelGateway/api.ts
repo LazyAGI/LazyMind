@@ -122,6 +122,7 @@ export function channelAccountConnectionStatus(account: ChannelAccount): 'connec
   if (account.status === 'provisioning') return 'connecting';
   if (account.status !== 'connected' || ['paused', 'unbound'].includes(account.binding_status || '')) return 'disconnected';
   if (isChannelAccountAuthorizationRequired(account)) return 'authorization_required';
+  if (account.provider === 'wechat' && account.capabilities?.connection_error_code === 'WECHAT_REAUTHORIZATION_REQUIRED') return 'disconnected';
   if (account.runtime_status === 'starting') return 'connecting';
   if (account.provider === 'feishu' && account.runtime_status === 'degraded' && account.capabilities?.connection_ready === true) return 'connected';
   if (['stopped', 'failed', 'degraded', 'unsupported'].includes(account.runtime_status)) return 'disconnected';
@@ -131,7 +132,49 @@ export function channelAccountConnectionStatus(account: ChannelAccount): 'connec
 export function isChannelAccountPendingActivation(account: ChannelAccount): boolean {
   return account.provider === 'wechat'
     && channelAccountConnectionStatus(account) === 'connected'
-    && account.capabilities?.notification_ready === false;
+    && account.capabilities?.connection_check_status !== 'unavailable'
+    && (account.capabilities?.notification_ready === false || account.capabilities?.connection_check_status === 'activation_required');
+}
+
+// Current-state labels share one vocabulary. "disconnected" remains an action/result message.
+export function channelAccountStatusKey(account?: ChannelAccount): string {
+  if (!account) return 'notConnected';
+  if (account.binding_status === 'unbound') return 'unbound';
+  const status = channelAccountConnectionStatus(account);
+  if (account.provider === 'wechat' && account.binding_status !== 'paused' && status !== 'connecting'
+    && account.capabilities?.connection_error_code === 'WECHAT_REAUTHORIZATION_REQUIRED') return 'wechatReconnectRequired';
+  if (account.provider === 'wechat' && account.status === 'connected' && account.binding_status !== 'paused') {
+    if (['failed', 'degraded'].includes(account.runtime_status)) return 'wechatConnectionUnavailable';
+  }
+  if (status === 'connecting') return 'connecting';
+  if (status === 'authorization_required') return 'wecomAuthorizationExpired';
+  if (status === 'disconnected') return 'notConnected';
+  return isChannelAccountPendingActivation(account) ? 'pendingActivation' : 'connected';
+}
+
+export function channelProviderStatusKey(accounts: ChannelAccount[]): string {
+  const statuses = accounts.map(channelAccountStatusKey);
+  return ['connected', 'wecomAuthorizationExpired', 'connecting', 'pendingActivation', 'wechatReconnectRequired', 'wechatConnectionUnavailable']
+    .find(status => statuses.includes(status)) ?? 'notConnected';
+}
+
+// Keep diagnostic causes separate from the smaller set of user-facing labels.
+export function channelStatusLabelKey(status: string): string {
+  const labels: Record<string, string> = {
+    wecomAuthorizationExpired: 'notAuthorized',
+    wechatReconnectRequired: 'notConnected',
+    wechatConnectionUnavailable: 'unavailable',
+  };
+  return labels[status] ?? status;
+}
+
+export function channelStatusHintKey(status: string): string | undefined {
+  const hints: Record<string, string> = {
+    wecomAuthorizationExpired: 'wecomReauthorizeStepHint',
+    wechatReconnectRequired: 'wechatReconnectHint',
+    wechatConnectionUnavailable: 'wechatConnectionUnavailableHint',
+  };
+  return hints[status];
 }
 
 export function isChannelAccountAvailable(account: ChannelAccount): boolean {

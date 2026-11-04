@@ -26,6 +26,15 @@ import (
 	workflowstore "lazymind/core/workflow/store"
 )
 
+type workflowReadinessQuery struct {
+	WorkflowRef    string `query:"workflow_ref" required:"true"`
+	ConversationID string `query:"conversation_id"`
+}
+type workflowReadinessResponse struct {
+	Code    int                        `json:"code"`
+	Message string                     `json:"message"`
+	Data    workflow.WorkflowReadiness `json:"data"`
+}
 type workflowSlotsReadData struct {
 	Slots []workflow.SlotResponse `json:"slots"`
 }
@@ -3145,6 +3154,7 @@ func registeredCoreOperations() []openAPIOperation {
 			200: resp("Document save result", documentRewriteExecuteOpenAPIResponse{}), 400: resp("Invalid input or missing baseline/model", documentActionErrorOpenAPIResponse{}), 403: resp("Permission denied", documentActionErrorOpenAPIResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{}), 409: resp("Stale baseline, preview or unavailable mutation", documentActionErrorOpenAPIResponse{}), 422: resp("Unsupported document action", documentActionErrorOpenAPIResponse{}), 500: resp("Document action could not be saved", documentActionErrorOpenAPIResponse{}), 502: resp("Document action service failed", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-sessions/{session_id}/slots", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSlotsReadResponse{})}},
 		{Method: "GET", Path: "/workflow-sessions/{session_id}", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
+		{Method: "GET", Path: "/chat/workflow-readiness", Summary: "Check the published Workflow revision and current runtime configuration without creating a run", Tags: []string{"workflow"}, QueryParams: workflowReadinessQuery{}, Responses: map[int]openAPIResponse{200: resp("Workflow readiness", workflowReadinessResponse{})}},
 		{Method: "GET", Path: "/conversations/{conversation_id}/workflow-sessions:active", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
 		{Method: "GET", Path: "/conversations/{conversation_id}/workflow-sessions:latest", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
 		{Method: "GET", Path: "/workflow-sessions/{session_id}/artifacts", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowArtifactListReadResponse{})}},

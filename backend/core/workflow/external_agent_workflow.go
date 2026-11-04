@@ -344,6 +344,13 @@ func ensureExternalWorkflowTaskSession(ctx context.Context, db *gorm.DB, task or
 	if err != nil {
 		return failExternalTask(db, task, "WORKFLOW_NOT_FOUND", "Workflow 不存在或不可访问。", "请重新生成或发布 Workflow。")
 	}
+	if checkErr := RequireWorkflowReady(ctx, db, task.OwnerUserID, pkg.WorkflowRef, pkg.RevisionID); checkErr != nil {
+		var invalid *WorkflowNotReadyError
+		if errors.As(checkErr, &invalid) {
+			return failExternalTask(db, task, "WORKFLOW_CONFIGURATION_INVALID", "工作流配置异常，暂时无法运行。", "请检查工作流配置并重新发布后重试。")
+		}
+		return failExternalTask(db, task, "WORKFLOW_CHECK_UNAVAILABLE", "暂时无法检查工作流配置。", "请稍后重试。")
+	}
 	conversationID, err := ensureExternalWorkflowConversation(ctx, db, task)
 	if err != nil {
 		return failExternalTask(db, task, "CONVERSATION_CREATE_FAILED", err.Error(), "请稍后重试，或在 LazyMind 中新建会话后继续。")

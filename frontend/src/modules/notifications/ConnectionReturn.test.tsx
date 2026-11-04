@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { TerminalConnectionPage } from '@/modules/channelGateway';
@@ -18,7 +18,9 @@ it('returns the account from the successful connection only after the user selec
  });
  const useAccount = vi.fn();
  render(<MemoryRouter><TerminalConnectionPage initialProvider="wecom" embedded onUseAccount={useAccount} /></MemoryRouter>);
- fireEvent.click(await screen.findByRole('button', { name: /startScan/ }));
+ const start = await screen.findByRole('button', { name: /startScan/ });
+ await waitFor(() => expect(start).toBeEnabled());
+ fireEvent.click(start);
  const action = await screen.findByRole('button', { name: 'notifications.returnUseAccount' });
  expect(useAccount).not.toHaveBeenCalled(); fireEvent.click(action);
  expect(useAccount).toHaveBeenCalledTimes(1); expect(useAccount).toHaveBeenCalledWith(account);

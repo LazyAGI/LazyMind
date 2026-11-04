@@ -40,6 +40,10 @@ import {
   CHANNEL_ACCOUNTS_CHANGED_EVENT,
   channelAccountConnectionStatus,
   channelAccountLabel,
+  channelAccountStatusKey,
+  channelProviderStatusKey,
+  channelStatusLabelKey,
+  channelStatusHintKey,
   disconnectChannelAccount,
   isChannelAccountAvailable,
   isChannelAccountAuthorizationRequired,
@@ -434,6 +438,8 @@ function AccountDisclosure({ account, accounts, onReconnect, onChanged }: { acco
   const [savingRemark, setSavingRemark] = useState(false);
   const binding = account.binding_status || detail?.binding_status;
   const unbound = binding === 'unbound';
+  const accountStatus = channelAccountStatusKey({ ...account, binding_status: binding });
+  const accountHint = channelStatusHintKey(accountStatus);
   const connectionStatus = channelAccountConnectionStatus(account);
   const provisioning = connectionStatus === 'connecting';
   const connected = connectionStatus === 'connected';
@@ -477,13 +483,13 @@ function AccountDisclosure({ account, accounts, onReconnect, onChanged }: { acco
     } finally { setBusy(false); }
   };
   return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !busy) void load(); }}>
-    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account, accounts)}</strong><small>{t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={provisioning || authorizationRequired || pendingActivation || menuPending ? 'warning' : connected ? 'success' : 'default'}>{t('notifications.' + (authorizationRequired ? 'wecomAuthorizationExpired' : provisioning ? 'connecting' : binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : connected ? 'connected' : 'disconnected'))}</Tag></summary>
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account, accounts)}</strong><small>{t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={provisioning || authorizationRequired || pendingActivation || menuPending ? 'warning' : connected ? 'success' : 'default'}>{t('notifications.' + channelStatusLabelKey(accountStatus))}</Tag></summary>
     {busy && <Spin size="small" />}
     {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
     {detail && <div className="notification-account-details">
       <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account, accounts)}</strong></div>
       {account.provider === 'wecom' && <div><small>{t('notifications.wecomBotIdentity')}</small><strong>{detail.identity?.bot_id || account.identity?.bot_id || t('notifications.identityMissing')}</strong></div>}
-      <div><small>{t('notifications.runtime')}</small><strong>{t(authorizationRequired ? 'notifications.wecomAuthorizationExpired' : menuPending ? 'notifications.feishuConnectionReady' : `channelGateway.${account.provider}.runtimeStatusMap.${account.runtime_status}`)}</strong><p>{t(authorizationRequired ? 'notifications.wecomReauthorizeStepHint' : provisioning ? 'notifications.connectionInProgressHint' : pendingActivation ? 'notifications.pendingActivationHint' : connected ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
+      <div><small>{t('notifications.runtime')}</small><strong>{t(authorizationRequired ? 'notifications.notAuthorized' : menuPending ? 'notifications.feishuConnectionReady' : `channelGateway.${account.provider}.runtimeStatusMap.${account.runtime_status}`)}</strong><p>{t(accountHint ? 'notifications.' + accountHint : authorizationRequired ? 'notifications.wecomReauthorizeStepHint' : provisioning ? 'notifications.connectionInProgressHint' : pendingActivation ? 'notifications.pendingActivationHint' : connected ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
       <div><small>{t('notifications.connectedAt')}</small><strong>{formatTime(detail.connected_at)}</strong><p>{t('notifications.authorizationTimeHint')}</p></div>
       <div><small>{t('notifications.lastMessageAt')}</small><strong>{formatTime(detail.last_message_at)}</strong><p>{t('notifications.lastMessageHint')}</p></div>
       <div className="notification-wide"><small>{t('notifications.references')}</small><strong>{refs.map(r => r.name).join('、') || t('notifications.noReferences')}</strong><p>{t('notifications.referencesStableHint')}</p>
@@ -577,7 +583,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
       const pendingCount = providerAccounts.filter(isChannelAccountPendingActivation).length;
       const authorizationPending = providerAccounts.some(isChannelAccountAuthorizationRequired);
       const connecting = providerAccounts.some(account => channelAccountConnectionStatus(account) === 'connecting');
-      return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 ? <small>{t('notifications.enabledCount', { count })}</small> : authorizationPending ? <small>{t('notifications.wecomAuthorizationExpired')}</small> : connecting ? <small>{t('notifications.connecting')}</small> : pendingCount > 0 ? <small>{t('notifications.pendingActivationCount', { count: pendingCount })}</small> : null}</span><small>{t('notifications.' + (count ? 'connected' : authorizationPending ? 'wecomAuthorizationExpired' : connecting ? 'connecting' : pendingCount ? 'pendingActivation' : 'notConnected'))}</small></button>;
+      return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 ? <small>{t('notifications.enabledCount', { count })}</small> : authorizationPending ? <small>{t('notifications.notAuthorized')}</small> : connecting ? <small>{t('notifications.connecting')}</small> : pendingCount > 0 ? <small>{t('notifications.pendingActivationCount', { count: pendingCount })}</small> : null}</span><small>{t('notifications.' + (loading ? 'loading' : error ? 'unavailable' : channelStatusLabelKey(channelProviderStatusKey(providerAccounts))))}</small></button>;
     })}</nav>
     <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && isChannelAccountAvailable(a)) && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && isChannelAccountAvailable(a)).length })}</Tag>}</header><div className="notification-account-list">
       {loading && <Spin />}

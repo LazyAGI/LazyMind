@@ -259,6 +259,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   disabledMentionReasons?: Partial<Record<MentionType, string>>;
   allowKnowledgeBaseSelection?: boolean;
   allowMentions?: boolean;
+  workflowDisabled?: boolean;
+  beforeWorkflowSelect?: () => Promise<boolean>;
   runInBackground?: boolean;
   conversationId?: string;
   fileCandidates?: Array<{ id: string; name: string; disabled?: boolean }>;
@@ -276,6 +278,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   disabledMentionReasons,
   allowKnowledgeBaseSelection = true,
   allowMentions = true,
+  workflowDisabled = false,
+  beforeWorkflowSelect,
   runInBackground = false,
   conversationId,
   fileCandidates = EMPTY_FILES,
@@ -292,6 +296,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const [retryCount, setRetryCount] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
+  const selectingWorkflow = useRef(false);
+  const selectionScope = useRef({});
+  useEffect(() => {
+    selectionScope.current = {};
+    return () => { selectionScope.current = {}; };
+  }, [conversationId, runInBackground, allowMentions, disabled]);
   const menuRef = useRef<HTMLDivElement>(null);
   const emittedRef = useRef<string | null>(null);
   const queryRef = useRef<QueryState | null>(null);
@@ -486,10 +496,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     candidate.disabled || Boolean(getDisabledReason(candidate))
   ), [getDisabledReason]);
 
-  const insertCandidate = useCallback((candidate: Candidate) => {
+  const insertCandidate = useCallback(async (candidate: Candidate) => {
     const editor = editorRef.current;
     const currentQuery = queryRef.current;
-    if (!editor || !currentQuery) return;
+    if (!editor || !currentQuery || selectingWorkflow.current) return;
     const candidateDisabledReason = getDisabledReason(candidate);
     if (candidate.disabled || candidateDisabledReason) {
       message.info(candidateDisabledReason || "该能力已停用");
@@ -501,6 +511,19 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     ) {
       message.warning(t("chat.mentionSingleWorkflowOnly"));
       return;
+    }
+    if (candidate.type === "workflow" && beforeWorkflowSelect) {
+      const currentScope = selectionScope.current;
+      const text = editor.textContent;
+      selectingWorkflow.current = true;
+      closeMenu();
+      try {
+        const allowed = await beforeWorkflowSelect();
+        if (!allowed || selectionScope.current !== currentScope || editorRef.current !== editor
+          || editor.textContent !== text) return;
+      } finally {
+        selectingWorkflow.current = false;
+      }
     }
     const selection = window.getSelection();
     currentQuery.range.deleteContents();
@@ -524,7 +547,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     closeMenu();
     emit();
     editor.focus();
-  }, [closeMenu, emit, getDisabledReason, t]);
+  }, [beforeWorkflowSelect, closeMenu, emit, getDisabledReason, t]);
 
   const removeChip = (chip: HTMLElement) => {
     const parent = chip.parentNode;
@@ -581,7 +604,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         aria-label={placeholder}
         data-placeholder={placeholder}
         data-empty={value === "" ? "true" : "false"}
-        onInput={() => { emit(); refreshQuery(); }}
+        onInput={() => { selectionScope.current = {}; emit(); refreshQuery(); }}
         onClick={(event) => {
           const button = (event.target as HTMLElement).closest('[data-remove-mention]');
           const chip = button?.closest<HTMLElement>('.chat-mention-chip');
@@ -656,7 +679,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
                   : item.description ? `${item.name}\n${item.description}` : item.name;
                 return <button type="button" role="option" id={`${menuId}-${index}`} title={title} aria-selected={activeIndex === index} className={`chat-mention-option${activeIndex === index ? " is-active" : ""}`} disabled={itemDisabled} key={`${item.type}-${item.id}`} onClick={() => { if (!itemDisabled) insertCandidate(item); }} onMouseEnter={() => { if (!itemDisabled) setActiveKey(`${item.type}:${item.id}`); }} onMouseDown={(event) => { event.preventDefault(); if (!itemDisabled) insertCandidate(item); }}>
                   <span className="chat-mention-option-name">{item.name}</span>
-                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || "已停用"}</span> : null}
+                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || "已停用"}</span>
+                    : item.type === "workflow" && workflowDisabled ? <span className="chat-mention-option-status">{t("chat.workflowSelectionDisabledLabel")}</span> : null}
                   {group.type === "conversation" && item.description ? <span className="chat-mention-option-description">{item.description}</span> : null}
                 </button>;
               })}

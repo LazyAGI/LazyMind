@@ -512,3 +512,16 @@ export async function copyBuiltinWorkflow(workflowId: string, name: string): Pro
   );
   return resp.data.data;
 }
+
+
+export interface WorkflowReadiness {
+  ready: boolean; workflow_ref: string; name: string; revision_id: string; revision_no: number;
+  editable: boolean; repair_url: string;
+  issues: Array<{ code: string; message: string; node_id?: string; path?: string; details?: Record<string, unknown>; repair_url?: string }>;
+}
+export async function getWorkflowReadiness(workflowRef: string, conversationId?: string, signal?: AbortSignal): Promise<WorkflowReadiness> {
+  const response = await axiosInstance.get<CoreResponse<WorkflowReadiness>>(`${coreBasePath}/chat/workflow-readiness`, {
+    params: { workflow_ref: workflowRef, conversation_id: conversationId }, signal, silentError: true,
+  } as import('axios').RawAxiosRequestConfig);
+  return response.data.data;
+}

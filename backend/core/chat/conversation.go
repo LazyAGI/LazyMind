@@ -269,6 +269,28 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Explicit selections are checked before creating a conversation, chat history
+	// or background task. Runtime tool entrypoints independently check their pinned revision.
+	earlyMentions, err := parseChatMentions(raw)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	for _, mention := range earlyMentions {
+		if mention.Type != "workflow" || mentionIsDenied(query, mention) {
+			continue
+		}
+		readiness, checkErr := workflow.CheckWorkflowInvocationReadiness(r.Context(), db, userID, mention.ResourceID, convID)
+		if checkErr != nil {
+			common.ReplyErr(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !readiness.Ready {
+			common.ReplyErrWithData(w, "plugin validation failed", readiness, http.StatusUnprocessableEntity)
+			return
+		}
+	}
+
 	var searchConfigJSON json.RawMessage
 	var requestSearchConfig any
 	if conv != nil {
@@ -720,6 +742,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			mentionedResources.ExcludedWorkflowRefs, workflowEnabled, true,
 		)
 		if bindingErr != nil {
+			if errors.Is(bindingErr, errConversationWorkflowsDisabled) {
+				common.ReplyErr(w, bindingErr.Error(), http.StatusForbidden)
+				return
+			}
 			common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
 			return
 		}

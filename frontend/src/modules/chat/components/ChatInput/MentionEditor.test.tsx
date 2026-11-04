@@ -60,6 +60,41 @@ describe("MentionEditor", () => {
     fireEvent.input(editor);
   };
 
+  it.each(["/", "/workflow:"])("waits for consent before inserting a workflow selected through %s", async (query) => {
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: "builtin:writer", name: "Writer", enabled: true }] } });
+    let confirm!: (allowed: boolean) => void;
+    const beforeWorkflowSelect = vi.fn(() => new Promise<boolean>(resolve => { confirm = resolve; }));
+    const onMentionsChange = vi.fn();
+    const onSend = vi.fn();
+    const { container } = render(<MentionEditor value="" placeholder="message" workflowDisabled
+      beforeWorkflowSelect={beforeWorkflowSelect} onChange={vi.fn()} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={onSend} onCompositionChange={vi.fn()} />);
+    enterQuery(query);
+    const option = await screen.findByRole("option", { name: /Writer/ });
+    expect(option).toHaveTextContent("chat.workflowSelectionDisabledLabel");
+    fireEvent.mouseDown(option);
+    expect(beforeWorkflowSelect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".chat-mention-chip")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent(query);
+    confirm(true);
+    await waitFor(() => expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: "workflow", resource_id: "builtin:writer" })]));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("preserves the input when workflow consent is declined", async () => {
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: "builtin:writer", name: "Writer", enabled: true }] } });
+    const beforeWorkflowSelect = vi.fn().mockResolvedValue(false);
+    const { container } = render(<MentionEditor value="" placeholder="message" beforeWorkflowSelect={beforeWorkflowSelect}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery("/workflow:");
+    await screen.findByRole("option", { name: "Writer" });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    await waitFor(() => expect(beforeWorkflowSelect).toHaveBeenCalledTimes(1));
+    expect(container.querySelector(".chat-mention-chip")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent("/workflow:");
+  });
+
   it('separates reference candidates from slash invocations and offers current files', async () => {
     mocks.listDatasets.mockResolvedValue({ data: { datasets: [{ dataset_id: 'split-kb', display_name: 'Reference knowledge' }] } });
     mocks.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'split-skill', name: 'Execute skill' }] });

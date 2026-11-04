@@ -358,6 +358,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		workflowEnabled, false,
 	)
 	if bindingErr != nil {
+		if errors.Is(bindingErr, errConversationWorkflowsDisabled) {
+			common.ReplyErr(w, bindingErr.Error(), http.StatusForbidden)
+			return
+		}
 		common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
 		return
 	}

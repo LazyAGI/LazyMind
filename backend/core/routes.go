@@ -619,6 +619,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:restore", []string{"qa.write"}, workflow.RestoreWorkflowDraft)
 	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}:purge", []string{"qa.write"}, workflow.PurgeWorkflowDraft)
 	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}", []string{"qa.write"}, workflow.DeleteWorkflowDraft)
+	handleAPI(r, "GET", "/chat/workflow-readiness", []string{"qa.read"}, workflow.GetWorkflowReadiness)
 	handleAPI(r, "GET", "/chat/settings/workflows", []string{"qa.read"}, workflow.ListUserWorkflowSettings)
 	handleAPI(r, "PATCH", "/chat/settings/workflows/{workflow_ref:.+}", []string{"qa.write"}, workflow.PatchUserWorkflowSetting)
 	handleAPI(r, "GET", "/skills/{skill_id}/linked-workflows", []string{"qa.read"}, workflow.ListSkillLinkedWorkflows)

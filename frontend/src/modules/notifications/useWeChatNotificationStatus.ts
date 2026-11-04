@@ -39,7 +39,7 @@ export default function useWeChatNotificationStatus({ enabled, ready = true, acc
   }, [confirmed, ready, accountId, recipientId]);
   const snapshots = enabled ? visibleWeChatTargets() : [];
   const snapshot = confirmed ? readWeChatTarget({ account_id: accountId!, recipient_id: recipientId! })
-    : aggregate ? snapshots.find(value => value.status !== 'connected' && value.status !== 'checking') || snapshots[0] : undefined;
+    : aggregate ? snapshots.find(value => !['connected', 'connecting', 'checking'].includes(value.status)) || snapshots[0] : undefined;
   return { status: enabled ? snapshot?.status ?? 'unconfigured' as const : undefined,
     account: snapshot?.account, refresh };
 }
