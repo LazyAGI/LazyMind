@@ -168,7 +168,7 @@ func resolveSelectedTitle(ctx context.Context, user string, p capability.PaperSe
 		}
 		slices.Sort(options)
 		if len(options) > 0 {
-			return WorkInput{}, fmt.Errorf("%w：%s", errPaperSelectionUnconfirmed, strings.Join(options, " / "))
+			return WorkInput{}, fmt.Errorf("论文候选需要确认（%s）：%w", strings.Join(options, " / "), errPaperSelectionUnconfirmed)
 		}
 		return WorkInput{}, errPaperSelectionUnconfirmed
 	}
