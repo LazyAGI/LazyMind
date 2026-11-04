@@ -31,7 +31,7 @@ import {
 } from "../api";
 import ToolManagementSection from "../components/ToolManagementSection";
 import DependencyInstallSection from "../components/DependencyInstallSection";
-import { translationProviderDisplayName } from "../translationProviderNames";
+import { sortTranslationProviders, translationProviderDisplayName } from "../translationProviderNames";
 import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -1120,6 +1120,7 @@ export default function ExternalServicesPage({
       }
       return a.name.localeCompare(b.name);
     });
+    byCategory.translation = sortTranslationProviders(byCategory.translation, (service) => service.name);
     return byCategory;
   }, [services]);
 
