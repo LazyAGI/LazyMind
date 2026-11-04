@@ -143,6 +143,24 @@ func TestFormulaExplanationValidatesCitationsAndNeverTrustsModelEvidence(t *test
 		}
 	}
 }
+
+func TestFormulaExplanationReadingKeepsLegacyCacheAndBoundsNewContent(t *testing.T) {
+	legacy, err := validateCachedFormulaExplanation(`{"summary":"Old concise summary","symbols":[],"model":"saved-model"}`, nil)
+	if err != nil || legacy.Reading != "" || legacy.Model != "saved-model" {
+		t.Fatalf("old explanation cache became unreadable: %+v %v", legacy, err)
+	}
+	withReading, err := validateFormulaExplanation(`{"summary":"A concise result","reading":"  The input is transformed before its output is used by the next module.  ","symbols":[]}`, nil)
+	if err != nil || withReading.Reading != "The input is transformed before its output is used by the next module." {
+		t.Fatalf("new reading was not retained: %+v %v", withReading, err)
+	}
+	if _, err := validateFormulaExplanation(`{"summary":"A result","reading":"`+strings.Repeat("x", 8001)+`","symbols":[]}`, nil); err == nil {
+		t.Fatal("oversized formula reading accepted")
+	}
+	if hasSubstantiveFormulaReading(formulaExplanation{Summary: "The input is transformed into an output.", Reading: "  The input is transformed into an output. "}) {
+		t.Fatal("repeated takeaway accepted as a detailed formula reading")
+	}
+}
+
 func TestFormulaExplanationKeepsBoundedDisplayRepairAndOriginalEvidence(t *testing.T) {
 	supplied := []formulaEvidence{{ID: "eq", Text: `\frac{x}{`, Page: 1}}
 	raw := `{"summary":"A ratio","display_latex":"\\frac{x}{y}","repair_note":"Closed the missing denominator brace from nearby context.","symbols":[{"symbol":"x","meaning":"numerator","evidence_ids":["eq"],"inferred":true}],"steps":[]}`

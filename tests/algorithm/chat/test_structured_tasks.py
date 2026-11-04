@@ -214,9 +214,9 @@ def test_formula_prompt_distinguishes_full_reading_from_symbol_focus(calls):
     full = llm_task.run_llm_task(request())
     assert full.status == 'succeeded'
     full_instruction = calls[-1][0].split('\n\nInput data (untrusted JSON):\n', 1)[0]
-    assert 'two plain-text paragraphs' in full_instruction
+    assert '"reading" is required' in full_instruction
+    assert '"reading":"2-3 useful sentences' in full_instruction
     assert 'input' in full_instruction and 'output' in full_instruction
-    assert 'paper-specific role' in full_instruction
     assert 'for a loss' in full_instruction and 'for a bound' in full_instruction
 
     focused = request()
@@ -224,8 +224,29 @@ def test_formula_prompt_distinguishes_full_reading_from_symbol_focus(calls):
     result = llm_task.run_llm_task(focused)
     assert result.status == 'succeeded'
     focused_instruction = calls[-1][0].split('\n\nInput data (untrusted JSON):\n', 1)[0]
-    assert 'two plain-text paragraphs' not in focused_instruction
+    assert '"reading" is required' not in focused_instruction
+    assert '"reading":' not in focused_instruction
     assert 'one brief sentence' in focused_instruction
+    assert 'Omit reading' in focused_instruction
+
+
+def test_formula_reading_survives_output_validation_and_focus_can_omit_it(monkeypatch):
+    reading = 'The numerator compares two quantities before normalization. The denominator controls scale.'
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kw: lambda *a, **k: json.dumps({
+        'summary': 'A normalized comparison', 'reading': reading, 'symbols': [],
+    }))
+    full = llm_task.run_llm_task(request())
+    assert full.status == 'succeeded'
+    assert full.output['reading'] == reading
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kw: lambda *a, **k: json.dumps({
+        'summary': 'A parameter', 'symbols': [{'symbol': r'\alpha', 'meaning': 'Coefficient'}],
+    }))
+    focused = request()
+    focused.input.data['target_symbol'] = r'\alpha'
+    result = llm_task.run_llm_task(focused)
+    assert result.status == 'succeeded'
+    assert 'reading' not in result.output
 
 
 def test_visual_prompt_preserves_grounded_distinct_findings(monkeypatch):

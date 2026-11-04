@@ -282,6 +282,9 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 				return formulaExplanation{}, formulaExplanationFailure{502, "The selected model could not explain this formula. Check the model connection and retry."}
 			}
 			result, err := validateFormulaExplanation(raw, evidence)
+			if err == nil && request.FocusSymbol == nil && !hasSubstantiveFormulaReading(result) {
+				err = errors.New("missing substantive formula reading")
+			}
 			if err != nil || !bindFormulaExplanationFocus(&result, request.FocusSymbol) {
 				// Validation errors contain schema/limit diagnostics, never the model response.
 				log.Printf("formula_explanation validation_failed: %v", err)
@@ -319,6 +322,14 @@ func (h formulaExplanationHandler) explain(r *http.Request, request formulaReadi
 		return result, "shared", nil
 	}
 	return result, "miss", nil
+}
+
+// Old disk results and single-symbol answers may have no reading. Require the
+// new full-formula response to add an actual explanation beyond its takeaway.
+func hasSubstantiveFormulaReading(result formulaExplanation) bool {
+	reading := strings.Join(strings.Fields(result.Reading), " ")
+	summary := strings.Join(strings.Fields(result.Summary), " ")
+	return utf8.RuneCountInString(reading) >= 20 && !strings.EqualFold(reading, summary)
 }
 
 func saveFormulaExplanation(dir, path string, result formulaExplanation) error {

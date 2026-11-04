@@ -7,6 +7,7 @@ import {usePaperReaderSession} from './paperReader';
 export interface FormulaEvidence {id:string; text:string; page:number; bbox?:[number,number,number,number]}
 export interface FormulaExplanation {
   summary:string;
+  reading?:string;
   display_latex?:string;
   repair_note?:string;
   symbols:Array<{symbol:string; meaning:string; evidence_ids:string[]; inferred:boolean}>;

@@ -34,6 +34,7 @@ type formulaStep struct {
 }
 type formulaExplanation struct {
 	Summary      string            `json:"summary"`
+	Reading      string            `json:"reading,omitempty"`
 	DisplayLatex string            `json:"display_latex,omitempty"`
 	RepairNote   string            `json:"repair_note,omitempty"`
 	Symbols      []formulaSymbol   `json:"symbols"`
@@ -209,6 +210,10 @@ func validateFormulaExplanation(raw string, supplied []formulaEvidence) (formula
 	}
 	if strings.TrimSpace(result.Summary) == "" || len(result.Summary) > 12000 || len(result.Symbols) > 64 || len(result.Steps) > 32 {
 		return formulaExplanation{}, fmt.Errorf("invalid explanation limits: summary_bytes=%d symbols=%d steps=%d", len(strings.TrimSpace(result.Summary)), len(result.Symbols), len(result.Steps))
+	}
+	result.Reading = strings.TrimSpace(result.Reading)
+	if len(result.Reading) > 8000 {
+		return formulaExplanation{}, fmt.Errorf("invalid formula reading length: %d", len(result.Reading))
 	}
 	// A known model-output variant uses "text" for symbol meanings. Keep the
 	// canonical value when present and subject aliases to the same limits below.

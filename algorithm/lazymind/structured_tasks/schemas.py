@@ -93,6 +93,8 @@ class SummaryOutput(OutputModel):
 
 
 class FormulaOutput(SummaryOutput):
+    # Optional for focused symbol lookups and older provider responses.
+    reading: Annotated[str, Field(max_length=12000)] = ''
     symbols: list[Symbol] = Field(max_length=64)
     steps: list[Step] = Field(default_factory=list, max_length=32)
     # Optional repairs are bounded by total response size. Core discards unsafe

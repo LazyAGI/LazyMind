@@ -81,6 +81,68 @@ func TestFormulaExplanationConcurrentGenerationSharesOneCall(t *testing.T) {
 	}
 }
 
+func TestFormulaExplanationRequiresReadingOnlyForNewWholeFormula(t *testing.T) {
+	installOriginalSourceTransport(t)
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+		t.Fatal(err)
+	}
+	seedDocumentListDataset(t, db, "reading-ds", "owner")
+	seedDocumentListDoc(t, db, "reading-ds", "reading-doc", "paper.pdf", time.Now(), "owner", nil)
+	source := filepath.Join(t.TempDir(), "paper.pdf")
+	if err := os.WriteFile(source, []byte("%PDF-formula-reading"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&orm.Document{}).Where("id = ?", "reading-doc").Update("ext", mustJSON(documentExt{StoredPath: source, OriginalFilename: "paper.pdf"}))
+	hash, _ := pdfir.SourceHash(source)
+	ir := pdfir.Document{Version: 1, SourceSHA256: hash, CoordinateSpace: "normalized_top_left", Blocks: []pdfir.Block{{ID: "formula", Type: "formula", Latex: "x^2", Text: "$$x^2$$", Page: 0}}}
+	irPath := filepath.Join(t.TempDir(), "ir.json")
+	if err := os.WriteFile(irPath, mustJSON(ir), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db.Create(&orm.AsyncJob{ID: "reading-job", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("reading-ds", "reading-doc"), Status: "succeeded", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, DatasetID: "reading-ds", DocumentID: "reading-doc", SourceSHA256: hash}), ResultJSON: mustJSON(pdfIRResult{IRPath: irPath}), CreatedAt: time.Now()})
+	var calls atomic.Int32
+	mode := "missing"
+	handler := formulaExplanationHandler{
+		loadModel: func(context.Context, string) (map[string]any, string, string, error) {
+			return map[string]any{"llm": map[string]any{"model": "test-model"}}, "test-model", "test-model", nil
+		},
+		generate: func(_ context.Context, content, _ string, _ map[string]any) (string, error) {
+			calls.Add(1)
+			if strings.Contains(content, `"target_symbol"`) {
+				return `{"summary":"A focused definition","symbols":[{"symbol":"x","meaning":"The input variable."}]}`, nil
+			}
+			if mode == "missing" {
+				return `{"summary":"One sentence only.","symbols":[]}`, nil
+			}
+			return `{"summary":"The formula transforms its input.","reading":"The input passes through the first operation, then the result becomes the output used by the next stage.","symbols":[]}`, nil
+		},
+	}
+	call := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+		r.Header.Set("X-User-Id", "owner")
+		r = mux.SetURLVars(r, map[string]string{"dataset": "reading-ds", "document": "reading-doc", "block": "formula"})
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	if w := call(`{}`); w.Code != 502 || calls.Load() != 2 {
+		t.Fatalf("short generated explanation accepted or retries unbounded: status=%d calls=%d body=%s", w.Code, calls.Load(), w.Body)
+	}
+	mode = "rich"
+	w := call(`{}`)
+	if w.Code != 200 || calls.Load() != 3 || !strings.Contains(w.Body.String(), `"reading"`) {
+		t.Fatalf("rich generated explanation rejected: status=%d calls=%d body=%s", w.Code, calls.Load(), w.Body)
+	}
+	mode = "missing"
+	if w := call(`{}`); w.Code != 200 || calls.Load() != 3 {
+		t.Fatalf("rich cache was not reused: status=%d calls=%d", w.Code, calls.Load())
+	}
+	if w := call(`{"focus_symbol":"x"}`); w.Code != 200 || calls.Load() != 4 {
+		t.Fatalf("focused explanation improperly required a reading: status=%d calls=%d body=%s", w.Code, calls.Load(), w.Body)
+	}
+}
+
 func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	installOriginalSourceTransport(t)
 	db := newDocumentTestDB(t)
@@ -145,7 +207,7 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 				}
 				return string(mustJSON(map[string]any{"summary": "Focused definition", "symbols": []map[string]any{{"symbol": focus, "meaning": "distance", "evidence_ids": []string{"p"}, "inferred": true}}, "steps": []any{}})), nil
 			}
-			return `{"summary":"Distance squared","symbols":[{"symbol":"x","meaning":"distance","evidence_ids":["p"]}],"steps":[]}`, nil
+			return `{"summary":"Distance squared","reading":"The input distance is squared, so larger distances produce larger nonnegative values for the next stage.","symbols":[{"symbol":"x","meaning":"distance","evidence_ids":["p"]}],"steps":[]}`, nil
 		},
 	}
 	call := func(user, block, body string) *httptest.ResponseRecorder {

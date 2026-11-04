@@ -54,6 +54,21 @@ describe('formula study panel',()=>{
   expect(screen.queryByRole('button',{name:'Locate original formula'})).toBeNull();
   expect(screen.getByText('Summary').compareDocumentPosition(screen.getByText('Exact source quote')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  });
+ it('shows the detailed reading after the concise formula purpose',async()=>{
+  mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,summary:'The loss pulls matching embeddings together.',reading:'It compares a query with its positive example and competing negatives. Optimizing it increases the positive score relative to the negatives.'}}});
+  const view=render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="separate-reading" blocks={[block]} selected={block} autoExplain onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+  await screen.findByText('The loss pulls matching embeddings together.');
+  const paragraphs=view.container.querySelectorAll('.pdf-study-summary p');
+  expect(paragraphs).toHaveLength(2);
+  expect(paragraphs[0]).toHaveTextContent('The loss pulls matching embeddings together.');
+  expect(paragraphs[1]).toHaveTextContent('Optimizing it increases the positive score relative to the negatives.');
+ });
+ it('keeps a cached one-line summary as one paragraph',async()=>{
+  mocks.post.mockReset().mockResolvedValue({data:{data:explanation}});
+  const view=render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="legacy-one-line" blocks={[block]} selected={block} autoExplain onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+  await screen.findByText('Summary');
+  expect(view.container.querySelectorAll('.pdf-study-summary p')).toHaveLength(1);
+ });
  it('shows exact evidence separately from generated interpretation and navigates to it',async()=>{
  mocks.post.mockResolvedValue({data:{data:explanation}});
  const navigate=vi.fn();

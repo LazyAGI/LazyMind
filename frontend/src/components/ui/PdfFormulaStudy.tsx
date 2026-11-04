@@ -44,7 +44,10 @@ export function PdfFormulaStudy({target,sourceKey,blocks,selected,autoExplain=fa
   return <div className="pdf-study-citations">{evidence.map(e=><button key={e.id} className="pdf-study-citation" onClick={()=>onNavigate(e)} title={e.text}>{t('pdfFormula.sourcePage',{page:e.page+1})}</button>)}</div>;
  };
  const symbolList=data?.symbols?.length?<dl className="pdf-study-symbols">{data.symbols.map((symbol,index)=><div key={index}><dt><FormulaMathText text={symbol.symbol} mathOnly/></dt><dd><FormulaMathText text={symbol.meaning}/>{!compact&&sources(symbol.evidence_ids,symbol.inferred)}</dd></div>)}</dl>:null;
- const summaryParagraphs=data?.summary?.trim().split(/\n\s*\n/).map(paragraph=>paragraph.trim()).filter(Boolean) || [];
+ const summaryParagraphs=[
+  ...(data?.summary?.trim().split(/\n\s*\n/).map(paragraph=>paragraph.trim()).filter(Boolean) || []),
+  ...(data?.reading?.trim()?[data.reading.trim()]:[]),
+ ];
  const catalog=<div className="pdf-study-navigation"><label>{t('pdfFormula.catalog')}<select aria-label={t('pdfFormula.catalog')} value={selected?.id || ''} onChange={event=>{const block=blocks.find(b=>b.id===event.target.value);if(block)onSelect(block);}}><option value="" disabled>{t('pdfFormula.chooseFormula')}</option>{blocks.map((block,index)=><option key={block.id} value={block.id}>{formulaNumber(block)?`(${formulaNumber(block)})`:t('pdfFormula.formulaIndex',{number:index+1})} · {t('pdfFormula.page',{page:block.page+1})}</option>)}</select></label>{canReturn&&<button onClick={onReturn}>{t('pdfFormula.returnReading')}</button>}</div>;
  const explanationDetails=data&&<><p className="pdf-study-disclaimer">{t('pdfFormula.interpretationNote')}</p>
   {!!data.steps?.length&&<section><h3>{t('pdfFormula.steps')}</h3><ol className="pdf-study-steps">{data.steps.map((step,index)=><li key={index}><p><FormulaMathText text={step.text}/></p>{sources(step.evidence_ids,step.inferred)}</li>)}</ol></section>}
