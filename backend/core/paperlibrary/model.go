@@ -5,7 +5,12 @@ import (
 	"lazymind/core/common/orm"
 	"strings"
 	"time"
+	"unicode"
 )
+
+// MaxMetadataAuthors allows large scientific collaborations while bounding
+// author lists consistently across snapshot imports and metadata edits.
+const MaxMetadataAuthors = 10000
 
 type Identifiers struct {
 	DOI   string `json:"doi,omitempty"`
@@ -86,10 +91,14 @@ type Note struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 type Data struct {
-	Folders     []Folder     `json:"folders"`
-	Papers      []Paper      `json:"papers"`
-	Attachments []Attachment `json:"attachments"`
-	Notes       []Note       `json:"notes"`
+	// Legacy is an immutable export of the original graph; Extra contains live
+	// auxiliary fields projected alongside authoritative normalized entities.
+	Legacy      json.RawMessage `json:"legacy,omitempty"`
+	Extra       json.RawMessage `json:"-"`
+	Folders     []Folder        `json:"folders"`
+	Papers      []Paper         `json:"papers"`
+	Attachments []Attachment    `json:"attachments"`
+	Notes       []Note          `json:"notes"`
 }
 
 func EmptyData() Data {
@@ -109,14 +118,51 @@ func WorkMetadata(work orm.AcademicWork) Metadata {
 	}
 	return m
 }
-func EffectiveMetadata(entry orm.PaperLibraryEntry, work orm.AcademicWork) (Metadata, error) {
+func mergeMetadata(entry orm.PaperLibraryEntry, work orm.AcademicWork, source json.RawMessage) (Metadata, error) {
 	m := WorkMetadata(work)
+	if len(source) > 0 {
+		var value struct {
+			Metadata
+			CitationCountSnake *int64 `json:"citation_count"`
+		}
+		if err := json.Unmarshal(source, &value); err != nil {
+			return m, err
+		}
+		if value.Title != "" {
+			m.Title = value.Title
+		}
+		if len(value.Authors) > 0 {
+			m.Authors = TrimAuthors(value.Authors)
+		}
+		if value.Year > 0 {
+			m.Year = value.Year
+		}
+		if value.Venue != "" {
+			m.Venue = value.Venue
+		}
+		if value.Abstract != "" {
+			m.Abstract = value.Abstract
+		}
+		if value.CitationCount != nil {
+			m.CitationCount = value.CitationCount
+		}
+		if value.CitationCountSnake != nil {
+			m.CitationCount = value.CitationCountSnake
+		}
+	}
 	if len(entry.MetadataJSON) > 0 {
 		if err := json.Unmarshal(entry.MetadataJSON, &m); err != nil {
 			return m, err
 		}
 	}
-	m.Identifiers = Identifiers{DOI: work.DOINormalized, Arxiv: work.ArxivIDBase}
+	// Legacy duplicate identities may have a private work identity. Their
+	// confirmed identifiers remain in metadata without violating global indexes.
+	if work.DOINormalized != "" {
+		m.Identifiers.DOI = work.DOINormalized
+	}
+	if work.ArxivIDBase != "" {
+		m.Identifiers.Arxiv = work.ArxivIDBase
+	}
 	if m.Authors == nil {
 		m.Authors = []string{}
 	}
@@ -142,14 +188,19 @@ func ImportMethod(entryType string) string {
 		return "link"
 	case "paper_expansion":
 		return "expansion"
-	default:
+	case "single_reference", "paper_references", "collection_references":
 		return "references"
+	case "conversation_sources":
+		return "conversation"
+	default:
+		return ""
 	}
 }
 func TrimAuthors(authors []string) []string {
 	out := []string{}
 	for _, a := range authors {
-		if a = strings.TrimSpace(a); a != "" {
+		a = strings.TrimSpace(a)
+		if strings.ContainsFunc(a, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
 			out = append(out, a)
 		}
 	}

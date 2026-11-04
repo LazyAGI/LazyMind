@@ -67,6 +67,12 @@ func ListUserProviderGroupsByCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	if category == "translation" {
+		if err := EnsureDefaultTranslationServices(r.Context(), db, userID); err != nil {
+			common.ReplyErr(w, "initialize free translation services failed", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	groups, err := loadVerifiedGroupsForUser(r.Context(), db, userID, category, keyword)
 	if err != nil {

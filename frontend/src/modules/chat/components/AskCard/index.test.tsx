@@ -15,6 +15,120 @@ vi.mock("@/modules/chat/utils/chunkUpload", () => ({
 }));
 
 describe("AskCard read-only history", () => {
+  it("does not carry answers from a previous card into a different field", () => {
+    const props = { onSubmit: vi.fn() };
+    const { rerender } = render(<AskCard {...props} askPending={{ ask_id: "first", questions: [
+      { id: "topic", text: "Topic?", type: "text", required: true },
+    ] }} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "RAG" } });
+    rerender(<AskCard {...props} askPending={{ ask_id: "second", questions: [
+      { id: "length", text: "Length?", type: "text", required: true },
+    ] }} />);
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+  it("requires a valid answer and submits its stable id", async () => {
+    const submit = vi.fn().mockResolvedValue(false);
+    render(<AskCard onSubmit={submit} askPending={{ ask_id: "required", questions: [{
+      id: "count", text: "How many?", reason: "Controls output size", type: "text", required: true,
+      validation: { format: "positive_integer", min: 1, max: 10, example: "1–10" },
+    }] }} />);
+    const button = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(button).toBeDisabled();
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(button).toBeDisabled();
+    fireEvent.change(input, { target: { value: "3" } });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][0].structured.questions[0]).toMatchObject({ id: "count", answer: { value: "3" } });
+  });
+
+  it.each(["text", "single", "multiple"] as const)(
+    "treats max_length=0 as unlimited for %s answers", async (type) => {
+      const submit = vi.fn().mockResolvedValue(false);
+      render(<AskCard onSubmit={submit} askPending={{ ask_id: "unlimited", questions: [{
+        id: "source", text: "Source?", type, required: true, validation: { max_length: 0 },
+        ...(type !== "text" ? { choices: ["A", "__ask_user_other__"] } : {}),
+      }] }} />);
+      if (type !== "text") {
+        fireEvent.click(screen.getByRole(type === "single" ? "radio" : "checkbox", {
+          name: "chat.askCardOtherOption",
+        }));
+      }
+      const input = screen.getByRole("textbox");
+      expect(input).not.toHaveAttribute("maxlength");
+      fireEvent.change(input, { target: { value: "A complete original paragraph" } });
+      const button = screen.getByRole("button", { name: "chat.askCardSubmit" });
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+      await waitFor(() => expect(submit).toHaveBeenCalled());
+      expect(submit.mock.calls[0][0].structured.questions[0].answer).toMatchObject(
+        type === "text" ? { value: "A complete original paragraph" } : { otherText: "A complete original paragraph" },
+      );
+    },
+  );
+
+  it("retains a positive business length limit", () => {
+    render(<AskCard onSubmit={vi.fn()} askPending={{ ask_id: "bounded", questions: [{
+      id: "source", text: "Source?", type: "text", required: true,
+      validation: { min_length: 2, max_length: 10 },
+    }] }} />);
+    const input = screen.getByRole("textbox");
+    expect(input).toHaveAttribute("maxlength", "10");
+    fireEvent.change(input, { target: { value: "A" } });
+    expect(screen.getByRole("button", { name: "chat.askCardSubmit" })).toBeDisabled();
+    fireEvent.change(input, { target: { value: "A paragraph".slice(0, 10) } });
+    expect(screen.getByRole("button", { name: "chat.askCardSubmit" })).toBeEnabled();
+  });
+
+  it("allows one multiple selection and inline Other with the selected options", async () => {
+    const submit = vi.fn().mockResolvedValue(false);
+    render(<AskCard onSubmit={submit} askPending={{ ask_id: "multiple", questions: [{
+      id: "style", text: "Style?", type: "multiple", required: true,
+      choices: ["A", "B", "__ask_user_other__"],
+    }] }} />);
+    const button = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    fireEvent.click(screen.getByRole("checkbox", { name: "A" }));
+    expect(button).toBeEnabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "chat.askCardOtherOption" }));
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("chat.askCardOtherPlaceholder"), { target: { value: "Custom" } });
+    fireEvent.click(button);
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][0].structured.questions[0].answer).toEqual({
+      type: "multiple", value: ["A", "__ask_user_other__"], otherText: "Custom",
+    });
+  });
+
+  it("uses searchable selection for more than six fixed choices without removing any", async () => {
+    const submit = vi.fn().mockResolvedValue(false);
+    render(<AskCard onSubmit={submit} askPending={{ ask_id: "enum", questions: [{
+      id: "format", text: "Format?", type: "single", required: true, choice_policy: "fixed",
+      choices: ["A", "B", "C", "D", "E", "F", "G"],
+    }] }} />);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByText("G"));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][0].structured.questions[0].answer.value).toBe("G");
+  });
+
+  it("shows semantic boolean labels and preserves their stable values", async () => {
+    const submit = vi.fn().mockResolvedValue(false);
+    render(<AskCard onSubmit={submit} askPending={{ ask_id: "boolean", questions: [{
+      id: "backgrounds", text: "Backgrounds?", type: "boolean", required: true,
+      choices: ["__ask_user_yes__", "__ask_user_no__"],
+      boolean_labels: { yes: "Generate backgrounds", no: "Use ordinary backgrounds" },
+    }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Use ordinary backgrounds" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    expect(submit.mock.calls[0][0].text).toContain("Use ordinary backgrounds");
+    expect(submit.mock.calls[0][0].structured.questions[0].answer.value).toBe("__ask_user_no__");
+  });
+
   it.each([
     { type: "single", value: "old-option", otherText: "" },
     { type: "multiple", value: ["new-option"], otherText: "" },

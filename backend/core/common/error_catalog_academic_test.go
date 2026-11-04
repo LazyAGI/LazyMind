@@ -9,11 +9,17 @@ func TestResolveAcademicImportErrorsPreservesContext(t *testing.T) {
 		message      string
 		detail       any
 	}{
+		{"parser version", "PDF 解析服务版本不一致，请同步更新解析服务", 502, 2005157, "The PDF parser service version is incompatible; update the parser service", nil},
+		{"download failure context", "PDF 下载失败：context deadline exceeded", 504, 2005159, "Failed to download the paper PDF", "PDF 下载失败：context deadline exceeded"},
+		{"preparation limit", "研究方向最多 6 个，请合并重复方向后重试", 422, 2005160, "Research preparation is incomplete or invalid; supplement the scope and retry", "研究方向最多 6 个，请合并重复方向后重试"},
+		{"report integrity", "expansion report must preserve the research analysis", 409, 2005165, "The report must preserve the research analysis and its actual research outcome", nil},
 		{"dataset permission", "dataset write permission required", 403, 2005100, "Dataset write permission is required", nil},
 		{"candidate version", `arXiv candidate has invalid version "latest"`, 400, 2005103, "Invalid arXiv candidate version", `arXiv candidate has invalid version "latest"`},
 		{"provider failure", "OpenAlex lookup failed: upstream connection: timeout", 502, 2005122, "OpenAlex metadata lookup failed", "upstream connection: timeout"},
 		{"download failure", "arXiv PDF 下载失败：context deadline exceeded", 504, 2005109, "Failed to download the arXiv PDF", "arXiv PDF 下载失败：context deadline exceeded"},
 		{"submission failure", "文献处理任务未能启动: parser rejected the document", 500, 2005111, "Paper processing did not start or failed; retry in document tasks", "parser rejected the document"},
+		{"queued processing failure", "processing submission failed", 500, 2005111, "Paper processing did not start or failed; retry in document tasks", nil},
+		{"queue before saved", "document must be saved before processing is queued", 409, 2005148, "Save the document before queuing processing", nil},
 		{"library validation", "论文库 papers 的 id 为空、重复或过长", 400, 2005125, "Invalid paper library data", "论文库 papers 的 id 为空、重复或过长"},
 		{"folder validation", "目录层级不能包含循环", 400, 2005125, "Invalid paper library data", nil},
 		{"library revision conflict", "论文已在其他窗口更新，请保留草稿并加载最新内容后重试", 409, 2005138, "The paper library changed; refresh and retry", nil},

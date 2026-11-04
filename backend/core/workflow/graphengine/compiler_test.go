@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -673,6 +674,74 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 		if !result.Valid {
 			t.Fatalf("bundled plugin %s must compile: %#v", workflowID, result.Diagnostics)
 		}
+	}
+}
+
+func TestPaperExpansionEndsAtThePublishedList(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "workflows", "paper_expansion")
+	workflow, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.ReadFile(filepath.Join(root, "scenario", "state.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := Compile(string(workflow), string(state), "", ProfileRuntimeLoad)
+	if !compiled.Valid {
+		t.Fatalf("compile paper expansion: %#v", compiled.Diagnostics)
+	}
+	snapshot := RuntimeSnapshot{
+		Attempts: []AttemptFact{{StepID: "expand_and_screen", Status: "succeeded", Validity: "effective"}},
+		Materials: []MaterialValue{
+			{MaterialID: "expansion_id", RevisionID: "input", Valid: true},
+			{MaterialID: "candidate_set", RevisionID: "candidate", Valid: true},
+		},
+	}
+	first := Project(compiled.Graph, snapshot)
+	if first.Completed || !reflect.DeepEqual(first.Ready, []string{"screen_and_supplement"}) {
+		t.Fatalf("search must hand off to screening: %#v", first)
+	}
+	fast := snapshot
+	fast.Materials = append(append([]MaterialValue(nil), snapshot.Materials...),
+		MaterialValue{MaterialID: "screening_not_required", RevisionID: "skip", Valid: true},
+		MaterialValue{MaterialID: "expansion_list_ready", RevisionID: "list", Valid: true},
+		MaterialValue{MaterialID: "analysis_not_required", RevisionID: "skip-analysis", Valid: true})
+	if projected := Project(compiled.Graph, fast); !projected.Completed || len(projected.Bypassed) != 2 {
+		t.Fatalf("fast should finish at search: %#v", projected)
+	}
+	review := fast
+	review.Materials = review.Materials[:len(review.Materials)-1]
+	if projected := Project(compiled.Graph, review); !reflect.DeepEqual(projected.Ready, []string{"analyze_relations"}) {
+		t.Fatalf("review should continue directly to analysis: %#v", projected)
+	}
+	failedScreen := snapshot
+	failedScreen.Attempts = append(append([]AttemptFact(nil), snapshot.Attempts...),
+		AttemptFact{StepID: "screen_and_supplement", Status: "failed", Validity: "effective"})
+	if failed := Project(compiled.Graph, failedScreen); !reflect.DeepEqual(failed.Retryable, []string{"screen_and_supplement"}) ||
+		!failed.Nodes["screen_and_supplement"].Evaluation.Satisfied {
+		t.Fatalf("screening retry should reuse its saved search input: %#v", failed)
+	}
+	snapshot.Attempts = append(snapshot.Attempts, AttemptFact{StepID: "screen_and_supplement", Status: "succeeded", Validity: "effective"})
+	snapshot.Materials = append(snapshot.Materials, MaterialValue{MaterialID: "screened_candidates", RevisionID: "screened", Valid: true})
+	deep := Project(compiled.Graph, snapshot)
+	if deep.Completed || !reflect.DeepEqual(deep.Ready, []string{"analyze_relations"}) {
+		t.Fatalf("deep should continue from screening to analysis: %#v", deep)
+	}
+	completed := snapshot
+	completed.Attempts = append(append([]AttemptFact(nil), snapshot.Attempts...), AttemptFact{StepID: "analyze_relations", Status: "succeeded", Validity: "effective"})
+	completed.Materials = append([]MaterialValue(nil), snapshot.Materials...)
+	for _, slot := range []string{"relation_analysis", "expansion_result", "expansion_report"} {
+		completed.Materials = append(completed.Materials, MaterialValue{MaterialID: slot, RevisionID: slot, Valid: true})
+	}
+	if result := Project(compiled.Graph, completed); !result.Completed || len(result.Ready) != 0 {
+		t.Fatalf("checked analysis must publish the final report and finish: %#v", result)
+	}
+	snapshot.Materials = append(snapshot.Materials, MaterialValue{MaterialID: "screened_list_ready", RevisionID: "list", Valid: true},
+		MaterialValue{MaterialID: "analysis_not_required", RevisionID: "skip-analysis", Valid: true})
+	standard := Project(compiled.Graph, snapshot)
+	if !standard.Completed || len(standard.Bypassed) != 1 || len(standard.Ready) != 0 {
+		t.Fatalf("standard should finish at screening: %#v", standard)
 	}
 }
 

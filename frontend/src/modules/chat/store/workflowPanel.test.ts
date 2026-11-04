@@ -102,6 +102,26 @@ describe('filterWorkflowTabs', () => {
     expect(slots.some(slot => slot.slot === 'deck_outline')).toBe(true);
   });
 
+  it.each([
+    ['fast', ['screening_not_required', 'analysis_not_required'], ['expand_and_screen']],
+    ['balanced', ['analysis_not_required'], ['expand_and_screen', 'screen_and_supplement']],
+    ['deep', [], ['expand_and_screen', 'screen_and_supplement', 'analyze_relations']],
+  ])('shows every planned paper expansion stage before %s starts', (_mode, materials, expected) => {
+    const tabs = [
+      { id: 'expand_and_screen', label: 'Search', slots: [] },
+      { id: 'screen_and_supplement', label: 'Screen', slots: [], hide_when_material: 'screening_not_required' },
+      { id: 'analyze_relations', label: 'Analyze', slots: [], hide_when_material: 'analysis_not_required' },
+    ];
+    const slots = materials.map(slot => ({ slot, selected: true })) as SlotRevision[];
+    expect(filterWorkflowTabs(tabs, slots).map(tab => tab.id)).toEqual(expected);
+  });
+
+  it('shows a conditional stage again when a rewind clears its runtime bypass', () => {
+    const tabs = [{ id: 'analysis', label: 'Analysis', slots: [], hide_when_material: 'list_ready' }];
+    expect(filterWorkflowTabs(tabs, [], undefined, { projection: { bypassed: ['analysis'] } })).toEqual([]);
+    expect(filterWorkflowTabs(tabs, [], undefined, { projection: { bypassed: [], ready: ['analysis'] } })).toEqual(tabs);
+  });
+
   it('shows executed collection or academic analysis in the shared materials tab', () => {
     const tabs = [{ id: 'materials', label: 'Materials', step_id: 'collect_materials',
       status_step_ids: ['collect_materials', 'analyze_academic_sources'], slots: [],

@@ -11,6 +11,7 @@ import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
+import { getTranslationServiceStatus, translateSelectionText } from "@/modules/knowledge/api/translation";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
 import EnvInputCard, { type EnvironmentInputResult } from "../EnvInputCard";
 
@@ -121,6 +122,7 @@ vi.mock("@/modules/identityAvatar", () => ({
 
 vi.mock("@/modules/knowledge/api/translation", () => ({
   getTranslationStatus: vi.fn().mockResolvedValue(true),
+  getTranslationServiceStatus: vi.fn().mockResolvedValue({ configured: true, provider: "DeepL", document_supported: true }),
   isSingleEnglishWord: (text:string) => /^[A-Za-z]+$/.test(text),
   translateSelectionText: vi.fn().mockResolvedValue({
     translated_text: "已翻译内容",
@@ -555,6 +557,7 @@ describe("AssistantMessage cancellation", () => {
   });
 
   it("translates selected assistant text", async () => {
+    vi.mocked(translateSelectionText).mockClear();
     render(
       <AssistantMessage
         item={{
@@ -598,7 +601,10 @@ describe("AssistantMessage cancellation", () => {
 
     expect(await screen.findByText("已翻译内容")).toBeInTheDocument();
     expect(screen.getByText("knowledge.translationTitle")).toBeInTheDocument();
+    expect(translateSelectionText).toHaveBeenCalledWith("text to translate", undefined);
+    expect(screen.queryByText("knowledge.translationSourceLanguage")).not.toBeInTheDocument();
   });
+
 });
 
 describe("externalProviderDisplayName", () => {

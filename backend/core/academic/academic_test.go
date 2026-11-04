@@ -162,6 +162,13 @@ func TestCitationTitleWhenYearIsLast(t *testing.T) {
 	}
 }
 
+func TestCitationTitleDoesNotTreatArxivDigitsAsPublicationYear(t *testing.T) {
+	citation := "DeepSeek-AI. Deepseek-v4: Towards highly efficient million-token context intelligence. CoRR, abs/2606.19348, 2026b. URL https://doi.org/10.48550/arXiv.2606.19348."
+	if got := citationTitle(citation); got != "Deepseek-v4: Towards highly efficient million-token context intelligence" {
+		t.Fatalf("citationTitle() = %q", got)
+	}
+}
+
 func TestCitationTitleWhenYearPrecedesURL(t *testing.T) {
 	citation := "Rabe, M. N. and Staats, C. Self-attention does not need o(n2) memory, 2022. URL https://arxiv.org/ abs/2112.05682."
 	if got := citationTitle(citation); got != "Self-attention does not need o(n2) memory" {

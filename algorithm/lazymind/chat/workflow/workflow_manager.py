@@ -62,6 +62,7 @@ class WorkflowAgentContribution:
     # Trusted host extensions may explicitly adopt a server-created successor.
     # This callback is never exposed as a model tool.
     bind_successor: Optional[Callable[[Dict[str, Any]], None]] = None
+    pending_ask: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -530,10 +531,13 @@ def _safe_session_tools(
     def patch_artifact_text(artifact_ref: str, old_text: str, new_text: str) -> Dict[str, Any]:
         """Edit one unique excerpt of a selected text/Markdown artifact without rerunning steps.
 
-        Read the artifact first. Include a unique exact section/paragraph excerpt;
-        every character outside that excerpt is preserved. Does not regenerate
-        downstream pages. For a list use the exact handle returned by list_artifacts.
+        Read the artifact first. Keep the edit scoped to a unique exact
+        section/paragraph excerpt. Does not regenerate downstream pages.
+        For a list use the exact handle returned by list_artifacts.
+        Headings contain section names; the document editor supplies their numbering.
         """
+        from lazymind.document_tools.artifacts import normalize_generated_markdown
+
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         if checkpoint and checkpoint.protects(artifact.get('slot')):
             raise WorkflowClientError('WORKFLOW_CHECKPOINT_READ_ONLY', 'Use answer_workflow_questions for user answers.')
@@ -552,7 +556,7 @@ def _safe_session_tools(
             raise ValueError('HTML slides require their scoped page-editing tool')
         if not old_text or text.count(old_text) != 1:
             raise ValueError('old_text must match exactly once; read the current artifact and retry')
-        revised = text.replace(old_text, new_text, 1)
+        revised = normalize_generated_markdown(text.replace(old_text, new_text, 1))
         revised_value = {**value, field: revised} if field else revised
         return artifact_output(toolkit.patch_artifact(
             artifact_id, int(current.get('revision') or artifact.get('revision') or 0),
@@ -829,6 +833,10 @@ def _runtime_clarification_fields(runtime_policy: Any) -> List[Dict[str, Any]]:
             'choice_policy': choice_policy,
             'ask_when': _clean_workflow_text(raw.get('ask_when')),
         }
+        for key in ('reason', 'required', 'resolution', 'default', 'boolean_labels', 'validation',
+                    'applies_when', 'value_aliases', 'patterns'):
+            if key in raw:
+                field[key] = raw[key]
         # A conditional attachment augments an existing choice question. It uses
         # the normal conversation attachment transport instead of introducing a
         # workflow-specific file question or upload API.
@@ -1004,6 +1012,7 @@ def enforce_startup_clarification_policy(
             if matched['id'] in satisfied:
                 continue
             if matched.get('choice_policy') == 'fixed':
+                question['choice_policy'] = 'fixed'
                 question['type'] = matched['type']
                 question['choices'] = list(matched['choices'])
                 question['allow_other'] = matched.get('allow_other', True)
@@ -1250,6 +1259,18 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
               if field['id'] not in set(policy.get('_host_satisfied_fields') or [])]
     if not fields:
         return ''
+    from lazymind.chat.workflow.clarification import managed
+    if managed(runtime_policy):
+        return (
+            'Startup fields are checked by the Host, without another model call. Call the trigger with '
+            'only values explicitly supplied or unambiguously grounded in the current task and attachments. '
+            'The trigger sends all missing required questions and stops automatically. Do not '
+            'ask optional preferences or invent missing values. Reuse submitted answers; later batches '
+            'ask only unresolved fields. Defaults and conditional applicability are package-owned. '
+            'Do not call generic ask_user for startup fields; use the trigger. '
+            'Preserve the original request and exact URLs and attachment names. Declared fields: '
+            + json.dumps(fields, ensure_ascii=False, default=str)
+        )
     answer_guidance = (
         'Apply the attachment_clarification contract BEFORE the FIRST ask_user call whenever '
         'the selected attachment is already available: read the entire attachment first, '
@@ -1276,12 +1297,11 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'and conversation first. Exclude fields whose condition is false. Existing source '
         'attachments or supplied substantive source text satisfy material questions; never '
         'ask for those uploads again. A visual template alone is not source material. If one or '
-        'more fields are missing, call ask_user once for the basic requirements with only those missing fields, '
-        'putting all of them in that single card, then stop without triggering the Workflow in '
-        'that turn. Include each '
-        'declared field id in its question object. Whenever meaningful, generate 2-4 concise, '
-        'context-specific suggested answers from the current request and use type=single so the '
-        'user can click one. For choice_policy=subset, choose only the 2-4 most relevant declared '
+        'more blocking fields remain, call ask_user with as many unresolved decision dimensions as needed, '
+        'then stop without triggering the Workflow in that turn. Explain why each is needed. Include each '
+        'declared field id in its question object. When useful, offer up to three real single-choice '
+        'suggestions, or up to four multiple-choice suggestions when selections can coexist. '
+        'Multiple permits one selection. For choice_policy=subset, choose only the most relevant declared '
         'choices, copy them verbatim, and never invent or rename an option. For '
         'choice_policy=fixed, use all declared choices verbatim. Otherwise declared choices are '
         'useful seeds, not a limit. In particular, for choice_policy=seed, any explicit '
@@ -1302,7 +1322,8 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'EVERY exact attachment filename in request_context so the Workflow can resolve each '
         'through the conversation attachment reader. Do not stringify a filename list into '
         'a single file binding; omit that binding when multiple attachments are supplied. '
-        'Combine the original request, all already-known '
+        'On the answer turn, never ask resolved fields again. Only a truly unresolved blocking field '
+        'can require another batch. Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
         'the trigger; an answer-only current_query must never replace the original request. '
         'When clarification and any declared attachment inspection are complete, trigger immediately. '
@@ -1393,8 +1414,9 @@ def build_workflow_discovery_context(
         'description and when_to_use before deciding. Call a trigger tool only when the '
         'Workflow is clearly appropriate, or when the user explicitly asks to run/open/start '
         'that Workflow. For a matching Workflow with startup_clarification_fields, inspect the '
-        'request and prior conversation first. If fields are missing, call ask_user once with '
-        'only the missing declared questions and stop; if none are missing, trigger immediately. '
+        'request and prior conversation first. Follow each package startup policy. For Host-managed '
+        'fields call its trigger with grounded values; the Host asks only unresolved required fields. '
+        'Legacy packages may explicitly request their declared startup card. '
         'After the user answers, pass the trigger a merged request_context containing the original '
         'request plus the answers. Do not trigger a Workflow merely because it exists, and do not ask the '
         'user to list Workflows before making this routing decision. A triggered Workflow '
@@ -1442,9 +1464,10 @@ def _normalize_trigger_input_bindings(value: Optional[Union[Dict[str, str], str]
 
 def _workflow_trigger_tools(
     activations: List[Dict[str, Any]], allowed_refs: set[str], current_query: str = '',
-    conversation_id: str = '', session_holder: Optional[Dict[str, str]] = None,
+    conversation_id: str = '', session_holder: Optional[Dict[str, Any]] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
     workflow_mode: str = 'dynamic',
+    clarification: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     """Bind backend-prepared activations to public package reads."""
     attachments_available = _conversation_has_attachments()
@@ -1483,11 +1506,32 @@ def _workflow_trigger_tools(
                 input_types_hint = _trigger_input_types(package_hint)
             except Exception as exc:
                 LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
+        for field in _runtime_clarification_fields(item.get('runtime')):
+            input_types_hint.setdefault(str(field['id']), 'text')
+
+        # A resumed, owned card already has a task identity and structured
+        # answers. Resolve its next batch without another planning-model turn.
+        from lazymind.chat.workflow.clarification import managed, resolve_fields, startup_card, startup_metadata
+        selected_runtime = (package_hint.get('runtime')
+                            or (package_hint.get('compiled_graph') or {}).get('runtime') or item.get('runtime'))
+        if allowed_refs and package_hint and managed(selected_runtime) and session_holder is not None:
+            session_holder['startup_managed'] = True
+            known, missing = resolve_fields(selected_runtime, current_query,
+                                            previous=(clarification or {}).get('values'))
+            direct_opt_in = (not attachments_available and '模板' not in current_query
+                             and 'template' not in current_query.lower()
+                             and all(field.get('resolution') == 'explicit' for field in missing))
+            if missing and (clarification or direct_opt_in):
+                session_holder['pending_ask'] = startup_card(missing, startup_metadata(
+                    workflow_ref, str(package_hint.get('revision_id') or revision_id),
+                    current_query, known, clarification,
+                ))
 
         def make_trigger(
             bound_id: str, bound_ref: str, bound_revision: str, bound_query: str,
             bound_clarification_answer: bool, bound_package: Optional[Dict[str, Any]],
             supports_scalar_bindings: bool, bound_runtime: Any,
+            bound_clarification: Optional[Dict[str, Any]],
         ) -> Any:
             def run_trigger(
                 input_bindings: Optional[Union[Dict[str, str], str]] = None,
@@ -1554,6 +1598,43 @@ def _workflow_trigger_tools(
                     if session_holder is not None:
                         session_holder['request_context'] = effective_context
                 clarification_ids = {str(field['id']) for field in _runtime_clarification_fields(runtime)}
+                has_contract = (_trigger_input_contract(package) is not None
+                                or isinstance((package.get('compiled_graph') or {}).get('material_producers'), dict))
+                if has_contract and set(input_bindings) - input_types.keys() - clarification_ids:
+                    raise WorkflowClientError(
+                        'WORKFLOW_INPUT_NOT_EXPOSED', 'Use only inputs advertised by this package.',
+                    )
+                from lazymind.chat.workflow.clarification import (
+                    managed, resolve_fields, startup_card, startup_metadata,
+                )
+                semantic_values = {}
+                if managed(runtime):
+                    previous = (bound_clarification or {}).get('values') or {}
+                    semantic_values, missing = resolve_fields(runtime, bound_query, input_bindings, previous)
+                    if missing:
+                        from lazyllm.tools.agent.base import _write_agent_data
+                        card = startup_card(missing, startup_metadata(
+                            bound_ref, str(package.get('revision_id') or bound_revision), effective_context,
+                            semantic_values, bound_clarification,
+                        ))
+                        _write_agent_data('ask_pending', **card)
+                        return {'status': 'needs_input', 'missing_clarification_fields': [f['id'] for f in missing],
+                                '_agent_control': {'stop': True, 'reason': 'awaiting_user', 'final_text': ''}}
+                    # Never append a second, model-guessed copy of fields after
+                    # the resolver's canonical values (especially explicit opt-ins).
+                    input_bindings = {key: value for key, value in input_bindings.items()
+                                      if key not in clarification_ids or input_types.get(key) in {'file', 'image'}}
+                    # Import defaults and submitted scalars through the existing
+                    # typed material transport. Lists remain JSON, never filenames.
+                    for key, value in semantic_values.items():
+                        if input_types.get(key) in {'text', 'json'}:
+                            input_bindings[key] = (value if isinstance(value, str)
+                                                   else json.dumps(value, ensure_ascii=False))
+                    effective_context += '\n\nConfirmed workflow parameters:\n' + json.dumps(
+                        semantic_values, ensure_ascii=False,
+                    )
+                    if session_holder is not None:
+                        session_holder['request_context'] = effective_context
                 clarification_answers = {
                     key: value for key, value in input_bindings.items()
                     if key not in input_types and key in clarification_ids and value.strip()
@@ -1566,13 +1647,6 @@ def _workflow_trigger_tools(
                     )
                     if session_holder is not None:
                         session_holder['request_context'] = effective_context
-                graph = package.get('compiled_graph') or {}
-                has_input_contract = (_trigger_input_contract(package) is not None
-                                      or isinstance(graph.get('material_producers'), dict))
-                if has_input_contract and set(input_bindings) - input_types.keys():
-                    raise WorkflowClientError(
-                        'WORKFLOW_INPUT_NOT_EXPOSED', 'Use only inputs advertised by this package.',
-                    )
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
                     binding = str(attachment_ref or '').strip()
@@ -1611,9 +1685,22 @@ def _workflow_trigger_tools(
                     bound_id, input_bindings=resolved_bindings,
                     request_context=effective_context,
                     workflow_mode=workflow_mode,
+                    **({'clarification_values': semantic_values,
+                        'revision_id': str(package.get('revision_id') or bound_revision)} if managed(runtime) else {}),
                 )
                 session_id = str(prepared.get('session_id') or '')
                 if not session_id:
+                    if prepared.get('questions'):
+                        from lazyllm.tools.agent.base import _write_agent_data
+                        from lazymind.chat.engine.tools.ask_user import question_card_payload
+                        card = question_card_payload(prepared['questions'], title='补充必要信息', workflow=startup_metadata(
+                            bound_ref, str(prepared.get('workflow_revision') or bound_revision), effective_context,
+                            prepared.get('clarification_values') or semantic_values, bound_clarification,
+                        ))
+                        _write_agent_data('ask_pending', **card)
+                        return {**prepared, '_agent_control': {
+                            'stop': True, 'reason': 'awaiting_user', 'final_text': '',
+                        }}
                     return {
                         **prepared,
                         'status': 'waiting',
@@ -1727,6 +1814,7 @@ def _workflow_trigger_tools(
             package_hint,
             any(kind in {'text', 'json'} for kind in input_types_hint.values()),
             item.get('runtime'),
+            clarification if (clarification or {}).get('workflow_ref') == workflow_ref else None,
         )
 
         trigger_workflow.__name__ = name
@@ -1784,6 +1872,7 @@ def resolve_workflow_injection(
     allowed_workflow_refs: Optional[List[str]] = None,
     workflow_activations: Optional[List[Dict[str, Any]]] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
+    clarification: Optional[Dict[str, Any]] = None,
 ) -> WorkflowAgentContribution:
     """Map public Workflow APIs to LazyMind Chat tools; no Runtime decisions live here."""
     cfg = _agentic_config()
@@ -1791,6 +1880,16 @@ def resolve_workflow_injection(
         return WorkflowAgentContribution([], [], {}, '')
 
     context = workflow_context if isinstance(workflow_context, dict) else {}
+    if clarification and not context.get('session_id'):
+        ref = str(clarification.get('workflow_ref') or '')
+        if any(item.get('workflow_ref') == ref for item in (workflow_catalog or [])):
+            allowed_workflow_refs = [ref]
+            pinned_revision = str(clarification.get('revision_id') or '')
+            if pinned_revision:
+                workflow_activations = [{**item, 'revision_id': pinned_revision} if item.get('workflow_ref') == ref
+                                        else item for item in (workflow_activations or [])]
+            current_query = (str(clarification.get('original_request') or current_query)
+                             + '\n\nClarification answers:\n' + current_query)
     session_id = str(context.get('session_id') or '')
     workflow_id = str(context.get('workflow_id') or context.get('workflow_ref') or '')
     revision_id = str(context.get('revision_id') or '')
@@ -1897,7 +1996,7 @@ def resolve_workflow_injection(
 
     trigger_tools = _workflow_trigger_tools(
         activations, allowed_refs, current_query, conversation_id, session_holder,
-        conversation_history, mode,
+        conversation_history, mode, clarification,
     )
     toolkit = HostWorkflowToolkit(
         _client, allowed_workflow_ids=allowed_ids, origin_ref=conversation_id,
@@ -1933,7 +2032,8 @@ def resolve_workflow_injection(
         # A ChatAgent tool set is fixed for the duration of one model turn. Expose
         # Host-bound Session tools up front and resolve their Session id only after
         # trigger_<workflow> creates it, so trigger -> advance works in the same turn.
-        if len(trigger_tools) == 1:
+        from lazymind.chat.workflow.clarification import managed
+        if len(trigger_tools) == 1 and not managed(runtime_policy) and not session_holder.get('startup_managed'):
             @fc_register(host_file='NONE')
             def initialize_selected_session():
                 return trigger_tools[0]()
@@ -2185,6 +2285,7 @@ def resolve_workflow_injection(
         selection_context = discovery_context.prompt
     return WorkflowAgentContribution(
         tools, [], patch, selection_context, runtime_policy,
+        pending_ask=session_holder.get('pending_ask'),
     )
 
 

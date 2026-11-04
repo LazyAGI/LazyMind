@@ -243,6 +243,7 @@ function AutoSlotGrid({
               <SlotRenderer
                 key={`${rev.slot_id}-${rev.list_index ?? -1}`}
                 slot={rev}
+                workflowSession={session}
                 sessionId={session.session_id}
                 slotId={slotId}
                 revisionCount={rev.revision_count}
@@ -604,6 +605,7 @@ function InnerTabsCell({
             {rev ? (
               <SlotRenderer
                 slot={rev}
+                workflowSession={session}
                 widget={session.workflow_id === 'ppt-workflow' && slotId === 'slide_outline'
                   ? { ...def?.widget, widgetType: 'ppt-prompt' } : def?.widget}
                 expectedType={def?.type}
@@ -954,6 +956,7 @@ function CompositeSlotGrid({
         {rev ? (
           <SlotRenderer
             slot={rev}
+            workflowSession={session}
             widget={session.workflow_id === 'ppt-workflow' && slotId === 'slide_outline'
               ? { ...def?.widget, widgetType: 'ppt-prompt' } : def?.widget}
             slideNavigation={paged ? {
@@ -1357,6 +1360,7 @@ function SortableImageList({
             >
               <SlotRenderer
                 slot={rev}
+                workflowSession={session}
                 cardMode
                 widget={slotDef.widget}
                 expectedType={slotDef.type}
@@ -1440,14 +1444,24 @@ function NamedTabSlot({
     revisions.length === 0 || artifactStream.state === 'streaming'
   ));
 
+  const paperPendingKey = session.workflow_id === 'paper_expansion'
+    ? ({ candidate_set: 'chat.paperSearching', screened_candidates: 'chat.paperScreening', relation_analysis: 'chat.paperVerifying',
+      expansion_report: 'chat.paperComposing' } as Record<string, string>)[slotDef.id]
+    : undefined;
+  const emptyStateKey = compactEmptyStates || paperPendingKey
+    ? workflowEmptyStateKey(session, slotStepId) : undefined;
+
+  const pendingMessageKey = emptyStateKey === 'chat.workflowEmptyRunning' && paperPendingKey
+    ? paperPendingKey : emptyStateKey;
+
   const content = showStream && artifactStream ? (
     <SlotMarkdownStream stream={artifactStream} />
   ) : revisions.length === 0 ? (
     <div
-      className='workflow-panel__slot-placeholder'
+      className={`workflow-panel__slot-placeholder${paperPendingKey ? ' workflow-panel__slot-placeholder--paper-status' : ''}`}
       aria-label={`${slotLabel} pending`}
     >
-      <span>{compactEmptyStates ? t(workflowEmptyStateKey(session, slotStepId)) : '—'}</span>
+      <span>{pendingMessageKey ? t(pendingMessageKey) : '—'}</span>
     </div>
   ) : isImageList ? (
     <SortableImageList
@@ -1476,6 +1490,7 @@ function NamedTabSlot({
         >
           <SlotRenderer
             slot={rev}
+            workflowSession={session}
             widget={slotDef.widget}
             originalFileSlot={
               slotDef.id === 'delivered_markdown'
@@ -1589,7 +1604,15 @@ function TabSlotGrid({
       tasks,
     )));
   };
-  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session));
+  const isPaperReportTab = session.workflow_id === 'paper_expansion'
+    && tab.slots.some(slot => slot.id === 'expansion_report');
+  const paperReportReady = isPaperReportTab
+    && getTabSlotRevisions(session, tab, 'expansion_report').some(revision => revision.selected);
+  const paperResultReady = isPaperReportTab
+    && getTabSlotRevisions(session, tab, 'expansion_result').some(revision => revision.selected);
+  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session))
+    .filter(slot => !isPaperReportTab || slot.id !== 'relation_analysis')
+    .filter(slot => slot.id !== 'expansion_result' || !isPaperReportTab || (!paperReportReady && paperResultReady));
   const documents = visibleSlots.flatMap(slotDef => getTabSlotRevisions(session, tab, slotDef.id)
     .filter(revision => revision.document)
     .map(revision => ({ slotDef, revision })));
@@ -1629,7 +1652,7 @@ function TabSlotGrid({
         primaryDocumentKey={primaryDocumentKey}
         slotDef={slotDef}
         slotStepId={resolveWorkflowTabStepId(tab, session.steps)}
-        hideLabel={visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
+        hideLabel={session.workflow_id === 'paper_expansion' || visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
           && slotDef.widget?.collapsed === undefined && slotDef.label === tab.label}
         revisions={revisions}
         artifactStream={artifactStream}
@@ -2215,7 +2238,7 @@ export function WorkflowPanel({
       actionPending,
     }}>
     <div
-      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded ? ' workflow-panel--embedded' : ''}${externalPresentation ? ' workflow-panel--external-presentation' : ''}`}
+      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded ? ' workflow-panel--embedded' : ''}${externalPresentation ? ' workflow-panel--external-presentation' : ''}${session.workflow_id === 'paper_expansion' ? ' workflow-panel--paper-expansion' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.workflowPanelTitle')}
     >

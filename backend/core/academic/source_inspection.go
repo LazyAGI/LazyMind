@@ -13,7 +13,10 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -42,16 +45,19 @@ type sourceRecord struct {
 	Index      any    `json:"index"`
 	URL        string `json:"url"`
 	Title      string `json:"title"`
+	DOI        string `json:"doi"`
 }
 type SourceInspection struct {
-	SourceID  string            `json:"source_id"`
-	URL       string            `json:"url"`
-	Title     string            `json:"title"`
-	Eligible  bool              `json:"eligible"`
-	PaperKey  string            `json:"paper_key,omitempty"`
-	Reason    string            `json:"reason,omitempty"`
-	Work      WorkInput         `json:"-"`
-	Candidate FulltextCandidate `json:"-"`
+	SourceID        string            `json:"source_id"`
+	URL             string            `json:"url"`
+	Title           string            `json:"title"`
+	NeedsPDFLookup  bool              `json:"needs_pdf_lookup,omitempty"`
+	PDFLookupFailed bool              `json:"pdf_lookup_failed,omitempty"`
+	Eligible        bool              `json:"eligible"`
+	PaperKey        string            `json:"paper_key,omitempty"`
+	Reason          string            `json:"reason,omitempty"`
+	Work            WorkInput         `json:"-"`
+	Candidate       FulltextCandidate `json:"-"`
 }
 
 var strictArxivPath = regexp.MustCompile(`^/(?:abs|pdf|html)/((?:[0-9]{2}(?:0[1-9]|1[0-2])\.[0-9]{4,5}|[a-z-]+(?:\.[A-Z]{2})?/[0-9]{2}(?:0[1-9]|1[0-2])[0-9]{3}))(?:v[1-9][0-9]*)?(?:\.pdf)?/?$`)
@@ -62,6 +68,13 @@ func officialArxivID(raw string) string {
 		return ""
 	}
 	host := strings.ToLower(u.Hostname())
+	if host == "doi.org" || host == "dx.doi.org" {
+		id, err := arxivsource.Parse(raw)
+		if err != nil {
+			return ""
+		}
+		return strings.ToLower(id.BaseID)
+	}
 	if host != "arxiv.org" && host != "www.arxiv.org" && host != "export.arxiv.org" {
 		return ""
 	}
@@ -167,8 +180,7 @@ func loadSourceRecords(ctx context.Context, db *gorm.DB, user string, c SourceCo
 	return decodeSources(raw)
 }
 
-// Recognition is deliberately offline. Only persisted academic identities may
-// expand recognition beyond official arXiv URLs; a DOI-shaped string is insufficient.
+// Recognition is offline. A DOI source can be queued for lookup without claiming a PDF exists.
 func inspectRecord(ctx context.Context, db *gorm.DB, s sourceRecord) (SourceInspection, error) {
 	out := SourceInspection{SourceID: sourceRecordID(s), URL: s.URL, Title: s.Title, Reason: "无法确认文献身份或缺少原文地址"}
 	id := officialArxivID(s.URL)
@@ -176,6 +188,9 @@ func inspectRecord(ctx context.Context, db *gorm.DB, s sourceRecord) (SourceInsp
 		out.Work = WorkInput{ArxivID: id, Title: s.Title, Provider: "arxiv", ProviderWorkID: id}
 		out.PaperKey = "arxiv:" + id
 		out.Candidate = FulltextCandidate{URL: "https://arxiv.org/pdf/" + id, SourceType: "official_pdf", SourceProvider: "arxiv", ExpectedMIME: "application/pdf"}
+		if selected, err := arxivsource.Parse(s.URL); err == nil {
+			out.Candidate.URL, out.Candidate.Version = selected.PDFURL(), selected.Version
+		}
 		// Prefer an already established cross-provider identity.
 		var known orm.AcademicWork
 		if e := db.WithContext(ctx).Where("arxiv_id_base = ?", id).Take(&known).Error; e == nil {
@@ -188,20 +203,25 @@ func inspectRecord(ctx context.Context, db *gorm.DB, s sourceRecord) (SourceInsp
 		}
 	} else {
 		u, e := url.Parse(s.URL)
-		if e != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		if e != nil || u.User != nil || (s.URL != "" && u.Scheme != "http" && u.Scheme != "https") {
 			return out, nil
+		}
+		doi := NormalizeDOI(s.DOI)
+		if u.Port() == "" && (strings.EqualFold(u.Hostname(), "doi.org") || strings.EqualFold(u.Hostname(), "dx.doi.org")) {
+			doi = strings.ToLower(strings.TrimPrefix(u.Path, "/"))
+		}
+		if doiPattern.FindString(doi) != doi {
+			doi = ""
 		}
 		var known orm.AcademicWork
 		var linked orm.AcademicWorkDocument
 		// A persisted acquisition is trusted evidence of the original locator.
-		if e = db.WithContext(ctx).Where("source_locator = ?", s.URL).Take(&linked).Error; e == nil {
-			e = db.WithContext(ctx).Where("id = ?", linked.AcademicWorkID).Take(&known).Error
-		} else if strings.EqualFold(u.Hostname(), "doi.org") || strings.EqualFold(u.Hostname(), "dx.doi.org") {
-			doi := strings.ToLower(strings.TrimPrefix(u.Path, "/"))
-			if !doiPattern.MatchString(doi) {
-				return out, nil
-			}
+		if doi != "" {
 			e = db.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&known).Error
+		} else if s.URL == "" {
+			return out, nil
+		} else if e = db.WithContext(ctx).Where("source_locator = ?", s.URL).Take(&linked).Error; e == nil {
+			e = db.WithContext(ctx).Where("id = ?", linked.AcademicWorkID).Take(&known).Error
 		} else {
 			if !errors.Is(e, gorm.ErrRecordNotFound) {
 				return out, e
@@ -224,20 +244,22 @@ func inspectRecord(ctx context.Context, db *gorm.DB, s sourceRecord) (SourceInsp
 				return out, nil
 			}
 		}
-		if e != nil {
-			if errors.Is(e, gorm.ErrRecordNotFound) {
-				return out, nil
-			}
+		if e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
 			return out, e
 		}
 		candidates := candidatesForWork(known)
-		if len(candidates) == 0 || (known.DOINormalized == "" && known.ArxivIDBase == "") {
-			return out, nil
-		}
-		// Only resolver-provided PDF provenance or an official arXiv identity qualifies.
 		var provenance map[string]any
 		_ = json.Unmarshal(known.ProvenanceJSON, &provenance)
-		if known.ArxivIDBase == "" && (provenance["pdf_url"] == nil || provenance["trusted_fulltext"] != true) {
+		hasTrustedPDF := len(candidates) > 0 && (known.ArxivIDBase != "" ||
+			(known.DOINormalized != "" && provenance["trusted_fulltext"] == true))
+		if !hasTrustedPDF {
+			if doi == "" {
+				return out, nil
+			}
+			out.Work = WorkInput{WorkID: known.ID, DOI: doi}
+			out.PaperKey = "doi:" + doi
+			out.NeedsPDFLookup = true
+			out.Eligible, out.Reason = true, ""
 			return out, nil
 		}
 		out.Work = WorkInput{WorkID: known.ID, Title: known.CanonicalTitle, DOI: known.DOINormalized, ArxivID: known.ArxivIDBase}
@@ -303,4 +325,97 @@ func InspectSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyJSON(w, map[string]any{"items": items})
+}
+
+func LookupSourcePDFs(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Context SourceContext `json:"source_context"`
+		IDs     []string      `json:"source_ids"`
+	}
+	if !parseJSON(r, &req) || len(req.IDs) == 0 || len(req.IDs) > 24 {
+		replyError(w, 400, "INVALID_REQUEST", "1–24 source_ids required")
+		return
+	}
+	ctx, db := r.Context(), store.DB()
+	items, err := inspectSources(ctx, db, user, req.Context, req.IDs)
+	if err != nil {
+		replyError(w, 403, "SOURCE_UNAVAILABLE", err.Error())
+		return
+	}
+	if err = lookupSourcePDFs(ctx, db, items); err != nil {
+		replyError(w, 500, "SOURCE_LOOKUP_FAILED", err.Error())
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"items": items})
+}
+
+func lookupSourcePDFs(ctx context.Context, db *gorm.DB, items []SourceInspection) error {
+	client, release := paperPDFClient(ctx)
+	defer release()
+	ctx = context.WithValue(ctx, paperPDFClientKey{}, client)
+	byDOI := map[string][]int{}
+	for i, row := range items {
+		if row.NeedsPDFLookup {
+			byDOI[row.Work.DOI] = append(byDOI[row.Work.DOI], i)
+		}
+	}
+	var group errgroup.Group
+	group.SetLimit(8)
+	results := make([]paperPDFLookup, len(items))
+	for doi, indices := range byDOI {
+		group.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			results[indices[0]] = lookupOpenDOIPDF(ctx, doi)
+			return ctx.Err()
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return err
+	}
+	for _, indices := range byDOI {
+		found := results[indices[0]]
+		if found.Candidate != nil {
+			// Reuse the verified locator on submit without querying the DOI again.
+			if err := rememberSourcePDF(ctx, db, items[indices[0]], *found.Candidate); err != nil {
+				return err
+			}
+		}
+		for _, i := range indices {
+			items[i].NeedsPDFLookup = found.Candidate == nil
+			items[i].PDFLookupFailed = found.Candidate == nil && (found.Err != nil || len(found.Warnings) > 0)
+		}
+	}
+	return nil
+}
+
+func rememberSourcePDF(ctx context.Context, db *gorm.DB, source SourceInspection, candidate FulltextCandidate) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		work, err := sourceWork(ctx, tx, source)
+		if err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&work, "id = ?", work.ID).Error; err != nil {
+			return err
+		}
+		provenance := map[string]any{}
+		if err := json.Unmarshal(work.ProvenanceJSON, &provenance); err != nil {
+			return err
+		}
+		if len(candidatesForWork(work)) > 0 && (work.ArxivIDBase != "" || provenance["trusted_fulltext"] == true) {
+			return nil
+		}
+		if provenance == nil {
+			provenance = map[string]any{}
+		}
+		provenance["trusted_fulltext"], provenance["pdf_url"] = true, candidate.URL
+		provenance["pdf_provider"], provenance["pdf_source_type"] = candidate.SourceProvider, candidate.SourceType
+		provenance["pdf_license"], provenance["pdf_version"] = candidate.License, candidate.Version
+		return tx.Model(&work).Update("metadata_provenance_json", marshal(provenance)).Error
+	})
 }

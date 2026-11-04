@@ -77,7 +77,7 @@ class InputCheckpoint:
         _, _, value = record
         if not value['questions'] or value.get('answer_text'):
             return None
-        from lazymind.chat.engine.tools.ask_user import _normalise_questions, ask_user
+        from lazymind.chat.engine.tools.ask_user import _normalise_questions, emit_question_card
 
         # Validate before persisting a pending card. Never silently truncate a
         # long checklist: all missing fields must remain visible to the user.
@@ -86,7 +86,7 @@ class InputCheckpoint:
         if not value.get('checkpoint_token'):
             self._save(record, {**value, 'checkpoint_token': token})
         if token not in self.emitted:
-            ask_user(
+            emit_question_card(
                 questions,
                 title=config.get('title') or '补充缺失信息',
                 description='已完成素材搜集，请补充以下信息；不确定的内容可填写“不知道”或“省略”。',

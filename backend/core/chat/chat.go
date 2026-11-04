@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/common/askuser"
+
 	"lazymind/core/evolution"
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
@@ -22,6 +24,7 @@ import (
 
 const (
 	streamChatPath = "/api/chat/stream"
+	steerChatPath  = "/api/chat/steer"
 
 	defaultDialTimeout = 10 * time.Second
 	// defaultTotalTimeout bounds the whole upstream stream. auto-mode SubAgents block the
@@ -29,6 +32,7 @@ const (
 	// longest expected SubAgent runtime. Override via LAZYMIND_CHAT_UPSTREAM_TIMEOUT_SEC.
 	defaultTotalTimeout = 2 * time.Hour
 	defaultTTFB         = 3 * time.Minute
+	defaultSteerTimeout = 15 * time.Second
 )
 
 func upstreamTotalTimeout() time.Duration {
@@ -150,6 +154,7 @@ type ChatAgentOptions struct {
 }
 
 type ChatWorkflowOptions struct {
+	Clarification            map[string]any   `json:"clarification,omitempty"`
 	EnableWorkflow           *bool            `json:"enable_workflow,omitempty"`
 	WorkflowContext          map[string]any   `json:"workflow_context,omitempty"`
 	Catalog                  []map[string]any `json:"catalog,omitempty"`
@@ -160,6 +165,7 @@ type ChatWorkflowOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
+	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
 	Sources                  []any                          `json:"sources"`
@@ -217,17 +223,13 @@ type ArtifactCreatedEvent struct {
 
 // AskQuestion is a single question within an AskPendingEvent.
 // type is one of "boolean", "single", "multiple", "text".
-type AskQuestion struct {
-	Text       string   `json:"text"`
-	Type       string   `json:"type"`
-	Choices    []string `json:"choices,omitempty"`
-	AllowOther *bool    `json:"allow_other,omitempty"`
-}
+type AskQuestion = askuser.Question
 
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
+	Workflow                   map[string]string          `json:"workflow,omitempty"`
 	KnowledgeManagementPreview map[string]any             `json:"knowledge_management_preview,omitempty"`
 	KnowledgeManagement        map[string]string          `json:"knowledge_management,omitempty"`
 	AskID                      string                     `json:"ask_id"`
@@ -277,11 +279,14 @@ type ToolLimitPendingEvent struct {
 // Go writes the intent to DB and pushes an intent_updated convEvent so the frontend refreshes
 // the session immediately without requiring a manual page reload.
 type IntentUpdatedEvent struct {
-	SessionID     string            `json:"session_id,omitempty"`
-	Scope         string            `json:"scope"`
-	Operations    []IntentOperation `json:"operations,omitempty"`
-	StepID        string            `json:"step_id,omitempty"`
-	IntentContext map[string]any    `json:"intent_context,omitempty"`
+	// Empty means the original answer; nil preserves legacy unsegmented events.
+	SteeringSegmentID *string           `json:"steering_segment_id,omitempty"`
+	RunID             string            `json:"run_id,omitempty"`
+	SessionID         string            `json:"session_id,omitempty"`
+	Scope             string            `json:"scope"`
+	Operations        []IntentOperation `json:"operations,omitempty"`
+	StepID            string            `json:"step_id,omitempty"`
+	IntentContext     map[string]any    `json:"intent_context,omitempty"`
 }
 
 type IntentOperation struct {
@@ -340,6 +345,21 @@ type ChatService struct {
 	baseURL       string
 	streamChatURL string
 	client        *http.Client
+}
+
+type LazyChatSteerRequest struct {
+	AlgorithmID    string `json:"algorithm_id,omitempty"`
+	ConversationID string `json:"conversation_id"`
+	RunID          string `json:"run_id"`
+	SteerID        string `json:"steer_id"`
+	Input          string `json:"input"`
+}
+
+type LazyChatSteerResponse struct {
+	Accepted bool   `json:"accepted"`
+	SteerID  string `json:"steer_id,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 // NewChatServiceWithEndpoint Createtext endpoint text ChatService，endpoint text http://host:port。
@@ -406,6 +426,36 @@ func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-c
 	return lazyStreamHandler(ctx, resp), strings.TrimSpace(resp.Header.Get("X-Algorithm-Id")), nil
 }
 
+// SteerChat delivers input to the exact algorithm instance that owns an active
+// run. A successful HTTP response means the runtime owns the input, not that a
+// model has already consumed it.
+func (c *ChatService) SteerChat(ctx context.Context, req LazyChatSteerRequest) (*LazyChatSteerResponse, int, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	steerCtx, cancel := context.WithTimeout(ctx, defaultSteerTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(steerCtx, http.MethodPost, c.baseURL+steerChatPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		httpReq.Header.Set("X-LazyMind-Internal-Token", token)
+	}
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	var result LazyChatSteerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return &result, resp.StatusCode, nil
+}
+
 func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStreamData {
 	scanner := bufio.NewScanner(resp.Body)
 	dataChan := make(chan *LazyStreamData)
@@ -447,6 +497,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
+	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
 	Think                    string                         `json:"think"`
@@ -684,6 +735,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if workflowContext, ok := body["workflow_context"].(map[string]any); ok && len(workflowContext) > 0 {
 		req.Workflow.WorkflowContext = workflowContext
+	}
+	if clarification, ok := body["workflow_clarification"].(map[string]any); ok {
+		req.Workflow.Clarification = clarification
 	}
 	if catalog, ok := body["workflow_catalog"].([]map[string]any); ok {
 		req.Workflow.Catalog = catalog
@@ -1127,6 +1181,7 @@ func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 	return UpstreamStreamChunk{
+		SteeringApplied:          data.SteeringApplied,
 		ModelOutput:              data.ModelOutput,
 		Text:                     data.Text,
 		Think:                    data.ReasoningText,

@@ -140,6 +140,14 @@ type documentPublicationGroupResponse struct {
 	Message string                                 `json:"message"`
 	Data    workflow.DocumentPublicationGroupState `json:"data" required:"true"`
 }
+type publicationTargetCheckResponse struct {
+	Code int                             `json:"code" required:"true"`
+	Data workflow.PublicationTargetCheck `json:"data" required:"true"`
+}
+type publicationPreflightResponse struct {
+	Code int                                 `json:"code" required:"true"`
+	Data workflow.PublicationPreflightResult `json:"data" required:"true"`
+}
 type documentImageExportResponse struct {
 	Code    int                               `json:"code" required:"true"`
 	Message string                            `json:"message"`
@@ -1196,6 +1204,7 @@ type datasetQueryParams struct {
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
 	Source    string   `query:"source" enum:"manual,cloud,official_installed" desc:"Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza)."`
+	Scene     string   `query:"scene" desc:"Filter datasets by knowledge scene, for example academic_papers."`
 }
 
 type createDatasetQueryParams struct {
@@ -1615,6 +1624,7 @@ type listModelProviderGroupsOpenAPIItem struct {
 	HasAPIKey           bool                               `json:"has_api_key"`
 	ModelCount          int                                `json:"model_count" description:"Number of undeleted models owned by the current user in this supplier group; returned without loading model contents"`
 	IsVerified          bool                               `json:"is_verified"`
+	CredentialStatus    string                             `json:"credential_status,omitempty"`
 }
 
 type listModelProviderGroupsOpenAPIResponse struct {
@@ -3049,6 +3059,7 @@ type writerDocumentSaveOpenAPIRequest struct {
 type translationOpenAPIRequest struct {
 	Text   string `json:"text"`
 	Target string `json:"target,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 type translationOpenAPIResponse struct {
@@ -3057,8 +3068,18 @@ type translationOpenAPIResponse struct {
 	Target         string `json:"target"`
 }
 
+type translationDocumentProviderOpenAPIItem struct {
+	GroupID      string `json:"group_id"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
+}
+
 type translationStatusOpenAPIResponse struct {
-	Configured bool `json:"configured"`
+	Configured        bool                                     `json:"configured"`
+	Provider          string                                   `json:"provider,omitempty"`
+	SelectedGroupID   string                                   `json:"selected_group_id,omitempty"`
+	DocumentSupported bool                                     `json:"document_supported"`
+	DocumentProviders []translationDocumentProviderOpenAPIItem `json:"document_providers"`
 }
 
 func registeredCoreOperations() []openAPIOperation {
@@ -3133,6 +3154,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}", Summary: "Read owned image export progress and individual outcomes", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Image export", documentImageExportResponse{}), 404: resp("Export not found", documentActionErrorOpenAPIResponse{})}},
 		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry", Summary: "Retry missing images without changing the captured document", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Image export accepted", documentImageExportResponse{}), 404: resp("Export not found", documentActionErrorOpenAPIResponse{}), 410: resp("Export expired", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}", Summary: "Download an owned image archive or original image", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: {Description: "Image or ZIP attachment", ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}, 404: resp("File not found", documentActionErrorOpenAPIResponse{}), 410: resp("Export expired", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/document-providers/obsidian/status", Summary: "Inspect configured Obsidian vault availability on the executor", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Obsidian availability", publicationTargetCheckResponse{}), 502: resp("Executor unavailable", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/publications:preflight", Summary: "Check saved document destinations without writing documents", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(workflow.DocumentPublicationGroupRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Target checks", publicationPreflightResponse{}), 409: resp("Document changed", documentActionErrorOpenAPIResponse{}), 422: resp("Target invalid", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publications", Summary: "Read current per-platform synchronization state and confirmed preferences", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication targets", documentPublicationGroupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},
 		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/publications", Summary: "Confirm publication of the current saved document to independent targets", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(workflow.DocumentPublicationGroupRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Accepted publication", documentPublicationGroupResponse{}), 400: resp("Invalid targets", documentActionErrorOpenAPIResponse{}), 409: resp("Document or publication changed", documentActionErrorOpenAPIResponse{}), 422: resp("Target unsupported", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publication", Summary: "Find the blocking or latest owned document publication", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication lookup", documentPublicationLookupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},
@@ -4783,7 +4806,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/translation/status",
 			Summary:     "Get translation configuration status",
-			Description: "Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.",
+			Description: "Reports the current user's selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.",
+			Tags:        []string{"translation"},
+			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/translation/initialize",
+			Summary:     "Initialize free translation connections",
+			Description: "Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.",
 			Tags:        []string{"translation"},
 			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
 		},
@@ -4791,7 +4822,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/translation:translate",
 			Summary:     "Translate selected document text",
-			Description: "Translates up to 5000 characters with the current user's server-side translation credential.",
+			Description: "Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.",
 			Tags:        []string{"translation"},
 			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},

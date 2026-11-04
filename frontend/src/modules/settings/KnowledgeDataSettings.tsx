@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Alert, Button, Empty, Skeleton, Switch, Tag, message } from "antd";
 import {
-  ApiOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
   FolderOpenOutlined,
@@ -11,7 +10,6 @@ import {
   ReadOutlined,
   ReloadOutlined,
   RightOutlined,
-  TranslationOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -22,18 +20,14 @@ import {
   notifyToolAvailabilityChanged,
 } from "@/modules/memory/toolApi";
 import type { StructuredAsset } from "@/modules/memory/shared";
-import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 
 interface KnowledgeDataSettingsProps {
   routeParams?: URLSearchParams;
   documentDirectoriesEnabled: boolean;
   documentDirectoriesSaving: boolean;
   onDocumentDirectoriesChange: (enabled: boolean) => void;
-  documentParsingEnabled: boolean;
-  documentParsingSaving: boolean;
   controlsDisabled: boolean;
   headingRef: RefObject<HTMLHeadingElement>;
-  onDocumentParsingChange: (enabled: boolean) => void;
 }
 
 interface ToolDefinition {
@@ -41,7 +35,6 @@ interface ToolDefinition {
   name: string;
   description: string;
   destination?: string;
-  configurationOnly?: boolean;
 }
 
 interface ToolGroupDefinition {
@@ -58,11 +51,8 @@ export default function KnowledgeDataSettings({
   documentDirectoriesEnabled,
   documentDirectoriesSaving,
   onDocumentDirectoriesChange,
-  documentParsingEnabled,
-  documentParsingSaving,
   controlsDisabled,
   headingRef,
-  onDocumentParsingChange,
 }: KnowledgeDataSettingsProps) {
   const { t } = useTranslation();
   const [tools, setTools] = useState<StructuredAsset[]>([]);
@@ -115,25 +105,10 @@ export default function KnowledgeDataSettings({
       description: t("settingsPage.knowledge.groups.search.description"),
       icon: <GlobalOutlined />,
       tools: [
-        { id: "web_search", name: t("settingsPage.knowledge.groups.search.webSearch.name"), description: t("settingsPage.knowledge.groups.search.webSearch.description"), destination: "/settings?section=knowledge&tool=web-search" },
-        { id: "academic_search", name: t("settingsPage.knowledge.groups.search.academicSearch.name"), description: t("settingsPage.knowledge.groups.search.academicSearch.description"), destination: "/settings?section=knowledge&tool=academic-search" },
+        { id: "web_search", name: t("settingsPage.knowledge.groups.search.webSearch.name"), description: t("settingsPage.knowledge.groups.search.webSearch.description"), destination: "/settings?section=model_defaults&service=search" },
+        { id: "academic_search", name: t("settingsPage.knowledge.groups.search.academicSearch.name"), description: t("settingsPage.knowledge.groups.search.academicSearch.description"), destination: "/settings?section=model_defaults&service=academic" },
         { id: "wikipedia", name: t("settingsPage.knowledge.groups.search.wikipedia.name"), description: t("settingsPage.knowledge.groups.search.wikipedia.description") },
         { id: "url_fetch", name: t("settingsPage.knowledge.groups.search.urlFetch.name"), description: t("settingsPage.knowledge.groups.search.urlFetch.description") },
-      ],
-    },
-    {
-      id: "translation",
-      title: t("settingsPage.knowledge.groups.translation.title"),
-      description: t("settingsPage.knowledge.groups.translation.description"),
-      icon: <TranslationOutlined />,
-      destination: "/settings?section=knowledge&tool=translation",
-      tools: [
-        {
-          id: "translation_service",
-          name: t("settingsPage.knowledge.groups.translation.service.name"),
-          description: t("settingsPage.knowledge.groups.translation.service.description"),
-          configurationOnly: true,
-        },
       ],
     },
     {
@@ -207,9 +182,7 @@ export default function KnowledgeDataSettings({
     const tool = toolsByID.get(definition.id);
     const pending = pendingTools.has(definition.id);
     const displayName = tool?.name || definition.name;
-    const status = definition.configurationOnly
-      ? { label: t("settingsPage.knowledge.configure"), className: "is-fixed" }
-      : !tool
+    const status = !tool
       ? { label: t("settingsPage.knowledge.unregistered"), className: "is-unavailable" }
       : tool.readonly
         ? { label: t("settingsPage.knowledge.fixedOn"), className: "is-fixed" }
@@ -233,83 +206,72 @@ export default function KnowledgeDataSettings({
         <strong>{displayName}</strong>
         <p>{definition.description}</p>
       </div>
-      {definition.configurationOnly && destination ? (
-        <Link className="settings-knowledge-configure-link" to={withReturnContext(destination)}>
-          <Button size="small" type="link">{t("settingsPage.knowledge.configure")}</Button>
-        </Link>
-      ) : (
-        <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
-      )}
-      {!definition.configurationOnly ? (
-        <Switch
-          aria-label={t("settingsPage.knowledge.enableAria", { name: displayName })}
-          checked={Boolean(tool?.isEnabled)}
-          className="settings-ref-switch"
-          disabled={!tool || tool.readonly || pending}
-          loading={pending}
-          onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
-        />
-      ) : null}
+      <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
+      <Switch
+        aria-label={t("settingsPage.knowledge.enableAria", { name: displayName })}
+        checked={Boolean(tool?.isEnabled)}
+        className="settings-ref-switch"
+        disabled={!tool || tool.readonly || pending}
+        loading={pending}
+        onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
+      />
       {destination ? <RightOutlined aria-hidden="true" className="settings-knowledge-detail-icon" /> : null}
     </div>;
   };
 
-  const capabilityContent = toolsLoading ? (
-    <div className="settings-knowledge-loading"><Skeleton active paragraph={{ rows: 12 }} /></div>
-  ) : toolsError ? (
-    <Alert
-      action={<Button icon={<ReloadOutlined />} onClick={() => void loadTools()}>{t("settingsPage.retry")}</Button>}
-      description={t("settingsPage.knowledge.loadFailedDesc")}
-      message={t("settingsPage.knowledge.loadFailed")}
-      showIcon
-      type="error"
-    />
-  ) : (
+  const toolsReady = !toolsLoading && !toolsError;
+  const visibleGroups = toolsReady ? toolGroups : toolGroups.filter((group) => group.id === "retrieval");
+  const capabilityContent = (
     <div className="settings-knowledge-groups">
       <div className="settings-knowledge-capability-flow">
-        {toolGroups.map((group) => {
-          const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length;
-          const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length;
+        {visibleGroups.map((group) => {
+          const includesDirectories = group.id === "retrieval";
+          const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length + Number(includesDirectories);
+          const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length
+            + Number(includesDirectories && documentDirectoriesEnabled);
           return <section className={`settings-knowledge-group is-${group.id}`} key={group.id}>
             <header className="settings-knowledge-group-head">
               <span>{group.icon}</span>
               <div><h2>{group.title}</h2><p>{group.description}</p></div>
               <Tag>{t("settingsPage.knowledge.enabledCount", { enabled, registered })}</Tag>
             </header>
-            <div className="settings-knowledge-tool-list">{group.tools.map((tool) => renderTool(tool, group))}</div>
+            <div className="settings-knowledge-tool-list">
+              {toolsReady ? group.tools.map((tool) => renderTool(tool, group)) : null}
+              {includesDirectories ? (
+                <div className="settings-knowledge-tool-row">
+                  <span className="settings-knowledge-tool-icon" aria-hidden="true"><FolderOpenOutlined /></span>
+                  <div className="settings-knowledge-tool-copy">
+                    <strong>{t("settingsPage.controls.documentDirectories.title")}</strong>
+                    <p>{t("settingsPage.knowledge.groups.retrieval.documentDirectories.description")}</p>
+                  </div>
+                  <Tag className={`settings-knowledge-state ${documentDirectoriesEnabled ? "is-enabled" : "is-disabled"}`}>
+                    {documentDirectoriesEnabled ? t("settingsPage.enabled") : t("settingsPage.disabled")}
+                  </Tag>
+                  <Switch
+                    aria-label={t("settingsPage.controls.documentDirectories.title")}
+                    checked={documentDirectoriesEnabled}
+                    className="settings-ref-switch"
+                    disabled={controlsDisabled}
+                    loading={documentDirectoriesSaving}
+                    onChange={onDocumentDirectoriesChange}
+                  />
+                </div>
+              ) : null}
+            </div>
           </section>;
         })}
-      </div>
-      <section className="settings-knowledge-group is-parser">
-        <header className="settings-knowledge-group-head">
-          <span><ApiOutlined /></span>
-          <div>
-            <h2>{t("settingsPage.knowledge.documentParsing")}</h2>
-            <p>{t("settingsPage.knowledge.documentParsingGroupDesc")}</p>
-          </div>
-          <div className="settings-knowledge-parser-controls">
-            <Tag className={`settings-knowledge-state ${documentParsingEnabled ? "is-enabled" : "is-disabled"}`}>
-              {documentParsingEnabled ? t("settingsPage.enabled") : t("settingsPage.disabled")}
-            </Tag>
-            <Switch
-              aria-label={t("settingsPage.knowledge.documentParsingAria")}
-              checked={documentParsingEnabled}
-              className="settings-ref-switch"
-              disabled={controlsDisabled}
-              loading={documentParsingSaving}
-              onChange={onDocumentParsingChange}
-            />
-          </div>
-        </header>
-        <div className="settings-knowledge-parser-services">
-          <ExternalServicesPage
-            includeBuiltinTools={false}
-            includeDependencies={false}
-            includeMcp={false}
-            visibleCategories={["parsing"]}
+        {toolsLoading ? (
+          <div className="settings-knowledge-loading"><Skeleton active paragraph={{ rows: 12 }} /></div>
+        ) : toolsError ? (
+          <Alert
+            action={<Button icon={<ReloadOutlined />} onClick={() => void loadTools()}>{t("settingsPage.retry")}</Button>}
+            description={t("settingsPage.knowledge.loadFailedDesc")}
+            message={t("settingsPage.knowledge.loadFailed")}
+            showIcon
+            type="error"
           />
-        </div>
-      </section>
+        ) : null}
+      </div>
     </div>
   );
 
@@ -320,25 +282,6 @@ export default function KnowledgeDataSettings({
         <p>{t("settingsPage.knowledge.description")}</p>
       </div>
     </header>
-    <section className="settings-knowledge-group is-parser">
-      <header className="settings-knowledge-group-head">
-        <span><FolderOpenOutlined /></span>
-        <div>
-          <h2>{t("settingsPage.controls.documentDirectories.title")}</h2>
-          <p>{t("settingsPage.controls.documentDirectories.summary")}</p>
-        </div>
-        <div className="settings-knowledge-parser-controls">
-          <Switch
-            aria-label={t("settingsPage.controls.documentDirectories.title")}
-            checked={documentDirectoriesEnabled}
-            className="settings-ref-switch"
-            disabled={controlsDisabled}
-            loading={documentDirectoriesSaving}
-            onChange={onDocumentDirectoriesChange}
-          />
-        </div>
-      </header>
-    </section>
     {capabilityContent}
     {!toolsLoading && !toolsError && managedTools.length === 0 ? <Empty description={t("settingsPage.knowledge.empty")} /> : null}
   </section>;

@@ -42,7 +42,7 @@ def _page_from_meta(metadata: Dict[str, Any]) -> int:
             digits = ''.join(ch for ch in text if ch.isdigit())
             if digits:
                 return max(1, int(digits))
-    return 1
+    return 0  # Unknown location must not be presented as a verified first page.
 
 
 def _flatten_nodes(nodes: Sequence[Any]) -> List[Any]:

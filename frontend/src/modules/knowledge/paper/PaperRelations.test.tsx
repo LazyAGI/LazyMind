@@ -31,6 +31,7 @@ function fixture() {
 function expansion(): Expansion {
     return {
         id: 'expansion', dataset_id: 'library', conversation_id: 'chat', title: 'Efficient adaptation', goal: 'review', status: 'completed', version: 2,
+        preparation_revision: 1, budget_mode: 'balanced',
         created_at: '2026-10-26T00:00:00Z', updated_at: '2026-10-26T00:00:00Z',
         result: { user_instruction: '', candidate_directions: [], selected_directions: ['Adaptation'], papers: [
                 { paper: { paper_id: 'work-current', title: 'Current paper', abstract: null }, is_seed: false, is_important: false, seed_relation: 'Builds on the seed method', direction_relation: 'Reduces adaptation cost', key_contribution: 'A compact adaptation method' },
@@ -48,6 +49,27 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe('paper relations in the detail drawer', () => {
+    it('opens sources identified in citation text and explains references without a source', async () => {
+        vi.mocked(listAcademicReferences).mockResolvedValue([
+            { ID: 'library', RawText: 'Author. Target paper. doi: 10.1234/target.' },
+            { ID: 'external', RawText: 'Author. External method. arXiv:2305.14314v2, 2023.' },
+            { ID: 'doi', RawText: 'Author. Another method. https://doi.org/10.1234/external.' },
+            { ID: 'unresolved', RawText: 'Author. A reference without an identifier. 2024.' },
+        ]);
+        const onOpenPaper = vi.fn();
+        show(fixture(), { onOpenPaper });
+        const citations = screen.getByRole('region', { name: '引用文献' });
+        const external = await within(citations).findByRole('link', { name: /打开来源：.*External method/ });
+        expect(external).toHaveAttribute('href', 'https://arxiv.org/abs/2305.14314');
+        expect(external).toHaveAttribute('target', '_blank');
+        expect(within(citations).getByRole('link', { name: /打开来源：.*Another method/ })).toHaveAttribute('href', 'https://doi.org/10.1234/external');
+        fireEvent.click(within(citations).getByRole('button', { name: '查看库内论文：Target paper' }));
+        expect(onOpenPaper).toHaveBeenCalledWith('target');
+        const unresolved = within(citations).getByText('Author. A reference without an identifier. 2024.').closest('article')!;
+        expect(within(unresolved).getByText('未识别来源')).toBeInTheDocument();
+        expect(within(unresolved).queryByRole('link')).not.toBeInTheDocument();
+    });
+
     it('reports failed reference loading to notifications and resolves it after retry', async () => {
         const notify = vi.fn(); const resolve = vi.fn();
         vi.mocked(listAcademicReferences).mockRejectedValueOnce(new Error('references unavailable'));
@@ -78,8 +100,9 @@ describe('paper relations in the detail drawer', () => {
         fireEvent.click(screen.getByRole('tab', { name: '附件 2' }));
         const attachments = screen.getByRole('tabpanel', { name: '附件 2' });
         fireEvent.change(within(attachments).getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'second-version' } });
-        fireEvent.click(within(attachments).getByRole('button', { name: '阅读 ↗' }));
-        expect(onOpenAttachment).toHaveBeenCalledWith('pdf-v1');
+        fireEvent.click(within(attachments).getByRole('button', { name: '阅读此附件' }));
+        expect(onOpenAttachment).toHaveBeenCalledOnce();
+        expect(within(attachments).getByText('附件预览')).toBeInTheDocument();
         expect(extractAcademicReferences).not.toHaveBeenCalled();
     });
     it('identifies references when needed and presents expansion context separately from citations', async () => {
@@ -152,4 +175,14 @@ describe('paper relations in the detail drawer', () => {
         await act(async () => finish([{ ID: 'obsolete', Title: 'Obsolete reference', RawText: 'Obsolete reference' }]));
         expect(screen.queryByText('Obsolete reference')).not.toBeInTheDocument();
     });
+});
+
+it('shows saved Zotero relationships alongside extracted references', async () => {
+    const data = fixture();
+    data.relations = [{ id: 'zotero-related', fromPaperId: 'current', toPaperId: 'related', kind: 'related' }];
+    const onOpenPaper = vi.fn();
+    show(data, { onOpenPaper });
+    const saved = await screen.findByRole('region', { name: '已保存关系' });
+    fireEvent.click(within(saved).getByRole('button', { name: /Related paper/ }));
+    expect(onOpenPaper).toHaveBeenCalledWith('related');
 });

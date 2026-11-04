@@ -2,14 +2,16 @@ import { v4 as uuidv4 } from 'uuid';
 export type ReadingStatus = "unread" | "reading" | "read";
 export type LibraryView = "all" | "important" | "incomplete" | "directory";
 export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv" | "web" | "unknown";
-export type PaperImportMethod = "upload" | "link" | "bibliography" | "expansion" | "references";
+export type PaperImportMethod = "upload" | "link" | "bibliography" | "expansion" | "references" | "conversation";
 export type ParseState = "ready" | "parsing" | "failed";
 export type CitationStyle = "gbt" | "apa" | "mla";
+export const paperSourceVersionLabels: Record<string, string> = { submittedVersion: '投稿稿', acceptedVersion: '录用稿', publishedVersion: '出版稿' };
 export interface PaperFolder {
     revision?: number;
     id: string;
     name: string;
     parentId?: string | null;
+    zoteroSources?: string[];
 }
 export interface PaperMetadata {
     title: string;
@@ -20,7 +22,10 @@ export interface PaperMetadata {
     identifiers: {
         doi?: string;
         arxiv?: string;
+        pmid?: string;
+        isbn?: string;
     };
+    confidence?: Partial<Record<'title' | 'authors' | 'venue' | 'year' | 'abstract', number>>;
     citationCount?: number;
 }
 export interface PaperRecord {
@@ -42,15 +47,20 @@ export interface PaperRecord {
     associationConflict?: string;
     attachmentIds: string[];
     noteIds: string[];
+    collectionIds?: string[];
+    annotationIds?: string[];
+    relatedPaperIds?: string[];
+    zoteroSources?: string[];
 }
-export function parseAuthorInput(value: string): string[] {
-    return value.split(/[、;；\n]+/).map(name => name.trim()).filter(Boolean);
+export function parseAuthorInput(value: string | string[]): string[] {
+    const authors = Array.isArray(value) ? value : value.split(/[、;；\n]+/);
+    return authors.map(name => name.trim()).filter(name => /[\p{L}\p{N}]/u.test(name));
 }
 export function createPaperRecord(metadata: Partial<PaperMetadata> & {
     title: string;
 }, fields: Partial<Omit<PaperRecord, 'metadata'>> = {}): PaperRecord {
     return { id: uuidv4(), revision: 0, folderId: null, status: 'unread', important: false, tags: [], source: 'unknown', parse: 'ready', attachmentIds: [], noteIds: [], ...fields,
-        metadata: { authors: [], venue: '', year: 0, ...metadata, identifiers: { ...metadata.identifiers } } };
+        metadata: { venue: '', year: 0, ...metadata, authors: parseAuthorInput(metadata.authors || []), identifiers: { ...metadata.identifiers } } };
 }
 export function descendantFolderIds(folders: PaperFolder[], parentId: string): Set<string> {
     const ids = new Set([parentId]);
@@ -86,6 +96,14 @@ export interface PaperLibraryData {
     papers: PaperRecord[];
     attachments: import('./libraryModel').Attachment[];
     notes: import('./libraryModel').Note[];
+    collections?: import('./libraryModel').Collection[];
+    annotations?: import('./libraryModel').Annotation[];
+    relations?: import('./libraryModel').PaperRelation[];
+    mergeSnapshots?: unknown[];
+    migrationSnapshots?: unknown[];
+    hiddenArxivPapers?: PaperRecord[];
+    legacy?: unknown;
+    backupDatasetId?: string;
 }
 export interface ImportPlan {
     fresh: PaperRecord[];
@@ -104,8 +122,12 @@ export const sourceLabel: Record<ImportSource, string> = {
     unknown: "未记录",
 };
 export const importMethodLabel: Record<PaperImportMethod, string> = {
-    upload: "上传 PDF", link: "链接导入", bibliography: "题录导入", expansion: "自动扩展", references: "参考文献导入",
+    upload: "上传 PDF", link: "链接导入", bibliography: "题录导入", expansion: "扩展导入", references: "参考文献导入", conversation: "对话来源导入",
 };
+export const paperSourceProviderLabels: Record<string, string> = { arxiv: 'arXiv', upload: '本地文件', local: '本地 PDF', web: '网页', doi: 'DOI', openalex: 'OpenAlex', crossref: 'Crossref', unpaywall: 'Unpaywall', sciverse: 'SciVerse' };
+export function paperImportMethodName(method?: PaperImportMethod): string {
+    return method ? importMethodLabel[method] || '未记录' : '未记录';
+}
 export function safePaperUrl(value?: string): string | undefined {
     if (!value)
         return undefined;
@@ -130,7 +152,11 @@ export const citationLabel: Record<CitationStyle, string> = {
 export function papersInView(data: PaperLibraryData, folderId: string | null) {
     if (!folderId)
         return data.papers;
-    return data.papers.filter((item) => item.folderId === folderId);
+    const ids = descendantFolderIds(data.folders, folderId);
+    return data.papers.filter(item => paperBelongsToFolders(item, ids));
+}
+export function paperBelongsToFolders(paper: PaperRecord, ids: Set<string>): boolean {
+    return (!!paper.folderId && ids.has(paper.folderId)) || !!paper.collectionIds?.some(id => ids.has(id));
 }
 export function filterLibraryView(items: PaperRecord[], view: LibraryView) {
     if (view === "important")
@@ -256,7 +282,7 @@ export function applyPaperEdits(item: PaperRecord, edits: PaperEdits): PaperReco
             authors: parseAuthorInput(edits.authors.trim() || "佚名"),
             venue: edits.venue.trim() || "未标注",
             year: Number.isFinite(edits.year) && edits.year > 0 ? Math.trunc(edits.year) : item.metadata.year,
-            identifiers: { doi: doi || undefined, arxiv: arxiv || undefined }
+            identifiers: { ...item.metadata.identifiers, doi: doi || undefined, arxiv: arxiv || undefined }
         }
     };
 }
@@ -398,6 +424,7 @@ export function parseBibTeX(text: string, source: ImportSource): PaperRecord[] {
         const year = Number(fields.get("year")) || 0;
         const arxiv = normalizeArxiv(fields.get("eprint") || fields.get("arxiv") || "");
         return draftPaper({
+            sourceUrl: safePaperUrl(fields.get("url")),
             metadata: {
                 title: fields.get("title")!,
                 authors: bibAuthors(fields.get("author") || ""),
@@ -461,6 +488,7 @@ export function parseRIS(text: string, source: ImportSource): PaperRecord[] {
             throw new Error(`RIS 第 ${index + 1} 条缺少标题，导入已停止`);
         const arxiv = normalizeArxiv((fields.get("UR") || []).join(" ") || fields.get("AN")?.[0] || "");
         return draftPaper({
+            sourceUrl: (fields.get("UR") || []).map(safePaperUrl).find(Boolean),
             tags: (fields.get("KW") || []).flatMap((value) => value.split(/[;；]/)).map((tag) => tag.trim()).filter(Boolean),
             metadata: {
                 title: title,
@@ -558,6 +586,7 @@ export function parseCSV(text: string, source: ImportSource = "local"): {
             throw new Error(`CSV 第 ${index + 2} 行缺少标题，导入已停止`);
         const folder = cells[indexOf("文件夹", "folder")] || "";
         papers.push(draftPaper({
+            sourceUrl: safePaperUrl(cells[indexOf("链接", "url")]),
             tags: (cells[indexOf("标签", "tags")] || "").split(/[;；]/).map((tag) => tag.trim()).filter(Boolean),
             metadata: {
                 title: title,
@@ -572,7 +601,6 @@ export function parseCSV(text: string, source: ImportSource = "local"): {
     return { papers, folderNames };
 }
 export function toCSV(items: PaperRecord[], folders: PaperFolder[]) {
-    const names = new Map(folders.map((folder) => [folder.id, folder.name]));
     const rows = items.map((item) => [
         item.metadata.title,
         item.metadata.authors.join("; "),
@@ -581,7 +609,7 @@ export function toCSV(items: PaperRecord[], folders: PaperFolder[]) {
         item.metadata.identifiers.doi || "",
         item.metadata.identifiers.arxiv || "",
         item.tags.join(";"),
-        item.folderId ? names.get(item.folderId) || "" : "",
+        paperFolderPath(folders, item.folderId),
     ].map(csvCell).join(","));
     return [csvHeaders.join(","), ...rows].join("\n");
 }
@@ -591,12 +619,16 @@ export function assignFolders(data: PaperLibraryData, papers: PaperRecord[], fol
         const name = folderNames[index]?.trim();
         if (!name)
             return { ...item, folderId: item.folderId ?? fallbackFolderId };
-        let folder = folders.find((entry) => entry.name === name && !entry.parentId);
-        if (!folder) {
-            folder = { id: `folder-${name}-${folders.length}`, name };
-            folders.push(folder);
+        let parentId = fallbackFolderId;
+        for (const segment of name.split(/\s+\/\s+/).map(part => part.trim()).filter(Boolean)) {
+            let folder = folders.find(entry => entry.name === segment && (entry.parentId || null) === parentId);
+            if (!folder) {
+                folder = { id: uuidv4(), name: segment, parentId };
+                folders.push(folder);
+            }
+            parentId = folder.id;
         }
-        return { ...item, folderId: folder.id };
+        return { ...item, folderId: parentId };
     });
     return { folders, papers: next };
 }

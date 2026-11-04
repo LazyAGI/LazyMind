@@ -6,6 +6,7 @@ import json
 import math
 import re
 import time
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from uuid import uuid4
@@ -13,7 +14,10 @@ from uuid import uuid4
 import lazyllm
 from json_repair import repair_json
 from lazyllm import AutoModel, LOG
-from lazyllm.module.llms.onlinemodule.base import ModelCallControl, ModelCallError
+from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError, ModelFinish
+from lazyllm.module.llms.onlinemodule.base.model_request import (
+    ModelCallControl, _ModelCallDeadlineExceeded,
+)
 from pydantic import BaseModel, Field
 
 from lazymind.model_config import inject_model_config
@@ -157,23 +161,31 @@ def _call_model(request: LLMTaskRequest, prompt: str, *, stream_output: bool = T
         raise LLMTaskCallError('model_configuration') from exc
     if request.options.get('temperature') is not None:
         options['temperature'] = request.options['temperature']
+    if request.options.get('output_limit') is not None:
+        options['output_limit'] = request.options['output_limit']
     if deadline is not None:
         timeout = min(timeout, deadline - time.monotonic())
         if timeout <= 0:
             raise LLMTaskCallError('request_timeout', retryable=True)
         # Check between streamed frames as well as before/after the request.
         # A per-read socket timeout alone does not bound a long-lived stream.
-        options['call_control'] = ModelCallControl(cancel_check=lambda: time.monotonic() >= deadline)
+        control = options.get('call_control') or ModelCallControl()
+        cancel_check = control.cancel_check
+        options['call_control'] = replace(
+            control, cancel_check=lambda: time.monotonic() >= deadline or bool(cancel_check and cancel_check()))
     try:
-        result = model(prompt, stream_output=stream_output, timeout=timeout,
+        result = model(prompt, stream_output=request.options.get('stream_output', stream_output), timeout=timeout,
                        max_retries=1 if deadline is not None else int(request.options.get('model_retry_attempts', 5)),
                        **options)
         if deadline is not None and time.monotonic() >= deadline:
             raise LLMTaskCallError('request_timeout', retryable=True, calls=1)
         return result
+    except _ModelCallDeadlineExceeded as exc:
+        raise LLMTaskCallError('task_timeout', retryable=True, calls=1) from exc
     except ModelCallError as exc:
         failure = exc.terminal.failure
-        code = failure.code.value if failure is not None else 'model_call_failed'
+        code = failure.code.value if failure is not None else (
+            'model_output_limit' if exc.terminal.finish == ModelFinish.LENGTH else 'incomplete_model_output')
         if deadline is not None and time.monotonic() >= deadline:
             code = 'request_timeout'
         raise LLMTaskCallError(
@@ -191,11 +203,20 @@ def _call_model(request: LLMTaskRequest, prompt: str, *, stream_output: bool = T
 
 
 def _run_task(
-    request: LLMTaskRequest, *, validate_output=None, usage=None,
+    request: LLMTaskRequest, *, validate_output=None, usage=None, call_control=None,
 ) -> tuple[dict[str, Any], str, list[LLMTaskFile]]:
     if request.task_type in _WORKFLOW_TASKS:
         return _run_workflow_task(request)
-    raw = _call_json_or_text(request, _generic_prompt(request), validate_output=validate_output, usage=usage)
+    if request.options.get('wall_timeout_seconds') is not None:
+        duration = float(request.options['wall_timeout_seconds'])
+        if duration <= 0:
+            raise LLMTaskCallError('invalid_task_config')
+        deadline = time.monotonic() + duration
+        if call_control is not None and call_control.deadline is not None:
+            deadline = min(deadline, call_control.deadline)
+        call_control = replace(call_control or ModelCallControl(), deadline=deadline)
+    raw = _call_json_or_text(request, _generic_prompt(request), validate_output=validate_output,
+                             usage=usage, call_control=call_control)
     if isinstance(raw, dict):
         return raw, json.dumps(raw, ensure_ascii=False), []
     return {}, str(raw), []
@@ -218,14 +239,16 @@ def _run_workflow_task(request: LLMTaskRequest) -> tuple[dict[str, Any], str, li
     return output, text, files
 
 
-def _call_json_or_text(request: LLMTaskRequest, prompt: str, *, validate_output=None, usage=None) -> Any:
+def _call_json_or_text(request: LLMTaskRequest, prompt: str, *, validate_output=None, usage=None,
+                       call_control=None) -> Any:
     wants_json = (request.response_format or {}).get('type') == 'json_object'
     if wants_json:
-        return _call_json(request, prompt, validate_output=validate_output, usage=usage)
-    return _call_model(request, prompt)
+        return _call_json(request, prompt, validate_output=validate_output, usage=usage, call_control=call_control)
+    return _call_model(request, prompt, **({'call_control': call_control} if call_control is not None else {}))
 
 
-def _call_json(request: LLMTaskRequest, prompt: str, *, validate_output=None, usage=None) -> dict[str, Any]:
+def _call_json(request: LLMTaskRequest, prompt: str, *, validate_output=None, usage=None,
+               call_control=None) -> dict[str, Any]:
     last_raw: Any = None
     last_error: Exception | None = None
     max_retries = max(1, int(request.options.get('max_retries', 2)))
@@ -245,7 +268,8 @@ def _call_json(request: LLMTaskRequest, prompt: str, *, validate_output=None, us
                 usage['model_calls'] = usage.get('model_calls', 0) + 1
                 usage['attempt_input_chars'] = usage.get('attempt_input_chars', 0) + len(attempt_prompt)
             raw = _call_model(request, attempt_prompt, response_format={'type': 'json_object'},
-                              **({'deadline': deadline, 'default_timeout': budget} if deadline is not None else {}))
+                              **({'deadline': deadline, 'default_timeout': budget} if deadline is not None else {}),
+                              **({'call_control': call_control} if call_control is not None else {}))
             if usage is not None:
                 usage['attempt_output_chars'] = usage.get('attempt_output_chars', 0) + len(str(raw))
             last_raw = raw
@@ -255,7 +279,10 @@ def _call_json(request: LLMTaskRequest, prompt: str, *, validate_output=None, us
                     parsed = validate_output(parsed)
                 return parsed
             raise ValueError('empty JSON object')
-        except LLMTaskCallError:
+        except LLMTaskCallError as exc:
+            if usage is not None:
+                exc.calls = usage.get('model_calls', 0)
+                exc.usage = {**usage, **exc.usage}
             raise
         except (ValueError, TypeError) as exc:
             last_error = exc

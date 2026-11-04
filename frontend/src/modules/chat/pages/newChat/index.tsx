@@ -47,6 +47,7 @@ import {
   parseShowcaseEntryType,
   showcaseEntryType as resolveShowcaseEntryType,
   SHOWCASE_ENTRY_QUERY_PARAM,
+  showcasePagePath,
   type ShowcaseEntryType,
 } from "@/modules/showcase/classification";
 import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
@@ -72,7 +73,11 @@ export function resolveChatEntryDefault(
 }
 
 import { useFeaturedSelectionStore } from "@/modules/chat/store/featuredSelection";
-import { useChatInputStore, type ChatModeDraft } from "@/modules/chat/store/chatInput";
+import {
+  NEW_CHAT_INPUT_DRAFT_KEY,
+  useChatInputStore,
+  type ChatModeDraft,
+} from "@/modules/chat/store/chatInput";
 
 const NewChatPage = () => {
   const { i18n, t } = useTranslation();
@@ -94,12 +99,21 @@ const NewChatPage = () => {
   };
   const incomingModeDraft = useRef(useChatInputStore.getState().modeDraft);
   useEffect(() => { if (incomingModeDraft.current) { useChatInputStore.getState().setModeDraft(); useFeaturedSelectionStore.getState().setSelection("new", incomingModeDraft.current.featuredSelection); } }, []);
-  const [inputValue, setInputValue] = useState(() => {
-    const pending = sessionStorage.getItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY) || "";
+  const [pendingConversationPrompt] = useState(() => {
+    const prompt = sessionStorage.getItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY) || "";
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY);
-    return incomingModeDraft.current?.text ?? pending;
+    return prompt;
   });
-  const shouldAutoSendGroupPromptRef = useRef(!incomingModeDraft.current && Boolean(inputValue));
+  const savedWelcomeDraft = useRef(
+    useChatInputStore.getState().getInputContent(NEW_CHAT_INPUT_DRAFT_KEY),
+  );
+  const [inputValue, setInputValue] = useState(() => {
+    return incomingModeDraft.current?.text
+      ?? (pendingConversationPrompt || savedWelcomeDraft.current);
+  });
+  const shouldAutoSendGroupPromptRef = useRef(
+    !incomingModeDraft.current && Boolean(pendingConversationPrompt),
+  );
   const [isChatContent, setIsChatContent] = useState(
     Boolean(routeConversationId || useChatMessageStore.getState().pendingMessage),
   );
@@ -133,7 +147,11 @@ const NewChatPage = () => {
   >("loading");
   const entryDefaultsRef = useRef(entryDefaults);
   entryDefaultsRef.current = entryDefaults;
-  const preservingModeDraft = useRef(Boolean(incomingModeDraft.current));
+  const preservingModeDraft = useRef(Boolean(
+    incomingModeDraft.current
+    || pendingConversationPrompt
+    || savedWelcomeDraft.current,
+  ));
   const [transferredDraft, setTransferredDraft] = useState<Omit<ChatModeDraft, "text"> | undefined>(incomingModeDraft.current);
   const entryModeRef = useRef(runInBackground);
   entryModeRef.current = runInBackground;
@@ -377,7 +395,12 @@ const NewChatPage = () => {
       setSearchParams({}, { replace: true });
       return;
     }
-    const resolvedEntryType = resolveShowcaseEntryType(showcaseCase.type);
+    const resolvedEntryType = resolveShowcaseEntryType(showcaseCase.type, requestedShowcaseEntry ?? (entryModeRef.current ? "work" : "chat"));
+    const pagePath = showcasePagePath(showcaseCase.page_action, resolvedEntryType);
+    if (pagePath) {
+      navigate(pagePath, { replace: true });
+      return;
+    }
     applyShowcaseEntryMode(resolvedEntryType);
     if (requestedShowcaseEntry !== resolvedEntryType
       || (showcaseTaskId && !selectedShowcaseTask)) {
@@ -393,6 +416,7 @@ const NewChatPage = () => {
     setInputValue(selectedShowcasePrompt);
   }, [
     applyShowcaseEntryMode,
+    navigate,
     officialKnowledgeId,
     requestedShowcaseEntry,
     selectedShowcaseTask,
@@ -429,6 +453,11 @@ const NewChatPage = () => {
   }, [locale, officialKnowledgeId, showcaseCaseId, t]);
 
   const selectShowcaseTask = (item: ShowcaseCase, taskId?: string | null) => {
+    const pagePath = showcasePagePath(item.page_action, activeShowcaseEntryType);
+    if (pagePath) {
+      navigate(pagePath);
+      return;
+    }
     const task = taskId && taskId !== FULL_CAPABILITY_TASK_VALUE
       ? item.tasks.find((candidate) => candidate.id === taskId)
       : undefined;
@@ -441,6 +470,15 @@ const NewChatPage = () => {
   };
 
   const handleWelcomeInputChange = (value: string) => {
+    preservingModeDraft.current = Boolean(value);
+    if (value.trim()) {
+      useChatInputStore.getState().saveInputContent(
+        NEW_CHAT_INPUT_DRAFT_KEY,
+        value,
+      );
+    } else {
+      useChatInputStore.getState().clearInputContent(NEW_CHAT_INPUT_DRAFT_KEY);
+    }
     setInputValue(value);
   };
 
@@ -491,7 +529,15 @@ const NewChatPage = () => {
       ).detail;
       const conversationId = detail?.conversationId || "";
       const modeDraft = detail?.runInBackground !== undefined ? useChatInputStore.getState().modeDraft : undefined;
-      if (!conversationId && modeDraft) {
+      const hasModeDraftContent = Boolean(
+        modeDraft
+        && (
+          modeDraft.text.trim()
+          || modeDraft.mentions.length > 0
+          || modeDraft.files.length > 0
+        ),
+      );
+      if (!conversationId && modeDraft && hasModeDraftContent) {
         preservingModeDraft.current = true;
         setTransferredDraft({ mentions: modeDraft.mentions, files: modeDraft.files, featuredSelection: modeDraft.featuredSelection });
         useFeaturedSelectionStore.getState().setSelection("new", modeDraft.featuredSelection);
@@ -511,8 +557,11 @@ const NewChatPage = () => {
         return;
       }
       if (!conversationId) {
-        preservingModeDraft.current = false;
-        setInputValue("");
+        const savedDraft = useChatInputStore.getState().getInputContent(
+          NEW_CHAT_INPUT_DRAFT_KEY,
+        );
+        preservingModeDraft.current = Boolean(savedDraft);
+        setInputValue(savedDraft);
         newChatInputRef.current?.clearFiles();
         useChatInputStore.getState().setModeDraft();
         setTransferredDraft(undefined);
@@ -622,13 +671,14 @@ const NewChatPage = () => {
         value: item.id,
         label: item.title,
         description: `${item.category}${t("showcase.capabilitySeparator")}${item.output_label}`,
+        pageAction: item.page_action,
       })),
       ariaLabel: t("showcase.selectedSkill"),
       placeholder: t("showcase.chooseSkill"),
       heading: t("showcase.quickSelectTitle"),
       subheading: t("showcase.quickSelectDescription"),
       moreLabel: t("showcase.exploreMoreCapabilities"),
-      onMore: () => navigate("/agent/chat/cases"),
+      onMore: () => navigate(`/agent/chat/cases?showcase_entry=${activeShowcaseEntryType}`),
       disabled: showcaseCasesLoading || availableShowcaseCases.length === 0,
       onChange: (skillId) => {
         const item = availableShowcaseCases.find((candidate) => candidate.id === skillId);
@@ -809,6 +859,7 @@ const NewChatPage = () => {
                     </div>
                   ) : null}
                   <ChatInput
+                    draftKey={NEW_CHAT_INPUT_DRAFT_KEY}
                     transferredDraft={transferredDraft}
                     conversationFiles={transferredDraft?.files}
                     ref={newChatInputRef}

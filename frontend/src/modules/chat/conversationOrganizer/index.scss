@@ -30,8 +30,10 @@
 .conversation-organizer-entry { display: flex; align-items: center; width: 100%; gap: 6px; }
 .conversation-organizer-start.ant-btn, .conversation-organizer-active.ant-btn { display: inline-flex; flex: 1; min-width: 0; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--color-primary-bg, #eef2ff); color: var(--color-primary, #5865f2); font-size: 12px; font-weight: 400; box-shadow: none; }
 .conversation-organizer-start.ant-btn:disabled { color: #aab2bf; }
+.conversation-organizer-more.ant-btn { flex: 0 0 auto; width: 28px; height: 32px; padding: 0; color: var(--color-text-tertiary, #89919f); }
 .conversation-groups--organizer {
   .conversation-organizer-entry { width: auto; }
+  .conversation-organizer-more.ant-btn { width: 22px; height: 22px; }
   .conversation-organizer-start.ant-btn, .conversation-organizer-active.ant-btn {
     flex: 0 1 auto;
     max-width: 100%;

@@ -52,6 +52,412 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
             resources.WriterResourceCapabilities().load_document(self.request)
         self.assertFalse(list(self.note.parent.glob('*.md')))
 
+    def test_load_serializes_all_local_image_resources(self):
+        from PIL import Image
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
+
+        for name in ('first.png', 'second.png'):
+            Image.new('RGB', (2, 2), 'blue').save(self.note.parent / name)
+        self.note.write_text('# Illustrated\n\n![[first.png]]\n\n![[second.png]]\n')
+        loaded = json.loads(resources.WriterResourceCapabilities().load_document(self.request))
+        self.assertEqual(len(loaded['input_resources']), 2)
+        for image, name in zip(loaded['input_resources'], ('first.png', 'second.png')):
+            self.assertEqual(image['resource_type'], 'image')
+            self.assertEqual(image['mime_type'], 'image/png')
+            self.assertEqual(Path(url2pathname(urlparse(image['uri']).path)).resolve(),
+                             (self.note.parent / name).resolve())
+            self.assertEqual(image['meta']['provider'], 'obsidian')
+            self.assertEqual(image['meta']['referenced_from'], loaded['target_document']['uri'])
+            self.assertIn(name, image['meta']['source_reference'])
+
+    def prepare_call(self, method, arguments):
+        from lazyllm.tools import ToolManager
+
+        manager = ToolManager([method])
+        return manager.prepare_tool_calls({'id': 'obsidian-fixture', 'function': {
+            'name': method.__name__, 'arguments': arguments,
+        }})[0]
+
+    def test_snapshot_tools_do_not_require_the_target_note_or_vault(self):
+        from lazymind.document_tools.toolkits import WriterResourceToolkit, WriterRevisionToolkit
+
+        target = json.loads(resources.WriterResourceCapabilities().load_document(self.request))['target_document']
+        methods = [
+            (WriterResourceToolkit().convert_document, {
+                'content_json': json.dumps('# Snapshot'), 'provider': 'obsidian',
+                'target_document_json': json.dumps(target),
+            }),
+            (WriterRevisionToolkit().build_revise_task, {
+                'query': 'Polish the snapshot', 'target_document_json': json.dumps(target),
+            }),
+        ]
+        self.note.unlink()
+        for unavailable in (False, True):
+            with ExitStack() as access:
+                if unavailable:
+                    access.enter_context(patch.object(ObsidianWriterProvider, '_fs',
+                                                      side_effect=PermissionError('Vault unavailable')))
+                for method, arguments in methods:
+                    with self.subTest(tool=method.__name__, unavailable=unavailable):
+                        prepared = self.prepare_call(method, arguments)
+                        self.assertTrue(prepared.ready)
+                        self.assertEqual(prepared.host_files, ())
+                        self.assertTrue(json.loads(method(**prepared.validated_arguments)))
+
+    def test_registered_snapshot_conversion_keeps_attachment_read_permission(self):
+        from lazymind.document_tools.toolkits import WriterResourceToolkit
+
+        image = self.root / 'attachment.png'
+        image.write_bytes(b'image fixture')
+        target = json.loads(resources.WriterResourceCapabilities().load_document(self.request))['target_document']
+        prepared = self.prepare_call(WriterResourceToolkit().convert_document, {
+            'content_json': json.dumps('# Snapshot'), 'provider': 'obsidian',
+            'target_document_json': json.dumps(target),
+            'media_assets_json': json.dumps({'assets': {'image': {'local_path': str(image)}}}),
+        })
+        self.assertTrue(prepared.ready)
+        self.assertEqual({(item.path, item.operation) for item in prepared.host_files},
+                         {(str(image.resolve()), 'read')})
+
+    def test_registered_load_reads_and_create_only_prepares(self):
+        from lazymind.document_tools.toolkits import WriterResourceToolkit
+
+        toolkit = WriterResourceToolkit()
+        reading = self.prepare_call(toolkit.load_document, {'user_input': self.request})
+        self.assertTrue(reading.ready)
+        self.assertEqual({(item.path, item.operation) for item in reading.host_files},
+                         {(str(self.note.resolve()), 'read')})
+        creating = self.prepare_call(toolkit.create_document, {'title': 'Prepared', 'adapter': 'obsidian'})
+        self.assertTrue(creating.ready)
+        self.assertEqual(creating.host_files, ())
+        target = json.loads(toolkit.create_document(**creating.validated_arguments))
+        self.assertTrue(target['meta']['create_pending'])
+        self.assertFalse((self.note.parent / 'Prepared.md').exists())
+
+    def test_registered_write_and_revision_still_require_target_permissions(self):
+        from lazymind.document_tools.artifacts import markdown_to_writer_document
+        from lazymind.document_tools.toolkits import WriterResourceToolkit, WriterRevisionToolkit
+
+        target = json.loads(resources.WriterResourceCapabilities().load_document(self.request))['target_document']
+        source = markdown_to_writer_document('# Snapshot', document_id='fixture-note')
+        source.metadata['source'] = target
+        source.provider_binding = {'provider': 'obsidian', 'uri': target['uri']}
+        calls = [
+            (WriterResourceToolkit().write_document, {
+                'converted_document_json': json.dumps(resources.convert_document('# Snapshot', 'obsidian')),
+                'target_document_json': json.dumps(target),
+            }),
+            (WriterResourceToolkit().publish_revision, {
+                'source_document_json': source.model_dump_json(), 'patch_set_json': '{}',
+            }),
+            (WriterRevisionToolkit().apply_revision, {
+                'writer_document_json': source.model_dump_json(), 'patch_set_json': '{}',
+                'writing_context_json': '{}', 'sync_provider': True,
+            }),
+        ]
+        for method, arguments in calls:
+            with self.subTest(tool=method.__name__):
+                prepared = self.prepare_call(method, arguments)
+                self.assertTrue(prepared.ready)
+                intents = {(item.path, item.operation) for item in prepared.host_files}
+                self.assertIn((str(self.note.resolve()), 'write'), intents)
+                self.assertIn((str((self.note.parent / 'assets/lazymind').resolve()), 'write'), intents)
+        self.note.unlink()
+        local_method, local_arguments = calls[-1]
+        local = self.prepare_call(local_method, {**local_arguments, 'sync_provider': False})
+        self.assertTrue(local.ready)
+        self.assertEqual(local.host_files, ())
+        for method, arguments in calls:
+            with self.subTest(missing_target=method.__name__):
+                self.assertFalse(self.prepare_call(method, arguments).ready)
+
+    def test_first_publication_uses_the_only_configured_vault(self):
+        converted = resources.convert_document('# New note\n\nBody.\n', 'obsidian')
+        result = resources.write_document(converted, title='New note')
+        self.assertTrue(result['provider_synced'])
+        self.assertEqual((self.note.parent / 'New note.md').read_text(), '# New note\n\nBody.\n')
+        self.assertTrue(result['target_document']['meta']['publication_revision'])
+
+    def test_multiple_vaults_require_an_explicit_choice(self):
+        (self.root / 'Other Vault' / '.obsidian').mkdir(parents=True)
+        from lazyllm.tools.fs.supplier.obsidian import _VAULT_DISCOVERY_CACHE
+        _VAULT_DISCOVERY_CACHE.clear()
+        converted = resources.convert_document('# New\n', 'obsidian')
+        with self.assertRaisesRegex(ValueError, 'OBSIDIAN_VAULT_REQUIRED'):
+            resources.write_document(converted, title='New')
+        self.assertFalse(list(self.root.rglob('New.md')))
+
+    def test_first_publication_does_not_rename_or_replace_existing_note(self):
+        converted = resources.convert_document('# Replacement\n', 'obsidian')
+        with self.assertRaisesRegex(ValueError, 'OBSIDIAN_TARGET_EXISTS'):
+            resources.write_document(converted, title='Note')
+        self.assertIn('Original text.', self.note.read_text())
+        self.assertEqual(list(self.note.parent.glob('*.md')), [self.note])
+
+    def test_external_edit_is_not_overwritten(self):
+        loaded = json.loads(resources.WriterResourceCapabilities().load_document(self.request))
+        target = loaded['target_document']
+        self.note.write_text('# External edit\n')
+        converted = resources.convert_document('# Replacement\n', 'obsidian', target_document=target)
+        with self.assertRaisesRegex(ValueError, 'OBSIDIAN_TARGET_CHANGED'):
+            resources.write_document(converted, target)
+        self.assertEqual(self.note.read_text(), '# External edit\n')
+
+    def test_concurrent_updates_do_not_overwrite_each_other(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from lazymind.document_tools.obsidian import ObsidianTargetError
+        target = json.loads(resources.WriterResourceCapabilities().load_document(self.request))['target_document']
+
+        def update(title):
+            try:
+                resources.write_document(resources.convert_document(f'# {title}\n', 'obsidian'), target)
+                return title
+            except ObsidianTargetError as exc:
+                self.assertEqual(exc.error_code, 'OBSIDIAN_TARGET_CHANGED')
+                return None
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(update, ['First', 'Second']))
+        winners = [result for result in results if result]
+        self.assertEqual(len(winners), 1)
+        self.assertEqual(self.note.read_text(), f'# {winners[0]}\n')
+
+    def test_new_note_respects_explicit_subdirectory(self):
+        folder = self.note.parent / 'Articles'
+        folder.mkdir()
+        vault = self.fs.discover_vaults()[0]
+        result = resources.write_document(
+            resources.convert_document('# Exact\n', 'obsidian'), title='Exact',
+            parent_uri=f'obsidian://{vault.vault_id}/Articles/',
+        )
+        self.assertTrue(result['provider_synced'])
+        self.assertEqual((folder / 'Exact.md').read_text(), '# Exact\n')
+
+    def test_new_note_rejects_symlink_escape(self):
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (self.note.parent / 'Escape').symlink_to(outside, target_is_directory=True)
+        vault = self.fs.discover_vaults()[0]
+        with self.assertRaisesRegex(ValueError, 'OBSIDIAN_PATH_INVALID'):
+            resources.write_document(
+                resources.convert_document('# Exact\n', 'obsidian'), title='Exact',
+                parent_uri=f'obsidian://{vault.vault_id}/Escape/',
+            )
+        self.assertFalse(list(outside.iterdir()))
+
+    def test_preparation_does_not_create_an_empty_note(self):
+        from lazymind.document_tools.actions import invoke_document_action
+        result = invoke_document_action('builtin:document.publication_target.v1', 'preview',
+                                        {'provider': 'obsidian', 'title': 'Prepared'})
+        self.assertEqual(result['state'], 'ready')
+        self.assertTrue(result['target_document']['meta']['create_pending'])
+        self.assertFalse((self.note.parent / 'Prepared.md').exists())
+
+    def test_prepared_target_resumes_without_selecting_another_vault(self):
+        from lazymind.document_tools.obsidian import LazyMindObsidianProvider
+        provider = LazyMindObsidianProvider()
+        target = provider.prepare_target('Prepared')
+        (self.root / 'Another' / '.obsidian').mkdir(parents=True)
+        self.assertEqual(len(provider.status()['vaults']), 2)
+        provider.prepare_target(target=target)
+        resources.write_document(resources.convert_document('# Prepared\n', 'obsidian'), target.model_dump())
+        self.assertTrue((self.note.parent / 'Prepared.md').exists())
+        self.assertFalse((self.root / 'Another' / 'Prepared.md').exists())
+
+    def test_attachments_are_copied_and_missing_attachment_blocks_confirmation(self):
+        from lazymind.document_tools.actions import invoke_document_action
+        source = self.root / 'fixture.png'
+        source.write_bytes(b'fixture-image-bytes')
+        assets = {'library_id': 'fixture-library', 'assets': {'image': {
+            'media_asset_id': 'image', 'asset_type': 'image', 'source_type': 'input_resource',
+            'uri': 'https://example.test/image.png', 'local_path': str(source),
+        }}}
+        markdown = '# Illustrated\n\n![Fixture](https://example.test/image.png)\n'
+        converted = resources.convert_document(markdown, 'obsidian', media_assets=assets)
+        result = resources.write_document(converted, media_assets=assets, title='Illustrated')
+        copies = list((self.note.parent / 'assets/lazymind').glob('*.png'))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(copies[0].read_bytes(), source.read_bytes())
+        self.assertIn('![[assets/lazymind/', (self.note.parent / 'Illustrated.md').read_text())
+        copies[0].unlink()
+        checked = invoke_document_action('builtin:document.reconcile.v1', 'preview', {
+            'converted_document': converted, 'target_document': result['target_document'], 'media_assets': assets,
+        })
+        self.assertEqual(checked['state'], 'unknown')
+        self.assertFalse(copies[0].exists())
+
+    def test_workspace_tool_calls_preserve_image_references_across_staging(self):
+        from PIL import Image
+        from lazymind.document_tools.toolkits import WriterResourceToolkit
+        from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
+        from lazymind.chat.engine.tools.workspace_context import (
+            ToolResolutionContext, WorkspaceContext, tool_resolution_scope, workspace_permission_scope,
+        )
+
+        task = self.root / 'workspace'
+        task.mkdir()
+        source = self.root / 'input.png'
+        Image.new('RGB', (2, 2), 'blue').save(source)
+        other = self.root / 'other.png'
+        Image.new('RGB', (2, 2), 'red').save(other)
+        permission = WorkspaceContext.from_snapshot({
+            'workspace_id': 'workspace', 'root': str(task), 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
+        })
+        toolkit = WriterResourceToolkit()
+        with tool_resolution_scope(ToolResolutionContext(managed_roots=(str(task.resolve()),))), \
+                workspace_permission_scope(permission):
+            cases = [(kind, uri) for kind in ('ir', 'markdown', 'markdown_file_uri')
+                     for uri in ('https://example.test/image.png', str(source), None)]
+            for index, (kind, uri) in enumerate(cases):
+                with self.subTest(kind=kind, uri=uri):
+                    title = f'Illustrated{index}'
+                    document = {'document_id': title, 'title': title, 'blocks': [{
+                        'node_id': 'image-block', 'type': 'image',
+                        'references': [{'type': 'media_asset', 'id': 'image'}],
+                    }]}
+                    if kind != 'ir':
+                        reference = source.as_uri() if kind == 'markdown_file_uri' else str(source)
+                        document = f'# {title}\n\n![Example]({reference})\n'
+                    assets = {'library_id': 'images', 'assets': {'image': {
+                        'media_asset_id': 'image', 'asset_type': 'image', 'source_type': 'input_resource',
+                        'uri': uri, 'local_path': str(source),
+                    }}}
+
+                    def invoke(method, arguments):
+                        prepared = self.prepare_call(method, arguments)
+                        self.assertTrue(prepared.ready)
+                        guard = HostAccessGuard(prepared.host_files)
+                        with host_access_scope(guard):
+                            guard.validate()
+                            return json.loads(method(**prepared.validated_arguments))
+
+                    converted = invoke(toolkit.convert_document, {
+                        'content_json': json.dumps(document), 'provider': 'obsidian',
+                        'media_assets_json': json.dumps(assets),
+                    })
+                    # The next call must use its own approved input, not a stale temporary copy.
+                    for old in (task / '.approved-inputs').rglob('input.png'):
+                        old.unlink()
+                    result = invoke(toolkit.write_document, {
+                        'converted_document_json': json.dumps(converted), 'title': title,
+                        'media_assets_json': json.dumps(assets),
+                    })
+                    written = (self.note.parent / f'{title}.md').read_text()
+                    self.assertEqual(result['provider'], 'obsidian')
+                    self.assertEqual(result['target_document']['title'], title)
+                    self.assertIn('![[assets/lazymind/', written)
+                    # Neither a previous approval nor the original image's existence
+                    # may authorize copying it when this call has no declared asset.
+                    if kind != 'ir':
+                        for unapproved in ({}, {'library_id': 'other', 'assets': {'other': {
+                            'media_asset_id': 'other', 'asset_type': 'image', 'source_type': 'input_resource',
+                            'local_path': str(other),
+                        }}}):
+                            with self.assertRaisesRegex(ValueError, 'OBSIDIAN_ATTACHMENT_UNAVAILABLE'):
+                                invoke(toolkit.write_document, {
+                                    'converted_document_json': json.dumps(converted), 'title': f'{title}-undeclared',
+                                    'media_assets_json': json.dumps(unapproved),
+                                })
+                            self.assertFalse((self.note.parent / f'{title}-undeclared.md').exists())
+        copies = list((self.note.parent / 'assets/lazymind').glob('*.png'))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(copies[0].read_bytes(), source.read_bytes())
+
+    def test_unavailable_local_image_does_not_write_a_note(self):
+        converted = resources.convert_document('# Broken\n\n![Missing](missing.png)\n', 'obsidian')
+        with self.assertRaisesRegex(ValueError, 'OBSIDIAN_ATTACHMENT_UNAVAILABLE'):
+            resources.write_document(converted, title='Broken')
+        self.assertFalse((self.note.parent / 'Broken.md').exists())
+
+    def test_chat_read_and_implicit_create_declare_different_permissions(self):
+        from lazymind.document_tools.host_files import resolve_writer_files
+        reading = resolve_writer_files({'user_input': self.request}, operation='load_document')
+        self.assertIn((str(self.note.resolve()), 'read'), {(item.path, item.operation) for item in reading.files})
+        self.assertFalse(any(item.operation == 'write' for item in reading.files))
+        converted = resources.convert_document('# New note\n', 'obsidian')
+        writing = resolve_writer_files({'converted_document_json': json.dumps(converted)}, operation='write_document')
+        self.assertIn((str((self.note.parent / 'New note.md').resolve()), 'write'),
+                      {(item.path, item.operation) for item in writing.files})
+
+    def test_chat_revision_preserves_target_metadata_and_response_contract(self):
+        from lazymind.document_tools.artifacts import markdown_to_writer_document
+        loaded = json.loads(resources.WriterResourceCapabilities().load_document(self.request))
+        source = markdown_to_writer_document(loaded['source_document'], document_id='fixture-note')
+        source.metadata['source'] = loaded['target_document']
+        source.provider_binding = {'provider': 'obsidian', 'uri': loaded['target_document']['uri']}
+        result = json.loads(resources.WriterResourceCapabilities().publish_revision(
+            source.model_dump_json(), json.dumps({'patch_id': 'revision-fixture',
+                                                  'target_doc_id': source.document_id, 'new_title': 'Revised'})))
+        self.assertEqual(result['provider'], 'obsidian')
+        self.assertEqual(result['representation'], 'ir')
+        self.assertTrue(result['published_link'].startswith('obsidian://open?'))
+        self.assertTrue(result['draft_document']['metadata']['source']['meta']['publication_revision'])
+        self.assertEqual(list(self.note.parent.glob('*.md')), [self.note])
+
+    def test_reconcile_lost_response_reads_without_writing(self):
+        from lazymind.document_tools.actions import invoke_document_action
+        prepared = invoke_document_action('builtin:document.publication_target.v1', 'preview',
+                                          {'provider': 'obsidian', 'title': 'Prepared'})
+        target = prepared['target_document']
+        converted = resources.convert_document('# Prepared\n', 'obsidian')
+        resources.write_document(converted, target)
+        note = self.note.parent / 'Prepared.md'
+        modified = note.stat().st_mtime_ns
+        checked = invoke_document_action('builtin:document.reconcile.v1', 'preview',
+                                         {'converted_document': converted, 'target_document': target})
+        self.assertEqual(checked['state'], 'confirmed')
+        self.assertEqual(note.stat().st_mtime_ns, modified)
+        note.write_text('# External edit\n')
+        checked = invoke_document_action('builtin:document.reconcile.v1', 'preview',
+                                         {'converted_document': converted, 'target_document': target})
+        self.assertEqual(checked['state'], 'unknown')
+        self.assertEqual(note.read_text(), '# External edit\n')
+
+    def test_preserves_frontmatter_and_updates_baseline(self):
+        original = '---\ntags: [fixture]\n---\n# Fixture\n\nOriginal text.\n'
+        self.note.write_text(original)
+        loaded = json.loads(resources.WriterResourceCapabilities().load_document(self.request))
+        target = loaded['target_document']
+        result = resources.write_document(resources.convert_document('# Changed\n', 'obsidian'), target)
+        self.assertEqual(self.note.read_text(), '---\ntags: [fixture]\n---\n# Changed\n')
+        result = resources.write_document(resources.convert_document('# Twice\n', 'obsidian'), result['target_document'])
+        self.assertTrue(result['provider_synced'])
+        self.assertEqual(self.note.read_text(), '---\ntags: [fixture]\n---\n# Twice\n')
+
+    def test_read_only_vault_is_not_ready(self):
+        from lazymind.document_tools.obsidian import LazyMindObsidianProvider
+        vault = self.note.parent
+        mode = vault.stat().st_mode
+        self.addCleanup(vault.chmod, mode)
+        vault.chmod(0o555)
+        self.assertEqual(LazyMindObsidianProvider().status()['state'], 'permission_required')
+        with self.assertRaisesRegex(ValueError, 'OBSIDIAN_PERMISSION_REQUIRED'):
+            resources.write_document(resources.convert_document('# New\n', 'obsidian'), title='New')
+
+    def test_chat_declares_note_and_attachment_writes_for_approval(self):
+        from lazymind.document_tools.host_files import resolve_writer_files
+        from lazymind.document_tools.obsidian import LazyMindObsidianProvider
+        target = LazyMindObsidianProvider().prepare_target('Approved')
+        resolution = resolve_writer_files(
+            {'target_document_json': json.dumps(target.model_dump())}, operation='write_document',
+        )
+        intents = {(item.path, item.operation) for item in resolution.files}
+        self.assertIn((str((self.note.parent / 'Approved.md').resolve()), 'write'), intents)
+
+    def test_action_reports_conflict_as_no_write(self):
+        from lazymind.document_tools.actions import invoke_document_action
+        loaded = json.loads(resources.WriterResourceCapabilities().load_document(self.request))
+        self.note.write_text('# External\n')
+        result = invoke_document_action('builtin:document.write_document.v1', 'execute', {
+            'converted_document': resources.convert_document('# Replacement\n', 'obsidian'),
+            'target_document': loaded['target_document'],
+        })
+        self.assertFalse(result['success'])
+        self.assertEqual(result['patch_result']['meta'], {'code': 'OBSIDIAN_TARGET_CHANGED', 'no_write': True})
+        self.assertEqual(self.note.read_text(), '# External\n')
+
     def test_prepare_produces_source_and_original_target(self):
         project = Path(__file__).resolve().parents[3]
         script = project / 'workflows/writer-workflow/scripts/tools.py'

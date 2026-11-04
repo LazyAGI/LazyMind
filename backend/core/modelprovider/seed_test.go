@@ -23,6 +23,40 @@ func TestModelCatalogHasNoMaxInputTokens(t *testing.T) {
 	}
 }
 
+func TestTranslationCatalogMatchesRuntimeDeclarations(t *testing.T) {
+	seen := map[string]bool{}
+	for _, file := range []string{"model_catalog.yaml", "translation_providers_paused.yaml"} {
+		data, err := os.ReadFile("../config/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := loadModelCatalog(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, supplier := range catalog["translation_providers"].Suppliers {
+			spec, ok := TranslationProvider(supplier.Name)
+			if !ok {
+				t.Errorf("catalog supplier %s has no runtime declaration", supplier.Name)
+				continue
+			}
+			if spec.Available != (file == "model_catalog.yaml") {
+				t.Errorf("availability differs for %s", supplier.Name)
+			}
+			seen[strings.ToLower(supplier.Name)] = true
+			keyless := strings.Contains(strings.Join(supplier.Capabilities, ","), "keyless_translation")
+			if keyless != spec.Keyless {
+				t.Errorf("credential declaration differs for %s", supplier.Name)
+			}
+		}
+	}
+	for name := range translationProviders {
+		if !seen[name] {
+			t.Errorf("runtime provider %s missing from catalog", name)
+		}
+	}
+}
+
 func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 	yamlBytes, err := os.ReadFile("../config/model_catalog.yaml")
 	if err != nil {

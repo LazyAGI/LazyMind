@@ -24,7 +24,11 @@ const original = { id: 'ca-original', provider: 'feishu', label: 'Work assistant
   identity: { app_id: 'cli_original', authorized_name: 'Alice', authorized_id: 'ou_original' } } as ChannelAccount;
 let rows: ChannelAccount[];
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.groups.mockResolvedValue({ items: [], next_cursor: '' }); rows = [{ ...original }];
+  vi.clearAllMocks();
+  vi.spyOn(message, 'success').mockImplementation(() => undefined as never);
+  vi.spyOn(message, 'info').mockImplementation(() => undefined as never);
+  vi.spyOn(message, 'error').mockImplementation(() => undefined as never);
+  mocks.groups.mockResolvedValue({ items: [], next_cursor: '' }); rows = [{ ...original }];
   mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: rows.filter(row => row.provider === p) }));
   mocks.detail.mockImplementation((id: string) => Promise.resolve({ ...rows.find(row => row.id === id), primary_recipient: null, notification_reference_count: 1 }));
   mocks.refs.mockResolvedValue({ items: [{ id: 'task', kind: 'schedule', name: 'Daily summary', enabled: true }], total: 1, next_cursor: '' });
@@ -79,10 +83,10 @@ it('removes only the selected unbound record after showing impact confirmation',
   expect(mocks.archive).toHaveBeenCalledWith(original.id);
 });
 
-it.each(['connected', 'paused'] as const)('does not offer record deletion while %s', async binding => {
+it.each(['connected', 'paused'] as const)('offers record deletion while %s', async binding => {
   rows = [{ ...original, binding_status: binding, status: binding === 'connected' ? 'connected' : 'disconnected' }];
   await mount();
-  expect(screen.queryByRole('button', { name: 'notifications.removeAccount' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'notifications.removeAccount' })).toBeEnabled();
 });
 
 it('blocks removal if the reference query fails', async () => {
@@ -97,8 +101,8 @@ it('blocks removal if the reference query fails', async () => {
 
 it('selects same-name robots by account id without changing their display names', async () => {
   rows = [
-    { ...original, label: 'Assistant', status: 'connected', binding_status: 'connected' },
-    { ...original, id: 'second', label: 'Assistant', status: 'connected', binding_status: 'connected',
+    { ...original, label: 'Assistant', status: 'connected', binding_status: 'connected', runtime_status: 'running' },
+    { ...original, id: 'second', label: 'Assistant', status: 'connected', binding_status: 'connected', runtime_status: 'running',
       identity: { app_id: 'cli_second', authorized_name: 'Bob', authorized_id: 'ou_second' } },
   ];
   const config = { events: { succeeded: { enabled: true, content: 'summary' as const },
@@ -227,9 +231,9 @@ it('refreshes original WeCom connection after permission recovery without asking
 
 it('renames only the selected WeCom account and shows its original full Bot ID without revealing a secret', async () => {
   rows = [
-    { ...original, provider: 'wecom', label: 'Team robot', status: 'connected', binding_status: 'connected',
+    { ...original, provider: 'wecom', label: 'Team robot', status: 'connected', binding_status: 'connected', runtime_status: 'running',
       identity: { bot_id: 'aibot_alpha_123456', bot_name: 'Team robot' } },
-    { ...original, provider: 'wecom', id: 'ca-second', label: 'Team robot', status: 'connected', binding_status: 'connected',
+    { ...original, provider: 'wecom', id: 'ca-second', label: 'Team robot', status: 'connected', binding_status: 'connected', runtime_status: 'running',
       identity: { bot_id: 'aibot_beta_654321', bot_name: 'Team robot' } },
   ];
   await mount('wecom');
@@ -262,7 +266,7 @@ it('keeps WeCom permission recovery open when the original bot remains unauthori
   mocks.resume.mockResolvedValue(account);
   mocks.targets.mockRejectedValue({ response: { data: { error: { code: 'WECOM_CAPABILITY_REAUTH_REQUIRED' } } } });
   const onConnected = vi.fn();
-  const errorToast = vi.spyOn(message, 'error');
+  const errorToast = vi.mocked(message.error);
   render(<MemoryRouter><ChannelConnectionPage provider="wecom" accountId={original.id} onConnected={onConnected} /></MemoryRouter>);
   fireEvent.click(screen.getByRole('button', { name: 'notifications.wecomRefreshAuthorization' }));
   expect(await screen.findByText('notifications.WECOM_CAPABILITY_REAUTH_REQUIRED')).toBeVisible();
@@ -286,5 +290,75 @@ it('waits for an original WeCom bot messaging permission check before completing
   expect(onConnected).not.toHaveBeenCalled();
   await act(async () => { finishPermissionCheck({ items: [], next_cursor: '' }); });
   expect(onConnected).toHaveBeenCalledWith(account);
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+
+
+it.each(['wecom', 'wechat'] as const)('offers removal for %s robots through the shared manager', async provider => {
+  rows = [{ ...original, provider, label: 'Managed robot', status: 'connected', binding_status: 'connected', runtime_status: 'running' }];
+  render(<MemoryRouter><TerminalConnectionPage initialProvider={provider} embedded /></MemoryRouter>);
+  const label = await screen.findByText('Managed robot');
+  const card = label.closest('details')!;
+  card.open = true; fireEvent(card, new Event('toggle'));
+  await waitFor(() => expect(within(card).getByRole('button', { name: 'notifications.removeAccount' })).toBeEnabled());
+});
+
+it('keeps an expanded robot card and unsaved remark when its status refreshes', async () => {
+  rows = [{ ...original, provider: 'wecom', label: 'Stable robot', status: 'connected', binding_status: 'connected', runtime_status: 'running' }];
+  await mount('wecom');
+  const card = screen.getAllByText('Stable robot')[0].closest('details')!;
+  fireEvent.click(within(card).getByRole('button', { name: 'notifications.editAccountLabel' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'notifications.accountRemark' }), { target: { value: 'Unsaved remark' } });
+  rows = rows.map(row => ({ ...row, updated_at: '2026-10-29', runtime_status: 'stopped' }));
+  fireEvent(window, new Event('focus'));
+  await waitFor(() => expect(card.querySelector('summary')).toHaveTextContent('notifications.disconnected'));
+  expect(screen.getAllByText('Stable robot')[0].closest('details')).toBe(card);
+  expect(card.open).toBe(true);
+  expect(screen.getByRole('textbox', { name: 'notifications.accountRemark' })).toHaveValue('Unsaved remark');
+  expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.notConnected');
+  expect(document.querySelector('.notification-account-manager > header')).not.toHaveTextContent('notifications.availableCount');
+});
+
+it('shows WeCom as awaiting authorization, excludes it from available counts, and recovers after refresh', async () => {
+  rows = [{ ...original, provider: 'wecom', label: 'Authorization robot', status: 'connected', binding_status: 'connected', runtime_status: 'running', capabilities: { authorization_required: true } }];
+  await mount('wecom');
+  const card = screen.getAllByText('Authorization robot')[0].closest('details')!;
+  expect(card.querySelector('summary')).toHaveTextContent('notifications.wecomAuthorizationExpired');
+  expect(card.querySelector('summary')).not.toHaveTextContent('notifications.connected');
+  expect(within(card).getByRole('button', { name: 'notifications.wecomRepairAuthorization' })).toBeEnabled();
+  expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.wecomAuthorizationExpired');
+  expect(document.querySelector('.notification-account-manager > header')).not.toHaveTextContent('notifications.availableCount');
+  rows = rows.map(row => ({ ...row, capabilities: { authorization_required: false } }));
+  fireEvent(window, new Event('focus'));
+  await waitFor(() => expect(card.querySelector('summary')).toHaveTextContent('notifications.connected'));
+  expect(card.open).toBe(true);
+});
+
+it('keeps the authorization panel mounted when a background refresh fails', async () => {
+  rows = [{ ...original, provider: 'wecom', label: 'Repair robot' }];
+  await mount('wecom');
+  fireEvent.click(screen.getByRole('button', { name: 'notifications.wecomRepairAuthorization' }));
+  const repair = await screen.findByRole('region', { name: 'notifications.wecomRestorePermissionTitle' });
+  const credentials = within(repair).getByText('notifications.wecomUpdateCredentials').closest('details')!;
+  credentials.open = true; fireEvent(credentials, new Event('toggle'));
+  fireEvent.change(screen.getByLabelText('notifications.wecomBotId'), { target: { value: 'draft-bot' } });
+  mocks.accounts.mockRejectedValue(new Error('temporarily unavailable'));
+  fireEvent(window, new Event('focus'));
+  await screen.findByText('notifications.loadFailed');
+  expect(screen.getByRole('region', { name: 'notifications.wecomRestorePermissionTitle' })).toBe(repair);
+  expect(screen.getByLabelText('notifications.wecomBotId')).toHaveValue('draft-bot');
+});
+
+it('keeps a scanned Feishu robot connected and explains a menu permission failure separately', async () => {
+  rows = [{ ...original, label: 'Scanned robot', status: 'connected', binding_status: 'connected', runtime_status: 'degraded',
+    capabilities: { connection_ready: true, bot_menu_ready: false, bot_menu_error: 'permission_required' } }];
+  await mount();
+  const card = screen.getAllByText('Scanned robot')[0].closest('details')!;
+  expect(card.querySelector('summary')).toHaveTextContent('notifications.connected');
+  expect(card.querySelector('summary')).not.toHaveTextContent('notifications.disconnected');
+  expect(within(card).getByText('notifications.feishuConnectionReady')).toBeVisible();
+  expect(within(card).getByRole('alert')).toHaveTextContent('notifications.feishuMenuPermissionHint');
+  expect(within(card).getByRole('button', { name: 'notifications.disconnect' })).toBeEnabled();
+  expect(document.querySelector('.notification-provider-tabs button[aria-pressed="true"]')).toHaveTextContent('notifications.connected');
   expect(mocks.create).not.toHaveBeenCalled();
 });

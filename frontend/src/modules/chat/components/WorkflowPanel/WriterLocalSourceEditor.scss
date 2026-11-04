@@ -40,8 +40,12 @@
 }
 .writer-document-options { position: relative; margin-left: auto; font-size: 12px;
   summary { cursor: pointer; padding: 5px 8px; border-radius: 4px; }
-  &__menu { position: absolute; top: 100%; right: 0; z-index: 35; width: 220px; padding: 10px; background: var(--color-bg-container, white); border: 1px solid var(--color-border, #dbe3ee); border-radius: 6px; box-shadow: 0 6px 20px #0002; }
-  .writer-document-options__menu > button {
+}
+// The popup is portaled to body so short/overflow-hidden editors cannot clip it.
+.writer-document-options__menu {
+  width: 220px; max-width: calc(100vw - 48px); max-height: min(420px, calc(100dvh - 64px));
+  overflow-y: auto; overscroll-behavior: contain; font-size: 12px;
+  > button {
     display: block;
     width: 100%;
     min-height: 0;

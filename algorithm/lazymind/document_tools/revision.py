@@ -29,6 +29,8 @@ from .artifacts import (
     _temp_root,
     _write_document_input,
     _write_input_artifact,
+    cleanup_writer_temporary,
+    normalize_generated_markdown,
     writer_schema,
 )
 from .resources import _target_from_document, sync_writer_documents
@@ -52,6 +54,7 @@ plan, analysis, commentary, or an outer Markdown code fence. The source document
 only document source of truth. Preserve unaffected content and the user's latest edits.
 Apply the requested changes directly; do not merely describe them. Do not invent facts,
 data, methods, results, citations, or source metadata.
+Headings contain section names; the document editor supplies section numbers.
 
 Constraints:
 {constraints}
@@ -78,7 +81,7 @@ Source Markdown:
             revised = revised[first_heading.start():].strip()
     if not revised:
         raise ValueError('Shared Writer returned no revised Markdown document.')
-    return revised
+    return normalize_generated_markdown(revised)
 
 
 def modify_plan_needs_media(plan: dict[str, Any]) -> bool:
@@ -144,6 +147,7 @@ def generate_revision_set(
     modify_plan: dict[str, Any],
     *,
     media_assets: Any = None,
+    writing_task: Any = None,
 ) -> dict[str, Any]:
     """Generate the representation-appropriate deterministic revision set."""
     toolkit = WriterRevisionCapabilities()
@@ -151,6 +155,7 @@ def generate_revision_set(
         return {
             'revision_set': _json_loads(
                 toolkit.generate_string_replace_set(
+                    writing_task_json=_json_dumps(writing_task) if writing_task is not None else '',
                     markdown_document=document,
                     modify_plan_json=_json_dumps(modify_plan),
                     writing_context_json=_json_dumps(writing_context),
@@ -162,6 +167,7 @@ def generate_revision_set(
     return {
         'revision_set': _json_loads(
             toolkit.generate_patch_set(
+                writing_task_json=_json_dumps(writing_task) if writing_task is not None else '',
                 writer_document_json=_json_dumps(document),
                 modify_plan_json=_json_dumps(modify_plan),
                 writing_context_json=_json_dumps(writing_context),
@@ -317,12 +323,14 @@ class WriterRevisionCapabilities:
             context=context_path,
             task=task_path,
         )
-        return _json_dumps(
+        payload = _json_dumps(
             {
                 'patch_set_review': _primary_data(result),
                 'patch_set_review_summary': result.get('summary') or '',
             }
         )
+        cleanup_writer_temporary(root)
+        return payload
 
     def locate_revision_target(
         self,
@@ -353,7 +361,9 @@ class WriterRevisionCapabilities:
         ).locate_revision_target(
             task=task_path, document=document_path, context=context_path
         )
-        return _json_dumps(_primary_data(result))
+        payload = _json_dumps(_primary_data(result))
+        cleanup_writer_temporary(root)
+        return payload
 
     def generate_modify_plan(
         self,
@@ -394,7 +404,9 @@ class WriterRevisionCapabilities:
             locate_result=locate_path,
             context=context_path,
         )
-        return _json_dumps(_primary_data(result))
+        payload = _json_dumps(_primary_data(result))
+        cleanup_writer_temporary(root)
+        return payload
 
     def build_revision_visual_plan(self, modify_plan_json: str) -> str:
         """Extract the explicit visual needs from a structured revision plan."""
@@ -442,8 +454,10 @@ class WriterRevisionCapabilities:
         modify_plan_json: str,
         writing_context_json: str,
         media_assets_json: str = '',
+        writing_task_json: str = '',
     ) -> str:
         """Generate a WriterDocument patch set from a modification plan."""
+        task = _json_loads(writing_task_json, None)
         root = _temp_root()
         document_path = _write_input_artifact(
             root,
@@ -478,17 +492,22 @@ class WriterRevisionCapabilities:
             document=document_path,
             modify_plan=plan_path,
             context=context_path,
+            task=task,
             media_assets=media_assets_path or None,
         )
-        return _json_dumps(_primary_data(result))
+        payload = _json_dumps(_primary_data(result))
+        cleanup_writer_temporary(root)
+        return payload
 
     def generate_string_replace_set(
         self,
         markdown_document: str,
         modify_plan_json: str,
         writing_context_json: str,
+        writing_task_json: str = '',
     ) -> str:
         """Generate Markdown string replacements from a modification plan."""
+        task = _json_loads(writing_task_json, None)
         root = _temp_root()
         document_path = _write_document_input(root, 'document', markdown_document)
         plan_path = _write_input_artifact(
@@ -510,8 +529,11 @@ class WriterRevisionCapabilities:
             document=document_path,
             modify_plan=plan_path,
             context=context_path,
+            task=task,
         )
-        return _json_dumps(_primary_data(result))
+        payload = _json_dumps(_primary_data(result))
+        cleanup_writer_temporary(root)
+        return payload
 
     def plan_revision(
         self,
@@ -533,6 +555,7 @@ class WriterRevisionCapabilities:
             writing_context_json=writing_context_json,
         )
         patch_set = self.generate_patch_set(
+            writing_task_json=writing_task_json,
             writer_document_json=writer_document_json,
             modify_plan_json=plan,
             writing_context_json=writing_context_json,
@@ -596,12 +619,14 @@ class WriterRevisionCapabilities:
             _read_artifact_data(revised_path) if revised_path else {},
             stage=source.stage,
         )
-        return _json_dumps(
+        payload = _json_dumps(
             {
                 'patch_result': _primary_data(result),
                 'revised_document': revised.model_dump(exclude_defaults=True),
             }
         )
+        cleanup_writer_temporary(root)
+        return payload
 
     def apply_string_replace(
         self,
@@ -633,12 +658,14 @@ class WriterRevisionCapabilities:
         )
         artifact_paths = (result.get('metadata') or {}).get('artifact_paths') or {}
         revised_path = artifact_paths.get('revised_document_md', '')
-        return _json_dumps(
+        payload = _json_dumps(
             {
                 'string_replace_result': _primary_data(result),
                 'revised_document': _read_artifact_data(revised_path),
             }
         )
+        cleanup_writer_temporary(root)
+        return payload
 
     def apply_revision(
         self,

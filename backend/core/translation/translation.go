@@ -1,36 +1,28 @@
 package translation
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 	"unicode"
+
+	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/store"
-)
-
-const (
-	tencentService = "tmt"
-	tencentVersion = "2018-03-21"
-	tencentAction  = "TextTranslate"
-	tencentRegion  = "ap-beijing"
 )
 
 type request struct {
 	Text   string `json:"text"`
 	Target string `json:"target,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 type Response struct {
@@ -40,33 +32,90 @@ type Response struct {
 }
 
 type statusResponse struct {
-	Configured bool `json:"configured"`
+	Configured        bool                     `json:"configured"`
+	Provider          string                   `json:"provider,omitempty"`
+	SelectedGroupID   string                   `json:"selected_group_id,omitempty"`
+	DocumentSupported bool                     `json:"document_supported"`
+	DocumentProviders []documentProviderOption `json:"document_providers"`
 }
 
-type tencentCredentials struct {
-	SecretID  string
-	SecretKey string
+type documentProviderOption struct {
+	GroupID      string `json:"group_id"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
 }
 
-type tencentResponse struct {
-	Response struct {
-		Source string `json:"Source"`
-		Target string `json:"Target"`
-		Text   string `json:"TargetText"`
-		Error  *struct {
-			Code    string `json:"Code"`
-			Message string `json:"Message"`
-		} `json:"Error,omitempty"`
-	} `json:"Response"`
+func documentProviderOptions(groups []modelconfig.TranslationProviderGroup) []documentProviderOption {
+	options := make([]documentProviderOption, 0, len(groups))
+	for _, group := range groups {
+		spec, ok := lookupProvider(group.ProviderName)
+		if !ok || !spec.SupportsDocuments {
+			continue
+		}
+		options = append(options, documentProviderOption{
+			GroupID: group.GroupID, ProviderName: spec.Name, GroupName: group.GroupName,
+		})
+	}
+	return options
+}
+
+// DocumentProviderSnapshot resolves one user's verified connection for a
+// document job without changing their default translation source.
+func DocumentProviderSnapshot(ctx context.Context, db *gorm.DB, userID, groupID string) (*modelconfig.TranslationConfigSnapshot, bool, error) {
+	groups, err := modelconfig.ListTranslationProviderGroups(ctx, db, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, group := range groups {
+		if group.GroupID != strings.TrimSpace(groupID) {
+			continue
+		}
+		spec, ok := lookupProvider(group.ProviderName)
+		if !ok || !spec.SupportsDocuments {
+			return nil, false, nil
+		}
+		snapshot := group.Snapshot
+		return &snapshot, true, nil
+	}
+	return nil, false, nil
+}
+
+// Initialize provisions free connections explicitly, outside read-only status requests.
+func Initialize(w http.ResponseWriter, r *http.Request) {
+	if err := modelprovider.EnsureDefaultTranslationServices(r.Context(), store.DB(), store.UserID(r)); err != nil {
+		common.ReplyErr(w, "initialize free translation services failed", http.StatusInternalServerError)
+		return
+	}
+	Status(w, r)
 }
 
 func Status(w http.ResponseWriter, r *http.Request) {
+	groups, err := modelconfig.ListTranslationProviderGroups(r.Context(), store.DB(), store.UserID(r))
+	if err != nil {
+		common.ReplyErr(w, "load translation providers failed", http.StatusInternalServerError)
+		return
+	}
+	response := statusResponse{DocumentProviders: documentProviderOptions(groups)}
 	config, err := modelconfig.LoadTranslationConfig(r.Context(), store.DB(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, "load translation config failed", http.StatusInternalServerError)
 		return
 	}
-	common.ReplyOK(w, statusResponse{Configured: config != nil})
+	if config == nil {
+		common.ReplyOK(w, response)
+		return
+	}
+	spec, ok := lookupProvider(config.ProviderName)
+	response.Configured, response.Provider, response.DocumentSupported = ok, spec.Name, ok && spec.SupportsDocuments
+	selected, err := modelconfig.LoadTranslationConfigSnapshot(r.Context(), store.DB(), store.UserID(r))
+	if err != nil {
+		common.ReplyErr(w, "load translation selection failed", http.StatusInternalServerError)
+		return
+	}
+	if selected != nil {
+		response.SelectedGroupID = selected.GroupID
+	}
+	common.ReplyOK(w, response)
 }
 
 func Translate(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +135,13 @@ func Translate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config, err := modelconfig.LoadTranslationConfig(r.Context(), store.DB(), store.UserID(r))
+	if err == nil && config == nil {
+		err = modelprovider.EnsureDefaultTranslationServices(r.Context(), store.DB(), store.UserID(r))
+		if err == nil {
+			config, err = modelconfig.LoadTranslationConfig(r.Context(), store.DB(), store.UserID(r))
+		}
+	}
+
 	if err != nil {
 		common.ReplyErr(w, "load translation config failed", http.StatusInternalServerError)
 		return
@@ -94,22 +150,21 @@ func Translate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "translation service is not configured", http.StatusPreconditionFailed)
 		return
 	}
-	if !strings.EqualFold(config.ProviderName, "Tencent Translation") {
+	spec, ok := lookupProvider(config.ProviderName)
+	if !ok {
 		common.ReplyErr(w, "unsupported translation provider", http.StatusBadRequest)
 		return
 	}
-	credentials, err := parseTencentCredentials(config.APIKey)
-	if err != nil {
+	if !spec.Keyless && strings.TrimSpace(config.APIKey) == "" {
 		common.ReplyErr(w, "invalid translation credentials", http.StatusPreconditionFailed)
 		return
 	}
-	target := normalizeTarget(req.Target, req.Text)
-	translated, source, err := callTencent(r.Context(), config.BaseURL, credentials, req.Text, target)
+	result, err := translateWithConfigSource(r.Context(), nil, store.UserID(r), *config, req.Text, req.Source, req.Target)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	common.ReplyOK(w, Response{TranslatedText: translated, Source: source, Target: target})
+	common.ReplyOK(w, result)
 }
 
 // TranslateText exposes the configured translation provider to other Core
@@ -126,19 +181,48 @@ func TranslateText(ctx context.Context, userID, text, target string) (Response, 
 	if config == nil {
 		return Response{}, errors.New("translation service is not configured")
 	}
-	if !strings.EqualFold(config.ProviderName, "Tencent Translation") {
-		return Response{}, errors.New("unsupported translation provider")
+	return translateWithConfig(ctx, nil, userID, *config, text, target)
+}
+
+// SelectedProvider reports the chosen API source without exposing credentials.
+func SelectedProvider(ctx context.Context, userID string) (string, bool, error) {
+	config, err := modelconfig.LoadTranslationConfig(ctx, store.DB(), userID)
+	if err != nil || config == nil {
+		return "", false, err
 	}
-	credentials, err := parseTencentCredentials(config.APIKey)
+	spec, ok := lookupProvider(config.ProviderName)
+	if !ok {
+		return "", false, errors.New("unsupported translation provider")
+	}
+	return spec.Name, spec.SupportsDocuments, nil
+}
+
+// SelectedProviderSnapshot captures the selected provider and encrypted
+// credentials in one database read for a long-running document job.
+func SelectedProviderSnapshot(ctx context.Context, userID string) (*modelconfig.TranslationConfigSnapshot, bool, error) {
+	snapshot, err := modelconfig.LoadTranslationConfigSnapshot(ctx, store.DB(), userID)
+	if err != nil || snapshot == nil {
+		return nil, false, err
+	}
+	spec, ok := lookupProvider(snapshot.ProviderName)
+	if !ok {
+		return nil, false, errors.New("unsupported translation provider")
+	}
+	return snapshot, spec.SupportsDocuments, nil
+}
+
+// TranslateTextWithSnapshot checks a pinned provider group on every document
+// chunk, so switching selections is harmless and deleting credentials revokes
+// remaining work.
+func TranslateTextWithSnapshot(ctx context.Context, userID string, snapshot modelconfig.TranslationConfigSnapshot, text, target string) (Response, error) {
+	config, err := modelconfig.ResolveTranslationConfigSnapshot(ctx, store.DB(), userID, snapshot)
 	if err != nil {
 		return Response{}, err
 	}
-	target = normalizeTarget(target, text)
-	translated, source, err := callTencent(ctx, config.BaseURL, credentials, text, target)
-	if err != nil {
-		return Response{}, err
-	}
-	return Response{TranslatedText: translated, Source: source, Target: target}, nil
+	return translateWithConfig(ctx, nil, userID, config, text, target, func() error {
+		_, err := modelconfig.ResolveTranslationConfigSnapshot(ctx, store.DB(), userID, snapshot)
+		return err
+	})
 }
 
 func normalizeTarget(target, text string) string {
@@ -154,15 +238,6 @@ func normalizeTarget(target, text string) string {
 	return "zh"
 }
 
-func parseTencentCredentials(raw string) (tencentCredentials, error) {
-	secretID, secretKey, ok := strings.Cut(strings.TrimSpace(raw), "|")
-	secretID, secretKey = strings.TrimSpace(secretID), strings.TrimSpace(secretKey)
-	if !ok || secretID == "" || secretKey == "" {
-		return tencentCredentials{}, errors.New("SecretId and SecretKey are required")
-	}
-	return tencentCredentials{SecretID: secretID, SecretKey: secretKey}, nil
-}
-
 func sha256Hex(value []byte) string {
 	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])
@@ -172,61 +247,4 @@ func hmacSHA256(key []byte, value string) []byte {
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte(value))
 	return mac.Sum(nil)
-}
-
-func callTencent(ctx context.Context, baseURL string, credentials tencentCredentials, text, target string) (string, string, error) {
-	payload, err := json.Marshal(map[string]any{
-		"SourceText": text, "Source": "auto", "Target": target, "ProjectId": 0,
-	})
-	if err != nil {
-		return "", "", err
-	}
-	endpoint, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || endpoint.Scheme != "https" || !strings.EqualFold(endpoint.Hostname(), "tmt.tencentcloudapi.com") {
-		return "", "", errors.New("invalid Tencent translation endpoint")
-	}
-	timestamp := time.Now().Unix()
-	date := time.Unix(timestamp, 0).UTC().Format("2006-01-02")
-	canonicalHeaders := "content-type:application/json; charset=utf-8\nhost:" + endpoint.Host + "\n"
-	signedHeaders := "content-type;host"
-	canonicalRequest := "POST\n/\n\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + sha256Hex(payload)
-	credentialScope := date + "/" + tencentService + "/tc3_request"
-	stringToSign := "TC3-HMAC-SHA256\n" + fmt.Sprint(timestamp) + "\n" + credentialScope + "\n" + sha256Hex([]byte(canonicalRequest))
-	secretDate := hmacSHA256([]byte("TC3"+credentials.SecretKey), date)
-	secretService := hmacSHA256(secretDate, tencentService)
-	secretSigning := hmacSHA256(secretService, "tc3_request")
-	signature := hex.EncodeToString(hmacSHA256(secretSigning, stringToSign))
-	authorization := "TC3-HMAC-SHA256 Credential=" + credentials.SecretID + "/" + credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + signature
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
-	if err != nil {
-		return "", "", err
-	}
-	req.Header.Set("Authorization", authorization)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Host", endpoint.Host)
-	req.Header.Set("X-TC-Action", tencentAction)
-	req.Header.Set("X-TC-Timestamp", fmt.Sprint(timestamp))
-	req.Header.Set("X-TC-Version", tencentVersion)
-	req.Header.Set("X-TC-Region", tencentRegion)
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("Tencent translation request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", "", err
-	}
-	var decoded tencentResponse
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		return "", "", fmt.Errorf("Tencent translation returned HTTP %d", resp.StatusCode)
-	}
-	if decoded.Response.Error != nil {
-		return "", "", fmt.Errorf("Tencent translation failed: %s", decoded.Response.Error.Message)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || decoded.Response.Text == "" {
-		return "", "", fmt.Errorf("Tencent translation returned HTTP %d", resp.StatusCode)
-	}
-	return decoded.Response.Text, decoded.Response.Source, nil
 }

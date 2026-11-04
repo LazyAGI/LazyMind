@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -247,12 +248,28 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 	}
 	desktopEnabled := notificationBlockReason(prefs, "desktop") == ""
 	var tasks []orm.TaskCenterTask
-	if err := tx.Where("user_id = ? AND task_type IN ? AND status IN ('pending','running','waiting','waiting_inputs') AND archived_at IS NULL", userID,
-		[]string{"scheduled", "background_chat", "workflow_run"}).Order("id").Find(&tasks).Error; err != nil {
+	taskTypes := []string{"scheduled", "background_chat", "workflow_run"}
+	// Use the same visibility and resolved status as ListTasks. Persisted task
+	// state can lag behind a workflow completion or retry; comparing it with the
+	// UI's live task list would otherwise require confirmation indefinitely.
+	if err := tx.Table("task_center_tasks tct").Select("tct.*").
+		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
+		Where("tct.user_id = ? AND tct.task_type IN ? AND tct.archived_at IS NULL", userID, taskTypes).
+		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false"). // workflow-naming: persistence
+		Order("tct.id").Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	ids := []string{}
 	for _, task := range tasks {
+		task, err = resolveTaskForResponse(tx.Statement.Context, tx, task)
+		if err != nil {
+			return nil, err
+		}
+		switch task.Status {
+		case "pending", "running", "waiting", "waiting_inputs":
+		default:
+			continue
+		}
 		if task.TaskType != "scheduled" || task.NotificationConfig == nil {
 			if desktopEnabled {
 				ids = append(ids, task.ID)
@@ -263,8 +280,8 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, channel := range config.Channels {
-			if channel.Enabled {
+		for name, channel := range config.Channels {
+			if channel.Enabled && notificationBlockReason(prefs, name) == "" {
 				ids = append(ids, task.ID)
 				break
 			}
@@ -345,4 +362,29 @@ func disabledNotificationChannels(config NotificationConfig) []string {
 		}
 	}
 	return disabled
+}
+
+// NotifyAcademicExpansion records one pending action per preparation revision.
+// Read/dismissal is independent of desktop delivery and of the business state.
+func NotifyAcademicExpansion(ctx context.Context, tx *gorm.DB, user, dataset, expansion string, revision int64, status string) error {
+	event, title, body := "paper_ready", "初步调研已完成", "已整理研究方向，确认后即可开始论文拓展。"
+	if status == "awaiting_info" {
+		event, title, body = "paper_info", "论文拓展需要补充信息", "请打开拓展记录，补充影响研究范围的信息。"
+	} else if status != "awaiting_confirmation" {
+		return nil
+	}
+	target, _ := json.Marshal(map[string]string{"type": "academic_expansion", "dataset_id": dataset, "expansion_id": expansion})
+	now := time.Now().UTC()
+	identity := notificationIdentity(expansion, strconv.FormatInt(revision, 10), event)
+	notice := orm.TaskNotification{ID: identity, UserID: user, EventID: identity, Event: event, Channel: "desktop", Title: title, Body: body, Content: "summary", Status: "pending", TargetJSON: orm.RawJSON(target), CreatedAt: now, UpdatedAt: now}
+	var prefs orm.UserNotificationPreferences
+	if err := tx.Where("user_id=?", user).Take(&prefs).Error; err == nil && notificationBlockReason(prefs, "desktop") != "" {
+		notice.Status = "suppressed"
+	}
+	return tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&notice).Error
+}
+
+func ResolveAcademicExpansionNotifications(ctx context.Context, tx *gorm.DB, expansion string, revision int64) error {
+	ids := []string{notificationIdentity(expansion, strconv.FormatInt(revision, 10), "paper_info"), notificationIdentity(expansion, strconv.FormatInt(revision, 10), "paper_ready")}
+	return tx.WithContext(ctx).Model(&orm.TaskNotification{}).Where("id IN ? AND read_at IS NULL", ids).Update("read_at", time.Now().UTC()).Error
 }

@@ -2885,6 +2885,9 @@ CREATE TABLE user_notification_preferences (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 CREATE TABLE task_notifications (
+ target_json JSON NOT NULL DEFAULT '{}',
+ read_at TIMESTAMP,
+
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     task_id VARCHAR(36) NOT NULL,
@@ -2930,6 +2933,9 @@ CREATE TABLE user_notification_preferences (
     updated_at DATETIME NOT NULL
 );
 CREATE TABLE task_notifications (
+ target_json JSON NOT NULL DEFAULT '{}',
+ read_at TIMESTAMP,
+
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     task_id VARCHAR(36) NOT NULL,
@@ -3319,6 +3325,35 @@ CREATE TABLE task_attempt_timings (
 );
 CREATE INDEX idx_task_attempt_execution ON task_attempt_timings(execution_id);
 
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE conversation_followups (
+    id VARCHAR(36) PRIMARY KEY,
+    conversation_id VARCHAR(36) NOT NULL,
+    content JSON NOT NULL,
+    text TEXT NOT NULL,
+    mode VARCHAR(16) NOT NULL DEFAULT 'queued',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    sort_order BIGINT NOT NULL DEFAULT 0,
+    revision BIGINT NOT NULL DEFAULT 1,
+    target_run_id VARCHAR(64) NOT NULL DEFAULT '',
+    target_history_id VARCHAR(36) NOT NULL DEFAULT '',
+    steer_id VARCHAR(64) NOT NULL DEFAULT '',
+    idempotency_key VARCHAR(64) NOT NULL,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    accepted_at TIMESTAMP,
+    create_user_id VARCHAR(255) NOT NULL,
+    create_user_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP
+);
+
+CREATE INDEX idx_conversation_followups_queue
+    ON conversation_followups(conversation_id, status, sort_order);
+CREATE UNIQUE INDEX uk_conversation_followups_idempotency
+    ON conversation_followups(create_user_id, conversation_id, idempotency_key);
+
 -- +migrate Dialect *
 CREATE TABLE academic_document_states (
  metadata_json JSON NOT NULL DEFAULT '{}',
@@ -3341,9 +3376,16 @@ CREATE TABLE academic_user_paper_states (
   dataset_id varchar(255) NOT NULL,
   paper_id varchar(36) NOT NULL,
   is_important BOOLEAN NOT NULL DEFAULT false,
+  reading_status VARCHAR(16) NOT NULL DEFAULT 'unread',
   PRIMARY KEY (user_id, dataset_id, paper_id)
 );
 CREATE TABLE academic_expansions (
+ preparation_json JSON NOT NULL DEFAULT '{}',
+ preparation_revision BIGINT NOT NULL DEFAULT 0,
+ budget_mode VARCHAR(16) NOT NULL DEFAULT 'balanced',
+ reading_json JSON NOT NULL DEFAULT '{}',
+ report_json JSON NOT NULL DEFAULT '{}',
+
  discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
  seed_snapshot_json JSON NOT NULL DEFAULT '[]',
  discovery_json JSON NOT NULL DEFAULT '[]',
@@ -3351,7 +3393,7 @@ CREATE TABLE academic_expansions (
   id varchar(36) NOT NULL,
   user_id varchar(255) NOT NULL,
   dataset_id varchar(255) NOT NULL,
-  conversation_id varchar(36) NOT NULL,
+  conversation_id varchar(36) DEFAULT NULL,
   request_key varchar(128) NOT NULL,
   request_owner varchar(255) NOT NULL,
   title text NOT NULL,
@@ -3371,6 +3413,8 @@ CREATE UNIQUE INDEX idx_academic_expansions_conversation_id ON academic_expansio
 CREATE UNIQUE INDEX uk_academic_expansion_request ON academic_expansions(request_key, request_owner);
 CREATE INDEX idx_academic_expansions_deleted_at ON academic_expansions(deleted_at);
 CREATE TABLE academic_expansion_rounds (
+ report_json JSON NOT NULL DEFAULT '{}',
+
  discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
   id varchar(36) NOT NULL,
   expansion_id varchar(36) NOT NULL,
@@ -3405,6 +3449,8 @@ CREATE TABLE academic_handoffs (
 CREATE UNIQUE INDEX uk_academic_handoff ON academic_handoffs(user_id, request_key);
 CREATE INDEX idx_academic_handoffs_expansion_id ON academic_handoffs(expansion_id);
 CREATE TABLE academic_paper_contents (
+ quality_json JSON NOT NULL DEFAULT '{}',
+
  source_provider VARCHAR(64) NOT NULL DEFAULT '',
  source_kind VARCHAR(16) NOT NULL DEFAULT 'legacy',
  source_version VARCHAR(64) NOT NULL DEFAULT '',
@@ -3426,6 +3472,14 @@ CREATE TABLE academic_paper_contents (
 CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version, source_key);
 -- Complete editable paper-library state and optimistic concurrency revision.
 -- +migrate Dialect postgres,sqlite
+-- Immutable pre-normalization paper graph archive.
+CREATE TABLE paper_libraries (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ data_json JSON NOT NULL,
+ revision BIGINT NOT NULL DEFAULT 0 CHECK(revision >= 0),
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE paper_library_folders (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, parent_id VARCHAR(255) NOT NULL DEFAULT '',
  name VARCHAR(255) NOT NULL, name_key VARCHAR(255) NOT NULL, revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0),
@@ -3435,7 +3489,7 @@ CREATE TABLE paper_library_folders (
 CREATE INDEX idx_library_folder_parent ON paper_library_folders(dataset_id,parent_id);
 CREATE TABLE paper_library_entries (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, academic_work_id VARCHAR(36) NOT NULL,
- folder_id VARCHAR(255) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'unread',
+ folder_id VARCHAR(255) NOT NULL DEFAULT '',
  tags_json JSON NOT NULL, metadata_json JSON NOT NULL, source VARCHAR(32) NOT NULL DEFAULT 'unknown',
  import_method VARCHAR(32) NOT NULL DEFAULT '', source_url TEXT NOT NULL DEFAULT '', arxiv_version VARCHAR(64) NOT NULL DEFAULT '',
  revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0), removed_at TIMESTAMP,
@@ -3463,6 +3517,22 @@ CREATE TABLE paper_library_attachments (
 CREATE INDEX idx_library_attachment_paper ON paper_library_attachments(dataset_id,paper_id);
 CREATE INDEX idx_library_attachment_document ON paper_library_attachments(dataset_id,document_id);
 CREATE UNIQUE INDEX uk_library_active_document ON paper_library_attachments(dataset_id,document_id) WHERE document_id<>'' AND detached_at IS NULL;
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE paper_library_legacy_states (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ extras_json JSON NOT NULL,
+ migrated_at TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL
+);
+
+-- +migrate Dialect postgres
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND ext->>'library_kind'='paper';
+
+-- +migrate Dialect sqlite
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND CASE WHEN json_valid(ext) THEN json_extract(ext,'$.library_kind') ELSE NULL END='paper';
 
 -- Promote the oldest active connection endpoint once. Keep rollback metadata
 -- without storing API keys; connection/model IDs and ciphertext stay intact.

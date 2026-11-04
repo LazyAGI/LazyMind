@@ -68,6 +68,7 @@ class AgentExecutionOptions:
     tool_failure_limits: Optional[dict[str, int]] = None
     argument_result_history: list[dict[str, Any]] = field(default_factory=list)
     tool_call_limits: Optional[dict[str, int]] = None
+    tool_call_budget_observer: Optional[Callable[[dict[str, dict[str, int]]], None]] = None
     llm_config: Optional[dict[str, Any]] = None
     current_model_candidate_id: str = ''
     model_candidates: tuple[ModelCandidate, ...] = field(default_factory=tuple, repr=False)

@@ -8,7 +8,7 @@ import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const api = vi.hoisted(() => ({
   listDocumentProviders: vi.fn(), publishDocument: vi.fn(), previewDocumentAction: vi.fn(), saveDocumentArtifact: vi.fn(),
-  getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn(),
+  getPublicationTargets: vi.fn(), preflightPublication: vi.fn(async () => ({ data: { data: { targets: [] } } })), createPublicationGroup: vi.fn(),
 }));
 vi.mock('@/modules/chat/utils/request', async original => ({
   ...await original<typeof import('@/modules/chat/utils/request')>(), WorkflowSessionApi: () => api,
