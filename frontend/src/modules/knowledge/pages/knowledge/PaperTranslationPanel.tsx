@@ -62,7 +62,6 @@ export default function PaperTranslationPanel(props: Props) {
     props.onTranslate(text);
   };
   return <section className="knowledge-reader-translation" aria-label="论文翻译">
-    <div className="paper-assistant-ready"><span aria-hidden="true"/><span>{props.loading ? "正在翻译" : "选中文字，即可翻译"}</span><span className="paper-assistant-ready__scope">原文对照</span></div>
     <div className="knowledge-reader-translation-content">
     <section className="knowledge-reader-translation-pane is-result" aria-label="翻译结果" aria-live="polite" aria-busy={props.loading}>
       <div className="knowledge-reader-translation-heading">
