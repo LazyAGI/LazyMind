@@ -28,12 +28,18 @@ func AfterControl(current, kind string, approvalPending, completed bool) string 
 	return Active
 }
 
+// ProjectionFacts retains controller admission and explicit user pause intent.
+type ProjectionFacts struct {
+	Preparing bool
+	Paused    bool
+}
+
 // AfterProjection reconciles execution facts without ending an admitted
 // continuation between successful steps. This is the same policy for native
 // and external controllers, independent of the executor chosen for each step.
-func AfterProjection(current string, projection graphengine.Projection, preparing bool) string {
-	if current == "pausing" {
-		return "pausing"
+func AfterProjection(current string, projection graphengine.Projection, facts ProjectionFacts) string {
+	if facts.Paused || current == "pausing" || current == "stopped" {
+		return current
 	}
 	if projection.Completed {
 		return Completed
@@ -49,7 +55,7 @@ func AfterProjection(current string, projection graphengine.Projection, preparin
 			}
 		}
 	}
-	if current == Active && len(projection.Current) == 0 && len(projection.Ready) > 0 && preparing {
+	if current == Active && len(projection.Current) == 0 && len(projection.Ready) > 0 && facts.Preparing {
 		return Active
 	}
 	return status

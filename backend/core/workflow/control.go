@@ -14,6 +14,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/controlpolicy"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/runstate"
 )
 
 type WorkflowControlCommand struct {
@@ -335,13 +336,8 @@ func resumeWorkflowExecution(ctx context.Context, tx *gorm.DB, session *orm.Work
 		target = projection.Projection.Ready[0]
 	}
 	if target == "" {
-		session.Status = SessionStatusWaiting
-		if projection.Projection.Completed {
-			session.Status = SessionStatusCompleted
-		} else if len(projection.Projection.Retryable) > 0 {
-			session.Status = SessionStatusFailed
-		}
-		if err := tx.Model(session).Update("status", session.Status).Error; err != nil {
+		status := projectedRunStatus(*session, projection)
+		if err := runstate.Write(tx, session, status, nil); err != nil {
 			return err
 		}
 		receipt.ResumeReason = session.Status

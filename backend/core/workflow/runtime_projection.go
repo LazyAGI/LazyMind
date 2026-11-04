@@ -425,10 +425,8 @@ func finalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, at
 			return nil
 		}
 		return freezeRouteDecision(ctx, db, sessionID, stepID, attemptID)
-	case "failed":
-		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusFailed)
-	case "cancelled", "interrupted":
-		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusWaiting)
+	case "failed", "cancelled", "canceled", "interrupted":
+		return reconcileRunStatus(ctx, db, &session)
 	default:
 		return gorm.ErrInvalidData
 	}
@@ -442,7 +440,11 @@ func reconcileSessionProjection(ctx context.Context, db *gorm.DB, session *orm.W
 	if err != nil {
 		return err
 	}
-	status := runstate.AfterProjection(session.Status, projected.Projection, projected.Display.Status == "running")
+	return writeSessionProjection(ctx, db, session, projected)
+}
+
+func writeSessionProjection(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession, projected projectionResponse) error {
+	status := projectedRunStatus(*session, projected)
 	if err := runstate.Write(db.WithContext(ctx), session, status, map[string]any{"state_version": gorm.Expr("state_version + 1")}); err != nil {
 		return err
 	}

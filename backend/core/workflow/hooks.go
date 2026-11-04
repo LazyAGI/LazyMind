@@ -23,6 +23,7 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
+	"lazymind/core/workflow/runstate"
 )
 
 var OnAcademicRuntimeChanged func(context.Context, *gorm.DB, string)
@@ -346,15 +347,8 @@ func stopWorkflowSession(
 		if pending > 0 {
 			status = "pausing"
 		}
-		result := tx.Model(&orm.WorkflowSession{}).
-			Where("id = ? AND status = ?", session.ID, current.Status).
-			Updates(map[string]any{"status": status, "last_stopped_at": now,
-				"state_version": gorm.Expr("state_version + 1"), "updated_at": now})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return nil
+		if err := runstate.Write(tx, &current, status, map[string]any{"last_stopped_at": now, "state_version": current.StateVersion + 1}); err != nil {
+			return err
 		}
 		var updated orm.WorkflowSession
 		if err := tx.Where("id = ?", session.ID).First(&updated).Error; err != nil {

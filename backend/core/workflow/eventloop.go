@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
@@ -743,7 +744,14 @@ func OnSubAgentDone(
 	onSSE func(eventType string, payload map[string]any),
 	pctx *WorkflowChatContext,
 ) {
-	_ = UpdateStepStatus(ctx, db, taskID, status)
+	if observed, err := observeControlledTaskCompletion(ctx, db, taskID, status, summary, onSSE, pctx); err != nil {
+		// A failed notification read is not a failed execution. Recovery can
+		// replay it; never publish an unfenced workflow failure as a fallback.
+		fmt.Printf("[workflow] task completion notification deferred task=%s: %v\n", taskID, err)
+		return
+	} else if observed {
+		return
+	}
 	if step, err := GetStepByTaskID(ctx, db, taskID); err == nil && step != nil {
 		if step.TerminalCode == "WORKFLOW_STOP_REQUESTED" {
 			// Canonical workers acknowledge after executor cleanup through the
@@ -759,7 +767,14 @@ func OnSubAgentDone(
 		if step.Status == StepStatusInterrupted && step.TerminalCode == "WORKFLOW_STOPPED" {
 			return
 		}
+		if step.Validity == "stale" {
+			return
+		}
+		if step.Status != status && (step.Status == "succeeded" || step.Status == "failed" || step.Status == "interrupted" || step.Status == "cancelled" || step.Status == "canceled") {
+			return
+		}
 	}
+	_ = UpdateStepStatus(ctx, db, taskID, status)
 	stepFailed := status != subagent.StatusSucceeded && status != subagent.StatusInterrupted
 	sessionCompleted := false
 	if status == subagent.StatusSucceeded && pctx != nil && pctx.SessionID != "" {
@@ -856,7 +871,11 @@ func OnSubAgentDone(
 	// native ChatAgent must not race that scheduler or restart a failed task.
 	if pctx.HostedTaskID != "" {
 		if !stepFailed {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			if status == subagent.StatusInterrupted {
+				_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			}
+			// Route finalization already decided whether this run is preparing,
+			// awaiting review or complete. Yielding to its scheduler is not a pause.
 			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": pctx.StepID, "reason": "hosted_task"})
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 		}
@@ -947,7 +966,11 @@ func OnSubAgentDone(
 		}
 		go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
 	} else {
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		if status == subagent.StatusInterrupted {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		}
+		// The admitted Chat controller still owns the next-step handoff. Keep
+		// the shared projection's preparation state while it chooses that step.
 		onSSE("step_waiting", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -1142,7 +1165,7 @@ func checkAndFallbackIfStuck(
 	if err != nil || session == nil {
 		return
 	}
-	if session.Status != SessionStatusActive {
+	if controlstore.Controlled(*session) || session.Status != SessionStatusActive {
 		// Session was already advanced or completed — nothing to do.
 		return
 	}

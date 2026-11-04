@@ -27,3 +27,22 @@ func acceptRunControl(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSes
 	}
 	return runstate.Write(writeTx, session, status, fields)
 }
+
+// Notifications may request reconciliation, but the durable graph decides the
+// state. Publish only an actual change; replay is not a new execution event.
+func reconcileRunStatus(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession) error {
+	projected, err := projectSession(ctx, tx, session)
+	if err != nil {
+		return err
+	}
+	if projectedRunStatus(*session, projected) == session.Status {
+		return nil
+	}
+	return writeSessionProjection(ctx, tx, session, projected)
+}
+
+func projectedRunStatus(session orm.WorkflowSession, projected projectionResponse) string {
+	return runstate.AfterProjection(session.Status, projected.Projection, runstate.ProjectionFacts{
+		Preparing: projected.Display.Status == "running", Paused: projected.Display.Status == "paused",
+	})
+}
