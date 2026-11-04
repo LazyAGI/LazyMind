@@ -224,6 +224,7 @@ func init() {
 			"expansion report must preserve the research analysis",
 		}},
 		{2000103, 400, "Invalid request", []string{
+			"new reviews support only quick or standard expansion",
 			"unsupported_source",
 			"unknown paper research step",
 		}},
