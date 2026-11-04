@@ -53,7 +53,9 @@ const waiting = () => session("WAITING_USER", { user_code: CODE, verification_ur
 const page = (query = "") => render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[`/cloud-documents${query}`]}><Routes><Route path="/cloud-documents" element={<CloudDocumentsPage />} /><Route path="/cloud-documents/github" element={<GitHubAccountPage />} /></Routes></MemoryRouter></ConfigProvider>);
 
 async function openConnectionDialog() {
-  fireEvent.click(await screen.findByRole("button", { name: /^(连接 GitHub|添加账号)$/ }));
+  const button = await screen.findByRole("button", { name: /^(连接 GitHub|添加账号)$/ });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
   const dialog = await screen.findByRole("dialog", { name: "连接 GitHub" });
   await waitFor(() => expect(dialog).toBeVisible());
   return dialog;
@@ -107,6 +109,19 @@ afterEach(() => {
 });
 
 describe("GitHub CLI from the real cloud-documents page", () => {
+  it("waits for account loading before opening the connection dialog", async () => {
+    let finish!: (value: unknown) => void;
+    const loading = new Promise(resolve => { finish = resolve; });
+    mocks.list.mockImplementation(({ provider }: { provider: string }) =>
+      provider === "github" ? loading : Promise.resolve({ data: { items: [] } }));
+    page("/github");
+    const opening = openConnectionDialog();
+    expect(await screen.findByRole("button", { name: "添加账号" })).toBeDisabled();
+    await act(async () => { finish({ data: { items: [] } }); });
+    expect(await opening).toBeVisible();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
   it("opens two connection modes without starting authorization on open or tab changes", async () => {
     page();
     const dialog = await openConnectionDialog();
