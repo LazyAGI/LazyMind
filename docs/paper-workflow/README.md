@@ -1,13 +1,13 @@
 # 论文 Workflow 对接
 
-面向接入综述、阅读心得和科研 PPT 的同事。对应 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863)。
+面向接入综述、阅读心得和科研 PPT 的同事。基于 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863) 的论文能力，增加准备确认、多阶段拓展与独立报告。
 
-本 PR 已提供论文选择、真实 arXiv 拓展、版本化材料交接和全文读取。**综述、心得、PPT 目前接 Mock，只返回材料接收结果，正式生成能力由下游 Workflow 接入。**
+论文流程提供主题/种子初步调研、按选定方向开展多来源拓展、分层阅读与质量检查、版本化材料交接和全文读取。**综述、心得、PPT 目前接 Mock，只返回材料接收结果，正式生成能力由下游 Workflow 接入。**
 
 ## 1. 接入流程
 
 ```text
-论文集选文 / 输入研究方向 → 论文拓展 → 冻结所选轮次 → 新 Chat 接收综述任务
+论文集选文 / 输入研究方向 → 后台初步调研 → 回答必要问题 → 按启动设置全选方向或人工选择 → 论文拓展 → 冻结所选轮次 → 新 Chat 接收综述任务
 论文集选文 → 新 Chat 接收阅读心得 / PPT 任务
 PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT 步骤
 ```
@@ -21,6 +21,16 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 
 业务启动统一使用 `POST /api/core/academic/workflow-launches`，`kind` 为 `expansion / review / reflection / ppt`，`request_key` 为同次请求的稳定幂等键。从论文集启动时传 `dataset_id`、`document_ids` 和 `user_instruction`；PPT 可传 `reflection_first: true`。
 
+独立标准或深入扩展支持启动参数 `direction_selection: "all" | "manual"`，默认为 `all`：初步调研完成且没有待补充问题时，按全部有效方向自动继续；`manual` 始终等待人工选择并确认，单方向也不跳过。快速扩展不经过方向选择。该设置随准备记录保存，补充信息和重试时沿用。
+
+新建 expansion 或“先拓展后综述”返回 `expansion_id` 和准备状态，尚无 `conversation_id`。通过 `POST /academic/expansions/{id}/preparation` 提交 `action=answer/revise/retry`、准备 `revision` 和稳定 `request_key`；通过 `POST /academic/expansions/{id}:confirm` 提交同版本和方向选择，人工确认后启动正式 Chat。过期版本拒绝，重复确认返回同一正式任务。快速、标准、深入通过执行轮次和工具调用次数限制调研范围，具体限额见服务端返回的执行策略。
+
+正式步骤为「检索与拓展 → 筛选与补充 → 研究分析与报告」。快速拓展在检索后交付清单；标准拓展在筛选后交付按方向分组的清单；深入拓展沿用完整冻结清单，选择关键结论定点补读，并生成有引用的报告与论文关系图，不要求逐篇填满分析字段或穷尽前作、同类和后续调查。
+
+第三步通过 `academic_submit_relations` 提交关键 `analyses`、`claims`、`relations` 和正常研究 `limitations`；`investigation` 仅按需记录未解决工作，查询文字和来源版本来自真实记录。只为有实际已读原文支持的关系画边，未覆盖范围在部分报告中明确说明，不要求耗尽预算才交付。工具保留身份、真实已读位置、来源版本及发布一致性检查，不执行独立语义核验或接收 `check_id`。
+
+提交会使用当前执行的草稿保存机制；业务检查失败后，只重传变化的数组或对象即可，省略表示保留、`[]` 表示清空，每次仍重新检查保留内容。报告写作失败时可无参重试。结构解析失败的调用不保存草稿，不同执行不共享草稿。报告与关系图绑定同一 `analysis_version`，报告写作失败不发布伪成果，分析不自动入库。结果仍是四字段 `ReviewWorkflowInput`，引用、阅读覆盖、研究局限与用量保存在 `expansion_report` 和历史轮次报告。
+
 从已有拓展成果启动综述：
 
 ```json
@@ -33,7 +43,9 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 }
 ```
 
-返回新任务的 `conversation_id` 和 `handoff_id`。所选论文须属于该轮成果，至少两篇不同论文且全文可用。直接从论文集发起 `review` 会先运行拓展，满足条件后再建立综述 Chat。
+返回新任务的 `conversation_id` 和 `handoff_id`。所选论文须属于该轮成果，至少两篇不同论文的正文通过身份和解析质量检查（相同 PDF 哈希不重复计数）。
+
+从论文集直接发起综述时，传 `kind: "review"`、`skip_expansion: true`、`dataset_id`、`document_ids` 和 `request_key`，可用 `paper_ids` 确认其中的论文。此入口不运行拓展，所选论文须全部通过正文检查，且至少有两篇不同正文。可选 `review_scope` 为 `selected`（默认，仅所选论文）或 `direct_references`（允许下游引用其直接参考文献）；范围随业务输入交接。返回 `conversation_id`，再通过上下文取得 `handoff_id`。不传 `skip_expansion` 的论文集综述入口会先运行拓展。
 
 ## 2. 输入结构
 
@@ -67,6 +79,7 @@ interface WorkflowPaper {
 
 interface ReviewWorkflowInput {
   user_instruction: string;
+  review_scope?: "selected" | "direct_references";
   candidate_directions: string[];
   selected_directions: string[];
   papers: WorkflowPaper[];
@@ -103,7 +116,9 @@ page = academic_read_paper(paper_id=paper_id)
 page = academic_read_paper(cursor=page["next_cursor"])  # 有下一批时继续
 ```
 
-工具自动取得当前 Chat 的任务身份与鉴权。保留现有隐藏输入 `task_context`（`text`，内容为完整任务上下文 JSON），沿用 Workflow 材料绑定；不需要用户手填内部 ID。拓展 Workflow 使用自己的 `academic_read_paper(expansion_id, paper_id=..., cursor=...)`，见 [拓展工具](../../workflows/paper_expansion/scripts/tools.py)。
+工具自动取得当前 Chat 的任务身份与鉴权。保留现有隐藏输入 `task_context`（`text`，内容为任务定位信息 JSON），沿用 Workflow 材料绑定；论文、用户要求和笔记按需通过 `academic_handoff_context()` 取得，不需要模型重抄材料或用户手填内部 ID。拓展 Workflow 的学术工具同样自动读取当前工作流绑定的任务 ID，不接收 `expansion_id` 参数；读取论文使用 `academic_read_paper(paper_id=...)`，续读仅传 `cursor`，见 [拓展工具](../../workflows/paper_expansion/scripts/tools.py)。
+
+`academic_handoff_context()` 返回当前交接的 `handoff_id`、任务类型、导航信息及冻结的 `input`，不返回内部来源快照。提交和正文读取工具使用摘要取得当前 Chat 的交接身份；全文续读仍携带当前交接 ID 校验游标，不能混入其他任务的正文。
 
 ### 直接调用 HTTP
 
@@ -112,7 +127,10 @@ page = academic_read_paper(cursor=page["next_cursor"])  # 有下一批时继续
 | 用途 | 接口 |
 | --- | --- |
 | 查询当前论文任务上下文 | `GET /api/core/academic/chat-context?conversation_id=<Chat ID>` |
+| 查询页面状态和交接身份 | `GET /api/core/academic/chat-context?conversation_id=<Chat ID>&view=summary` |
 | 读取正文 | `POST /api/core/academic/paper-contents:read` |
+
+摘要视图只返回类型、ID、版本、状态及适用的导航字段，不包含 `input` 或 `contents`。默认视图在交接任务中额外返回 `input`；服务端来源快照保留用于全文权限和版本校验。两种视图采用相同的用户、Chat 归属和论文集权限检查。
 
 下游任务首次读取：
 
@@ -148,7 +166,11 @@ HTTP 200 也可能处于 `processing`，应同时检查 `status`。读取正文�
 
 - **启动路由**：[workflows.go](../../backend/core/academic/workflows.go) 的 `createPaperHandoff` 目前选择两个 Mock Workflow；接入正式 Workflow 时同步调整这里。
 - **下游步骤**：参考 [通用交接包](../../workflows/paper_workflow_mock) 和 [心得接续 PPT 包](../../workflows/paper_ppt_with_reflection_mock)，保留输入绑定与上述读取工具，替换 Mock 步骤的生成逻辑。
-- **输出**：正式成果沿用现有 Workflow artifact 发布机制。当前 `academic_handoff_submit()` 只确认冻结输入并发布 `handoff_receipt / ppt_request`，返回 `awaiting_downstream`，不代表正式成果完成。
+- **输出**：正式成果沿用现有 Workflow artifact 发布机制。当前 `academic_handoff_submit()` 只确认冻结输入并发布 `handoff_receipt / ppt_request`，返回 `awaiting_downstream`，不代表正式成果完成。通用回执展示任务、要求和论文标题；心得接续 PPT 保留可折叠查看的结构化输入。
 - **心得接续 PPT**：读取已保存的 `reflection_markdown` 和原论文清单；当前 Mock 的心得正文也是占位内容，正式接入时需一并替换。
 
+`POST /academic/mock-handoffs/{handoff_id}:submit` 的业务结果包含 `kind`、`status`、`feedback`、`input`。论文清单只位于 `input.papers`，没有顶层 `papers`；仅心得接续 PPT 携带非空的 `reflection_markdown`。重复提交使用同一份冻结材料。拓展详情中的 `handoffs` 只返回任务导航字段，不能用该列表代替任务上下文。
+
 完整接口定义见 [academic OpenAPI](../../backend/core/openapi_academic_workflows.go)，通用 Workflow 写法见 [格式规范](../workflow-format.md)。
+
+调研深度（快速／标准／深入）在启动任务时固定，补充范围、重试和确认方向时沿用。深度控制检索广度、关键内容阅读和研究报告，不承诺整轮耗时，也不按分钟截断研究；单次请求仍有超时及有限重试，调查保留轮次和工具调用上限。候选方向根据真实材料确定，最多 5 个、不设数量下限。独立扩展按启动时的方向选择模式继续；“先拓展后综述”保持单方向自动继续、多方向等待选择。没有有效方向时说明材料缺口。

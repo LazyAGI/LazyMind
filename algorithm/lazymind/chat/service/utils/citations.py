@@ -265,8 +265,8 @@ def register_external_search_result(
     roles: Any = ('searched',),
 ) -> dict[str, Any]:
     url = str(item.get('url') or '').strip()
+    doi = _external_doi(item)
     if not normalize_external_url(url):
-        doi = _external_doi(item)
         url = f'https://doi.org/{doi}' if doi else ''
     keys = _external_source_keys(item)
     if not keys:
@@ -297,6 +297,8 @@ def register_external_search_result(
             source['content'] = fetched_content
         elif not source.get('content') and snippet:
             source['content'] = snippet
+    if doi and not source.get('doi'):
+        source['doi'] = doi
     if image_urls:
         source['image_urls'] = list(dict.fromkeys(image_urls))
     for key in keys:

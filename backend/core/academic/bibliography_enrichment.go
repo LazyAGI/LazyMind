@@ -86,7 +86,7 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	if err := db.Where("id=?", item.AcademicWorkID).Take(&work).Error; err != nil {
 		return err
 	}
-	m, err := paperlibrary.EffectiveMetadata(entry, work)
+	m, err := paperlibrary.EffectiveMetadata(db, entry, work)
 	if err != nil {
 		return err
 	}

@@ -591,3 +591,33 @@ def test_plain_chat_builds_with_the_pinned_empty_tool_manager():
     assert not agent._tools_manager.all_tools
     agent.build_agent()
     assert not agent._fc._tools_manager.all_tools
+
+
+def test_executor_publishes_observed_tool_budget_from_real_execution(monkeypatch):
+    from lazyllm.tools.agent import fc_register
+
+    @fc_register(host_file='NONE')
+    def read_budget_evidence():
+        '''Read evidence for the current task.'''
+        return 'source evidence'
+
+    agent = MagicMock()
+    agent._tools_manager = ToolManager([read_budget_evidence])
+    agent._skill_tool_names = set()
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', MagicMock(return_value=agent))
+    budgets = []
+    created = AgentExecutor().create_agent('llm', _plan(
+        tool_call_limits={'read_budget_evidence': 1}, tool_call_budget_observer=budgets.append,
+        authorization_gate=lambda call: 'deny' if call.call_id == 'denied' else 'allow'))
+    denied = created._tools_manager.execute_with_records({
+        'id': 'denied', 'function': {'name': 'read_budget_evidence', 'arguments': {}}})
+    assert 'denied' in str(denied.results)
+    assert budgets[-1]['read_budget_evidence'] == {'limit': 1, 'used': 0, 'remaining': 1}
+    first = created._tools_manager.execute_with_records({
+        'id': 'first', 'function': {'name': 'read_budget_evidence', 'arguments': {}}})
+    second = created._tools_manager.execute_with_records({
+        'id': 'second', 'function': {'name': 'read_budget_evidence', 'arguments': {}}})
+    assert 'source evidence' in str(first.results)
+    assert 'call cap' in str(second.results)
+    assert budgets[0]['read_budget_evidence'] == {'limit': 1, 'used': 0, 'remaining': 1}
+    assert budgets[-1]['read_budget_evidence'] == {'limit': 1, 'used': 1, 'remaining': 0}

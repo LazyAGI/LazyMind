@@ -26,6 +26,9 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 		work.Provenance["pdf_url"], work.Provenance["pdf_license"], work.Provenance["pdf_version"] = c.URL, c.License, c.Version
 		work.Provenance["pdf_provider"], work.Provenance["pdf_source_type"] = c.SourceProvider, c.SourceType
 	}
+	if found.Candidate == nil && found.Err != nil {
+		work.FulltextError = fulltextLookupDiagnostic(found.Err)
+	}
 	work.Provenance["lookup_warnings"] = found.Warnings
 	return work, nil
 }

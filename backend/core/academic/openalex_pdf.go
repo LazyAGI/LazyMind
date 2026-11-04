@@ -3,13 +3,13 @@ package academic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type openAlexPDFLocation struct {
@@ -20,8 +20,8 @@ type openAlexPDFLocation struct {
 	Version    string `json:"version"`
 }
 
-func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi string) ([]FulltextCandidate, error) {
-	ctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi, apiKey string) ([]FulltextCandidate, error) {
+	ctx, cancel := context.WithTimeout(ctx, paperPDFMetadataTimeout)
 	defer cancel()
 	doi = NormalizeDOI(doi)
 	value := "https://doi.org/" + doi
@@ -29,7 +29,18 @@ func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi st
 		value = strconv.Quote(value)
 	}
 	query := url.Values{"filter": {"doi:" + value}, "select": {"doi,best_oa_location,locations"}, "per-page": {"1"}, "mailto": {"opensource@lazyagi.org"}}
+	if apiKey != "" {
+		query.Set("api_key", apiKey)
+		query.Set("select", query.Get("select")+",content_urls")
+		authenticated := *client
+		authenticated.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &authenticated
+	}
 	resp, err := fetchPaperSource(ctx, client, "https://api.openalex.org/works?"+query.Encode(), false)
+	var requestErr *url.Error
+	if apiKey != "" && errors.As(err, &requestErr) {
+		err = requestErr.Err
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -43,9 +54,12 @@ func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi st
 	}
 	var record struct {
 		Results []struct {
-			DOI       string                `json:"doi"`
-			Best      *openAlexPDFLocation  `json:"best_oa_location"`
-			Locations []openAlexPDFLocation `json:"locations"`
+			DOI         string                `json:"doi"`
+			Best        *openAlexPDFLocation  `json:"best_oa_location"`
+			Locations   []openAlexPDFLocation `json:"locations"`
+			ContentURLs struct {
+				PDF string `json:"pdf"`
+			} `json:"content_urls"`
 		} `json:"results"`
 	}
 	if err = json.Unmarshal(body, &record); err != nil {
@@ -89,6 +103,12 @@ func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi st
 				}
 			}
 		}
+		if u, err := url.Parse(work.ContentURLs.PDF); apiKey != "" && err == nil && u.Scheme == "https" && u.Host == "content.openalex.org" && u.User == nil {
+			query := u.Query()
+			query.Del("api_key")
+			u.RawQuery = query.Encode()
+			candidates = append(candidates, FulltextCandidate{URL: u.String(), SourceType: "openalex_hosted", SourceProvider: "openalex", ExpectedMIME: "application/pdf"})
+		}
 	}
 	return candidates, nil
 }
@@ -98,11 +118,21 @@ func fetchOpenAlexPDFCandidates(ctx context.Context, client *http.Client, doi st
 func lookupIndexedOpenPDF(ctx context.Context, client *http.Client, doi string) paperPDFLookup {
 	ctx, cancel := context.WithTimeout(ctx, paperPDFProviderTimeout)
 	defer cancel()
+	candidates, result := discoverDOIPDFs(ctx, client, doi, "")
+	probed := probeOpenPDFCandidates(ctx, client, candidates, doi)
+	result.Candidate = probed.Candidate
+	result.Warnings = append(result.Warnings, probed.Warnings...)
+	return result
+}
+
+func discoverDOIPDFs(ctx context.Context, client *http.Client, doi, openAlexKey string) ([]FulltextCandidate, paperPDFLookup) {
 	type provider struct {
 		name  string
 		fetch func(context.Context, *http.Client, string) ([]FulltextCandidate, error)
 	}
-	providers := []provider{{"Unpaywall", fetchUnpaywallPDFCandidates}, {"OpenAlex", fetchOpenAlexPDFCandidates}}
+	providers := []provider{{"Unpaywall", fetchUnpaywallPDFCandidates}, {"OpenAlex", func(ctx context.Context, client *http.Client, doi string) ([]FulltextCandidate, error) {
+		return fetchOpenAlexPDFCandidates(ctx, client, doi, openAlexKey)
+	}}}
 	type outcome struct {
 		index      int
 		candidates []FulltextCandidate
@@ -114,13 +144,16 @@ func lookupIndexedOpenPDF(ctx context.Context, client *http.Client, doi string) 
 	}
 	outcomes := make([]outcome, len(providers))
 	result := paperPDFLookup{}
+collect:
 	for range providers {
 		select {
 		case out := <-results:
 			outcomes[out.index] = out
 		case <-ctx.Done():
 			result.Warnings = append(result.Warnings, "开放来源: "+ctx.Err().Error())
-			return result
+			result.Err = ctx.Err()
+			result.Retryable = transientPDFError(ctx.Err())
+			break collect
 		}
 	}
 	candidates := []FulltextCandidate{}
@@ -128,6 +161,8 @@ func lookupIndexedOpenPDF(ctx context.Context, client *http.Client, doi string) 
 	for i, out := range outcomes {
 		if out.err != nil {
 			result.Warnings = append(result.Warnings, providers[i].name+": "+out.err.Error())
+			result.Err = errors.Join(result.Err, out.err)
+			result.Retryable = result.Retryable || transientPDFError(out.err)
 		}
 		for _, c := range out.candidates {
 			u, e := url.Parse(c.URL)
@@ -146,8 +181,5 @@ func lookupIndexedOpenPDF(ctx context.Context, client *http.Client, doi string) 
 			candidates = append(candidates, c)
 		}
 	}
-	probed := probeOpenPDFCandidates(ctx, client, candidates, doi)
-	result.Candidate = probed.Candidate
-	result.Warnings = append(result.Warnings, probed.Warnings...)
-	return result
+	return candidates, result
 }

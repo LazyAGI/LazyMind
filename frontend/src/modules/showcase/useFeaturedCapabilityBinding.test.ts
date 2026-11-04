@@ -48,6 +48,13 @@ describe("useFeaturedCapabilityBinding", () => {
     }]);
   });
 
+  it("opens paper collections without preparing a Skill or Workflow", () => {
+    const { result } = renderHook(() => useFeaturedCapabilityBinding({ type: "page", title: "论文阅读", page_action: "open_paper_library" }));
+    expect(result.current.status).toBe("ready");
+    expect(result.current.mentions).toEqual([]);
+    expect(enableBuiltinSkillMock).not.toHaveBeenCalled();
+  });
+
   it("retries a failed install and clears when the binding is removed", async () => {
     enableBuiltinSkillMock
       .mockRejectedValueOnce(new Error("offline"))

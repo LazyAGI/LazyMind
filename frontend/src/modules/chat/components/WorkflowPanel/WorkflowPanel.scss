@@ -988,6 +988,11 @@
     color: #c1c7d0;
     font-size: 18px;
 
+    &--paper-status {
+      color: var(--color-text-secondary);
+      font-size: 14px;
+    }
+
     &--upload {
       width: 100%;
       cursor: pointer;

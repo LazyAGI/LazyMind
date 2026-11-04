@@ -3,13 +3,11 @@ package academic
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 )
 
 const maxUnpaywallCandidates = 4
@@ -74,7 +72,7 @@ func unpaywallCandidates(result unpaywallResponse) []FulltextCandidate {
 }
 
 func fetchUnpaywallPDFCandidates(ctx context.Context, client *http.Client, doi string) ([]FulltextCandidate, error) {
-	metadataCtx, done := context.WithTimeout(ctx, 1500*time.Millisecond)
+	metadataCtx, done := context.WithTimeout(ctx, paperPDFMetadataTimeout)
 	req, err := http.NewRequestWithContext(metadataCtx, http.MethodGet, "https://api.unpaywall.org/v2/"+url.PathEscape(NormalizeDOI(doi))+"?email=opensource%40lazyagi.org", nil)
 	if err != nil {
 		done()
@@ -94,7 +92,7 @@ func fetchUnpaywallPDFCandidates(ctx context.Context, client *http.Client, doi s
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		done()
-		return nil, fmt.Errorf("Unpaywall lookup returned HTTP %d", resp.StatusCode)
+		return nil, paperPDFHTTPError(resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
 	resp.Body.Close()

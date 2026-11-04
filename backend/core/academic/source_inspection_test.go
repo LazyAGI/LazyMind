@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -62,7 +64,7 @@ func TestInspectionIsAuthorizedReadOnlyAndOffline(t *testing.T) {
 	if e := db.Create(&conv).Error; e != nil {
 		t.Fatal(e)
 	}
-	h := orm.ChatHistory{ID: "answer", ConversationID: "chat", RetrievalResult: json.RawMessage(`{"sources":{"1":{"url":"https://arxiv.org/abs/2210.03629","title":"ReAct"},"2":{"url":"https://arxiv.org/pdf/2210.03629v2.pdf"},"3":{"url":"https://example.com/paper.pdf","title":"ReAct"},"4":{"url":"https://doi.org/10.1234/example"}}}`)}
+	h := orm.ChatHistory{ID: "answer", ConversationID: "chat", RetrievalResult: json.RawMessage(`{"sources":{"1":{"url":"https://arxiv.org/abs/2210.03629","title":"ReAct"},"2":{"url":"https://arxiv.org/pdf/2210.03629v2.pdf"},"3":{"url":"https://example.com/paper.pdf","title":"ReAct"},"4":{"url":"https://doi.org/10.1234/example"},"5":{"url":"https://doi.org/10.48550/arXiv.2210.03629v3"}}}`)}
 	if e := db.Create(&h).Error; e != nil {
 		t.Fatal(e)
 	}
@@ -71,8 +73,11 @@ func TestInspectionIsAuthorizedReadOnlyAndOffline(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(rows) != 4 || !rows[0].Eligible || rows[0].PaperKey != rows[1].PaperKey || rows[2].Eligible || rows[3].Eligible {
+	if len(rows) != 5 || !rows[0].Eligible || rows[0].PaperKey != rows[1].PaperKey || rows[2].Eligible || !rows[3].Eligible || !rows[3].NeedsPDFLookup || rows[3].PaperKey != "doi:10.1234/example" || rows[3].Candidate.URL != "" {
 		t.Fatalf("%+v", rows)
+	}
+	if doi := rows[4]; !doi.Eligible || doi.PaperKey != rows[0].PaperKey || doi.Candidate.URL != "https://arxiv.org/pdf/2210.03629v3" {
+		t.Fatalf("arXiv DOI should match the direct arXiv link and preserve its revision: %+v", doi)
 	}
 	if _, e = inspectSources(ctx, db, "mallory", c, nil); e == nil {
 		t.Fatal("cross-user inspection allowed")
@@ -99,7 +104,7 @@ func TestUntrustedFulltextCannotQualify(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if row.Eligible {
+	if !row.NeedsPDFLookup || row.Candidate.URL != "" {
 		t.Fatal("client supplied trust marker accepted")
 	}
 	input.TrustedFulltext = true
@@ -115,6 +120,87 @@ func TestUntrustedFulltextCannotQualify(t *testing.T) {
 		t.Fatalf("trusted original URL rejected: %+v %v", row, e)
 	}
 }
+
+func TestSourcePDFLookupMakesAgentCitationImportable(t *testing.T) {
+	db := sourceTestDB(t)
+	const doi = "10.1234/cited"
+	const pdf = "https://publisher.example/cited.pdf"
+	var metadataCalls, pdfCalls atomic.Int32
+	ctx := context.WithValue(t.Context(), paperPDFClientKey{}, pdfLookupTestClient(func(r *http.Request) (int, string) {
+		switch r.URL.Host {
+		case "api.openalex.org":
+			return 200, `{"results":[]}`
+		case "api.unpaywall.org":
+			if metadataCalls.Add(1) == 1 {
+				return 429, "rate limited"
+			}
+			if strings.HasSuffix(r.URL.Path, doi) {
+				return 200, `{"best_oa_location":{"url_for_pdf":"https://publisher.example/cited.pdf"}}`
+			}
+			return 404, ""
+		case "publisher.example":
+			if pdfCalls.Add(1) == 1 {
+				return 503, "temporarily unavailable"
+			}
+			return 206, "%PDF-1.7 verified"
+		default:
+			t.Errorf("unexpected lookup host: %s", r.URL.Host)
+			return 404, ""
+		}
+	}))
+	record := sourceRecord{ID: "2.1", URL: "https://publisher.example/cited", DOI: doi, Title: "Cited paper"}
+	row, err := inspectRecord(ctx, db, record)
+	if err != nil || !row.NeedsPDFLookup {
+		t.Fatalf("inspect: %+v %v", row, err)
+	}
+	items := []SourceInspection{row}
+	if err = lookupSourcePDFs(ctx, db, items); err != nil || items[0].NeedsPDFLookup {
+		t.Fatalf("lookup: %+v %v", items, err)
+	}
+	if metadataCalls.Load() != 2 || pdfCalls.Load() != 2 || items[0].PDFLookupFailed {
+		t.Fatalf("automatic recovery: metadata=%d PDF=%d items=%+v", metadataCalls.Load(), pdfCalls.Load(), items)
+	}
+	// Import resolves the saved citation again without a network call.
+	row, err = inspectRecord(t.Context(), db, record)
+	if err != nil || row.NeedsPDFLookup || row.Candidate.URL != pdf || row.PaperKey != "doi:"+doi {
+		t.Fatalf("import inspection: %+v %v", row, err)
+	}
+}
+
+func TestSourcePDFLookupDistinguishesUnavailableAndFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		calls  int32
+		failed bool
+	}{
+		{"no record", 404, "", 1, false},
+		{"service remains unavailable", 503, "unavailable", 3, true},
+		{"access denied", 403, "forbidden", 1, true},
+		{"invalid response", 200, "not JSON", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := sourceTestDB(t)
+			var calls atomic.Int32
+			ctx := context.WithValue(t.Context(), paperPDFClientKey{}, pdfLookupTestClient(func(r *http.Request) (int, string) {
+				if r.URL.Host == "api.openalex.org" {
+					return 200, `{"results":[]}`
+				}
+				calls.Add(1)
+				return tc.status, tc.body
+			}))
+			items := []SourceInspection{{SourceID: "1", Eligible: true, NeedsPDFLookup: true, Work: WorkInput{DOI: "10.1234/test"}}}
+			if err := lookupSourcePDFs(ctx, db, items); err != nil {
+				t.Fatal(err)
+			}
+			if !items[0].NeedsPDFLookup || items[0].PDFLookupFailed != tc.failed || calls.Load() != tc.calls {
+				t.Fatalf("items=%+v calls=%d", items, calls.Load())
+			}
+		})
+	}
+}
+
 func TestWorkSourceOwnershipAndSourceWorkIdentity(t *testing.T) {
 	db := sourceTestDB(t)
 	ctx := context.Background()

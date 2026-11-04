@@ -13,7 +13,7 @@ const envelope = (data) => ({ code: 0, message: "success", data });
 const session = { server_url: origin, access_token: "synthetic-access", refresh_token: "synthetic-refresh" };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture(t, { wrapped = true, status = "active", recipient = "owner" } = {}) {
+function fixture(t, { wrapped = true, status = "active", recipient = "owner", navigation, visible = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "lazymind-envelope-"));
   const shown = [], opened = [], calls = [];
   class Native extends EventEmitter {
@@ -25,6 +25,7 @@ function fixture(t, { wrapped = true, status = "active", recipient = "owner" } =
   const bridge = createDesktopNotifications({
     Notification: Native, statePath: path.join(root, "receipts.json"),
     getRuntime: async () => ({ ready: true, apiOrigin: origin, frontendOrigin: origin, instanceId: "test-instance" }),
+    isTargetVisible: () => visible,
     openPath: async (url, valid) => { assert.ok(valid()); opened.push(url); },
     fetch: async (input) => {
       const route = new URL(input).pathname; calls.push(route);
@@ -34,7 +35,7 @@ function fixture(t, { wrapped = true, status = "active", recipient = "owner" } =
         result = wrapped ? envelope(identity) : identity;
       } else if (route === feed) {
         result = envelope({ device_id: "local", next_cursor: "", items: [{
-          notification_id: "a".repeat(64), user_id: recipient, task_id: "run",
+          notification_id: "a".repeat(64), user_id: recipient, task_id: navigation ? "" : "run", navigation,
           channel: "desktop", status: "pending", title: "每日简报", body: "验收完成",
         }] });
       } else if (route === `${feed}/${"a".repeat(64)}:ack`) {
@@ -79,4 +80,21 @@ test("clicking notification resolves the conversation from the Core response env
   assert.equal(h.shown.length, 1);
   h.shown[0].emit("click"); await flush();
   assert.deepEqual(h.opened, [origin + "/agent/chat/home/conversation%20one"]);
+});
+
+
+test("paper action opens the original expansion without starting a task", async (t) => {
+  const h = fixture(t, { navigation: { type: "academic_expansion", dataset_id: "papers one", expansion_id: "exp-one" } });
+  await h.bridge.setSession(session); await flush();
+  assert.equal(h.shown.length, 1);
+  h.shown[0].emit("click"); await flush();
+  assert.deepEqual(h.opened, [origin + "/lib/knowledge/detail/papers%20one?expansion_id=exp-one"]);
+  assert.equal(h.calls.some(route => route.includes("/tasks/")), false);
+});
+
+test("viewing the expansion suppresses a native popup while acknowledging delivery", async (t) => {
+  const h = fixture(t, { navigation: { type: "academic_expansion", dataset_id: "papers", expansion_id: "exp" }, visible: true });
+  await h.bridge.setSession(session); await flush();
+  assert.equal(h.shown.length, 0);
+  assert.equal(h.calls.filter(route => route.endsWith(":ack")).length, 1);
 });

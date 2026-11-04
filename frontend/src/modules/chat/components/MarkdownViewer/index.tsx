@@ -69,6 +69,8 @@ import {
 import {
   type ChatSource,
   findSourceByCitationId,
+  getCitationSources,
+  getSourceCitationId,
   getSourceEvidenceText,
   getSourceFaviconUrl,
   getSourceHref,
@@ -89,11 +91,6 @@ const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303
 const SAFE_INLINE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i;
 const EDITABLE_FENCE_PATTERN = /```editable[ \t]*\r?\n[\s\S]*?\r?\n```/g;
 
-const markdownRemarkWorkflows = [
-  [remarkGfm, { singleTilde: false }],
-  remarkSourceCitations,
-  remarkMath,
-];
 const markdownRehypeWorkflows = [
   rehypeRaw,
   rehypeKatex,
@@ -808,10 +805,15 @@ const MarkdownViewer = memo((props: any) => {
   const [markSources, setMarkSources] = useState<ChatSource[]>([]);
 
   useEffect(() => {
-    if (sources && sources.length > 0) {
-      setMarkSources(sources);
-    }
+    const citationSources = getCitationSources(sources);
+    if (citationSources.length) setMarkSources(citationSources);
   }, [sources]);
+
+  const markdownRemarkWorkflows = useMemo(() => [
+    [remarkGfm, { singleTilde: false }],
+    [remarkSourceCitations, new Set(markSources.map(getSourceCitationId))],
+    remarkMath,
+  ], [markSources]);
 
   const renderContextValue = useMemo(
     () => ({
