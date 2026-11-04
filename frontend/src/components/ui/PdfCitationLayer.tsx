@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { citationAtPoint, citationForPointerActivation, citationOccurrences, type PdfCitationTarget } from "./pdfCitationReferences";
-import { formatPdfCitationSummary } from "./pdfCitationText";
 import type { createPdfCitationPreviewCache, PdfCitationPreview, PdfCitationPreviewDocument } from "./pdfCitationPreview";
 import "./PdfCitationLayer.css";
 
@@ -191,7 +190,7 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
       onPointerEnter={() => { pointerInCard.current = true; cancelClose(); }} onPointerLeave={() => { pointerInCard.current = false; scheduleClose(); }}
       onFocus={cancelClose} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) scheduleClose(); }}>
       <div className="pdf-citation-heading"><strong>{t("pdfCitation.title", { number: active.referenceKey })}</strong><button aria-label={t("pdfCitation.close")} onClick={dismiss}>×</button></div>
-      <p className="pdf-citation-raw">{formatPdfCitationSummary(active.rawText)}</p>
+      <p className="pdf-citation-raw">{active.rawText}</p>
       {preview ? <img className="pdf-citation-preview" src={preview.url} width={preview.width} height={preview.height} alt={t("pdfCitation.image", { number: active.referenceKey })}/> : <div className="pdf-citation-placeholder" role="status">{t(loading ? "pdfCitation.loading" : "pdfCitation.unavailable")}</div>}
       <div className="pdf-citation-footer"><button onClick={() => navigate(active)}>{t("pdfCitation.jump", { number: active.referenceKey })}</button></div>
     </div>, document.body)}

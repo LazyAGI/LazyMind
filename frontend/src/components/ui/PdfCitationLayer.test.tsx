@@ -36,17 +36,14 @@ async function hover(page: HTMLElement) {
 }
 describe("citation preview interaction", () => {
   it.each([
-    ["Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hinton. Layer normalization. arXiv preprint arXiv:1607.06450, 2016.", "Jimmy Lei Ba et al. Layer normalization. arXiv preprint arXiv:1607.06450, 2016."],
-    ["Denny Britz, Anna Goldie, and Quoc V. Le. Massive exploration of neural machine translation architectures. CoRR, 2017.", "Denny Britz et al. Massive exploration of neural machine translation architectures. CoRR, 2017."],
-    ["J. R. Smith, A. Doe, et al. 2024. A title.", "J. R. Smith et al. 2024. A title."],
-    ["Alex Graves. Generating sequences with recurrent neural networks. arXiv preprint, 2013.", "Alex Graves et al. Generating sequences with recurrent neural networks. arXiv preprint, 2013."],
-    ["Paper", "Paper"],
-    ["Deep learning. A survey.", "Deep learning. A survey."],
-    ["Deep Learning. A Survey.", "Deep Learning. A Survey."],
-  ])("shortens only a recognizable author segment in the hover card: %s", async (rawText, expected) => {
+    "Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hinton. Layer normalization. arXiv preprint arXiv:1607.06450, 2016.",
+    "J. R. Smith, A. Doe, et al. 2024. A title.",
+    "Alex Graves. Generating sequences with recurrent neural networks. arXiv preprint, 2013.",
+    "Jimmy Lei Ba,\nJamie Ryan Kiros. Layer normalization. 2016.",
+  ])("keeps the complete extracted reference in the hover card: %s", async rawText => {
     const { page } = setup(new Promise(() => {}), rawText);
     await hover(page);
-    expect(screen.getByRole("dialog").querySelector(".pdf-citation-raw")).toHaveTextContent(expected);
+    expect(screen.getByRole("dialog").querySelector(".pdf-citation-raw")?.textContent).toBe(rawText);
   });
 
   it("waits 300 ms, keeps the portal open while entering it, and never navigates on hover", async () => {
