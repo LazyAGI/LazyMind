@@ -101,7 +101,8 @@ def test_structured_preview_replaces_revised_fields_and_does_not_emit_raw_json()
 
 
 @pytest.mark.parametrize('step', STEPS)
-def test_all_steps_use_shared_progress_preview_and_real_artifact_publication(step, monkeypatch, tmp_path):
+def test_all_steps_use_shared_progress_preview_and_real_artifact_publication(
+        step, monkeypatch, tmp_path, prepared_analysis_pool):
     from lazymind.chat.engine.subagent.context import SubAgentContext
     from lazymind.document_tools.paper.review import materials as review_materials
     monkeypatch.setattr(review_materials, 'current_handoff', lambda: None)
@@ -117,7 +118,7 @@ def test_all_steps_use_shared_progress_preview_and_real_artifact_publication(ste
         from lazymind.document_tools.paper.writing import revise_document
         monkeypatch.setattr(revise_document, 'resolve_review_issues', lambda request, review, **kwargs: [])
     value = {key: copy.deepcopy(item) for key, item in example['input'].items() if key != 'mode'}
-    pool = workflow.pool_from_business(value)
+    pool = prepared_analysis_pool(value) if step == 'data_analysis' else workflow.pool_from_business(value)
     seed = tmp_path / 'seed.json'
     seed.write_text(json.dumps(pool, ensure_ascii=False))
     module = contracts.ALIASES.get(step, step)

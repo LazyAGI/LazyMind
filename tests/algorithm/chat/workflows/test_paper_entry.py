@@ -47,7 +47,12 @@ def test_forward_step_uses_current_user_input_from_runtime(step):
     params = {'step_id': step, 'user_input': '最初只做选题',
               'current_user_input': '综述之后调整选题，只研究失败恢复，不做实验',
               'remote_inputs': {'literature_review_pool': '/saved/pool.json'}}
-    assert workflow._step_request(step, pool, params) == params['current_user_input']
+    result = workflow._step_request(step, pool, params)
+    if step == 'experiment':
+        assert result.startswith(pool['request'])
+        assert result.endswith(params['current_user_input'])
+    else:
+        assert result == params['current_user_input']
     assert pool['request'] == '最初只做选题'
 
 

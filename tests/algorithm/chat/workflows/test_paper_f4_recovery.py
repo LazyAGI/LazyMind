@@ -29,7 +29,7 @@ def package():
 
 
 @pytest.fixture
-def snapshots(tmp_path, monkeypatch):
+def snapshots(tmp_path, monkeypatch, prepared_analysis_pool):
     monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path / 'uploads'))
     example = json.loads((ROOT / 'tests/fixtures/paper-writing/data_analysis.json').read_text())
     inputs = normalize_input(example['input'])
@@ -42,10 +42,10 @@ def snapshots(tmp_path, monkeypatch):
         scope='Two single observations.', coordinates={'comparison': 'evidence minus baseline'},
         comparison='evidence minus baseline', sample_size=finding['sample_size'])]))
     output['charts'][0]['finding_ids'] = ['r1']
-    pool = workflow.pool_from_business(inputs)
+    pool = prepared_analysis_pool(inputs)
     outputs = [workflow.add_material(pool, key, output[key], [], []) for key in ('analysis', 'charts')]
     pool['history'].append(dict(node='F4', step='data_analysis', inputs=[], outputs=outputs))
-    pool['sequence'] = 1
+    pool['sequence'] += 1
     saved = {'data_analysis_pool': copy.deepcopy(pool), 'data_analysis_document': render(output['analysis'])}
     chart = output['charts'][0]
     manuscript = ('# Paper\n\nSee [score](#block-' + chart['id'] + ').\n\n<a id="block-'
@@ -96,7 +96,7 @@ def test_configured_recovery_uses_latest_pool_and_current_document(package, snap
         return
     restored = workflow.initialize_pool(recovery_inputs(package, available, tmp_path))
     kind = {'write_outline': 'outline', 'peer_review': 'review'}.get(last, 'manuscript')
-    assert restored['sequence'] == latest + 1
+    assert restored['sequence'] == latest + 2
     assert workflow.material(restored, kind)['content'] == available[last + '_document']
     assert workflow.material(restored, 'analysis')['content'] == snapshots[1]['analysis']
     if last == 'write_outline':
@@ -164,7 +164,7 @@ def test_real_runtime_redraw_uses_declared_snapshots_and_preserves_latest_manusc
         assert workflow.material(result, 'analysis')['content'] == output['analysis']
         assert manuscript == original.replace(publication.chart_uri(chart), publication.chart_uri(current[0]))
         assert Path(artifacts['redrawn_manuscript_document']['path']).read_text() == manuscript
-        assert result['sequence'] == 6 and result['history'][-1]['analysis_execution'][0]['mode'] == 'redraw'
+        assert result['sequence'] == 7 and result['history'][-1]['analysis_execution'][0]['mode'] == 'redraw'
         publication.validate_chart_references(manuscript, current)
         classifier.assert_called_once()
         forbidden.assert_not_called()
@@ -176,21 +176,22 @@ def test_real_runtime_redraw_uses_declared_snapshots_and_preserves_latest_manusc
 
 
 @pytest.mark.parametrize('recovery', [False, True])
-def test_old_graph_missing_analysis_rejects_visual_only_followup(snapshots, tmp_path, monkeypatch, recovery):
+def test_old_graph_missing_analysis_rejects_visual_only_followup(
+        snapshots, tmp_path, monkeypatch, recovery, prepared_analysis_pool):
     inputs, _, _ = snapshots
     source = tmp_path / 'paper_input.json'
-    source.write_text(json.dumps(inputs))
+    source.write_text(json.dumps(prepared_analysis_pool(inputs)))
     classifier = Mock(return_value=True)
     monkeypatch.setattr(data_analysis, 'redraw_requested', classifier)
     forbidden = Mock(side_effect=AssertionError('Missing prior analysis must not trigger fresh analysis'))
     monkeypatch.setattr(workflow, 'run_algorithm', forbidden)
-    params = dict(step_id='data_analysis', remote_inputs={'paper_input': str(source)}, user_input=inputs['request'],
+    params = dict(step_id='data_analysis', remote_inputs={'experiment_pool': str(source)}, user_input=inputs['request'],
                   current_user_input='Only change colors', output_slot_types={})
     if recovery:
         params['retry_hint'] = 'Recovery request for this rerun only: Only change colors'
     context = SubAgentContext(
         task_id='legacy-redraw', conversation_id='paper-test', agent_type='workflow_step',
-        objective='Only change colors', params=params, workspace_path=str(tmp_path), input_slots=['paper_input'],
+        objective='Only change colors', params=params, workspace_path=str(tmp_path), input_slots=['experiment_pool'],
         output_slots=[], db=None, emit=lambda _: None)
     with pytest.raises(workflow.MissingMaterials, match='无法只重画'):
         workflow._run_paper_step(context)
@@ -198,18 +199,19 @@ def test_old_graph_missing_analysis_rejects_visual_only_followup(snapshots, tmp_
     forbidden.assert_not_called()
 
 
-def test_initial_analysis_does_not_add_redraw_classification(snapshots, tmp_path, monkeypatch):
+def test_initial_analysis_does_not_add_redraw_classification(
+        snapshots, tmp_path, monkeypatch, prepared_analysis_pool):
     inputs, output, _ = snapshots
     source = tmp_path / 'paper_input.json'
-    source.write_text(json.dumps(inputs))
+    source.write_text(json.dumps(prepared_analysis_pool(inputs)))
     monkeypatch.setattr(data_analysis, 'redraw_requested', Mock(side_effect=AssertionError('Fresh analysis classified')))
     monkeypatch.setattr(workflow, 'run_algorithm', Mock(return_value=output))
     context = SubAgentContext(
         task_id='initial-analysis', conversation_id='paper-test', agent_type='workflow_step',
         objective=inputs['request'], params=dict(
-            step_id='data_analysis', remote_inputs={'paper_input': str(source)},
+            step_id='data_analysis', remote_inputs={'experiment_pool': str(source)},
             user_input=inputs['request'], current_user_input=inputs['request'], output_slot_types={}),
-        workspace_path=str(tmp_path), input_slots=['paper_input'],
+        workspace_path=str(tmp_path), input_slots=['experiment_pool'],
         output_slots=['data_analysis_pool', 'data_analysis_document', 'analysis_chart'], db=None, emit=lambda _: None)
     # Publishing is unrelated; reaching execution proves the new guard adds no model call.
 

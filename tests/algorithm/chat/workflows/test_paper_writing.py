@@ -61,7 +61,7 @@ def test_scenarios_preserve_sources_versions_and_inputs(path, reflection_calls):
         assert pool == before
         pool = result['pool']
         assert result['document'].startswith('# ')
-        assert '演示数据' in result['document']
+        assert any(label in result['document'] for label in ('演示数据', '模拟示例'))
         assert 'MOCK' not in result['document']
         assert pool['materials'][:len(before['materials'])] == before['materials']
         assert result['next'] == tools.routes_after(result['pool']) + ['END']
@@ -229,7 +229,7 @@ def test_runtime_wrapper_uses_host_inputs_and_saves_all_declared_outputs(runtime
         document = next(item for item in batches[-1] if item['key'].endswith('_document'))
         assert document['content_type'] == 'file'
         assert Path(document['value']).name == tools.STEP_LABELS[step] + '.md'
-        assert '演示数据' in tools._read_bound(document['value'])
+        assert any(label in tools._read_bound(document['value']) for label in ('演示数据', '模拟示例'))
         if step == 'experiment':
             experiment_pool = next(item['value'] for item in batches[-1] if item['key'] == 'experiment_pool')
     ctx.params = {'step_id': 'finish'}

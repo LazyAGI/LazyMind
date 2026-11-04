@@ -29,7 +29,6 @@ transitions:
     - {to: data_analysis, when: "The user explicitly selects data analysis"}
     - {to: finish, when: "The user explicitly chooses to finish this workflow"}
   data_analysis:
-    - {to: experiment, when: "User supplies new data or requests updated experiment/data preparation"}
     - {to: write_outline, when: "The user requests a new manuscript or an outline before drafting"}
     - {to: write_document, when: "The user continues drafting from the confirmed outline"}
     - {to: revise_document, when: "The user requests direct edits to an existing manuscript without peer review"}
@@ -182,10 +181,10 @@ steps:
       - {material: experiment_question, required: false, transport: path}
       - {material: refine_topic_pool, required: false, transport: path}
       - {material: refine_topic_document, required: false, transport: path}
-      - {material: experiment_pool, required: false, transport: path}
-      - {material: experiment_document, required: false, transport: path}
-      - {material: data_analysis_pool, required: false, transport: path}
-      - {material: data_analysis_document, required: false, transport: path}
+      - {material: recovery_experiment_pool, required: false, transport: path}
+      - {material: recovery_experiment_document, required: false, transport: path}
+      - {material: recovery_data_analysis_pool, required: false, transport: path}
+      - {material: recovery_data_analysis_document, required: false, transport: path}
     outputs:
       - {material: experiment_pool, required: true}
       - {material: experiment_document, required: true}
@@ -208,6 +207,7 @@ steps:
       Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
       On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
       On success, end this node and wait for user confirmation or selection; do not run other branches.
+      For new data or updated preparation, use native rewind to experiment.
     tools: [run_paper_step]
     terminal_tools: [run_paper_step]
     inputs:

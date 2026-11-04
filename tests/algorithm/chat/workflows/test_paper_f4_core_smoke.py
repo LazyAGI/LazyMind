@@ -57,7 +57,7 @@ def runtime_state(paper_execution):
 
 
 @pytest.fixture
-def replay(monkeypatch, tmp_path):
+def replay(monkeypatch, tmp_path, prepared_analysis_pool):
     request = '只执行 F4，分析上传的 input.json，输出分析、结论和图表。'
     inputs = dict(topic='模拟：方法得分比较', request=request, data=dict(
         columns=['method', 'score'], column_types=['string', 'number'], units=[None, 'point'],
@@ -84,23 +84,29 @@ def replay(monkeypatch, tmp_path):
     monkeypatch.delenv('LAZYMIND_PAPER_PLOT_SKILLS', raising=False)
     source = tmp_path / 'input.json'
     source.write_text(json.dumps(inputs), encoding='utf-8')
+    prepared = tmp_path / 'prepared.json'
+
+    def set_inputs(value):
+        source.write_text(json.dumps(value), encoding='utf-8')
+        prepared.write_text(json.dumps(prepared_analysis_pool(value)), encoding='utf-8')
+
+    set_inputs(inputs)
     lazyllm.globals['agentic_config'] = dict(
         user_id='f4-test', conversation_id='f4-test', query=request, files=[str(source)],
         history_files_per_turn={'1': [str(source)]})
-    from lazymind.document_tools.paper.analysis.attachments import workflow_input_bindings
     events = []
     slots = ['data_analysis_pool', 'data_analysis_document', 'analysis_chart']
     context = SubAgentContext(
         task_id='f4-test', conversation_id='f4-test', agent_type='workflow_step', objective=request,
         params=dict(step_id='data_analysis', user_input=request,
-                    remote_inputs=workflow_input_bindings({}, request),
+                    remote_inputs={'experiment_pool': str(prepared)},
                     output_slot_types=dict.fromkeys(slots, 'file')),
-        workspace_path=str(tmp_path), input_slots=['paper_input'], output_slots=slots,
+        workspace_path=str(tmp_path), input_slots=['experiment_pool'], output_slots=slots,
         db=None, emit=events.append)
     lazyllm.globals['subagent_ctx'] = context
     return SimpleNamespace(source=source, inputs=inputs, plan=plan, arrangement=arrangement, conclusion=conclusion,
                            structured=structured, analysis=analysis, plot=plot, repair=repair,
-                           narrative=narrative, events=events, context=context)
+                           narrative=narrative, events=events, context=context, set_inputs=set_inputs)
 
 
 def payload(prompt):
@@ -430,7 +436,7 @@ def test_short_plan_accepts_changed_columns_groups_units_and_missing_values(repl
     inputs = copy.deepcopy(replay.inputs)
     inputs['data'] = dict(columns=['condition', 'latency'], column_types=['string', 'number'],
                           units=[None, 'ms'], rows=[['a', 1.], ['a', None], ['a', 3.], ['b', 5.], ['c', 8.]])
-    replay.source.write_text(json.dumps(inputs))
+    replay.set_inputs(inputs)
     replay.plan['questions'] = ['Mean latency by condition?']
     replay.arrangement['figures'][0]['result_indices'] = [0, 1, 2]
     replay.narrative.return_value = '三组均值为 2、5、8 ms；仅限本次模拟样本。'
@@ -447,6 +453,7 @@ def test_invalid_input_is_not_published(replay):
     inputs = json.loads(replay.source.read_text())
     inputs['data']['rows'][0].pop()
     replay.source.write_text(json.dumps(inputs))
+    replay.context.params['remote_inputs'] = {'paper_input': str(replay.source)}
     with pytest.raises(ContractError):
         workflow.run_paper_step()
     assert not any(event['type'] == 'artifact' for event in replay.events)

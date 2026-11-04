@@ -1,6 +1,7 @@
 """F3 selects existing evidence or a new computation before generating any experiment."""
 import copy
 import json
+import re
 from typing import Literal
 
 from lazyllm import AutoModel
@@ -60,7 +61,11 @@ def prepare(inputs, on_event=None):
         'Choose simulation ONLY for an explicitly requested modeled study with no existing user data to replace. '
         'Execution permission or permission to fall back is not a request for simulation. If real data is required '
         'but unavailable or source prose cannot be safely converted, choose missing and explain the exact gap. '
-        'Do not invent any values. Explain the decision and important scope/units/limitations in Chinese.\n'
+        'Do not invent any values. Write reason as a concise Chinese research description. '
+        'Explain the selected evidence, '
+        'its measurement scope and essential limitations in two short paragraphs. Do not expose internal IDs, '
+        'hashes, '
+        'routing decisions or repeated warnings.\n'
     )
     facts = {key: value for key, value in inputs.items() if key not in {'data', 'source_data'}}
     payload = {'facts': facts, 'tables': prompt_tables({key: entry['table'] for key, entry in tables.items()}),
@@ -97,24 +102,44 @@ def existing_output(inputs, tables, reason):
     from ..contracts import validate_output
     demo = inputs.get('input_is_demo', False)
     bundle = DataBundle.model_validate({'tables': tables}).model_dump()
-    report = [f'# 实验与数据准备 · {inputs["topic"]}',
-              '> 数据由用户提供，平台未复现实验；本次仅提取、校验并整理已有数据。',
-              '## 数据选择与口径\n' + reason]
-    for entry in tables:
+    report = ['# 实验与数据准备',
+              '> 数据来自用户提供的实验记录；本阶段整理已有结果，未重新运行实验。',
+              '## 研究说明\n\n' + reason]
+    for number, entry in enumerate(tables, 1):
         table = entry['table']
-        report += [f'## {entry["id"]}\n{entry["description"]}',
-                   '字段与单位：' + '；'.join(f'{c}（{u or "原文未声明单位"}）'
-                                       for c, u in zip(table['columns'], table['units'])),
-                   '| ' + ' | '.join(table['columns']) + ' |',
-                   '| ' + ' | '.join('---' for _ in table['columns']) + ' |']
-        for row in table['rows'][:20]:
-            cells = ['缺失' if cell is None else str(cell).replace('|', '\\|').replace('\n', ' ')
-                     for cell in row]
-            report.append('| ' + ' | '.join(cells) + ' |')
-        report.append(f'共 {len(table["rows"])} 行；展示前 20 行，完整数据保存在结果文件中。')
+        # Extracted descriptions retain source/section separately from the opaque source identity.
+        description = entry['description']
+        source, marker, location = description.partition('；来源 ')
+        parts = [part.strip() for part in source.split('；') if part.strip()]
+        title = parts[-1] if parts else f'数据表 {number}'
+        title = re.sub(r'^\d+(?:\.\d+)*[.、\s]+', '', title)
+        title = ' '.join(title.splitlines()).lstrip('# ').strip() or f'数据表 {number}'
+        if marker:
+            citation = parts[0] if parts else '用户材料'
+            _, _, lines = location.partition('，')
+            if lines:
+                citation += '，' + lines
+        else:
+            citation = description
+        headers = [c if not u or u in c else f'{c}（{u}）'
+                   for c, u in zip(table['columns'], table['units'])]
+
+        def cells(row):
+            values = ['缺失' if cell is None else str(cell).replace('\\', '\\\\').replace('|', '\\|')
+                      .replace('\r', ' ').replace('\n', ' ') for cell in row]
+            return '| ' + ' | '.join(values) + ' |'
+
+        lines = [cells(headers), cells(['---'] * len(headers)),
+                 *(cells(row) for row in table['rows'][:20])]
+        report += [f'## {title}', '\n'.join(lines)]
+        note = f'来源：{citation}' if citation else ''
+        if len(table['rows']) > 20:
+            note += f' 共 {len(table["rows"])} 行，此处展示前 20 行；完整数据见结果文件。'
+        if note:
+            report.append(note.strip())
     if demo:
-        report[1] = '> 演示数据，仅整理已有模拟结果，不代表真实观测。'
-    report.append('## 下一步\n确认上述数据后进入数据分析，生成统计表与图表；不补造原始观测或对照实验。')
+        report[1] = '> 演示数据：整理已有模拟结果，不代表真实观测。'
+    report.append('## 后续分析\n\n基于上述数据生成统计表和图表，并结合样本量、测量口径与实验条件解释结果。')
     meta = ResultMeta(execution_status='not_run', data_origin='synthetic' if demo else 'user_supplied',
                       method='simulation' if demo else 'empirical', reason='本次整理已有数据，未运行新实验。',
                       assumptions=['沿用输入材料的模拟/演示性质。'] if demo else [], metrics=[], seed=None)

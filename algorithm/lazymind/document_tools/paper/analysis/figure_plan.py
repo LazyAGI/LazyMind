@@ -16,10 +16,13 @@ class FigureDraft(Object):
         default_factory=list, description='Legacy zero-based selection; prefer finding_ids.')
     requirements: str = ''
     source_chart_id: str | None = Field(default=None, description='For redraw: exact existing chart ID to preserve.')
-    category: str | None = Field(default=None, description='Actual coordinate key; required for ordered line charts.')
-    series: str | None = Field(default=None, description='Optional actual coordinate key identifying repeated series.')
+    category: str | None = Field(default=None, description=(
+        'Existing coordinate or descriptive result field; null uses result labels. Lines require numeric coordinates.'))
+    series: str | None = Field(
+        default=None, description='Existing coordinate or descriptive result field identifying repeated series.')
     facet: str | None = Field(
-        default=None, description='Actual coordinate key defining separate panels, never numeric annotations.')
+        default=None, description=(
+            'Existing coordinate or descriptive result field defining panels; metric/unit panels are automatic.'))
     value_format: Literal['auto', 'number', 'percent'] = 'auto'
     annotation: Literal['auto', 'value', 'fraction', 'none'] = 'auto'
     numerator: str | None = Field(default=None, description='Actual numerator coordinate for fraction labels.')
@@ -109,7 +112,11 @@ def bind_figures(value, analysis):
         indices = [positions[key] for key in identifiers] if identifiers else list(dict.fromkeys(indices))
         selected = [findings[position] for position in indices]
         selected_rows = [rows[position] for position in indices]
-        check_encoding(draft, selected_rows)
+        try:
+            check_encoding(draft, selected_rows)
+        except ValueError as exc:
+            raise ValueError(f'Figure {index} ({draft["title"]}), selected finding_ids '
+                             f'{[row["id"] for row in selected_rows]}: {exc}') from exc
         if draft['style'] in STANDARD_STYLES:
             panels = {(row['metric'], row['unit'], row['kind']) for row in selected_rows}
             if len(panels) > 4 or (not draft['style'].startswith('line_') and len(selected_rows) > 32):

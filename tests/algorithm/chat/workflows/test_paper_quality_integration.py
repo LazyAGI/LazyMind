@@ -10,7 +10,7 @@ from lazymind.document_tools.paper.analysis.schema import binding, normalize_inp
 
 
 @pytest.fixture
-def materials():
+def materials(prepared_analysis_pool):
     inputs = normalize_input({'topic': 'T', 'data': {
         'columns': ['score'], 'column_types': ['number'], 'units': ['point'], 'rows': [[2.]]}})
     columns = [{'table_id': 'data', 'column': 'score'}]
@@ -24,12 +24,12 @@ def materials():
                     models=[], diagnostics=[], limitations=['One observation.'])
     charts = [dict(id='score', title='Score', caption='One observation.', columns=columns,
                    finding_ids=['score'], svg='<svg xmlns="http://www.w3.org/2000/svg"><text>2</text></svg>')]
-    pool = workflow.pool_from_business(inputs)
+    pool = prepared_analysis_pool(inputs)
     outputs = [workflow.add_material(pool, 'analysis', analysis, [], []),
                workflow.add_material(pool, 'charts', charts, [], [])]
     workflow.add_material(pool, 'manuscript', '# Manuscript\nMean score is 2.', [], [])
     pool['history'].append(dict(node='F4', step='data_analysis', inputs=[], outputs=outputs))
-    pool['sequence'] = 1
+    pool['sequence'] += 1
     return pool
 
 

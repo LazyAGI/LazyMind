@@ -164,7 +164,11 @@ panels. Verify each selected ID against its metric, kind, value and coordinates:
 both measured versions of the SAME outcome and dataset. Counts, rates and their differences are different quantities;
 select the intended quantity, never substitute a neighboring result or include unrelated datasets to fill a pair.
 Never place numeric annotations (counts, totals, estimates) in category/series/facet or tick labels.
-Use actual coordinate keys. Repeated category/series cells require a facet or separate figures; no hidden pooling.
+Use actual coordinate keys or descriptive string fields from each executed result (for example label or metric).
+Field availability is determined by the selected results, not a fixed business-field vocabulary.
+category=null uses the existing result labels; metric/unit/kind already create separate panels, so a metric facet
+is optional. Never use a translated display label as a field name. Repeated category/series cells require a facet
+or separate figures; no hidden pooling.
 Use value_format=percent ONLY when every selected row declares a proportion or percentage unit.
 Percentage-point effects are NOT percentages: keep their original numeric units, never multiply them by 100.
 For mixed units or any other units choose auto; each panel retains its source values and units.
@@ -178,8 +182,8 @@ terminology is ONE FLAT top-level object mapping an exact source VALUE to a disp
 For example {"before": "修订前", "after": "修订后"}; NEVER {"version": {"before": "修订前"}}.
 Do not put terminology inside individual figures. Every terminology value must be a string, never an object or list.
 Supply a short caption in the paper language explaining this figure's observed comparison and essential limits.
-Do not include a per-result provenance inventory. Use category and series only for actual
-coordinate keys in the selected rows. category MUST be an ordered numeric coordinate for a line chart;
+Do not include a per-result provenance inventory. Use category and series only for actual coordinates or descriptive
+string fields present in every selected row. category MUST be an ordered numeric coordinate for a line chart;
 independent tasks or unordered conditions need bars or points, never an invented trajectory.
 sort is source (preserve evidence order), value_ascending or value_descending. Lines always sort by numeric x.
 Select at most four metric/unit/kind combinations and 32 estimates in a bar/point figure; split dense comparisons.

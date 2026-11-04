@@ -174,11 +174,9 @@ def test_real_windows_failure_terminates_and_cleans(tmp_path, monkeypatch, failu
 
     monkeypatch.setattr(windows, '_launch', capture)
     # Trusted runner bypasses AST diagnostics: parent supervision must still apply.
-    code = '''from numpy import memmap as mapped
-import os, time
-array = mapped(os.environ['PAPER_TEST_TARGET'], dtype='uint8', mode='w+', shape=(20 * 1024 ** 2,))
-array[:] = 1
-array.flush()
+    code = '''import os, time
+with open(os.environ['PAPER_TEST_TARGET'], 'wb') as stream:
+    stream.write(b'x' * (20 * 1024 ** 2))
 time.sleep(120)
 '''
     if failure == 'timeout':

@@ -79,6 +79,11 @@ runtime:
         - 允许受限运行，条件不足时使用模拟数据
   transactional_outputs: true
   recovery_inputs:
+    experiment:
+      recovery_experiment_pool: experiment_pool
+      recovery_experiment_document: experiment_document
+      recovery_data_analysis_pool: data_analysis_pool
+      recovery_data_analysis_document: data_analysis_document
     data_analysis:
       recovery_data_analysis_pool: data_analysis_pool
       recovery_data_analysis_document: data_analysis_document
@@ -121,6 +126,8 @@ slots:
   - {id: review_request, label: 审稿要求, type: text, cardinality: single, external: true, exposed: false}
   - {id: paper_input, type: json, cardinality: single, external: true, exposed: false}
   - {id: experiment_execution, label: 实验运行偏好, type: text, cardinality: single, external: true, exposed: false}
+  - {id: recovery_experiment_pool, type: file, cardinality: single, external: true, exposed: false}
+  - {id: recovery_experiment_document, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_data_analysis_pool, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_data_analysis_document, type: file, cardinality: single, external: true, exposed: false}
   - {id: recovery_write_outline_pool, type: file, cardinality: single, external: true, exposed: false}

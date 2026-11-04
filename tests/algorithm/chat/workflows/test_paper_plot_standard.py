@@ -555,3 +555,41 @@ def test_caption_support_is_facet_local_and_does_not_call_unit_conflicts_varying
     caption = evidence_caption(dict(facet='dataset'), rows, 'zh-CN')
     assert 'Set A: direct: n=30' in caption and 'Set A: unselected' not in caption
     assert caption.count('n=15') == 1 and 'Set B: n=15' in caption
+
+
+def test_result_fields_bind_and_render_without_rewriting_frozen_coordinates(analysis):
+    pytest.importorskip('matplotlib')
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    for finding in analysis['findings']:
+        metadata = json.loads(finding['calculation'])
+        metadata['coordinates'] = {'实际分组字段': '单次测量'}
+        finding['calculation'] = json.dumps(metadata)
+    original = copy.deepcopy(analysis)
+    plan = bind_figures(dict(figures=[dict(
+        title='Observed results', purpose='Display existing estimates.', style='bar_grouped_hatch',
+        finding_ids=['r1', 'r2'], category='label', facet='metric')]), analysis)['figures'][0]
+    namespace = {}
+    exec(PROGRAM, namespace)
+    data = dict(analysis_results=result_rows(analysis), shared_style=dict(terminology={}, colors=['#546BF5']))
+    figure = namespace['draw'](data, {}, plan)
+    try:
+        assert [p.get_height() for p in figure.axes[0].patches] == pytest.approx([18 / 19, 20 / 21])
+        assert [t.get_text() for t in figure.axes[0].get_xticklabels()] == ['structured', 'direct']
+        assert analysis == original
+    finally:
+        plt.close(figure)
+
+
+def test_dimension_binding_discovers_actual_fields_and_keeps_unknown_fields_invalid(analysis):
+    rows = result_rows(analysis)[:2]
+    for row in rows:
+        row['研究条件说明'] = row['label']
+    spec = dict(style='bar_grouped_hatch', category='研究条件说明')
+    check_encoding(spec, rows)
+    with pytest.raises(ValueError, match='Available coordinates or descriptive result fields'):
+        check_encoding(dict(style='bar_grouped_hatch', category='不存在的字段'), rows)
+    with pytest.raises(ValueError, match='unavailable'):
+        check_encoding(dict(style='bar_grouped_hatch', category='value'), rows)

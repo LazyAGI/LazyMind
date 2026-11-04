@@ -46,10 +46,13 @@ func TestPaperDirectReviewFreezesEntryChoiceWithoutPrepareAttempt(t *testing.T) 
 		t.Fatal(err)
 	}
 	projection := graphengine.Project(graph, snapshot)
-	for _, id := range []string{"research_topic", "literature_review", "experiment", "data_analysis", "write_document", "reading_reflection"} {
+	for _, id := range []string{"research_topic", "literature_review", "experiment", "write_document", "reading_reflection"} {
 		if projection.Nodes[id].Branch != "pruned" {
 			t.Fatalf("unchosen entry %s was not pruned: %+v", id, projection.Nodes[id])
 		}
+	}
+	if projection.Nodes["data_analysis"].Reachability != "unreachable" {
+		t.Fatal("analysis must remain unreachable until F3 is selected")
 	}
 	if projection.Nodes["peer_review"].Branch != "active" || projection.Nodes["revise_document"].Branch == "pruned" {
 		t.Fatal("review and its future revision must remain visible")

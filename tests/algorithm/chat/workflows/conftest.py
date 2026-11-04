@@ -7,9 +7,25 @@ paper_simulation or usefixtures, so real Writer paths are not silently mocked.
 import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
+
+@pytest.fixture
+def prepared_analysis_pool():
+    """An F3 snapshot for tests focused on F4 and downstream publication."""
+    from lazymind.document_tools.paper import workflow
+
+    def prepare(value):
+        pool = workflow.pool_from_business(value)
+        pool['history'].append(dict(node='F3', step='experiment',
+                                    inputs=copy.deepcopy(list(pool['current'].values())), outputs=[]))
+        pool['sequence'] += 1
+        return workflow.validate_pool(pool)
+
+    return prepare
 
 
 @pytest.fixture
@@ -148,7 +164,7 @@ def offline_paper_model(monkeypatch):
 
     class Response:
         status_code = 200
-        raw = None
+        raw = SimpleNamespace(enforce_content_length=False)
 
         def __init__(self, content):
             self.content_text = json.dumps(content, ensure_ascii=False)

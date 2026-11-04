@@ -284,7 +284,7 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
     content = _document_value(value)
     if isinstance(content, str):
         path = root / f'{name}.md'
-        path.write_text(content, encoding='utf-8')
+        path.write_text(content, encoding='utf-8', newline='')
         return str(path)
     return _write_input_artifact(root, f'{name}.lmd', content, WRITER_IR_SCHEMA)
 

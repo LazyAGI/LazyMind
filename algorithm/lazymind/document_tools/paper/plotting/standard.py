@@ -8,16 +8,24 @@ PROPORTIONS = {'proportion', 'probability', '比例', '概率', 'proportion0-1',
 PERCENTS = {'%', 'percent', 'percentage', '百分比', '百分数'}
 
 
+def coordinate(row, key, default=None):
+    """Use actual coordinates or descriptive result fields without inventing dimensions."""
+    if key in row['coordinates']:
+        return row['coordinates'][key]
+    value = row.get(key)
+    return value if isinstance(value, str) else default
+
+
 def _levels(rows, key):
-    return list(dict.fromkeys(row['coordinates'].get(key) for row in rows))
+    return list(dict.fromkeys(coordinate(row, key) for row in rows))
 
 
 def _categorical(rows, key):
-    return all(isinstance(row['coordinates'].get(key), str) for row in rows)
+    return all(isinstance(coordinate(row, key), str) for row in rows)
 
 
 def _equivalent(rows, left, right):
-    pairs = {(row['coordinates'].get(left), row['coordinates'].get(right)) for row in rows}
+    pairs = {(coordinate(row, left), coordinate(row, right)) for row in rows}
     return len(pairs) == len(_levels(rows, left)) == len(_levels(rows, right))
 
 
@@ -25,9 +33,14 @@ def check_encoding(spec, rows):
     """Resolve only unambiguous grouping, never turn numeric metadata into category labels."""
     for key in ('category', 'series', 'facet'):
         name = spec.get(key)
-        if name and any(name not in row['coordinates'] or not isinstance(
-                row['coordinates'][name], (str, int, float, bool)) for row in rows):
-            raise ValueError(f'{key} must name an observed non-null scalar coordinate on every selected result')
+        if name and any(not isinstance(coordinate(row, name), (str, int, float, bool)) for row in rows):
+            available = set.intersection(*(
+                {key for key, value in row['coordinates'].items() if isinstance(value, (str, int, float, bool))}
+                | {key for key, value in row.items() if isinstance(value, str)} for row in rows))
+            raise ValueError(f'{key}={name!r} is unavailable on the selected results. '
+                             f'Available coordinates or descriptive result fields: {sorted(available)}. '
+                             'Use an actual field name; category=null uses result labels; '
+                             'metric/unit panels are automatic.')
     if spec['style'] not in STANDARD_STYLES:
         return
     dimensions = [spec[key] for key in ('category', 'series', 'facet') if spec.get(key)]
@@ -53,9 +66,9 @@ def check_encoding(spec, rows):
         value = row['value']
         if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
             raise ValueError('Figure values must be finite executed numbers or explicitly missing')
-        panel = (row['metric'], row['unit'], row['kind'], row['coordinates'].get(spec.get('facet')))
-        identity = (panel, row['coordinates'].get(spec.get('category'), row['label']),
-                    row['coordinates'].get(spec.get('series')))
+        panel = (row['metric'], row['unit'], row['kind'], coordinate(row, spec.get('facet')))
+        identity = (panel, coordinate(row, spec.get('category'), row['label']),
+                    coordinate(row, spec.get('series')))
         if identity in cells:
             raise ValueError('Duplicate category/series cell; choose a facet or separate estimands, never pool silently')
         cells.add(identity)
@@ -93,7 +106,7 @@ def _fraction_encoding(spec, rows):
         return
     keys = [key for key in rows[0]['coordinates'] if key not in (
         spec.get('category'), spec.get('series'), spec.get('facet')) and all(
-            type(row['coordinates'].get(key)) in (int, float) for row in rows)]
+            type(coordinate(row, key)) in (int, float) for row in rows)]
     pairs = []
     for denominator in keys:
         for numerator in keys:
@@ -125,7 +138,7 @@ def evidence_caption(spec, rows, language='en'):
     zh = language == 'zh-CN'
     groups = {}
     for row in rows:
-        facet = row['coordinates'].get(spec.get('facet'), '')
+        facet = coordinate(row, spec.get('facet'), '')
         groups.setdefault(str(facet), []).append(row)
     support = []
     for facet, members in groups.items():
@@ -207,8 +220,16 @@ def display(value, names):
     return str(names.get(str(value), value))
 
 
+def coordinate(row, key, default=None):
+    """Use actual coordinates or descriptive result fields without inventing dimensions."""
+    if key in row['coordinates']:
+        return row['coordinates'][key]
+    value = row.get(key)
+    return value if isinstance(value, str) else default
+
+
 def category(row, spec):
-    return row['coordinates'].get(spec.get('category'), row['label'])
+    return coordinate(row, spec.get('category'), row['label'])
 
 
 def interval_marks(axis, row, position, color, vertical):
@@ -260,7 +281,7 @@ def draw(data, statistics, spec):
     bars = spec['style'] in ('bar_grouped_hatch', 'bar_paired_delta')
     groups = {}
     for row in rows:
-        facet = row['coordinates'].get(spec.get('facet'))
+        facet = coordinate(row, spec.get('facet'))
         groups.setdefault((row['metric'], row['unit'], row['kind'], facet), []).append(row)
     figure, axes = plt.subplots(len(groups), 1, squeeze=False, figsize=(3.35, 2.25 * len(groups)))
     for axis, ((metric, unit, kind, facet), members) in zip(axes.ravel(), groups.items()):
@@ -286,11 +307,11 @@ def draw(data, statistics, spec):
                 categories = sorted(categories, key=lambda key: next(
                     (row['value'] for row in members if category(row, spec) == key and row['value'] is not None), 0),
                     reverse=spec['sort'] == 'value_descending')
-        series = ordered([row['coordinates'].get(spec.get('series')) for row in members], order)
+        series = ordered([coordinate(row, spec.get('series')) for row in members], order)
         width = .76 / len(series)
         bar_handles = []
         for series_index, identity in enumerate(series):
-            selected = [row for row in members if row['coordinates'].get(spec.get('series')) == identity]
+            selected = [row for row in members if coordinate(row, spec.get('series')) == identity]
             color = colors.get(identity) or palette[(series_index + 2) % len(palette)]
             legend = display(identity, names) if identity is not None else None
             if bars:
@@ -335,7 +356,7 @@ def draw(data, statistics, spec):
             for index, key in enumerate(categories):
                 for series_index, identity in enumerate(series):
                     matching = [row for row in members if category(row, spec) == key and
-                                row['coordinates'].get(spec.get('series')) == identity]
+                                coordinate(row, spec.get('series')) == identity]
                     if not matching or all(row['value'] is None for row in matching):
                         position = index + (series_index - (len(series) - 1) / 2) * width
                         missing = '缺失' if spec.get('paper_language') == 'zh-CN' else 'missing'

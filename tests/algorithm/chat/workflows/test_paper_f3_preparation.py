@@ -329,3 +329,25 @@ def test_selected_user_data_computation_and_download_use_identical_values(model_
                          cwd=tmp_path, capture_output=True, text=True, timeout=15)
     assert ran.returncode == 0, ran.stderr
     assert json.loads((tmp_path / 'results.json').read_text()) == output['experiment']['results']
+
+
+def test_existing_report_renders_tables_with_readable_headings_and_preserves_handoff():
+    from lazyllm.tools.writer.utils.serialization import parse_document_markdown
+
+    tables, _ = sources.markdown_tables(MATERIAL, 'upload-' + 'a' * 64, 'paper-materials-v3')
+    before = copy.deepcopy(tables)
+    output = preparation.existing_output({'topic': 'Original workflow request:\n原始指令'}, tables,
+                                         '已有删除任务与资源消耗记录；只进行描述性分析。')
+    report = output['experiment']['report']
+    document = parse_document_markdown(report, 'prepared-experiment')
+    assert len([block for block in document.iter_blocks() if block.type == 'table']) == 2
+    assert '## 删除任务' in report and '## 运行资源' in report
+    assert 'Original workflow request' not in report
+    assert 'upload-' not in report and all(entry['id'] not in report for entry in tables)
+    assert '原文未声明单位' not in report and '展示前 20 行' not in report
+    assert '| 指标 | 成功/总数 | 比例（%） |' in report
+    assert '| 耗时（秒）（秒） |' not in report
+    assert output['experiment']['results']['tables'] == before
+    handed = to_analysis({'topic': 'T', 'experiment': output['experiment'], 'result_meta': output['result_meta']})
+    assert handed['data']['tables'] == before
+    assert tables == before
