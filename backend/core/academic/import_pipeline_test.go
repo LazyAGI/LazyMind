@@ -230,7 +230,7 @@ func TestUnifiedImportAssociationFailureRollsBackDocumentAndReceipt(t *testing.T
 func TestUnifiedBatchInterruptionPersistsRetryableFailure(t *testing.T) {
 	db, b, _, _ := importPipelineFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
-	_, err := handleImportBatchJob(ctx, asyncjob.Job{ID: "job", AttemptCount: 1}, cancelImportReporter{cancel: cancel}, b)
+	_, err := handleImportBatchJob(ctx, asyncjob.Job{ID: "job", AttemptCount: 1}, cancelImportReporter{cancel: cancel}, b, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}

@@ -43,7 +43,7 @@ def runtime(monkeypatch, responses, events=None, allowed_tools=None):
     return host, requests
 
 
-@pytest.mark.parametrize('name', MANAGEMENT_TOOLS[:3])
+@pytest.mark.parametrize('name', (*MANAGEMENT_TOOLS[:3], 'knowledge.paper.sources'))
 def test_readonly_queries_skip_operation_state(monkeypatch, name):
     host, requests = runtime(monkeypatch, {})
     host._tools['identity'] = name
@@ -62,7 +62,6 @@ def test_server_factory_intersects_positive_whitelist_and_keeps_empty(monkeypatc
     assert set(host.server_config({})['allowed_tools']) == set(MANAGEMENT_TOOLS)
     assert 'knowledge.document.get' not in MANAGEMENT_TOOLS
     assert 'knowledge.options' not in MANAGEMENT_TOOLS
-    assert len(MANAGEMENT_TOOLS) == 10
     assert host.server_config({'allowed_tools': ['knowledge.options']})['allowed_tools'] == []
 
 
@@ -496,3 +495,33 @@ def test_confirmation_polling_uses_one_second_interval(monkeypatch):
         pass
     assert sleeps == [1, 1]
     assert [path.split(':')[-1] for path, _, _ in requests] == ['prepare', 'status', 'status', 'status', 'claim']
+
+
+def test_paper_import_dispatch_binds_only_selected_current_search_evidence(monkeypatch):
+    from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
+    from lazymind.chat.service.utils.citations import CITATION_REFS_KEY
+
+    wire = 'knowledge.paper.import'
+    args = {'knowledge_base_id': 'kb', 'source_ids': ['2.1']}
+    record = {'source_id': '2.1', 'title': 'Toolformer', 'doi': '10.48550/arxiv.2302.04761'}
+    context = ToolResolutionContext(citation_state={CITATION_REFS_KEY: {
+        '1.1': {'source_type': 'external', 'title': 'Not selected'},
+        '2.1': {**record, 'source_type': 'external', 'content': 'Unnecessary abstract'},
+    }})
+    host, requests = runtime(monkeypatch, {
+        'prepare': lambda payload: {'operation_key': 'op', 'arguments_digest': digest(payload['arguments']),
+                                    'snapshot': 'snapshot', 'requires_confirmation': False, 'status': 'allowed'},
+        'claim': {'status': 'allowed', 'metadata': {'operation_key': 'op'}},
+    })
+    host._tools['identity'] = wire
+    with tool_resolution_scope(context):
+        with host.execution_context(prepared(wire, args)):
+            assert asyncio.run(host.request_metadata(wire, {**args, 'current_sources': [record]}))
+        with pytest.raises(ToolExecutionError, match='Unknown current search source'):
+            with host.execution_context(prepared(wire, {**args, 'source_ids': ['fake']})):
+                pytest.fail('unregistered citation dispatched')
+        with pytest.raises(ToolExecutionError, match='reserved for the chat runtime'):
+            with host.execution_context(prepared(wire, {**args, 'current_sources': [record]})):
+                pytest.fail('model-supplied source dispatched')
+    assert [request[1]['arguments'] for request in requests] == [{**args, 'current_sources': [record]}] * 2

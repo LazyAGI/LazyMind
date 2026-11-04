@@ -80,7 +80,11 @@ func validateKnowledgeExecutionDB(ctx context.Context, db *gorm.DB, e knowledger
 		}
 	}
 	selected := []string{}
-	for _, t := range mcpadapter.KnowledgeManagementTools {
+	tools := mcpadapter.KnowledgeManagementTools
+	if e.TaskID == "" {
+		tools = mcpadapter.ChatKnowledgeManagementTools()
+	}
+	for _, t := range tools {
 		if slices.Contains(allowed, t) {
 			selected = append(selected, t)
 		}
@@ -92,7 +96,12 @@ func validateKnowledgeExecutionDB(ctx context.Context, db *gorm.DB, e knowledger
 	if err != nil {
 		return knowledgeruntime.Identity{}, err
 	}
-	principal := capability.Principal{UserID: response.Subject, TenantID: response.TenantID, Permissions: capability.NewPermissionSet(response.Permissions...)}
+	principal := capability.Principal{
+		UserID:      response.Subject,
+		UserName:    response.Username,
+		TenantID:    response.TenantID,
+		Permissions: capability.NewPermissionSet(response.Permissions...),
+	}
 	var datasets []string
 	if e.TaskID != "" {
 		datasets = knowledgeExecutionDatasetScope(metadata)

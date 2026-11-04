@@ -8,6 +8,11 @@ import (
 
 var KnowledgeManagementTools = []string{"knowledge.list", "knowledge.document.list", "knowledge.document.aggregate", "knowledge.create", "knowledge.folder.create", "knowledge.resource.update_metadata", "knowledge.resource.move", "knowledge.resource.delete", "knowledge.document.upload", "knowledge.document.reparse"}
 
+// Chat can refer to sources owned by its running conversation. Work and public MCP keep their existing scopes.
+func ChatKnowledgeManagementTools() []string {
+	return append(append([]string{}, KnowledgeManagementTools...), capability.PaperSourcesTool, capability.PaperImportTool)
+}
+
 func addKnowledgeManagementTools(server *mcp.Server, s *capability.Service) {
 	if !s.SupportsKnowledgeManagement() {
 		return
@@ -47,9 +52,21 @@ func addKnowledgeManagementTools(server *mcp.Server, s *capability.Service) {
 	})
 }
 
-func newManagementServer(service *capability.Service) *mcp.Server {
+func newManagementServer(service *capability.Service, config HandlerConfig) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "lazymind-knowledge", Version: "v1"}, nil)
 	addKnowledgeManagementTools(server, service)
+	if config.PaperSources != nil {
+		addCloudTool(server, &mcp.Tool{Name: capability.PaperSourcesTool, Title: "Find papers from an earlier chat answer", Description: "Read saved paper search sources from an earlier answer in this chat. Identified sources may still require full-text lookup. Returns answer_id and exact source IDs.", Annotations: readOnlyAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.PaperSourcesInput) (*mcp.CallToolResult, capability.PaperSourcesResult, error) {
+			v, err := config.PaperSources(ctx, invocation(ctx, r), in)
+			return nil, v, err
+		})
+	}
+	if config.ImportPapers != nil {
+		addCloudTool(server, &mcp.Tool{Name: capability.PaperImportTool, Title: "Import original paper PDFs", Description: "Queue original PDF acquisition for explicitly requested papers or selected chat sources. Handles PDF lookup, validation, deduplication and ingestion in the background. Queued does not mean saved or parsed.", Annotations: writeAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.PaperImportInput) (*mcp.CallToolResult, capability.PaperImportResult, error) {
+			v, err := config.ImportPapers(ctx, invocation(ctx, r), in)
+			return nil, v, err
+		})
+	}
 	addCloudTool(server, &mcp.Tool{Name: "knowledge.list", Description: "List accessible library metadata and allowed actions; filters combine with AND. Returned IDs are Core IDs.", Annotations: readOnlyAnnotations()}, func(ctx context.Context, r *mcp.CallToolRequest, in capability.ListKnowledgeInput) (*mcp.CallToolResult, capability.ListKnowledgeResult, error) {
 		v, e := service.ListKnowledge(ctx, invocation(ctx, r), in)
 		return nil, v, e

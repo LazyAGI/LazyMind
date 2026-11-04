@@ -32,13 +32,19 @@ type paperPDFClientKey struct{}
 
 func pdfLookupError(detail string) error { return fmt.Errorf("PDF 来源查询失败: %s", detail) }
 
-type paperPDFHTTPError int
+type paperPDFHTTPError struct {
+	status     int
+	retryAfter string
+}
 
-func (e paperPDFHTTPError) Error() string { return fmt.Sprintf("PDF 来源查询失败: HTTP %d", e) }
+func (e paperPDFHTTPError) Error() string {
+	return fmt.Sprintf("PDF 来源查询失败: HTTP %d", e.status)
+}
 
 func transientPDFError(err error) bool {
-	var status paperPDFHTTPError
-	if errors.As(err, &status) {
+	var failure paperPDFHTTPError
+	if errors.As(err, &failure) {
+		status := failure.status
 		return status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504
 	}
 	var network net.Error
@@ -72,7 +78,8 @@ func paperPDFClient(ctx context.Context) (*http.Client, func()) {
 	return client, client.CloseIdleConnections
 }
 
-func lookupOpenDOIPDF(ctx context.Context, doi string) paperPDFLookup {
+func lookupOpenDOIPDF(ctx context.Context, doi string, publicationOnly ...bool) paperPDFLookup {
+	exact := len(publicationOnly) > 0 && publicationOnly[0]
 	client, release := paperPDFClient(ctx)
 	defer release()
 	// Source imports are an explicit lookup. Give discovery and validation
@@ -81,6 +88,13 @@ func lookupOpenDOIPDF(ctx context.Context, doi string) paperPDFLookup {
 	defer cancel()
 	var candidates []FulltextCandidate
 	seen := map[string]bool{}
+	if exact {
+		// The registered DOI resolves to the publisher's own landing page. Do
+		// not substitute an accepted manuscript or a preprint for this edition.
+		address := "https://doi.org/" + url.PathEscape(doi)
+		candidates = append(candidates, FulltextCandidate{URL: address, SourceProvider: "publisher", SourceType: "open_access_landing", Version: "publishedVersion", ExpectedMIME: "application/pdf"})
+		seen[address] = true
+	}
 	var discovery, result paperPDFLookup
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt == 0 || discovery.Retryable {
@@ -89,7 +103,7 @@ func lookupOpenDOIPDF(ctx context.Context, doi string) paperPDFLookup {
 			found, discovery = discoverDOIPDFs(discoveryCtx, client, doi, "")
 			stop()
 			for _, candidate := range found {
-				if !seen[candidate.URL] {
+				if (!exact || candidate.Version == "publishedVersion") && !seen[candidate.URL] {
 					seen[candidate.URL] = true
 					candidates = append(candidates, candidate)
 				}
@@ -267,7 +281,7 @@ func fetchPaperSource(ctx context.Context, client *http.Client, address string, 
 	}
 	if resp.StatusCode != http.StatusOK && !(probe && resp.StatusCode == http.StatusPartialContent) {
 		resp.Body.Close()
-		return nil, paperPDFHTTPError(resp.StatusCode)
+		return nil, paperPDFHTTPError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 	}
 	return resp, nil
 }

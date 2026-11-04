@@ -363,7 +363,7 @@ func (r *Runtime) Decide(ctx context.Context, user, tenant, id, decision, argsDi
 	return nil
 }
 func readOnlyTool(name string) bool {
-	return name == "knowledge.list" || name == "knowledge.document.list" || name == "knowledge.document.aggregate"
+	return name == "knowledge.list" || name == "knowledge.document.list" || name == "knowledge.document.aggregate" || name == capability.PaperSourcesTool
 }
 
 // authorizeOperation checks a write without issuing another credential.
@@ -437,7 +437,7 @@ func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, na
 		return capability.InvocationContext{}, errors.New("tool not allowed")
 	}
 	if readOnlyTool(name) {
-		return capability.InvocationContext{Principal: id.Principal, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
+		return capability.InvocationContext{Principal: id.Principal, AllowedDatasetIDs: id.AllowedDatasetIDs, ConversationID: execution.ConversationID, HistoryID: execution.HistoryID}, nil
 	}
 	token, _ := metadata["dispatch_token"].(string)
 	claims, err := r.verify(token, "knowledge-dispatch")
@@ -458,7 +458,7 @@ func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, na
 	if _, _, err = r.authorizeOperation(ctx, req, id); err != nil {
 		return capability.InvocationContext{}, err
 	}
-	return capability.InvocationContext{ExecutionKey: claims.ConfirmationID, Principal: id.Principal, OperationKey: p.Prepared.OperationKey, ExpectedSnapshot: p.Prepared.Snapshot, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
+	return capability.InvocationContext{ConversationID: execution.ConversationID, HistoryID: execution.HistoryID, ExecutionKey: claims.ConfirmationID, Principal: id.Principal, OperationKey: p.Prepared.OperationKey, ExpectedSnapshot: p.Prepared.Snapshot, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
 }
 
 func argumentsDigest(args []byte) string {

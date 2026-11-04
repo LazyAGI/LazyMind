@@ -22,10 +22,12 @@ from lazymind.chat.engine.tools.workspace_context import thaw
 
 
 BUILTIN_ID = 'lazymind-knowledge'
-READ_ONLY_TOOLS = ('knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate')
+PAPER_IMPORT_TOOL = 'knowledge.paper.import'
+READ_ONLY_TOOLS = ('knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate', 'knowledge.paper.sources')
 MANAGEMENT_TOOLS = READ_ONLY_TOOLS + (
     'knowledge.create', 'knowledge.folder.create', 'knowledge.resource.update_metadata',
     'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload', 'knowledge.document.reparse',
+    PAPER_IMPORT_TOOL,
 )
 _REQUEST = ContextVar('knowledge_management_request', default=None)
 
@@ -52,6 +54,29 @@ def _resolve_upload_files(arguments):
     for item in arguments.get('files') or []:
         item['path'] = resolution.local(item.get('path'))
     return resolution.finish(arguments)
+
+
+def _resolve_paper_sources(arguments):
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
+    from lazymind.chat.service.utils.citations import CITATION_REFS_KEY
+
+    if 'current_sources' in arguments:
+        raise ToolExecutionError('Select source IDs; current_sources is reserved for the chat runtime')
+    if arguments.get('answer_id') or arguments.get('papers') or not arguments.get('source_ids'):
+        return arguments
+    resolution = get_tool_resolution_context()
+    if resolution is None:
+        raise ToolExecutionError('No current search context; use knowledge.paper.sources for an earlier answer')
+    refs = resolution.citation_state.get(CITATION_REFS_KEY, {})
+    sources = []
+    for source_id in dict.fromkeys(arguments['source_ids']):
+        item = refs.get(source_id)
+        if not item or item.get('source_type') != 'external':
+            raise ToolExecutionError('Unknown current search source; use the exact citation_index from the search results')
+        sources.append({'source_id': source_id, **{key: item[key] for key in ('title', 'url', 'doi') if item.get(key)}})
+    if len(json.dumps(sources, ensure_ascii=False).encode()) > 48 * 1024:
+        raise ToolExecutionError('Selected source metadata is too large; import a smaller batch')
+    return {**arguments, 'current_sources': sources}
 
 
 @dataclass
@@ -165,6 +190,8 @@ class KnowledgeManagementRuntime:
         if (wire_name, original_digest) in self._uncertain_calls:
             raise ToolExecutionError(
                 'Previous knowledge mutation outcome is uncertain; reconcile its receipt before retrying')
+        if wire_name == PAPER_IMPORT_TOOL:
+            arguments = _resolve_paper_sources(arguments)
         arguments_digest = digest(arguments)
         if wire_name in READ_ONLY_TOOLS:
             token = _REQUEST.set(_DispatchContext(self, wire_name, arguments_digest, {}, original_digest, arguments))
