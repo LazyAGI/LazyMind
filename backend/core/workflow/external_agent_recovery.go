@@ -24,7 +24,7 @@ func collectRecoveredExternalTask(ctx context.Context, db *gorm.DB, taskID strin
 		}
 		var session orm.WorkflowSession
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
-			"id=? AND create_user_id=? AND conversation_id=? AND plugin_revision_id=? AND plugin_ref=? AND status=? AND dismissed=? AND origin_host=? AND controller_host=?",
+			"id=? AND create_user_id=? AND conversation_id=? AND plugin_revision_id=? AND plugin_ref=? AND status=? AND dismissed=? AND origin_host=? AND controller_host=?", // workflow-naming: persistence — legacy physical columns.
 			task.SessionID, task.OwnerUserID, task.ConversationID, task.WorkflowRevisionID, task.WorkflowRef, "completed", false, "external-agent", "lazymind").First(&session).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil

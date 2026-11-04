@@ -95,8 +95,8 @@ func TestExternalTaskRecoveryRejectsUnrelatedOrUnfinishedSessions(t *testing.T) 
 		{"session_dismissed", "session", "dismissed", true},
 		{"owner_mismatch", "session", "create_user_id", "other"},
 		{"conversation_mismatch", "session", "conversation_id", "other"},
-		{"revision_mismatch", "session", "plugin_revision_id", "other"},
-		{"workflow_mismatch", "session", "plugin_ref", "other"},
+		{"revision_mismatch", "session", "plugin_revision_id", "other"}, // workflow-naming: persistence — legacy physical columns.
+		{"workflow_mismatch", "session", "plugin_ref", "other"},         // workflow-naming: persistence — legacy physical columns.
 		{"not_hosted", "session", "origin_host", "external"},
 		{"foreign_controller", "session", "controller_host", "other"},
 		{"conversion_failure", "task", "error_code", "CONVERSION_FAILED"},
