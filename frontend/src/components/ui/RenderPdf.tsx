@@ -10,8 +10,11 @@ import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
 import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { PdfCitationLayer } from "./PdfCitationLayer";
+import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
+import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
 import {pdfNoteHighlightBackground,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
@@ -37,6 +40,7 @@ import {readNativePdfOutline,type PdfNativeOutlineItem} from "@/modules/knowledg
 import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
 export type { LearningSelectionAction } from "./learningSelection";
 export type { PdfReferenceAction } from "./pdfReferenceGeometry";
+type LoadedPdfDocument = Parameters<NonNullable<React.ComponentProps<typeof Document>["onLoadSuccess"]>>[0];
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -265,6 +269,13 @@ export default function RenderPdf({
   }>>([]);
   const referenceHoverTimer = useRef<number | undefined>(undefined);
   const referenceHoverCloseTimer = useRef<number | undefined>(undefined);
+  const citationTargets = useMemo(() => groupPdfCitationTargets(referenceActions), [referenceActions]);
+  const [citationPreview, setCitationPreview] = useState<{source: RenderPdfProps["fileData"]; cache: ReturnType<typeof createPdfCitationPreviewCache>}>();
+  useEffect(() => {
+    const cache = createPdfCitationPreviewCache();
+    setCitationPreview({source:fileData,cache});
+    return () => cache.dispose();
+  }, [fileData]);
 
   const tagReferenceTextLayer = (pageIndex: number) => {
     const pageElement = pageRefs.current[pageIndex];
@@ -288,7 +299,8 @@ export default function RenderPdf({
   };
 
   const zoomPosition = useRef<PdfViewPosition>();
-  const pdfDocument = useRef<{source: RenderPdfProps["fileData"]; document: {numPages:number;getPage:(page:number)=>Promise<{getViewport:(options:{scale:number})=>{width:number;height:number;convertToViewportPoint:(x:number,y:number)=>number[]};getTextContent:()=>Promise<{items:unknown[]}>}>}}>();
+  const pdfDocument = useRef<{source: RenderPdfProps["fileData"]; document: LoadedPdfDocument}>();
+  const getCitationDocument = useCallback(() => pdfDocument.current?.source === fileData ? pdfDocument.current.document : undefined, [fileData]);
   const lastPageNavigation = useRef("");
   useEffect(() => {
     lastPageNavigation.current = "";
@@ -537,8 +549,13 @@ export default function RenderPdf({
     return arr;
   }, [pageHeightsPx, numPages]);
 
-  const [nativeDestination,setNativeDestination] = useState<{source:RenderPdfProps["fileData"];pageNumber:number;dest?:unknown[]}>();
+  const [nativeDestination,setNativeDestination] = useState<{source:RenderPdfProps["fileData"];pageNumber:number;dest?:unknown[];bbox?:[number,number,number,number]}>();
   const [resolvedDestination,setResolvedDestination] = useState<{source:RenderPdfProps["fileData"];page:number;progress:number}>();
+  const navigateCitation = useCallback((target:PdfCitationTarget) => {
+    const first = target.regions[0];
+    const pageNumber = first?.page ?? target.fallbackPage;
+    if (pageNumber !== undefined) setNativeDestination({source:fileData,pageNumber,bbox:first?.bbox});
+  }, [fileData]);
   useEffect(()=>{
     const request=nativeDestination;
     const loaded=pdfDocument.current;
@@ -554,7 +571,18 @@ export default function RenderPdf({
       const y=kind==='XYZ'?dest?.[3]:kind==='FitH'||kind==='FitBH'?dest?.[2]:kind==='FitR'?dest?.[5]:undefined;
       const x=kind==='XYZ'||kind==='FitR'?dest?.[2]:0;
       const point=typeof y==='number'&&Number.isFinite(y)?viewport.convertToViewportPoint(typeof x==='number'?x:0,y):[0,0];
-      const progress=Math.max(0,Math.min(.999,point[1]/viewport.height));
+      let top = point[1];
+      if (request.bbox) {
+        // Parsed bibliography boxes use unrotated top-left coordinates. Convert
+        // through PDF space so rotated and cropped pages land at the same spot.
+        const base = pdfPage.getViewport({scale:1,rotation:0});
+        const [left,upper,right,lower] = request.bbox;
+        top = Math.min(...[[left,upper],[right,upper],[right,lower],[left,lower]].map(([x,y]) => {
+          const pdfPoint = base.convertToPdfPoint(x,y);
+          return viewport.convertToViewportPoint(pdfPoint[0],pdfPoint[1])[1];
+        }));
+      }
+      const progress=Math.max(0,Math.min(.999,top/viewport.height));
       setPageSizesMap(previous=>({...previous,[page-1]:{width:viewport.width,height:viewport.height}}));
       setResolvedDestination({source:request.source,page,progress});
     }).catch(()=>{
@@ -982,7 +1010,7 @@ export default function RenderPdf({
           pageNumber={index + 1}
           width={RASTER_WIDTH}
           devicePixelRatio={Math.min(2, Math.max(1.5, window.devicePixelRatio || 1))}
-          renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection)}
+          renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection || citationTargets.length)}
           renderAnnotationLayer
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
@@ -1004,6 +1032,7 @@ export default function RenderPdf({
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
           return valid ? {left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`} : {inset:3,background:"transparent"};
         })()} />}
+        {citationTargets.length > 0 && citationPreview?.source === fileData && <PdfCitationLayer targets={citationTargets} getDocument={getCitationDocument} previewCache={citationPreview.cache} onNavigate={navigateCitation} sourceKey={fileData}/>}
         {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} onExplain={explainFormula} />}
         {formulaDocument && <PdfFigureLayer blocks={imageBlocks.filter(block=>block.page===index)} allBlocks={formulaDocument.blocks} onSelect={openVisualStudy}/> }
         {tablesEnabled && formulaDocument && tablePages.has(index) && <PdfTableLayer key={`tables:${studySourceKey}`} blocks={tablePages.get(index)!} onSelect={pdfIRTarget?openVisualStudy:openTableStudy} />}

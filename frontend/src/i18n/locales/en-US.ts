@@ -130,6 +130,15 @@ const enUS = {
     "hide": "Hide tables",
     "show": "Show tables"
   },
+  pdfCitation: {
+    title: "Reference [{{number}}]",
+    view: "Preview reference [{{number}}]",
+    jump: "Go to reference [{{number}}]",
+    image: "Source crop for reference [{{number}}]",
+    close: "Close reference preview",
+    loading: "Loading source preview…",
+    unavailable: "Source preview is unavailable. The reference text is shown above.",
+  },
   pdfFormula: {
     "serviceRequired": "Full formula, figure and source explanations require a configured document parser and a parsed PDF. The original PDF and its bookmarks remain available.",
     "configureService": "Configure document parsing",

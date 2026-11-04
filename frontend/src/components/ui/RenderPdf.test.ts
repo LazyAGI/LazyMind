@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
 import { isLearningActionCompatible, visibleLearningSelectionActions } from "./learningSelection";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
+import { groupPdfCitationTargets } from "./pdfCitationReferences";
 
 describe("extractPdfSelectionContext", () => {
   it("returns the sentence containing the selected text", () => {
@@ -50,5 +51,53 @@ describe("reference bbox matching", () => {
 
   it("matches a selection intersecting the reference bbox", () => {
     expect(referenceActionForSelection(actions, 3, [350, 230, 450, 280])?.referenceId).toBe("ref-1");
+  });
+});
+
+describe("citation target metadata", () => {
+  it("normalizes numeric keys, sorts pages, and preserves upstream reading order within each page", () => {
+    const actions: PdfReferenceAction[] = [
+      { referenceId: "r12", referenceKey: " 0012 ", rawText: "Full paper", kind: "external", href: "https://example.com", page: 9, bbox: [20, 10, 100, 30] },
+      { referenceId: "r12", referenceKey: "12", rawText: "Continuation", kind: "download", page: 8, bbox: [40, 60, 100, 80] },
+      { referenceId: "r12", referenceKey: "12", rawText: "Continuation", kind: "download", page: 8, bbox: [20, 60, 100, 80] },
+      { referenceId: "r12", referenceKey: "12", rawText: "Continuation", kind: "download", page: 8, bbox: [20, 10, 100, 30] },
+      { referenceId: "r12", referenceKey: "12", rawText: "Continuation", kind: "download", page: 8, bbox: [20, 10, 100, 30] },
+    ];
+    const before = structuredClone(actions);
+    expect(groupPdfCitationTargets(actions)).toEqual([{
+      referenceId: "r12", referenceKey: "12", rawText: "Full paper", kind: "external", href: "https://example.com",
+      fallbackPage: 9,
+      regions: [
+        { page: 8, bbox: [40, 60, 100, 80] },
+        { page: 8, bbox: [20, 60, 100, 80] },
+        { page: 8, bbox: [20, 10, 100, 30] },
+        { page: 9, bbox: [20, 10, 100, 30] },
+      ],
+    }]);
+    expect(actions).toEqual(before);
+  });
+
+  it("ignores nonnumeric keys and excludes invalid geometry without losing reference metadata", () => {
+    const action: PdfReferenceAction = { referenceId: "r12", referenceKey: "12", rawText: "Paper", kind: "download" };
+    const targets = groupPdfCitationTargets([
+      { ...action, referenceKey: "author2020" },
+      { ...action, referenceKey: "" },
+      { ...action, referenceKey: undefined },
+      { ...action, page: 0, bbox: [20, 60, 100, 80] },
+      { ...action, page: 1.5, bbox: [20, 60, 100, 80] },
+      { ...action, page: 8, bbox: [100, 60, 20, 80] },
+      { ...action, page: 8, bbox: [20, 60, 20, 80] },
+      { ...action, page: 8, bbox: [20, 60, 100, Number.NaN] },
+      { ...action, page: 8 },
+    ]);
+    expect(targets).toEqual([{ ...action, fallbackPage: 8, regions: [] }]);
+  });
+
+  it("keeps the first valid page even when its crop is absent", () => {
+    const action: PdfReferenceAction = { referenceId: "r12", referenceKey: "12", rawText: "Paper", kind: "download" };
+    expect(groupPdfCitationTargets([
+      { ...action, page: -1 }, { ...action, page: 2.5 }, { ...action, page: 7 },
+      { ...action, page: 8, bbox: [20, 60, 100, 80] },
+    ])[0]).toMatchObject({ fallbackPage: 7, regions: [{ page: 8, bbox: [20, 60, 100, 80] }] });
   });
 });

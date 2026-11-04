@@ -130,6 +130,15 @@ const zhCN = {
     "hide": "隐藏表格",
     "show": "显示表格"
   },
+  pdfCitation: {
+    title: "参考文献 [{{number}}]",
+    view: "预览参考文献 [{{number}}]",
+    jump: "跳转到参考文献 [{{number}}]",
+    image: "参考文献 [{{number}}] 原文截图",
+    close: "关闭参考文献预览",
+    loading: "正在加载原文预览…",
+    unavailable: "原文截图暂不可用，可阅读上方参考文献文字。",
+  },
   pdfFormula: {
     "serviceRequired": "完整的公式、图表和原文解释功能需要先配置文档解析服务，并解析当前 PDF。原文阅读和自带目录仍可直接使用。",
     "configureService": "配置文档解析服务",
