@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_HIDE_EVO?: string;
   readonly VITE_APP_LOGO?: string;
   readonly VITE_APP_CHAT_TITLE?: string;
+  readonly VITE_USER_AGREEMENT_VERSION?: string;
 }
 
 interface ImportMeta {

@@ -10,6 +10,7 @@ import (
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/paperlibrary"
@@ -36,7 +37,7 @@ func sourceJobFence(tx *gorm.DB, job asyncjob.Job, batchID string) error {
 	return nil
 }
 func sourceItemUpdate(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, itemID string, updates map[string]any) error {
-	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, store.DB(), func(tx *gorm.DB) error {
 		if e := sourceJobFence(tx, job, b.ID); e != nil {
 			return e
 		}

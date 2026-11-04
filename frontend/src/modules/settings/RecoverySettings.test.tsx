@@ -196,6 +196,27 @@ describe("RecoverySettings", () => {
     mocks.deleteArchiveFolder.mockResolvedValue(1);
   });
 
+  it("shows existing empty archive folders when there are no archived conversations", async () => {
+    mocks.listArchivedConversations.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
+    const group = await screen.findByRole("region", { name: "产品设计" });
+    expect(within(group).getByText("0 项")).toBeInTheDocument();
+    expect(within(group).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late dialog response after switching to task archives", async () => {
+    let resolveDialog!: (value: unknown) => void;
+    mocks.listArchivedConversations.mockImplementation(({ kind }: { kind: string }) => kind === "dialog"
+      ? new Promise((resolve) => { resolveDialog = resolve; })
+      : Promise.resolve({ items: [], total: 0, page: 1, pageSize: 20 }));
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
+    await waitFor(() => expect(mocks.listArchivedConversations).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("tab", { name: "任务", exact: true }));
+    await waitFor(() => expect(mocks.listArchivedConversations).toHaveBeenCalledWith(expect.objectContaining({ kind: "task" })));
+    await act(async () => resolveDialog({ items: [{ conversation_id: "old-dialog", display_name: "旧对话结果", kind: "dialog", create_time: "", update_time: "" }], total: 1 }));
+    expect(screen.queryByRole("link", { name: "旧对话结果" })).not.toBeInTheDocument();
+  });
+
   function openArchiveView() {
     fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
   }
@@ -454,7 +475,7 @@ describe("RecoverySettings", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "知识库" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /创\s*建/ }));
 
-    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库"));
+    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库", "dialog"));
   });
 
   it("renames a custom archive folder from the folder manager", async () => {
@@ -521,7 +542,7 @@ describe("RecoverySettings", () => {
     fireEvent.change(input, { target: { value: "知识库" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /^创建$/ }));
 
-    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库"));
+    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库", "dialog"));
     expect(await within(dialog).findByRole("radio", { name: /知识库.*0 个会话/ })).toBeChecked();
     fireEvent.click(within(dialog).getByRole("button", { name: /^移动$/ }));
 
