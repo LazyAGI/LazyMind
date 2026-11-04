@@ -94,4 +94,56 @@ def test_prompt_stage_receives_durable_template_mode():
     step = state['steps']['plan_page_prompts']
     assert {'material': 'template_mode', 'required': True} in step['inputs']
     assert 'output_format="native_pptx"' in step['prompt']
-    assert 'HTML ONLY (template_mode=none)' in step['prompt']
+    assert 'HTML ONLY (presentation_output_format=html' in step['prompt']
+
+
+@pytest.mark.parametrize('output_format', ['html', 'native_pptx'])
+def test_uploaded_template_respects_saved_choice(monkeypatch, tools, output_format):
+    artifacts = [
+        {'slot': 'template_mode', 'value': 'upload'},
+        {'slot': 'presentation_output_format', 'revision': 1, 'value': output_format},
+        {'slot': 'presentation_output_format', 'revision': 2, 'selected': False, 'value': 'invalid'},
+    ]
+    monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(
+        list_artifacts=lambda session: SimpleNamespace(result={'artifacts': artifacts})))
+    prompt = 'Recreate template style with HTML' if output_format == 'html' else '复用源页2并替换标题'
+    assert tools._validate_prompt_output_format(output_format, [prompt]) == output_format
+    if output_format == 'html':
+        tools._require_html_output()
+        with pytest.raises(tools.ToolExecutionError, match='PPT_OUTPUT_FORMAT_MISMATCH'):
+            tools.ppt_fill_template('not-read.pptx', 'hash', pages=[{}])
+
+
+def test_template_startup_asks_only_missing_output_choice():
+    from lazymind.chat.workflow.clarification import resolve_fields, startup_card
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    values, missing = resolve_fields(policy, '主题：研究报告，8页，使用附件 company.pptx 作为 PPTX 模板',
+                                     supplied={'template_pptx': 'company.pptx'})
+    assert values['template_mode'] == 'upload'
+    assert [field['id'] for field in missing] == ['presentation_output_format']
+    card = startup_card(missing, {})
+    assert len(card['questions']) == 1
+    values, missing = resolve_fields(policy, '主题：研究报告，8页',
+                                     previous={**values, 'presentation_output_format': 'HTML｜参考模板样式生成'})
+    assert values['presentation_output_format'] == 'html' and missing == []
+
+
+def test_plain_startup_never_asks_template_format_or_generation_mode():
+    from lazymind.chat.workflow.clarification import resolve_fields
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    values, missing = resolve_fields(policy, '主题：城市介绍，8页，不生成AI底图')
+    assert values['template_mode'] == 'none' and missing == []
+    assert 'presentation_output_format' not in values
+    assert 'generation_mode' not in {field['id'] for field in policy['clarification_fields']}
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('输出 HTML', 'html'), ('输出PPTX', 'native_pptx'), ('用html输出', 'html'),
+    ('HTML 格式', 'html'), ('generate PPTX', 'native_pptx'),
+])
+def test_explicit_template_output_does_not_ask_again(text, expected):
+    from lazymind.chat.workflow.clarification import resolve_fields
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    values, missing = resolve_fields(policy, '主题：研究报告，8页，' + text,
+                                     supplied={'template_pptx': 'template.pptx'})
+    assert values['presentation_output_format'] == expected and missing == []

@@ -3,7 +3,7 @@ name: AI PPT Planner
 preflight_disabled: true
 description: >
   Plan a presentation from a user request, collect useful source material,
-  then generate HTML slides or fill uploaded PPTX templates in place into a new
+  then generate HTML slides by default, or compose uploaded templates into a new
   native PPTX. Native files are downloaded for viewing in PowerPoint or WPS.
 
 when_to_use: >
@@ -20,12 +20,15 @@ when_to_use: >
   questions for these defaults. Preserve an explicit user visual direction or
   explicit request to enable AI backgrounds; an uploaded template takes precedence.
   Uploaded source materials are optional: text-only requests must start from
-  the user's prompt. The startup card may offer the declared optional PPTX
-  template choice; show its upload control only after the user selects upload,
-  and never ask for a source document merely because uploads are supported.
+  the user's prompt. Never ask whether to use/upload a template. Bind a template
+  only when the user actually supplies one. Without a template, default to HTML
+  and do not ask an output-format question. With an uploaded template, ask once
+  for HTML or PPTX unless already specified. HTML reads and recreates its style;
+  PPTX reuses template layouts and can add, remove or repeat pages.
+  Never ask for a source document merely because uploads are supported.
   Before starting, collect only missing declared fields: presentation topic,
   slide count, target customer/audience, visual style, AI-generated per-slide
-  backgrounds, optional template mode, and generation mode.
+  backgrounds. Never ask quick/full generation mode, with or without a template.
   When a supplied PPTX is identified as the template, it already determines
   visual style: never ask about style, palette, typography, decorative images
   or AI backgrounds, even via a custom question. Reuse supplied facts and ask
@@ -203,12 +206,11 @@ runtime:
       Choose the inspection timing from when the template becomes available.
       DIRECT UPLOAD: if the user already attached and selected a PPTX template
       in their request, inspect it BEFORE the FIRST Ask. Combine all missing
-      basic requirements (including generation mode) and template-specific facts
-      into that ONE card. Never defer inspection just to ask generation mode first.
-      ASK UPLOAD: only if the template is not available yet, use the initial Ask
-      upload control with the missing basic requirements. After the user uploads
-      through that card, inspect the file and ask ONE supplemental card for
-      missing template facts. Do not repeat questions already answered.
+      basic requirements (including the HTML/PPTX output choice) and template-specific
+      facts into that ONE card. Never ask quick/full generation mode or whether
+      to use/upload a template. If a template arrives in a later user message,
+      inspect it and ask only the still-missing output choice and content facts.
+      Do not repeat questions already answered.
       In either path, BEFORE asking about template facts or triggering, inspect the exact template
       using pptx_analyzer(all_pages=true) ONCE. The tool reads EVERY page
       internally and returns pages plus shared metadata. Do not loop over page
@@ -350,23 +352,31 @@ runtime:
       question: 这份 PPT 面向哪位客户或哪类受众？
       type: text
     - id: template_mode
-      label: PPT 模板
+      label: Template binding
       default: none
-      value_aliases: {不使用模板｜按需求生成新的视觉风格: none, 上传 PPTX 模板｜分析母版、字体、配色和版式后生成: upload, 使用上传模板: upload, 使用PPTX模板: upload}
-      ask_when: Only when template use has not been specified and no attachment has already been identified by the user as the template. Reuse the provided PPTX, do not ask for another upload.
-      question: 是否使用现有 PPTX 作为模板？选择上传后可直接添加文件，将沿用模板风格并跳过 AI 底图。
+      ask_when: Never ask this field. Derive upload only from an actually bound template_pptx; otherwise none; do not ask for another upload.
+      question: Template binding (internal default; never display this question).
       type: single
-      choice_policy: fixed
-      allow_other: false
-      choices:
-        - 不使用模板｜按需求生成新的视觉风格
-        - 上传 PPTX 模板｜分析母版、字体、配色和版式后生成
+      choices: [none, upload]
       attachment:
-        when_choice: 上传 PPTX 模板｜分析母版、字体、配色和版式后生成
+        when_choice: upload
         material_id: template_pptx
         accept: [.pptx]
         max_files: 1
         required: true
+    - id: presentation_output_format
+      label: 输出格式
+      required: true
+      reason: HTML 会重建模板样式，PPTX 会保留并复用原生模板版式。
+      resolution: explicit
+      applies_when: {field: template_mode, equals: upload}
+      value_aliases: {HTML｜参考模板样式生成: html, PPTX｜复用模板并按需增删页面: native_pptx, 输出HTML: html, 输出 HTML: html, 生成HTML: html, 生成 HTML: html, 输出PPTX: native_pptx, 输出 PPTX: native_pptx, 生成PPTX: native_pptx, 生成 PPTX: native_pptx, 用HTML: html, 用 HTML: html, 要HTML: html, 要 HTML: html, HTML输出: html, HTML 输出: html, HTML格式: html, HTML 格式: html, 选择HTML: html, 选择 HTML: html, output HTML: html, generate HTML: html, 用PPTX: native_pptx, 用 PPTX: native_pptx, 要PPTX: native_pptx, 要 PPTX: native_pptx, PPTX输出: native_pptx, PPTX 输出: native_pptx, PPTX格式: native_pptx, PPTX 格式: native_pptx, 选择PPTX: native_pptx, 选择 PPTX: native_pptx, output PPTX: native_pptx, generate PPTX: native_pptx}
+      ask_when: Only after a PPTX template is actually uploaded, and the user has not chosen HTML or PPTX output. A template filename or mention of PPT/PPTX alone is not an output choice.
+      question: 已收到模板，希望输出哪种格式？HTML 会读取并仿照模板样式生成；PPTX 会复用模板版式，可按目标页数增加、删除和修改页面。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices: [HTML｜参考模板样式生成, PPTX｜复用模板并按需增删页面]
     - id: visual_style
       label: 风格
       reason: 未指定风格时按主题自动设计，明确要求优先保留。
@@ -430,6 +440,7 @@ tool_scripts:
       - ppt_read_pr_description
       - ppt_search_web_images
       - ppt_register_material_images
+      - ppt_collect_kb_images
       - ppt_extract_pdf_images
       - ppt_generate_material_images
       - ppt_publish_background_prompts
@@ -560,6 +571,14 @@ slots:
   - id: generation_mode
     user_visible: false
     label: Generation Mode
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
+
+  - id: presentation_output_format
+    user_visible: false
+    label: Presentation Output Format
     type: text
     cardinality: single
     exposed: false

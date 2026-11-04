@@ -546,3 +546,21 @@ API 依据：[GitHub PR 列表接口](https://docs.github.com/en/rest/pulls/pull
 - 素材注册前对本地/下载图片进行完整解码、尺寸和像素检查：最大 12 MiB、3600 万像素；最短边至少 48 像素、面积至少 16384 像素；拒绝损坏/截断、全透明或纯色图片。小于 1 KiB 的有效压缩图片仍可通过；下载响应无论成功失败均关闭。
 - 边界：请求次数不是供应商金额保证，超时/断连后的供应商计费和已消耗 token 无法回滚。图片校验可识别坏文件、跟踪像素和明显空白占位图，但不能确定所有可正常解码的错误提示图片或内容不相关图片。未更改 LazyLLM 子模块；未重启服务，未执行收费模型验收。
 - CI 回归入口：`tests/algorithm/chat/workflows/test_ppt_generation_resilience.py`；原有发布/重试回归在 `workflows/ppt-workflow/scripts/tests/test_partial_edit.py`。
+
+## 知识库 OCR 图片与输出选择
+
+`collect_materials` 的 `ppt_collect_kb_images` 通过 Core 文档权限接口读取已有解析切片，
+不加载可选 RAG、Embedding 或重排依赖。先用 `knowledge_management` 列出授权文档，
+再按文档分页读取图片路径、图片 URL、Markdown/HTML 图片引用和图片元数据；空图片页
+仍须跟随 `next_page_token`。只接受共享上传目录内的现存图片文件，保留文档、切片和
+实际存在的页码信息，不能把切片序号视为 PDF 页码。配置 OCR 不保证每个 PDF 都有
+图片切片；缺失文件或没有图片时记录缺口，不重新解析入库。
+
+返回图片交给 `ppt_register_material_images` 进行现有视觉检查与素材登记，
+`kb_provenance` 随素材清单保留，供 HTML 和原生 PPTX 使用。不需要图片向量索引。
+
+新演示默认输出 HTML。Ask 不询问是否使用模板或快速/完整生成；已绑定上传模板时，
+仅在格式尚未明确时询问 HTML/PPTX。两条模板路径均不询问风格、不生成 AI 底图，
+也不使用模板整页截图作为底图。HTML 读取并仿照模板的字体、配色和版式，以组件重建；
+PPTX 按目标页数复用、增删和修改源页。`presentation_output_format` 独立于
+`template_mode` 保存并由工具层校验；旧会话缺少格式字段时保留原有输出路径。

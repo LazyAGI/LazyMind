@@ -25,7 +25,11 @@ A/B/C style-preview step.
 Material collection and academic analysis share a conditional Materials tab;
 effective executed steps remain visible even when a skip marker exists.
 Template paths skip both background stages;
-final generation revalidates and fills the original PPTX, not HTML.
+final generation revalidates the template and follows the saved output choice:
+HTML recreates its style in components; PPTX composes pages from reusable layouts
+with the requested page count. Neither route uses full-slide template screenshots
+as backgrounds. With no template, HTML is the default. Only an already uploaded
+template prompts for HTML/PPTX; never ask whether to upload/use a template.
 
 1. `analyze_requirements` — goal, audience, length, visual style, constraints,
    and the user's explicit AI-background choice. A deterministic post-step gate
@@ -64,7 +68,7 @@ The result and rationale live in `academic_brief`; citations or benchmark relati
 alone do not establish dependencies. Each paper retains problem/motivation,
 method/process, and experiments/limitations, including when the user requests a
 compressed deck. Page prompts and native PPTX composition follow that order.
-General self-contained decks in either mode may
+General self-contained decks may
 skip material collection according to the declared state transitions.
 The collection step must use
 a supplied/selected KB before any web tool and must skip web retrieval when the

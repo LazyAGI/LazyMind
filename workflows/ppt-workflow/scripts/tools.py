@@ -1204,6 +1204,8 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     """
     from lazymind.chat.engine.tools.file_resources.pptx_template_fill import fill_template
     from lazymind.chat.engine.tools.file_resources.pptx_template_compose import compose_template
+    if _workflow_session_id() and _required_output_format() != 'native_pptx':
+        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML')
     if (edits is None) == (pages is None):
         raise ValueError('Supply exactly one of edits or pages')
     if notes_ref and pages is None:
@@ -1243,6 +1245,8 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     This path supports editable text and notes, not generated charts or formulas.
     """
     from lazymind.chat.engine.tools.file_resources.native_presentation import build_native_pptx
+    if _workflow_session_id() and _required_output_format() != 'native_pptx':
+        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires HTML')
 
     if template_file:
         raise ValueError('Uploaded templates must use ppt_inspect_template_page and ppt_fill_template; '
@@ -1678,12 +1682,20 @@ def _required_output_format() -> str:
                                  'do not fall back to HTML') from exc
     if mode not in ('upload', 'none'):
         raise ToolExecutionError('PPT_OUTPUT_CONTRACT_INVALID: template_mode must be upload or none')
-    return 'native_pptx' if mode == 'upload' else 'html'
+    formats = [item for item in artifacts if item.get('slot') == 'presentation_output_format'
+               and item.get('selected') is not False and not item.get('deleted')]
+    if not formats:
+        # Existing sessions predate the explicit choice and keep their original route.
+        return 'native_pptx' if mode == 'upload' else 'html'
+    output = _artifact_text(max(formats, key=lambda item: int(item.get('revision') or 0)).get('value'))
+    if output not in ('html', 'native_pptx') or (mode == 'none' and output != 'html'):
+        raise ToolExecutionError('PPT_OUTPUT_CONTRACT_INVALID: invalid presentation_output_format for template mode')
+    return output
 
 
 def _require_html_output() -> None:
     if _required_output_format() != 'html':
-        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: uploaded template requires native_pptx; '
+        raise ToolExecutionError('PPT_OUTPUT_FORMAT_MISMATCH: saved output choice requires native_pptx; '
                                  'use ppt_fill_template or ppt_generate_native_pptx, not HTML rendering')
 
 
@@ -1692,7 +1704,7 @@ def _validate_prompt_output_format(output_format: str, page_prompts) -> str:
     if output_format not in ('auto', 'html', 'native_pptx'):
         raise ToolExecutionError('output_format must be auto, html or native_pptx')
     if output_format != required and not (required == 'html' and output_format == 'auto'):
-        raise ToolExecutionError(f'PPT_OUTPUT_FORMAT_MISMATCH: saved template_mode requires '
+        raise ToolExecutionError(f'PPT_OUTPUT_FORMAT_MISMATCH: saved output contract requires '
                                  f'output_format={required}; regenerate prompts for that format')
     if required == 'native_pptx':
         prompts = json.loads(page_prompts) if isinstance(page_prompts, str) else page_prompts
@@ -5699,6 +5711,7 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
             return {
                 **metadata,
                 'pdf_provenance': item.get('pdf_provenance'),
+                'kb_provenance': item.get('kb_provenance'),
                 'sha256': hashlib.sha256(data).hexdigest(),
                 'path': str(dest.resolve()),
                 'alt': alt,
@@ -5723,6 +5736,7 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
     return {
         **metadata,
         'pdf_provenance': item.get('pdf_provenance'),
+        'kb_provenance': item.get('kb_provenance'),
         'sha256': hashlib.sha256(data).hexdigest(),
         'path': str(dest.resolve()),
         'alt': alt,
@@ -5782,7 +5796,7 @@ def _attach_material_images_to_deck(deck: Path) -> dict:
         if cap:
             captions[abs_dst] = cap
         sources[abs_dst] = {'source': entry.get('source'), 'pdf_provenance': entry.get('pdf_provenance'),
-                            'visual_inspection': inspection}
+                            'kb_provenance': entry.get('kb_provenance'), 'visual_inspection': inspection}
         attached += 1
 
     ua['reference_image_sources'] = sources
@@ -5886,6 +5900,27 @@ def ppt_search_web_images(query: str, count: Union[int, str, None] = 3) -> dict:
             '[{"url":..., "caption":..., "source":"web"}, ...] for chosen URLs.'
         ),
     })
+
+
+def ppt_collect_kb_images(
+    knowledge_base_id: str, document_id: str, page_token: str = '', page_size: int = 50,
+) -> dict[str, Any]:
+    """Collect existing OCR/PDF image references from an authorized KB document.
+
+    No RAG, embedding, reranker or image-vector index is required. Discover IDs
+    with knowledge_management document listing, then read stored chunks here.
+    Follow next_page_token even when count is zero until has_more is false.
+    Pass relevant returned images to ppt_register_material_images for visual
+    inspection and staging; preserve kb_provenance. Does not parse PDFs again.
+
+    Args:
+        knowledge_base_id: Selected knowledge base's dataset ID.
+        document_id: Document ID in that knowledge base.
+        page_token: Cursor from the preceding result, empty for the first page.
+        page_size: Number of chunks to read, between 1 and 100.
+    """
+    from lazymind.chat.engine.tools.file_resources.kb_material_images import collect_document_images
+    return collect_document_images(knowledge_base_id, document_id, page_token, page_size)
 
 
 def ppt_register_material_images(
@@ -6027,6 +6062,7 @@ def ppt_register_material_images(
                 'material_index': first_new_index + offset + 1,
                 'width': x.get('width'), 'height': x.get('height'),
                 'pdf_provenance': x.get('pdf_provenance'),
+                'kb_provenance': x.get('kb_provenance'),
                 'visual_inspection': x.get('visual_inspection'),
             }
             for offset, x in enumerate(registered)
@@ -8374,8 +8410,8 @@ def ppt_publish_outline(
     Args:
         deck_dir (str): Optional absolute deck directory. Omit to use the deck
             already bound to this workflow; no find-deck call is needed.
-        output_format: native_pptx for uploaded templates, html otherwise. Validated
-            against saved template_mode; the model cannot override the saved route.
+        output_format: Saved presentation_output_format: html or native_pptx. Validated
+            against the selected output artifact; the model cannot override the saved route.
         page_prompts: Required for text outlines: array of authored per-page visual
             generation instructions in target-page order, or its JSON string.
             Include content, composition, visual elements, typography and constraints.

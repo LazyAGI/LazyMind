@@ -105,9 +105,15 @@ and provider reason instead of silently falling back.
 
 ## Optional PPTX template
 
-The startup Ask card exposes a conditional `.pptx` upload. The file remains a
-normal conversation attachment and is bound to the external `template_pptx`
-material. It is never treated as source evidence.
+HTML is the default output. Startup never asks whether to use/upload a template
+or to choose quick/full generation. An already supplied template is bound to
+`template_pptx`; only then is the user asked for HTML or PPTX if unspecified.
+Both template routes skip style questions and AI backgrounds. HTML recreates
+the template style with components, without using full-slide background images.
+Native PPTX composition can repeat, omit and reorder source layouts to meet the
+requested page count. The template itself is never treated as source evidence.
+The selected route is saved as `presentation_output_format`; old sessions
+without that artifact retain their previous route.
 
 When a template is present, `generate_ppt` calls `ppt_analyze_template` first.
 The analyzer caches the original template plus a deterministic OOXML profile
