@@ -582,10 +582,18 @@ func externalWorkflowAcceptsInputs(ctx context.Context, db *gorm.DB, workflow or
 }
 
 func completeExternalTask(ctx context.Context, db *gorm.DB, task orm.ExternalAgentWorkflowTask) orm.ExternalAgentWorkflowTask {
+	updates, err := externalTaskResultUpdates(ctx, db, task)
+	if err != nil {
+		return failExternalTask(db, task, "RESULT_READ_FAILED", err.Error(), "请进入 LazyMind 查看完整执行记录。")
+	}
+	return persistExternalTask(db, task, updates)
+}
+
+func externalTaskResultUpdates(ctx context.Context, db *gorm.DB, task orm.ExternalAgentWorkflowTask) (map[string]any, error) {
 	repo := workflowstore.New(db)
 	artifacts, err := repo.ListArtifacts(ctx, task.OwnerUserID, task.SessionID)
 	if err != nil {
-		return failExternalTask(db, task, "RESULT_READ_FAILED", err.Error(), "请进入 LazyMind 查看完整执行记录。")
+		return nil, err
 	}
 	outputs := make([]workflowstore.Artifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
@@ -598,7 +606,7 @@ func completeExternalTask(ctx context.Context, db *gorm.DB, task orm.ExternalAge
 	summaryJSON, _ := json.Marshal(summary)
 	now := time.Now().UTC()
 	updates := map[string]any{"status": externalTaskStatusSucceeded, "stage": "collect_result", "error_code": "", "error_message": "", "suggestion": "", "result_summary_json": summaryJSON, "result_artifacts_json": artifactsJSON, "completed_at": &now, "updated_at": now}
-	return persistExternalTask(db, task, updates)
+	return updates, nil
 }
 
 func inputBindingsFromExternalRequest(ctx context.Context, db *gorm.DB, owner string, values map[string]any, files []any) ([]workflowstore.InputBinding, error) {

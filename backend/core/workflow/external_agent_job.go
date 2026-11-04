@@ -78,6 +78,19 @@ func recoverExternalWorkflowTasks(ctx context.Context, db *gorm.DB) error {
 			return fmt.Errorf("collect handed-off task: %s", updated.ErrorMessage)
 		}
 	}
+	// A user may recover an execution failure in the same pinned Session.
+	// Collect only its completed result; do not schedule or resume any step.
+	var recovered []orm.ExternalAgentWorkflowTask
+	if err := db.WithContext(ctx).Where("status=? AND stage=? AND error_code=? AND session_id IN (?)",
+		externalTaskStatusFailed, "execute", "WORKFLOW_EXECUTION_FAILED",
+		db.Model(&orm.WorkflowSession{}).Select("id").Where("status=? AND dismissed=?", "completed", false)).Find(&recovered).Error; err != nil {
+		return err
+	}
+	for _, task := range recovered {
+		if err := collectRecoveredExternalTask(ctx, db, task.ID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
