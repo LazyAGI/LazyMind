@@ -130,6 +130,7 @@ func init() {
 			"verified paper identity conflict",
 		}},
 		{2005137, 409, "The paper content or cache is unavailable or changed; retry the read", []string{
+			"conversation pdf content changed",
 			"verified paper source version conflict",
 			"paper content changed after research analysis; report publication requires renewed analysis",
 		}},
@@ -138,6 +139,10 @@ func init() {
 		}},
 		{2005147, 502, "Unable to find an available paper PDF source", []string{
 			"开放全文探测失败",
+			"arxiv 预印本不能替代正式发表版",
+			"出版社 pdf 地址转向了其他来源",
+			"论文页面未声明目标 doi",
+			"paper source did not return a pdf original",
 		}},
 		{2005135, 400, "The selected paper does not match the import request", []string{
 			"doi metadata is missing",
@@ -224,8 +229,11 @@ func init() {
 			"expansion report must preserve the research analysis",
 		}},
 		{2000103, 400, "Invalid request", []string{
+			"new reviews support only quick or standard expansion",
 			"unsupported_source",
 			"unknown paper research step",
+			"无法唯一核对论文身份或指定版本",
+			"论文候选需要确认（%s）：%w",
 		}},
 	} {
 		for _, source := range group.sources {

@@ -86,16 +86,13 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 		replyError(w, 403, "SOURCE_UNAVAILABLE", e.Error())
 		return
 	}
-	unique := map[string]SourceInspection{}
-	for _, s := range inspected {
-		if !s.Eligible {
-			replyError(w, 422, "SOURCE_NOT_IMPORTABLE", s.Reason)
+	for _, source := range inspected {
+		if !source.Eligible {
+			replyError(w, 422, "SOURCE_NOT_IMPORTABLE", source.Reason)
 			return
 		}
-		if previous, exists := unique[s.PaperKey]; !exists || previous.NeedsPDFLookup || !s.NeedsPDFLookup {
-			unique[s.PaperKey] = s
-		}
 	}
+	unique := importableSources(inspected)
 	c := sourceCaller(r)
 	target := req.TargetDatasetID
 	if req.NewKnowledgeBase != nil {
@@ -130,11 +127,56 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 		sourceSubmitError(w, target, e)
 		return
 	}
+	batch := newSourceImportBatch(c, *req.SourceContext, target, batchID, req.IdempotencyKey, hash, len(unique), req.NewKnowledgeBase != nil)
+	if e = enqueueSourceImport(ctx, c, &batch, unique, nil); e != nil {
+		sourceSubmitError(w, target, e)
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "target_dataset_id": target, "total_items": batch.TotalItems})
+}
+
+func sourceSelectionKey(source SourceInspection) string {
+	if source.Candidate.Version != "" {
+		return source.PaperKey + ":" + source.Candidate.SourceProvider + ":" + source.Candidate.Version
+	}
+	return source.PaperKey
+}
+
+func importableSources(inspected []SourceInspection) map[string]SourceInspection {
+	unique := make(map[string]SourceInspection)
+	pinned := make(map[string]bool)
+	for _, source := range inspected {
+		if source.Eligible && source.Candidate.Version != "" {
+			pinned[source.PaperKey] = true
+		}
+	}
+	for _, source := range inspected {
+		if !source.Eligible || source.Candidate.Version == "" && pinned[source.PaperKey] {
+			continue
+		}
+		key := sourceSelectionKey(source)
+		if previous, exists := unique[key]; !exists || previous.NeedsPDFLookup || !source.NeedsPDFLookup {
+			unique[key] = source
+		}
+	}
+	return unique
+}
+
+func newSourceImportBatch(c doc.DatasetCatalogCaller, source SourceContext, target, batchID, operationKey, hash string, count int, created bool) orm.PaperImportBatch {
 	now := time.Now().UTC()
-	policy, _ := json.Marshal(sourceImportPolicy{OriginKey: req.SourceContext.key(), Context: *req.SourceContext, RequestHash: hash, TenantID: c.TenantID, CreatedLibrary: req.NewKnowledgeBase != nil})
-	batch := orm.PaperImportBatch{ID: batchID, EntryType: "conversation_sources", TargetDatasetID: target, SourceDocumentIDsJSON: json.RawMessage("[]"), PolicySnapshotJSON: policy, Status: "pending", TotalItems: len(unique), IdempotencyKey: req.IdempotencyKey, CreatedBy: user, CreatedAt: now, UpdatedAt: now}
-	e = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		dataset, e := lockSourceTarget(ctx, tx, c, target)
+	policy := mustSourceJSON(sourceImportPolicy{OriginKey: source.key(), Context: source, RequestHash: hash, TenantID: c.TenantID, CreatedLibrary: created})
+	return orm.PaperImportBatch{ID: batchID, EntryType: "conversation_sources", TargetDatasetID: target, SourceDocumentIDsJSON: json.RawMessage("[]"), PolicySnapshotJSON: policy, Status: "pending", TotalItems: count, IdempotencyKey: operationKey, CreatedBy: c.UserID, CreatedAt: now, UpdatedAt: now}
+}
+
+func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch *orm.PaperImportBatch, unique map[string]SourceInspection, guard func(context.Context, *gorm.DB) error) error {
+	now := batch.CreatedAt
+	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if guard != nil {
+			if err := guard(ctx, tx); err != nil {
+				return err
+			}
+		}
+		dataset, e := lockSourceTarget(ctx, tx, c, batch.TargetDatasetID)
 		if e != nil {
 			return e
 		}
@@ -142,16 +184,16 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 			return errors.New("来源论文只能加入论文集")
 		}
 		var replay orm.PaperImportBatch
-		if e := tx.Where("id = ?", batchID).Take(&replay).Error; e == nil {
-			if sourcePolicy(replay).RequestHash != hash {
+		if e := tx.Where("id = ?", batch.ID).Take(&replay).Error; e == nil {
+			if sourcePolicy(replay).RequestHash != sourcePolicy(*batch).RequestHash {
 				return errors.New("idempotency conflict")
 			}
-			batch = replay
+			*batch = replay
 			return nil
 		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
 		}
-		if e := tx.Create(&batch).Error; e != nil {
+		if e := tx.Create(batch).Error; e != nil {
 			return e
 		}
 		keys := make([]string, 0, len(unique))
@@ -161,11 +203,15 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 		sort.Strings(keys)
 		for _, key := range keys {
 			s := unique[key]
-			work, e := sourceWork(ctx, tx, s)
-			if e != nil {
-				return e
+			var work orm.AcademicWork
+			if s.Requested == nil {
+				var err error
+				work, err = sourceWork(ctx, tx, s)
+				if err != nil {
+					return err
+				}
 			}
-			var candidate savedImportCandidate
+			candidate := savedImportCandidate{Requested: s.Requested}
 			if s.Candidate.URL != "" {
 				candidate = savedImportCandidate{FulltextCandidate: s.Candidate}
 				// arXiv inspection is offline, even when the URL names a version.
@@ -177,35 +223,37 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 				}
 			}
 			refs, _ := json.Marshal([]string{s.SourceID})
-			presence, _ := json.Marshal(map[string]string{"paper_key": key})
-			item := orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: work.ID, ReferenceIDsJSON: refs, PresenceSnapshotJSON: presence, SelectedCandidateJSON: marshal(candidate), Status: "pending", Stage: "acquire", ErrorDetailsJSON: json.RawMessage("{}"), CreatedAt: now, UpdatedAt: now}
+			presence, _ := json.Marshal(map[string]string{"paper_key": s.PaperKey, "selection_key": key})
+			item := orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, TitleSnapshot: s.Title, AcademicWorkID: work.ID, ReferenceIDsJSON: refs, PresenceSnapshotJSON: presence, SelectedCandidateJSON: marshal(candidate), Status: "pending", Stage: "acquire", ErrorDetailsJSON: json.RawMessage("{}"), CreatedAt: now, UpdatedAt: now}
 			// An alias follows the original durable item, including its processing state.
 			var active orm.PaperImportItem
-			q := tx.Table("paper_import_items pi").Select("pi.*").Joins("JOIN paper_import_batches pb ON pb.id = pi.batch_id").Where("pb.target_dataset_id = ? AND pi.academic_work_id = ? AND pi.status IN ?", target, work.ID, []string{"pending", "running"}).Order("pi.created_at ASC").Take(&active)
-			if q.Error == nil {
-				item.Stage = "follow"
-				item.Status = "succeeded"
-				item.PresenceSnapshotJSON = mustSourceJSON(map[string]string{"paper_key": key, "follows_item_id": active.ID})
-			} else if !errors.Is(q.Error, gorm.ErrRecordNotFound) {
+			q := tx.Table("paper_import_items pi").Select("pi.*").Joins("JOIN paper_import_batches pb ON pb.id = pi.batch_id").Where("pb.target_dataset_id = ? AND pb.entry_type = ? AND pi.academic_work_id = ? AND pi.status IN ?", batch.TargetDatasetID, batch.EntryType, work.ID, []string{"pending", "running"}).Order("pi.created_at ASC").Take(&active)
+			if work.ID != "" && q.Error == nil {
+				var previous map[string]string
+				_ = json.Unmarshal(active.PresenceSnapshotJSON, &previous)
+				var priorCandidate savedImportCandidate
+				_ = json.Unmarshal(active.SelectedCandidateJSON, &priorCandidate)
+				if previous["selection_key"] == key || (previous["selection_key"] == "" &&
+					priorCandidate.SourceProvider == candidate.SourceProvider && priorCandidate.Version == candidate.Version) {
+					item.Stage, item.Status = "follow", "succeeded"
+					item.PresenceSnapshotJSON = mustSourceJSON(map[string]string{"paper_key": s.PaperKey, "follows_item_id": active.ID})
+				}
+			} else if q.Error != nil && !errors.Is(q.Error, gorm.ErrRecordNotFound) {
 				return q.Error
 			}
 			if e := tx.Create(&item).Error; e != nil {
 				return e
 			}
 		}
-		job, e := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import:" + batch.ID, Payload: paperImportPayload{BatchID: batch.ID, UserID: user, UserName: c.UserName}, CreateUserID: user, CreateUserName: c.UserName})
+		job, e := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import:" + batch.ID, Payload: paperImportPayload{BatchID: batch.ID, UserID: c.UserID, UserName: c.UserName}, CreateUserID: c.UserID, CreateUserName: c.UserName})
 		if e != nil {
 			return e
 		}
 		batch.AsyncJobID = job.ID
-		return tx.Model(&batch).Update("async_job_id", job.ID).Error
+		return tx.Model(batch).Update("async_job_id", job.ID).Error
 	})
-	if e != nil {
-		sourceSubmitError(w, target, e)
-		return
-	}
-	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "target_dataset_id": target, "total_items": batch.TotalItems})
 }
+
 func sourceSubmitError(w http.ResponseWriter, target string, e error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
@@ -245,24 +293,26 @@ func sourceWork(ctx context.Context, tx *gorm.DB, s SourceInspection) (orm.Acade
 }
 
 type SourceImportView struct {
-	ItemID           string `json:"item_id"`
-	BatchID          string `json:"batch_id"`
-	Title            string `json:"title"`
-	PaperKey         string `json:"paper_key"`
-	TargetDatasetID  string `json:"target_dataset_id"`
-	TargetName       string `json:"target_name"`
-	CreatedLibrary   bool   `json:"created_library"`
-	Status           string `json:"status"`
-	Stage            string `json:"stage"`
-	ProcessingStatus string `json:"processing_status,omitempty"`
-	DocumentID       string `json:"document_id,omitempty"`
-	ErrorMessage     string `json:"error_message,omitempty"`
-	ErrorCode        string `json:"error_code,omitempty"`
-	ErrorDetail      string `json:"error_detail,omitempty"`
-	ErrorRecovery    string `json:"error_recovery,omitempty"`
-	Retryable        bool   `json:"retryable"`
-	RetryBatchID     string `json:"retry_batch_id,omitempty"`
-	RetryItemID      string `json:"retry_item_id,omitempty"`
+	RetryAt          *time.Time `json:"retry_at,omitempty"`
+	ItemID           string     `json:"item_id"`
+	BatchID          string     `json:"batch_id"`
+	Title            string     `json:"title"`
+	PaperKey         string     `json:"paper_key"`
+	TargetDatasetID  string     `json:"target_dataset_id"`
+	TargetName       string     `json:"target_name"`
+	CreatedLibrary   bool       `json:"created_library"`
+	Status           string     `json:"status"`
+	Stage            string     `json:"stage"`
+	ProcessingStatus string     `json:"processing_status,omitempty"`
+	ProcessingLevel  string     `json:"processing_level,omitempty"`
+	DocumentID       string     `json:"document_id,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	ErrorCode        string     `json:"error_code,omitempty"`
+	ErrorDetail      string     `json:"error_detail,omitempty"`
+	ErrorRecovery    string     `json:"error_recovery,omitempty"`
+	Retryable        bool       `json:"retryable"`
+	RetryBatchID     string     `json:"retry_batch_id,omitempty"`
+	RetryItemID      string     `json:"retry_item_id,omitempty"`
 }
 
 func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperImportItem, c doc.DatasetCatalogCaller, cached ...map[string]map[string]doc.DocumentMetadata) (SourceImportView, error) {
@@ -306,10 +356,15 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 
 		return originalView, nil
 	}
-	var detail map[string]string
+	var detail importFailureDetails
 	_ = json.Unmarshal(item.ErrorDetailsJSON, &detail)
-	v.ErrorMessage = detail["message"]
-	v.ErrorDetail, v.ErrorRecovery = detail["detail"], detail["recovery"]
+	v.ErrorMessage, v.ErrorDetail, v.ErrorRecovery, v.RetryAt = detail.Message, detail.Detail, detail.Recovery, detail.RetryAt
+	if item.Status == "pending" && item.Stage == "retry_wait" {
+		v.Status = "waiting_retry"
+	}
+	if item.Status == "failed" && item.ErrorCode == "needs_confirmation" {
+		v.Status = "needs_confirmation"
+	}
 	if item.DocumentID != "" {
 		var m doc.DocumentMetadata
 		if len(cached) > 0 {
@@ -329,6 +384,7 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 			}
 		}
 		v.ProcessingStatus = doc.DocumentProcessingStatus(m.ProcessingLevel, m.ProcessingState)
+		v.ProcessingLevel = m.ProcessingLevel
 		if m.ProcessingError != nil {
 			v.ProcessingStatus = "failed"
 		}
@@ -352,8 +408,8 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 			}
 		}
 		v.Retryable = v.ProcessingStatus == "failed"
-	} else if item.Status == "failed" {
-		v.Retryable = true
+	} else if item.Status == "failed" && item.ErrorCode != "needs_confirmation" {
+		v.Retryable = detail.RetryAt == nil || !detail.RetryAt.After(time.Now())
 	}
 	if (item.Status == "running" || item.Status == "pending") && v.Status != "added" && v.Status != "exists" {
 		var job orm.AsyncJob

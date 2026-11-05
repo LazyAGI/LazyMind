@@ -18,17 +18,15 @@ steps:
 
       学术工具自动读取当前工作流绑定的任务，不传 expansion_id。
 
-      独立快速扩展（record.goal=expansion、budget_mode=fast）根据种子摘要与用户要求做一轮定向查找。多个明确问题可合并并行查询，只查种子的一跳引用或具体机制关键词。只在核心机制缺少直接结果时补查，不追代表作的引用，不读候选全文。
+      快速扩展（budget_mode=fast）根据种子摘要与用户要求做一轮定向查找。没有种子时，从用户给定主题提取具体机制关键词查找代表论文。多个明确问题可合并并行查询，只查种子的一跳引用或具体机制关键词。只在核心机制缺少直接结果时补查，不追代表作的引用，不读候选全文。
 
       快速档纳入论文须满足至少一项：种子明确归因于该工作；该工作直接修改或复用同一机制；在相同研究对象和约束下提供关键对照。推荐理由写出具体机制和贡献，依据真实题录、摘要或已定位的引用；不要把同一上位主题当直接相关。例如研究 FP4 KV 时，其他位宽的 KV 量化、通用 FP4 训练或权重量化只作为搜索线索，除非它直接回答当前对照问题。只优化预填充速度不等同于复用同一缓存机制。多个结果重复回答同一机制问题时，保留证据最直接的代表工作。核心问题已有直接结果便停止，不为多补例子继续搜。
 
-      独立标准和深入研究使用同一规则。沿每个确认方向分别查方法来源、同类方法和后续工作，复用确实回答该方向及该类问题的初调回执。查到同类方法不能替代对方法来源和后续工作的查找。收集可能相关的已登记候选，为下一步保留有用线索；本步完成逐方向首轮检索即交接，薄弱方向定点补查与正式筛选留给下一步。
-
-      综述任务在本阶段交付初步候选。围绕具体机制查种子（无种子时查研究方向代表论文）的引用、被引及不同路线，关键命名来源至少实际尝试精确题名、别名、标识符或原文引用身份解析。候选能供下一阶段继续补充证据时及时发布。
+      标准扩展和深入研究使用同一规则。沿每个确认方向分别查方法来源、同类方法和后续工作，复用确实回答该方向及该类问题的初调回执。查到同类方法不能替代对方法来源和后续工作的查找。收集可能相关的已登记候选，为下一步保留有用线索；本步完成逐方向首轮检索即交接，薄弱方向定点补查与正式筛选留给下一步。
 
       只提交已登记论文，去重且不以篇数为目标。搜索支持 keyword/references/citations；续查仅传 cursor，值为真实返回的 next_cursor，遵守 retry_at。原文引用用 view="references"，需要解析身份时按 reference_keys 或 keywords 每批最多5条。引用索引空或失败不能证明没有前后作。清单不作未经研究的关系结论。
 
-      调用 academic_publish_stage，paper_ids 为有序的全部保留论文 ID，decisions=[]，gaps=[]。快速扩展传 recommendations，每篇非种子包含 paper_id 和 reason；标准、深入和综述在本步只交接候选，不传 recommendations。
+      调用 academic_publish_stage，paper_ids 为有序的全部保留论文 ID，decisions=[]，gaps=[]。快速扩展传 recommendations，每篇非种子包含 paper_id 和 reason；标准和深入在本步只交接候选，不传 recommendations。
       '
     tools:
     - academic_expansion_context
@@ -92,9 +90,8 @@ steps:
       不要求每方向凑齐前作/同类/后续调查，不穷尽所有命名线索，不把索引缺失当成不存在后续研究。
       厂商技术博客不能解析为论文时说明来源边界，不编造论文身份。
 
-      独立深入拓展自动保留第二步完整清单，analyses 只提交关键论文的必要分析文本，省略没有关键发现的论文。
+      深入研究自动保留第二步完整清单，analyses 只提交关键论文的必要分析文本，省略没有关键发现的论文。
       不必逐篇填满 seed_relation、direction_relation、key_contribution；不传 research_structure 和 selection_reasons。
-      其他路径提交最终全集、research_structure 和真实增删的 selection_reasons，保留全部用户种子。
       claims 只为实际写入报告的关键分析字段提供引用，relations 已表达的结论不再重复成 claims。
       claims 与 analyses 并列，不能放进单篇对象。positions 必须是该 paper_id 当前版本实际读过的内容块，
       不是 PDF 页码；跨论文证据分别填写各自 paper_id 与位置，不猜测 [0,1]，不把种子第 8 块套给其他论文。
@@ -104,11 +101,11 @@ steps:
       mechanism_comparison 为研究者的机制比较，background_citation 为背景引用。前三种由来源指向使用方，
       背景引用由被引论文指向引用方；比较没有继承方向。区分原文陈述与研究推断，保留适用条件和实验基线。
 
-      正常局限写入 limitations，例如不同基线不能直接排名、结果不能外推到未测规模；不要把这些写成待完成的 gaps。
-      investigation 可省略，只按需记录真实未解决问题或材料缺口，不填固定调查矩阵。
+      正常局限与确认范围外的证据写入 limitations，例如不同基线不能直接排名、范围外的第三方原文未单独核对。
+      investigation 可省略，只在回答确认范围内的问题仍缺关键证据时标为 open 或 blocked。已回答的问题标为 resolved，剩余比较局限写入 limitations。范围外的问题标为 excluded。
       如需记录 clue_resolutions，必须放在对应 investigation 条目内部，不能放顶层。
       只复制完整 query_ids；查询文字、题录和来源版本由服务取得，不再传 queries。
-      未覆盖范围会在部分报告中明确说明，不冒充完成，也不等待穷尽调查或耗尽预算才交付。
+      确认范围内的缺口会在部分报告中明确说明，无需等到穷尽调查或耗尽预算才交付。
 
       就绪后调用 academic_submit_relations，首次提交关键 analyses、claims、relations 和 limitations 即可。
       工具使用当前执行的草稿保存提交内容。业务检查失败后只重传变化的数组或对象；省略表示保留，[] 表示清空，
@@ -130,7 +127,7 @@ steps:
       required: true
       transport: path
     - material: screened_candidates
-      required: false
+      required: true
       transport: path
     outputs:
     - material: relation_analysis

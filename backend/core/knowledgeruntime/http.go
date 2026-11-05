@@ -38,6 +38,10 @@ func (r *Runtime) InternalHandler(secret string) http.Handler {
 			out, err = r.Prepare(req.Context(), in)
 		case strings.HasSuffix(req.URL.Path, ":status"):
 			out, err = r.Status(req.Context(), in.Execution, in.ConfirmationID)
+		case strings.HasSuffix(req.URL.Path, ":supersede"):
+			var status string
+			status, err = r.Supersede(req.Context(), in.Execution, in.ConfirmationID)
+			out = map[string]any{"status": status}
 		case strings.HasSuffix(req.URL.Path, ":claim"):
 			var metadata map[string]any
 			metadata, err = r.Claim(req.Context(), in)

@@ -224,7 +224,7 @@ def _ingest_fetched_pdf(
         manifest = ingest_pdf_file(
             tmp_path,
             source='web',
-            source_url=final_url,
+            source_url=normalized_url,
             display_name=name,
         )
     finally:

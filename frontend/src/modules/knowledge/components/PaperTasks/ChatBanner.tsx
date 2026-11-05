@@ -37,7 +37,7 @@ export default function AcademicChatBanner({ conversation }: {
                 const next: AcademicChatSummary = res.data.data || res.data;
                 setContext(next);
                 if (next.kind === 'expansion' && !next.next_conversation_id && (
-                    !['completed', 'canceled'].includes(next.status || '') || next.goal === 'review' && next.status === 'completed'
+                    !['completed', 'canceled'].includes(next.status || '') || next.goal === 'review' && next.status === 'completed' && next.research_complete !== false
                 ))
                     schedule();
             }
@@ -76,7 +76,8 @@ export default function AcademicChatBanner({ conversation }: {
     </Space>;
     if (review) return <div>
         <strong>{t(context.kind === 'review' ? 'paperTasks.task.review' : 'paperTasks.reviewFlow.preparationTitle')}</strong>
-        <ReviewFlow status={context.status} reviewStarted={context.kind === 'review' || !!context.next_conversation_id} readyCount={context.ready_count}>
+        <ReviewFlow status={context.status} reviewStarted={context.kind === 'review' || !!context.next_conversation_id}
+            readyCount={context.ready_count} processingCount={context.processing_count} researchIncomplete={context.research_complete === false}>
             {actions}
         </ReviewFlow>
     </div>;

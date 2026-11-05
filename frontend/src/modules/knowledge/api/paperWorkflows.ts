@@ -98,6 +98,11 @@ export interface ExpansionPreparation {
  directions: Array<{ name: string; question: string; reason: string; difference: string; paper_ids: string[]; papers?: PaperRef[] }>;
  selected_directions: string[];
  auto_confirmed?: boolean;
+  confirmed_at?: string;
+}
+export interface PaperMaterialProgress {
+  processing_count: number;
+  distinct_ready_count?: number;
 }
 export interface Expansion {
   preparation?: ExpansionPreparation;
@@ -118,6 +123,7 @@ export interface Expansion {
   created_at: string;
   updated_at: string;
   auto_review_id?: string;
+  material_progress?: PaperMaterialProgress;
 }
 export interface PaperContent {
   id: string;
@@ -129,14 +135,21 @@ export interface PaperContent {
   parser_version?: string;
   error?: string;
 }
+export interface PaperWorkflowStep {
+  step_id: string;
+  label?: string;
+  status: string;
+}
 export interface ExpansionDetail {
   record: Expansion;
   rounds: Array<{ discovery_mode?: string; id: string; version: number; status: string; result: ReviewWorkflowInput; report?: ExpansionReport }>;
   chat_status: 'uncreated' | 'available' | 'trashed' | 'deleted';
   contents: PaperContent[];
+  material_progress?: PaperMaterialProgress;
   paper_importance: Record<string, boolean>;
   presence?: Array<{ work_id: string; metadata_only?: boolean; current_dataset: ImportPreviewItem['presence']['current_dataset']; importing: boolean }>;
   handoffs: Array<{ id: string; kind: string; conversation_id: string; version: number }>;
+  workflow_steps?: PaperWorkflowStep[] | null;
 }
 export interface DocumentAcademic {
   source_url?: string;

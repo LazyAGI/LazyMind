@@ -55,6 +55,7 @@ export interface AcademicChatContext {
     'kind': string;
     'next_conversation_id'?: string;
     'paper_count'?: number;
+    'processing_count'?: number;
     'ready_count'?: number;
     'research_complete'?: boolean;
     'source_available'?: boolean;
@@ -73,6 +74,7 @@ export interface AcademicChatSummary {
     'kind': string;
     'next_conversation_id'?: string;
     'paper_count'?: number;
+    'processing_count'?: number;
     'ready_count'?: number;
     'research_complete'?: boolean;
     'source_available'?: boolean;

@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { useConversationRunningStore } from '@/modules/chat/store/conversationRunning';
 import { getExpansion, getReviewRecordContext, type ExpansionDetail, type ReviewRecordTarget } from '../../api/paperWorkflows';
 import ReviewRecordStatus from './ReviewRecordStatus';
+import PaperFlow from './PaperFlow';
+import { paperDetailFlow, paperFlowSteps } from './paperFlowModel';
 
 export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }: {
     record?: ReviewRecordTarget; onClose: () => void; onSource: (id: string) => void; onChat: (id: string) => void;
@@ -38,6 +40,12 @@ export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }
         return () => { controller.abort(); store.unwatch(watcher); };
     }, [record?.conversation_id, retry, watcher]);
     const created = record?.created_at ? dayjs(record.created_at) : undefined;
+    const automatic = source && source.record.auto_review_id === record?.id;
+    const steps = context && (automatic && source.record.version === record?.version && source.record.status === 'completed'
+        ? paperDetailFlow(source)
+        : !context.expansion_id || (source && !automatic)
+            ? paperFlowSteps('review', 'direct').map(step => ({ ...step, status: 'done' as const }))
+            : undefined);
     return <Drawer className="paper-review-record-drawer" width={780} open={!!record} onClose={onClose} title={t('paperTasks.viewReviewRecord')}>
         {record && <>
             <Typography.Title level={4}>{record.title || t('paperTasks.task.review')}</Typography.Title>
@@ -48,6 +56,7 @@ export default function ReviewRecordDrawer({ record, onClose, onSource, onChat }
             {loading && <Spin />}
             {failed && <Alert type="error" showIcon message={t('paperTasks.recordsDetailFailed')} action={<Button onClick={() => setRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
             {context && <>
+                {steps && <PaperFlow title={t('paperTasks.reviewFlow.label')} steps={steps} />}
                 <section className="paper-review-record-materials">
                     <Typography.Title level={5}>{t('paperTasks.recordsMaterials')}</Typography.Title>
                     <Space wrap><Typography.Text strong>{t('paperTasks.contentPaperCount', { count: context.input.papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.recordsFrozenAtStart')}</Typography.Text></Space>

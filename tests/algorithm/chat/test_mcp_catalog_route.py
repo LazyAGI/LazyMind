@@ -32,7 +32,7 @@ def test_catalog_uses_request_system_mcp_policy_and_does_not_inherit_previous_sc
                     'knowledge.list', 'knowledge.document.list', 'knowledge.document.aggregate',
                     'knowledge.create', 'knowledge.folder.create', 'knowledge.resource.update_metadata',
                     'knowledge.resource.move', 'knowledge.resource.delete', 'knowledge.document.upload',
-                    'knowledge.document.reparse',
+                    'knowledge.document.reparse', 'knowledge.paper.sources', 'knowledge.paper.import',
                 }
     try:
         asyncio.run(exercise())

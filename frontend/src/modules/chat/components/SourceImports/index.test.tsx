@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, cleanup, within, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { SourceImportProvider, ExecutionResults, uniquePapers } from "./index";
+import { SourceImportProvider, uniquePapers } from "./index";
 import { ChatSourcePanel, ReferenceSourcesButton } from "./ReferenceSources";
 import * as api from "./api";
 import type { ChatSource } from "../../utils/sourceAdapter";
@@ -21,24 +21,24 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("source imports", () => {
-  it("groups a confirmed paper and preserves each source when expanded", async () => {
+  it("groups a confirmed paper and lets the reader open each source version", async () => {
     view(<ChatSourcePanel sources={sources} onClose={() => {}} embedded />);
-    const expand = await screen.findByRole("button", { name: /展开 2 个来源/ });
+    const versions = await screen.findByRole("button", { name: /2 个来源/ });
     expect(screen.getByText("2 项 · 3 个来源")).toBeInTheDocument();
-    expect(expand).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Paper PDF")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    fireEvent.click(expand);
-    const links = within(screen.getByRole("list", { name: "Paper abstract 的来源" }));
+    fireEvent.click(versions);
+    expect(screen.getByRole("heading", { name: "来源版本" })).toBeInTheDocument();
+    const entries = within(screen.getByRole("list", { name: "Paper abstract 的来源" }));
     for (const source of sources.slice(0, 2)) {
-      expect(links.getByRole("link", { name: source.url })).toHaveAttribute("href", source.url);
-      expect(links.queryByText(source.content!)).not.toBeInTheDocument();
+      expect(entries.getByText(source.url!)).toBeInTheDocument();
+      expect(entries.queryByText(source.content!)).not.toBeInTheDocument();
     }
-    fireEvent.click(links.getByRole("button", { name: "Paper PDF" }));
+    fireEvent.click(entries.getByRole("button", { name: /Paper PDF/ }));
     expect(screen.getByRole("heading", { name: "Paper PDF" })).toBeInTheDocument();
     expect(screen.getByText("Version two evidence")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "返回来源版本" }));
     fireEvent.click(screen.getByRole("button", { name: "返回来源列表" }));
-    fireEvent.click(screen.getByRole("button", { name: /收起 2 个来源/ }));
     expect(screen.queryByText("Paper PDF")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "加入知识库" }));
     expect(await screen.findByRole("checkbox", { name: "Paper abstract" })).toBeChecked();
@@ -51,7 +51,7 @@ describe("source imports", () => {
     view(<ChatSourcePanel sources={rows} onClose={() => {}} embedded />, rows);
     await screen.findByRole("button", { name: "加入知识库" });
     expect(screen.getAllByRole("button", { name: /Same title/ })).toHaveLength(4);
-    expect(screen.queryByText(/展开 .* 个来源/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ 个来源$/)).not.toBeInTheDocument();
   });
   it("merges confirmed cross-provider identities and updates the reference count", async () => {
     const rows = [sources[0], { ...sources[1], url: "https://publisher.example/paper" }, sources[2]];
@@ -60,8 +60,8 @@ describe("source imports", () => {
     expect(api.inspectSources).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "参考来源 (3)" }));
     await screen.findByRole("button", { name: "参考来源 (2)" });
-    fireEvent.click(await screen.findByRole("button", { name: /展开 2 个来源/ }));
-    expect(screen.getByRole("link", { name: rows[1].url })).toHaveAttribute("href", rows[1].url);
+    fireEvent.click(await screen.findByRole("button", { name: /2 个来源/ }));
+    expect(screen.getByText(rows[1].url)).toBeInTheDocument();
   });
   it("keeps sources separate when inspection fails", async () => {
     vi.mocked(api.inspectSources).mockRejectedValue(new Error("unavailable"));
@@ -69,20 +69,26 @@ describe("source imports", () => {
     await screen.findByText("暂时无法检查文献是否可加入，请重新打开来源");
     expect(screen.getByRole("button", { name: /Paper abstract/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Paper PDF/ })).toBeInTheDocument();
-    expect(screen.queryByText(/展开 .* 个来源/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ 个来源$/)).not.toBeInTheDocument();
   });
-  it("groups before pagination and clamps the page after identities arrive", async () => {
-    const rows: ChatSource[] = Array.from({ length: 21 }, (_, i) => ({ source_type: "external", citation_id: String(i), title: `Source-${i}`, url: `https://example.com/${i}` }));
+  it("groups before paging four papers at a time and restores the page after viewing versions", async () => {
+    const rows: ChatSource[] = Array.from({ length: 9 }, (_, i) => ({ source_type: "external", citation_id: String(i), title: `Source-${i}`, url: `https://example.com/${i}` }));
     let resolveInspection!: (rows: api.InspectedSource[]) => void;
     vi.mocked(api.inspectSources).mockReturnValue(new Promise(resolve => { resolveInspection = resolve; }));
     view(<ChatSourcePanel sources={rows} onClose={() => {}} embedded />, rows);
-    fireEvent.click(screen.getByTitle("2"));
-    expect(screen.getByRole("button", { name: /Source-20/ })).toBeInTheDocument();
-    await act(async () => resolveInspection(rows.map((row, i) => ({ source_id: row.citation_id!, title: row.title!, url: row.url!, eligible: true, paper_key: i === 0 || i === 20 ? "arxiv:2210.03629" : `doi:10.1234/${i}` }))));
-    expect(screen.queryByTitle("2")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /展开 2 个来源/ }));
-    expect(screen.getByRole("link", { name: rows[20].url })).toHaveAttribute("href", rows[20].url);
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Source-\d/ })).toHaveLength(4);
+    fireEvent.click(screen.getByTitle("3"));
+    expect(screen.getAllByRole("button", { name: /Source-\d/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /Source-8/ })).toBeInTheDocument();
+    await act(async () => resolveInspection(rows.map((row, i) => ({ source_id: row.citation_id!, title: row.title!, url: row.url!, eligible: true, paper_key: i >= 7 ? "arxiv:2210.03629" : `doi:10.1234/${i}` }))));
+    expect(screen.queryByTitle("3")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Source-\d/ })).toHaveLength(4);
+    fireEvent.click(screen.getByRole("button", { name: /2 个来源.*Source-7/ }));
+    const versions = within(screen.getByRole("list", { name: "Source-7 的来源" }));
+    expect(versions.getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "返回来源列表" }));
+    expect(screen.getByRole("button", { name: /Source-7/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Source-0/ })).not.toBeInTheDocument();
   });
   it("keeps draft creation and cancellation free of writes", async () => {
     view(<ChatSourcePanel sources={[sources[0]]} onClose={() => {}} embedded />);
@@ -133,33 +139,39 @@ describe("source imports", () => {
     expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "加入知识库" })).not.toBeInTheDocument();
   });
-  it("shows only agent tool receipts in the execution result panel", async () => {
-    vi.mocked(api.listSourceImports).mockResolvedValue([{ item_id: "manual", batch_id: "batch", paper_key: "manual", title: "Manual import", target_dataset_id: "manual-kb", target_name: "Manual library", created_library: true, status: "added", stage: "done", retryable: false }]);
-    view(<ExecutionResults operations={[{ call_id: "a", action: "knowledge.create", status: "succeeded", items: [{ name: "Library", resource_ref: { kind: "knowledge_base", knowledge_base_id: "kb" }, resource_status: "created" }] }]} />);
-    expect(api.listSourceImports).not.toHaveBeenCalled();
-    expect(screen.getAllByRole("button", { name: "Agent 执行结果" })).toHaveLength(1);
-    expect(screen.queryByText("Library")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Agent 执行结果" }));
-    const panel = within(screen.getByRole("dialog", { name: "Agent 执行结果" }));
-    expect(panel.getByText("Library")).toBeInTheDocument();
-    expect(panel.queryByText("Manual import")).not.toBeInTheDocument();
-    expect(panel.queryByText("Manual library")).not.toBeInTheDocument();
+  it("shows when a cited source has no original link", async () => {
+    const rows: ChatSource[] = [{ source_type: "external", title: "Paper without URL", index: "10.1" }];
+    view(<ChatSourcePanel sources={rows} onClose={() => {}} embedded />, rows);
+    fireEvent.click(await screen.findByRole("button", { name: /Paper without URL/ }));
+    expect(screen.getByRole("button", { name: "暂无原文链接" })).toBeDisabled();
   });
   it("deduplicates versions without accepting unqualified PDFs", () => { expect(uniquePapers(inspected)).toHaveLength(1); });
-  it("adds PDF lookup results and preserves deselection across pages before submitting", async () => {
-    const many: ChatSource[] = Array.from({ length: 6 }, (_, i) => ({ source_type: "external", citation_id: String(i), title: `Paper-${i}`, url: `https://doi.org/10.1234/${i}` }));
-    const rows = many.map((row, i) => ({ source_id: row.citation_id!, title: row.title!, url: row.url!, eligible: true, paper_key: row.citation_id!, needs_pdf_lookup: i >= 4 }));
+  it("returns to the first page with PDF lookup results first and preserves deselection before submitting", async () => {
+    const many: ChatSource[] = Array.from({ length: 7 }, (_, i) => ({ source_type: "external", citation_id: String(i), title: `Paper-${i}`, url: `https://doi.org/10.1234/${i}` }));
+    const rows = many.map((row, i) => ({ source_id: row.citation_id!, title: row.title!, url: row.url!, eligible: true, paper_key: row.citation_id!, needs_pdf_lookup: i >= 5 }));
     vi.mocked(api.inspectSources).mockResolvedValue(rows);
-    vi.mocked(api.lookupSourcePDFs).mockResolvedValue([{ ...rows[4], needs_pdf_lookup: false }, rows[5]]);
+    let resolveLookup!: (results: api.InspectedSource[]) => void;
+    vi.mocked(api.lookupSourcePDFs).mockReturnValue(new Promise(resolve => { resolveLookup = resolve; }));
     vi.mocked(api.submitSourceImport).mockResolvedValue({ batch_id: "batch", target_dataset_id: "kb" });
     view(<ChatSourcePanel sources={many} onClose={() => {}} embedded />, many);
     fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
     const dialog = within(screen.getByRole("dialog", { name: "加入知识库" }));
+    expect(dialog.getByText("可入库论文 5 篇")).toBeInTheDocument();
     fireEvent.click(dialog.getByRole("checkbox", { name: "Paper-0" }));
-    fireEvent.click(dialog.getByRole("button", { name: "查找更多 PDF" }));
-    expect(await dialog.findByText(/累计补充 1 篇全文。.*1 篇未找到可用全文。/)).toBeInTheDocument();
-    expect(api.lookupSourcePDFs).toHaveBeenCalledWith({ conversation_id: "chat", history_id: "answer" }, ["4", "5"], expect.any(AbortSignal));
+    fireEvent.click(dialog.getByTitle("2"));
+    const lookup = dialog.getByRole("button", { name: "补查 PDF" });
+    fireEvent.click(lookup);
+    expect(lookup).toHaveTextContent("补查 PDF");
     expect(dialog.getByRole("checkbox", { name: "Paper-4" })).toBeChecked();
+    await act(async () => resolveLookup([{ ...rows[5], needs_pdf_lookup: false }, rows[6]]));
+    expect(await dialog.findByText(/本次找到 1 篇全文。.*1 篇未找到可用全文。/)).toBeInTheDocument();
+    expect(api.lookupSourcePDFs).toHaveBeenCalledWith({ conversation_id: "chat", history_id: "answer" }, ["5", "6"], expect.any(AbortSignal));
+    expect(dialog.getByText("可入库论文 6 篇")).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "补查 PDF" })).toBeDisabled();
+    const found = dialog.getByRole("checkbox", { name: "Paper-5" });
+    expect(dialog.getAllByRole("checkbox")[0]).toBe(found);
+    expect(found).toBeChecked();
+    expect(within(found.closest("li")!).getByText("补查")).toBeInTheDocument();
     expect(dialog.getByRole("checkbox", { name: "Paper-0" })).not.toBeChecked();
     fireEvent.click(dialog.getByTitle("2"));
     expect(dialog.getByRole("checkbox", { name: "Paper-3" })).toBeChecked();
@@ -168,8 +180,8 @@ describe("source imports", () => {
     expect(dialog.getByRole("checkbox", { name: "Paper-0" })).not.toBeChecked();
     fireEvent.click(dialog.getByRole("radio", { name: "新建论文集" }));
     fireEvent.change(dialog.getByLabelText("名称"), { target: { value: "Shared_papers" } });
-    fireEvent.click(dialog.getByRole("button", { name: "加入 3 篇" }));
-    await waitFor(() => expect(api.submitSourceImport).toHaveBeenCalledWith(expect.objectContaining({ source_ids: ["4", "1", "2"] })));
+    fireEvent.click(dialog.getByRole("button", { name: "加入 4 篇" }));
+    await waitFor(() => expect(api.submitSourceImport).toHaveBeenCalledWith(expect.objectContaining({ source_ids: ["5", "1", "2", "4"] })));
   });
   it("retries only failed items and restores persisted results", async () => {
     vi.mocked(api.listSourceImports).mockResolvedValue([
@@ -177,9 +189,8 @@ describe("source imports", () => {
       { item_id: "bad", batch_id: "batch", paper_key: "bad", title: "Failed", target_dataset_id: "kb", target_name: "Papers", created_library: false, status: "failed", stage: "download", retryable: true, error_message: "HTTP 404" },
     ]);
     vi.mocked(api.retrySourceImport).mockResolvedValue();
-    view(<><ExecutionResults /><ChatSourcePanel sources={sources} onClose={() => {}} /></>);
+    view(<ChatSourcePanel sources={sources} onClose={() => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: "入库记录" }));
-    expect(screen.queryByRole("button", { name: "Agent 执行结果" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "文献入库记录" })).toBeInTheDocument();
     expect(screen.getByText("HTTP 404")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "仅重试失败项" }));
@@ -196,12 +207,15 @@ describe("source imports", () => {
     view(<ChatSourcePanel sources={many} onClose={() => {}} embedded />, many);
     fireEvent.click(await screen.findByRole("button", { name: "加入知识库" }));
     const dialog = within(await screen.findByRole("dialog", { name: "加入知识库" }));
-    fireEvent.click(dialog.getByRole("button", { name: "查找更多 PDF" }));
-    expect(await dialog.findByText(/累计补充 4 篇全文。.*1 篇未找到可用全文。.*1 篇查询失败/)).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "补查 PDF" }));
+    expect(await dialog.findByText(/本次找到 4 篇全文。.*1 篇未找到可用全文。.*1 篇查询失败/)).toBeInTheDocument();
     expect(vi.mocked(api.lookupSourcePDFs).mock.calls.map(call => call[1])).toEqual([["0", "1", "2", "3"], ["4", "5"]]);
     expect(dialog.getByRole("checkbox", { name: "Lookup-0" })).toBeChecked();
-    fireEvent.click(dialog.getByRole("button", { name: "稍后重试失败项" }));
+    fireEvent.click(dialog.getByRole("button", { name: "补查 PDF" }));
     await waitFor(() => expect(api.lookupSourcePDFs).toHaveBeenLastCalledWith(expect.anything(), ["5"], expect.any(AbortSignal)));
+    expect(await dialog.findByText(/本次找到 0 篇全文。.*1 篇查询失败/)).toBeInTheDocument();
+    expect(dialog.queryByText(/未找到可用全文/)).not.toBeInTheDocument();
+    expect(dialog.getByRole("checkbox", { name: "Lookup-0" })).toBeChecked();
   });
 
 });

@@ -1031,7 +1031,7 @@ func run(ctx context.Context) error {
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
 	if capabilityRuntime.KnowledgeInternal != nil {
-		for _, action := range []string{"credential", "prepare", "status", "claim"} {
+		for _, action := range []string{"credential", "prepare", "status", "claim", "supersede"} {
 			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)
 		}
 		r.Handle("/internal/mcp/knowledge-management", capabilityRuntime.KnowledgeMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)

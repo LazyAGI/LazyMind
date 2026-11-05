@@ -44,8 +44,6 @@ export interface AskPending {
   /** Optional subtitle / description shown below the title */
   description?: string;
   user_env_delete?: { id: string; name: string; expected_updated_at: string };
-  knowledge_management?: { confirmation_id: string; arguments_digest: string; snapshot: string };
-  knowledge_management_preview?: Record<string, unknown>;
   env_input?: import("../EnvInputCard").EnvironmentInput;
   skill_ambiguity?: { requested_name: string; candidates: string[]; original_query: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
@@ -237,13 +235,9 @@ function formatAnswer(
   }
 }
 
-function previewText(value: unknown): string {
-  if (value == null) return "";
-  if (Array.isArray(value)) return value.map(previewText).filter(Boolean).join("\n");
-  if (typeof value === "object") {
-    return Object.entries(value).map(([key, entry]) => `${key}: ${previewText(entry)}`).join("; ");
-  }
-  return String(value);
+function hasConfirmationAnswer(answers: AnswerState[]) {
+  return answers.length === 1 && answers[0]?.type === "boolean" &&
+    (answers[0].value === "__ask_user_yes__" || answers[0].value === "__ask_user_no__");
 }
 
 function ChoiceLabel({ value }: { value: string }) {
@@ -293,16 +287,9 @@ function AskCardContent({
     description,
   } = askPending;
   const questions = normalizedAskQuestions(askPending, t);
-  const preview = askPending.knowledge_management_preview;
-  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "") || previewText(preview?.title);
-  const displayDescription = description || previewText(preview?.description);
-  const irreversible = previewText(preview?.impact).includes("删除后不可恢复");
-  const previewEntries = Object.entries(preview ?? {}).flatMap(([key, value]) => {
-    if (key === "title" || key === "description") return [];
-    const text = previewText(value);
-    return !text || text === displayTitle || text === displayDescription ? [] : [[key, text]];
-  });
   const total = questions.length;
+  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "");
+  const displayDescription = description;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
     questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i])),
@@ -311,22 +298,18 @@ function AskCardContent({
   const [submitted, setSubmitted] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [decisionFailed, setDecisionFailed] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<Record<number, AskAttachmentFile[]>>({});
   const attachmentRefs = useRef<Record<number, ImageUploadImperativeProps | null>>({});
   const submittingRef = useRef(false);
   const processed = answered || submitted;
   const isReadOnly = disabled || processed || submitting;
-  const isConfirmation = !!(askPending.knowledge_management || askPending.user_env_delete);
+  const isConfirmation = !!askPending.user_env_delete;
   const decision = answers[0]?.type === "boolean" ? answers[0].value : null;
   const statusLabel = t(isConfirmation && decision === "__ask_user_yes__"
     ? "chat.askCardConfirmed"
     : isConfirmation && decision === "__ask_user_no__"
       ? "chat.askCardCancelled" : "chat.askCardAnswered");
-  const needsConfirmation = !!(askPending.user_env_delete || askPending.knowledge_management) && !(
-    answers.length === 1 && answers[0]?.type === "boolean" &&
-    ["__ask_user_yes__", "__ask_user_no__"].includes(answers[0].value ?? "")
-  );
+  const needsConfirmation = isConfirmation && !hasConfirmationAnswer(answers);
 
   // Preserve the structured payload shape expected by the backend.
   const [customChoices] = useState<Record<number, string[]>>(() =>
@@ -382,16 +365,18 @@ function AskCardContent({
   };
 
   const handleSubmit = async () => {
-    if (isReadOnly || submittingRef.current || needsConfirmation) return;
-    const invalidIndex = questions.findIndex((question, index) => answerError(question, answers[index]!));
+    if (isReadOnly || submittingRef.current) return;
+    const submittedAnswers = answers;
+    if (isConfirmation && !hasConfirmationAnswer(submittedAnswers)) return;
+    const invalidIndex = questions.findIndex((question, index) => answerError(question, submittedAnswers[index]!));
     if (invalidIndex >= 0) { setCurrentIndex(invalidIndex); return; }
     if (questions.some((question, index) => !attachmentRequirementSatisfied(
-      question, answers[index]!, attachmentFiles[index] ?? [],
+      question, submittedAnswers[index]!, attachmentFiles[index] ?? [],
     ))) return;
     const lines = questions.map((q, i) =>
       formatAnswer(
         q,
-        answers[i]!,
+        submittedAnswers[i]!,
         customChoices[i] ?? q.choices ?? [],
         otherOption,
         answerSeparator,
@@ -407,23 +392,20 @@ function AskCardContent({
         type: q.type,
         choices: q.choices ?? [],
         custom_choices: customChoices[i] ?? q.choices ?? [],
-        answer: isAnswered(answers[i]!, otherOption) ? answers[i]! : null,
+        answer: isAnswered(submittedAnswers[i]!, otherOption) ? submittedAnswers[i]! : null,
       })),
     };
     submittingRef.current = true;
     setSubmitting(true);
-    setDecisionFailed(false);
     try {
       const files = questions.flatMap((question, index) => (
-        attachmentIsActive(question, answers[index]!)
+        attachmentIsActive(question, submittedAnswers[index]!)
           ? (attachmentFiles[index] ?? []).filter((file): file is RcFile & { uri: string } => Boolean(file.uri))
           : []
       ));
       const accepted = await onSubmit({ text: lines.join("\n"), structured, files });
       if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
-      if (accepted === false && askPending.knowledge_management) setDecisionFailed(true);
     } catch {
-      if (askPending.knowledge_management) setDecisionFailed(true);
       // Ordinary callers report their own request errors; keep the answer for retry.
     } finally {
       submittingRef.current = false;
@@ -457,7 +439,6 @@ function AskCardContent({
         </button>
       )}
       {(!processed || expanded) && <>
-      {decisionFailed && <p role="alert">{t("chat.knowledgeConfirmationFailed")}</p>}
       {/* Header */}
       <div className="ask-wizard__header">
         <div className="ask-wizard__header-top">
@@ -467,15 +448,6 @@ function AskCardContent({
             )}
             {displayDescription && (
               <p className="ask-wizard__description">{displayDescription}</p>
-            )}
-            {irreversible && <p role="alert"><strong>删除后不可恢复</strong></p>}
-            {previewEntries.length > 0 && (
-              <dl className="ask-wizard__knowledge-preview">
-                {previewEntries.map(([key, text]) => <div key={key}>
-                  <dt>{t(`chat.knowledgePreviewLabels.${key}`, { defaultValue: key.replaceAll("_", " ") })}</dt>
-                  <dd>{text}</dd>
-                </div>)}
-              </dl>
             )}
           </div>
           <div className="ask-wizard__meta">
@@ -759,7 +731,7 @@ function AskCardContent({
             !disabled && !processed && (
               <Button
                 type="primary"
-                onClick={handleSubmit}
+                onClick={() => handleSubmit()}
                 disabled={needsConfirmation || submitting || questions.some((question, index) =>
                   Boolean(answerError(question, answers[index]!)) || !attachmentRequirementSatisfied(
                     question, answers[index]!, attachmentFiles[index] ?? [],

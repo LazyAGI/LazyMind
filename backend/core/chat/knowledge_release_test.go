@@ -1,6 +1,9 @@
 package chat
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
@@ -14,7 +17,8 @@ func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
 		t.Fatalf("configs=%v", configs)
 	}
 	cfg := configs[0].(map[string]any)
-	if cfg["id"] != "lazymind-knowledge" || len(cfg["allowed_tools"].([]string)) != 10 {
+	tools := cfg["allowed_tools"].([]string)
+	if cfg["id"] != "lazymind-knowledge" || !slices.Contains(tools, "knowledge.paper.sources") || !slices.Contains(tools, "knowledge.paper.import") || !slices.Contains(tools, "knowledge.document.upload") {
 		t.Fatalf("config=%v", cfg)
 	}
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "false")

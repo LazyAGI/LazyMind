@@ -58,6 +58,33 @@ func TestAuthorSearchDownloadsMatchedPDFWithoutForwardingSearchKey(t *testing.T)
 	}
 }
 
+func TestPublishedPDFSearchRequiresPublisherPageWithMatchingDOI(t *testing.T) {
+	const title = "Reducing Transformer Key-Value Cache Size with Cross-Layer Attention"
+	const doi = "10.52202/079017-2758"
+	authorSearchFixture(t, 200, `{"items":[{"title":"`+title+`","url":"https://other.example/paper"},{"title":"`+title+`","url":"https://publisher.example/paper"}]}`)
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		switch r.URL.Host {
+		case "api.openalex.org":
+			return 200, `{"results":[]}`
+		case "other.example":
+			if r.URL.Path != "/paper" {
+				t.Error("downloaded PDF from a page with no DOI evidence")
+			}
+			return 200, `<meta name="citation_pdf_url" content="/paper.pdf">`
+		case "publisher.example":
+			if r.URL.Path == "/paper.pdf" {
+				return 206, "%PDF-1.7 test"
+			}
+			return 200, `<meta name="citation_doi" content="` + doi + `"><meta name="citation_pdf_url" content="/paper.pdf">`
+		}
+		return 404, ""
+	})
+	got := lookupPublishedPDF(context.WithValue(t.Context(), paperPDFClientKey{}, client), "u", doi, title)
+	if got.Candidate == nil || got.Candidate.URL != "https://publisher.example/paper.pdf" || got.Candidate.Version != "publishedVersion" {
+		t.Fatalf("publication not resolved: %+v", got)
+	}
+}
+
 func TestAuthorSearchRejectsUnrelatedTitleAndInsufficientIdentity(t *testing.T) {
 	m := paperlibrary.Metadata{Title: "Visual Text Features for Image Matching", Authors: []string{"Sam S. Tsai", "Huizhong Chen"}, Identifiers: paperlibrary.Identifiers{DOI: "10.1109/ISM.2012.84"}}
 	for _, result := range []publicPDFSearchResult{
