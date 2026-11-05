@@ -1033,6 +1033,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		TargetDatasetID   string               `json:"target_dataset_id"`
 		TargetPID         string               `json:"target_pid,omitempty"`
 		ResolveExternal   *bool                `json:"resolve_external,omitempty"`
+		VerifyReference   bool                 `json:"verify_reference,omitempty"`
 	}
 	if !parseJSON(r, &req) || req.TargetDatasetID == "" {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "target_dataset_id is required")
@@ -1046,7 +1047,13 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_REQUEST", "一次最多预览 500 条题录")
 		return
 	}
-	if req.LookupFulltext != nil && *req.LookupFulltext && strings.TrimSpace(req.Identifier) == "" && (len(req.WorkIDs) != 1 || len(req.Papers) > 0 || len(req.Works) > 0 || len(req.ReferenceIDs) > 0 || len(req.SourceDocumentIDs) > 0) {
+	if req.VerifyReference && (len(req.ReferenceIDs) != 1 || len(req.SourceDocumentIDs) > 0 || len(req.WorkIDs) > 0 || len(req.Works) > 0 || len(req.Papers) > 0 || req.Identifier != "") {
+		replyError(w, 400, "INVALID_REQUEST", "引用导入一次只能核对一条参考文献")
+		return
+	}
+	lookupSingleReference := req.VerifyReference && len(req.ReferenceIDs) == 1
+	lookupSingleWork := len(req.WorkIDs) == 1 && len(req.ReferenceIDs) == 0
+	if req.LookupFulltext != nil && *req.LookupFulltext && strings.TrimSpace(req.Identifier) == "" && (!lookupSingleReference && !lookupSingleWork || len(req.Papers) > 0 || len(req.Works) > 0 || len(req.SourceDocumentIDs) > 0) {
 		replyError(w, 400, "INVALID_REQUEST", "一次只能查找一篇文献的 PDF 来源")
 		return
 	}
@@ -1136,10 +1143,40 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 500, "REFERENCE_QUERY_FAILED", err.Error())
 			return
 		}
+		if req.VerifyReference && len(refs) != 1 {
+			replyError(w, 404, "REFERENCE_NOT_FOUND", "参考文献不存在")
+			return
+		}
 		resolvedInputs := map[string]WorkInput{}
 		explicitVersions := map[string]string{}
 		for index := range refs {
 			ref := &refs[index]
+			if req.VerifyReference {
+				sourceDatasetID, err := documentDataset(r.Context(), ref.SourceDocumentID)
+				if err != nil || !doc.HasDatasetPermission(r, sourceDatasetID, acl.PermissionDatasetRead) {
+					replyError(w, 403, "REFERENCE_FORBIDDEN", "参考文献不可访问")
+					return
+				}
+				input, err := verifiedCitationInput(r.Context(), ref)
+				if err != nil {
+					replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+					return
+				}
+				var work orm.AcademicWork
+				err = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+					var resolveErr error
+					work, resolveErr = saveVerifiedCitationResolution(r.Context(), tx, ref, input)
+					return resolveErr
+				})
+				if err != nil {
+					replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+					return
+				}
+				referenceMap[work.ID] = append(referenceMap[work.ID], ref.ID)
+				previewInputs[work.ID] = input
+				workIDs = append(workIDs, work.ID)
+				continue
+			}
 			var resolved orm.AcademicWork
 			if ref.ResolvedWorkID == "" || resolveExternal {
 				_, rawArxiv, version := extractStrongIDs(ref.RawText)
@@ -1276,6 +1313,11 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 				warnings = values
 			}
 		}
+		if req.VerifyReference {
+			// The work may predate this lookup. Use only the PDF URL from the
+			// verified citation response, not a stale shared-work provenance.
+			work.ProvenanceJSON = marshal(previewInputs[work.ID].Provenance)
+		}
 		candidates := candidatesForWork(work)
 		if req.LookupFulltext != nil && *req.LookupFulltext && strings.TrimSpace(req.Identifier) == "" && work.ArxivIDBase == "" && work.DOINormalized != "" {
 			found := lookupDOIPDF(r.Context(), work.DOINormalized)
@@ -1286,6 +1328,15 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			candidates = []FulltextCandidate{}
 			if found.Candidate != nil {
 				candidates = []FulltextCandidate{*found.Candidate}
+			} else if req.VerifyReference {
+				// An exact DOI search can miss a PDF already supplied by the
+				// verified OpenAlex record. Retain only that source-bound URL.
+				input := previewInputs[work.ID]
+				openAlexURL, _ := input.Provenance["pdf_url"].(string)
+				if input.Provider == "openalex" && openAlexURL != "" {
+					work.ProvenanceJSON = marshal(input.Provenance)
+					candidates = candidatesForWork(work)
+				}
 			}
 		}
 		if work.ArxivIDBase != "" && expansion == nil {

@@ -10,12 +10,15 @@ import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
 import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
+import { message } from "antd";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { PdfCitationLayer } from "./PdfCitationLayer";
 import { restorePdfLinkAnnotationBorders } from "./pdfNativeLinkBorders";
 import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
 import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
+import { addCitationToPaperLibrary } from "@/modules/knowledge/api/academicReferences";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
 import {pdfNoteHighlightBackground,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
@@ -279,6 +282,20 @@ export default function RenderPdf({
   const referenceHoverTimer = useRef<number | undefined>(undefined);
   const referenceHoverCloseTimer = useRef<number | undefined>(undefined);
   const citationTargets = useMemo(() => groupPdfCitationTargets(referenceActions), [referenceActions]);
+  const citationDatasetId = pdfIRTarget?.dataset;
+  const canAddCitationToLibrary = Boolean(citationDatasetId && pdfIRTarget?.document && pdfIRTarget.canWrite !== false);
+  const addCitation = useCallback(async (target: PdfCitationTarget) => {
+    if (!citationDatasetId || !canAddCitationToLibrary) return;
+    const key = `citation-library:${citationDatasetId}:${target.referenceId}`;
+    message.open({ key, type: "loading", content: t("pdfCitation.addStarted"), duration: 0 });
+    try {
+      const result = await addCitationToPaperLibrary(citationDatasetId, target.referenceId);
+      message.open({ key, type: "success", content: t(result.status === "pending" ? "pdfCitation.addSucceeded" : "pdfCitation.addedToLibrary"), duration: 3 });
+    } catch (error) {
+      message.open({ key, type: "error", content: getImportErrorMessage(error, t("pdfCitation.addFailed")), duration: 5 });
+      throw error;
+    }
+  }, [citationDatasetId, canAddCitationToLibrary, t]);
   const [citationPreview, setCitationPreview] = useState<{source: RenderPdfProps["fileData"]; cache: ReturnType<typeof createPdfCitationPreviewCache>}>();
   useEffect(() => {
     const cache = createPdfCitationPreviewCache();
@@ -1059,7 +1076,7 @@ export default function RenderPdf({
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
           return valid ? {left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`} : {inset:3,background:"transparent"};
         })()} />}
-        {citationTargets.length > 0 && citationPreview?.source === fileData && <PdfCitationLayer targets={citationTargets} getDocument={getCitationDocument} previewCache={citationPreview.cache} onNavigate={navigateCitation} sourceKey={fileData}/>}
+        {citationTargets.length > 0 && citationPreview?.source === fileData && <PdfCitationLayer targets={citationTargets} getDocument={getCitationDocument} previewCache={citationPreview.cache} onNavigate={navigateCitation} onAddToLibrary={canAddCitationToLibrary ? addCitation : undefined} sourceKey={fileData}/>}
         {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} onExplain={explainFormula} />}
         {formulaDocument && <PdfFigureLayer blocks={imageBlocks.filter(block=>block.page===index)} allBlocks={formulaDocument.blocks} onSelect={openVisualStudy}/> }
         {tablesEnabled && formulaDocument && tablePages.has(index) && <PdfTableLayer key={`tables:${studySourceKey}`} blocks={tablePages.get(index)!} onSelect={pdfIRTarget?openVisualStudy:openTableStudy} />}

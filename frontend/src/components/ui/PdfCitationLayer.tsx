@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { citationAtPoint, citationForPointerActivation, citationOccurrences, type PdfCitationTarget } from "./pdfCitationReferences";
 import type { createPdfCitationPreviewCache, PdfCitationPreview, PdfCitationPreviewDocument } from "./pdfCitationPreview";
+import type { PdfCitationRegion } from "./pdfReferenceGeometry";
+import { createNativeCitationPageResolver, createNativeCitationResolver, type NativeCitationDocument } from "./pdfNativeCitationResolver";
 import "./PdfCitationLayer.css";
 
 interface Props {
@@ -10,6 +12,7 @@ interface Props {
   getDocument: () => PdfCitationPreviewDocument | undefined;
   previewCache: ReturnType<typeof createPdfCitationPreviewCache>;
   onNavigate: (target: PdfCitationTarget) => void;
+  onAddToLibrary?: (target: PdfCitationTarget) => Promise<void>;
   sourceKey?: unknown;
 }
 type Occurrence = ReturnType<typeof citationOccurrences>[number];
@@ -29,7 +32,7 @@ function pageLocalOccurrences(page: HTMLElement, targets: PdfCitationTarget[]): 
   }));
 }
 
-export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigate, sourceKey }: Props) {
+export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigate, onAddToLibrary, sourceKey }: Props) {
   const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLDivElement>(null);
@@ -40,15 +43,20 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
   const [loading, setLoading] = useState(false);
   const [position, setPosition] = useState({ left: 8, top: 8 });
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const [pendingReferences, setPendingReferences] = useState<Set<string>>(() => new Set());
+  const pendingAdds = useRef(new Set<string>());
+  const [addedReferences, setAddedReferences] = useState<Set<string>>(() => new Set());
   const openTimer = useRef<ReturnType<typeof setTimeout>>();
   const closeTimer = useRef<ReturnType<typeof setTimeout>>();
   const request = useRef(0);
+  const previewRegion = useRef<{ referenceId: string; region: PdfCitationRegion }>();
   const pointerInCard = useRef(false);
   const cancelClose = useCallback(() => clearTimeout(closeTimer.current), []);
   const close = useCallback(() => {
     clearTimeout(openTimer.current);
     clearTimeout(closeTimer.current);
     request.current++;
+    previewRegion.current = undefined;
     opener.current = undefined;
     pointerInCard.current = false;
     setActive(undefined);
@@ -62,23 +70,52 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
       closeTimer.current = setTimeout(close, 250);
     }
   }, [cancelClose, close]);
-  const open = useCallback((target: PdfCitationTarget, x: number, y: number, keyboardOpener?: HTMLButtonElement) => {
+  const open = useCallback((target: PdfCitationTarget, x: number, y: number, keyboardOpener?: HTMLButtonElement, destinationPage?: number) => {
     cancelClose();
     const token = ++request.current;
+    const openedTarget = destinationPage ? { ...target, fallbackPage: destinationPage } : target;
+    previewRegion.current = undefined;
     opener.current = keyboardOpener ? { token, element: keyboardOpener } : undefined;
-    setActive(target);
+    setActive(openedTarget);
     setPreview(undefined);
     setPosition({ left: Math.max(8, Math.min(x, window.innerWidth - 392)), top: Math.max(8, Math.min(y + 12, window.innerHeight - 320)) });
     const pdf = getDocument();
-    setLoading(!!pdf && !!target.regions.length);
+    // A missing stored bbox can still be recovered from the PDF text layer.
+    setLoading(!!pdf);
     if (!pdf) return;
-    void previewCache.get(pdf, target).then(value => {
-      if (request.current === token) { setPreview(value); setLoading(false); }
+    void previewCache.get(pdf, openedTarget).then(value => {
+      if (request.current === token) {
+        previewRegion.current = value?.region ? { referenceId: target.referenceId, region: value.region } : undefined;
+        setPreview(value);
+        setLoading(false);
+      }
     }, () => {
       if (request.current === token) setLoading(false);
     });
   }, [cancelClose, getDocument, previewCache]);
-  const navigate = useCallback((target: PdfCitationTarget) => { close(); onNavigate(target); }, [close, onNavigate]);
+  const navigate = useCallback((target: PdfCitationTarget) => {
+    const region = previewRegion.current?.referenceId === target.referenceId ? previewRegion.current.region : undefined;
+    close();
+    onNavigate(region ? { ...target, fallbackPage: region.page, regions: [region] } : target);
+  }, [close, onNavigate]);
+  const addToLibrary = useCallback(async (target: PdfCitationTarget) => {
+    if (!onAddToLibrary || pendingAdds.current.has(target.referenceId) || addedReferences.has(target.referenceId)) return;
+    pendingAdds.current.add(target.referenceId);
+    setPendingReferences(previous => new Set(previous).add(target.referenceId));
+    try {
+      await onAddToLibrary(target);
+      setAddedReferences(previous => new Set(previous).add(target.referenceId));
+    } catch {
+      // The caller reports the server error; keep this action available to retry.
+    } finally {
+      pendingAdds.current.delete(target.referenceId);
+      setPendingReferences(previous => {
+        const next = new Set(previous);
+        next.delete(target.referenceId);
+        return next;
+      });
+    }
+  }, [onAddToLibrary, addedReferences]);
   const dismiss = useCallback(() => {
     const currentOpener = card.current && opener.current?.token === request.current ? opener.current.element : undefined;
     close();
@@ -95,9 +132,17 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
     close();
     const page = root.current?.parentElement;
     if (!page) return;
-    let hovered: PdfCitationTarget | undefined;
+    let alive = true;
+    let hovered: PdfCitationTarget | string | undefined;
     let pointerStart: { x: number; y: number } | undefined;
     const targetsByKey = new Map(targets.map(target => [target.referenceKey, target]));
+    const pageIndex = Number(page.closest<HTMLElement>("[data-pdf-page-index]")?.dataset.pdfPageIndex);
+    const pdf = getDocument() as (PdfCitationPreviewDocument & Partial<NativeCitationDocument>) | undefined;
+    const resolveNative = Number.isInteger(pageIndex) && pageIndex >= 0
+      && pdf && typeof pdf.getDestination === "function" && typeof pdf.getPageIndex === "function"
+      ? createNativeCitationResolver(pdf as NativeCitationDocument, pageIndex + 1, targets)
+      : undefined;
+    let resolveNativePage: ReturnType<typeof createNativeCitationPageResolver> | undefined;
     const resolveOccurrences = () => setOccurrences(pageLocalOccurrences(page, targets));
     resolveOccurrences();
     const observer = new MutationObserver(mutations => {
@@ -117,6 +162,37 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
       const nativeKey = nativeLink?.getAttribute("title")?.trim();
       const nativeHit = greenLink && nativeKey && /^\d{1,4}$/.test(nativeKey) ? targetsByKey.get(String(Number(nativeKey))) : undefined;
       const hit = nativeHit || citationAtPoint(page, targets, event.clientX, event.clientY);
+      const nativeId = greenLink && nativeLink?.getAttribute("data-element-id");
+      if (nativeHit && !nativeHit.regions.length && nativeId && resolveNative) {
+        cancelClose();
+        if (hovered !== nativeHit) {
+          hovered = nativeHit;
+          clearTimeout(openTimer.current);
+          const { clientX, clientY } = event;
+          openTimer.current = setTimeout(() => {
+            resolveNativePage ??= createNativeCitationPageResolver(pdf as NativeCitationDocument, pageIndex + 1);
+            void resolveNativePage(nativeId).then(destinationPage => {
+              if (alive && hovered === nativeHit) open(nativeHit, clientX, clientY, undefined, destinationPage);
+            });
+          }, 300);
+        }
+        return;
+      }
+      if (!hit && nativeId && resolveNative) {
+        if (hovered !== nativeId) {
+          close();
+          hovered = nativeId;
+          const { clientX, clientY } = event;
+          openTimer.current = setTimeout(() => {
+            void resolveNative(nativeId).then(target => {
+              if (!alive || hovered !== nativeId) return;
+              if (target) open(target, clientX, clientY);
+              else scheduleClose();
+            });
+          }, 300);
+        }
+        return;
+      }
       if (!hit) { hovered = undefined; scheduleClose(); return; }
       cancelClose();
       if (hovered !== hit) {
@@ -146,6 +222,7 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
     window.addEventListener("scroll", scroll, true);
     window.addEventListener("resize", resize);
     return () => {
+      alive = false;
       request.current++;
       opener.current = undefined;
       clearTimeout(openTimer.current);
@@ -163,6 +240,8 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
     };
   }, [targets, sourceKey, open, close, scheduleClose, cancelClose, navigate, dismiss]);
 
+  const numbered = active && /^\d{1,4}$/.test(active.referenceKey) ? active.referenceKey : undefined;
+  const canNavigate = Boolean(active && (active.regions.length || active.fallbackPage || preview?.region));
   return <div ref={root} className="pdf-citation-layer">
     {occurrences.map((hit, index) => {
       const rect = hit.rects[0];
@@ -185,14 +264,17 @@ export function PdfCitationLayer({ targets, getDocument, previewCache, onNavigat
           if (event.key === "ArrowDown") { event.preventDefault(); card.current?.querySelector("button")?.focus(); }
         }} onClick={() => { const current = resolve(); if (current) navigate(current.target); }}/>;
     })}
-    {active && createPortal(<div ref={card} className="pdf-citation-card" role="dialog" aria-label={t("pdfCitation.title", { number: active.referenceKey })} style={position}
+    {active && createPortal(<div ref={card} className="pdf-citation-card" role="dialog" aria-label={numbered ? t("pdfCitation.title", { number: numbered }) : t("pdfCitation.unnumberedTitle")} style={position}
       onMouseUp={event => event.stopPropagation()}
       onPointerEnter={() => { pointerInCard.current = true; cancelClose(); }} onPointerLeave={() => { pointerInCard.current = false; scheduleClose(); }}
       onFocus={cancelClose} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) scheduleClose(); }}>
-      <div className="pdf-citation-heading"><strong>{t("pdfCitation.title", { number: active.referenceKey })}</strong><button aria-label={t("pdfCitation.close")} onClick={dismiss}>×</button></div>
+      <div className="pdf-citation-heading"><strong>{numbered ? t("pdfCitation.title", { number: numbered }) : t("pdfCitation.unnumberedTitle")}</strong><button aria-label={t("pdfCitation.close")} onClick={dismiss}>×</button></div>
       <p className="pdf-citation-raw">{active.rawText}</p>
-      {preview ? <img className="pdf-citation-preview" src={preview.url} width={preview.width} height={preview.height} alt={t("pdfCitation.image", { number: active.referenceKey })}/> : <div className="pdf-citation-placeholder" role="status">{t(loading ? "pdfCitation.loading" : "pdfCitation.unavailable")}</div>}
-      <div className="pdf-citation-footer"><button onClick={() => navigate(active)}>{t("pdfCitation.jump", { number: active.referenceKey })}</button></div>
+      {preview ? <img className="pdf-citation-preview" src={preview.url} width={preview.width} height={preview.height} alt={numbered ? t("pdfCitation.image", { number: numbered }) : t("pdfCitation.unnumberedImage")}/> : <div className="pdf-citation-placeholder" role="status">{t(loading ? "pdfCitation.loading" : "pdfCitation.unavailable")}</div>}
+      <div className="pdf-citation-footer">
+        {onAddToLibrary && <button type="button" className="pdf-citation-add" disabled={pendingReferences.has(active.referenceId) || addedReferences.has(active.referenceId)} onClick={event => { event.stopPropagation(); void addToLibrary(active); }}>{t(addedReferences.has(active.referenceId) ? "pdfCitation.addedToLibrary" : pendingReferences.has(active.referenceId) ? "pdfCitation.addingToLibrary" : "pdfCitation.addToLibrary")}</button>}
+        <button type="button" disabled={!canNavigate} onClick={() => navigate(active)}>{numbered ? t("pdfCitation.jump", { number: numbered }) : t("pdfCitation.unnumberedJump")}</button>
+      </div>
     </div>, document.body)}
   </div>;
 }
