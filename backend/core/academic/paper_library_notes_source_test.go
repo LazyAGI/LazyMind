@@ -157,8 +157,12 @@ func TestLibraryNotesReadWithoutProcessingStatus(t *testing.T) {
 	}
 	var response struct {
 		Data struct {
-			Papers      []struct{ ID string `json:"id"` } `json:"papers"`
-			Attachments []struct{ ID string `json:"id"` } `json:"attachments"`
+			Papers []struct {
+				ID string `json:"id"`
+			} `json:"papers"`
+			Attachments []struct {
+				ID string `json:"id"`
+			} `json:"attachments"`
 		} `json:"data"`
 		CanWrite bool `json:"can_write"`
 	}
