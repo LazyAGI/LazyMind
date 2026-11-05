@@ -65,15 +65,6 @@ export function useSupplierOrder<T extends OrderedSupplier>(suppliers: readonly 
       return { ...current, scope, ids, hidden: current.scope === scope ? current.hidden : readOrder(hiddenKey(scope)) };
     });
   };
-  const promote = (id: string) => {
-    if (storageKey() !== scope || !suppliers.some(item => item.id === id)) return;
-    setSaved(current => {
-      const ordered = orderSuppliers(suppliers, current.scope === scope ? current.ids : readOrder(scope));
-      const ids = [id, ...ordered.map(item => item.id).filter(item => item !== id)];
-      if (scope) { try { localStorage.setItem(scope, JSON.stringify(ids)); } catch { /* Session fallback. */ } }
-      return { scope, ids, hidden: current.scope === scope ? current.hidden : readOrder(hiddenKey(scope)) };
-    });
-  };
   const setHidden = (id: string, hide: boolean) => {
     if (storageKey() !== scope || !suppliers.some(item => item.id === id)) return;
     setSaved(current => {
@@ -83,7 +74,7 @@ export function useSupplierOrder<T extends OrderedSupplier>(suppliers: readonly 
       return { scope, ids: current.scope === scope ? current.ids : readOrder(scope), hidden };
     });
   };
-  return { providers, reorder, promote, hiddenIds: saved.scope === scope ? saved.hidden : readOrder(hiddenKey(scope)),
+  return { providers, reorder, hiddenIds: saved.scope === scope ? saved.hidden : readOrder(hiddenKey(scope)),
     hide: (id: string) => setHidden(id, true), restore: (id: string) => setHidden(id, false), scope };
 
 }

@@ -108,7 +108,6 @@ interface Props {
     isCurrent: () => boolean,
   ) => Promise<void>;
   cloudContent: ReactNode;
-  verificationEvent?: { providerId: string; account: string | null; sequence: number };
 }
 
 function Logo({ provider }: { provider: ProviderOption }) {
@@ -211,16 +210,7 @@ export function ProviderWorkspace(props: Props) {
     [props.providers, props.configuredProviders],
   );
   const projectedNavigation = useMemo(() => projectSupplierNavigation(mergedProviders), [mergedProviders]);
-  const { providers: navigation, reorder: reorderSuppliers, promote, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
-  const lastVerification = useRef<Props["verificationEvent"]>();
-  useEffect(() => {
-    const event = props.verificationEvent;
-    if (!event || event === lastVerification.current) return;
-    lastVerification.current = event;
-    if (event.account !== localStorage.getItem("lazymind:user")) return;
-    const node = navigation.find(item => item.children.some(child => child.id === event.providerId));
-    if (node) promote(node.id);
-  }, [props.verificationEvent, navigation, promote]);
+  const { providers: navigation, reorder: reorderSuppliers, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
   const providers = useMemo(() => navigation.flatMap((node) => node.children), [navigation]);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
