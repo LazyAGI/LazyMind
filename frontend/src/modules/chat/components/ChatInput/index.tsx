@@ -38,7 +38,7 @@ import ImageUpload, {
 } from "../ImageUpload";
 import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import { useChatInputStore } from "@/modules/chat/store/chatInput";
+import { NEW_CHAT_INPUT_DRAFT_KEY, useChatInputStore } from "@/modules/chat/store/chatInput";
 import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 import { getRuntimeMode, isLocalLikeRuntimeMode } from "@/runtime/mode";
 
@@ -140,7 +140,8 @@ import {
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
-import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT } from "@/modules/chat/constants/chat";
+import { CHAT_SUBMIT_INPUT_EVENT, CHAT_CAPTURE_MODE_DRAFT_EVENT, CHAT_SELECT_CONVERSATION_EVENT, selectChatConversationFilter } from "@/modules/chat/constants/chat";
+import type { ShowcaseEntryType } from "@/modules/showcase/classification";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -817,6 +818,28 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       uri: file.uri, filename: file.name,
     }))], value);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
+
+    useEffect(() => {
+      if (props.transferredDraft) textAreaRef.current?.focusAtEnd();
+    }, [props.transferredDraft]);
+
+    const handleCapabilityModeChange = useCallback((entryType: ShowcaseEntryType, draft: {
+      text: string;
+      mentions: ChatMention[];
+      featuredSelection: { caseId: string };
+    }) => {
+      const modeDraft = { ...draft, files: composerFiles.filter(file =>
+        file.id.startsWith('upload:') && Boolean(file.input?.uri)
+        || draft.mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id),
+      ) };
+      useChatInputStore.getState().setModeDraft(modeDraft);
+      useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, draft.text, draft.mentions);
+      sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
+      selectChatConversationFilter(entryType === 'work' ? 'task' : 'normal');
+      window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+        detail: { conversationId: '', runInBackground: entryType === 'work', source: 'mention' },
+      }));
+    }, [composerFiles]);
     // Keep synchronous mode-switch capture aligned with the committed composer.
     // Async uploads can commit before passive effects update the old listener.
     useLayoutEffect(() => {
@@ -824,12 +847,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         const detail = (event as CustomEvent).detail;
         if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
           || !innerRef.current?.getClientRects().length) return;
-        detail.draft = { text: value, mentions: [...mentions], featuredSelection: useFeaturedSelectionStore.getState().selections[sessionId || "new"], files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
+        const capabilityBindings = [...boundMentions, ...featuredMentions].filter(mention => mention.type === 'skill' || mention.type === 'workflow');
+        const draft = textAreaRef.current?.getDraftWithoutMentions(capabilityBindings) ?? { text: value, mentions: [...mentions] };
+        detail.draft = { ...draft, files: composerFiles.filter(file => file.id.startsWith('upload:') && Boolean(file.input?.uri) || draft.mentions.some(mention => mention.type === 'file' && mention.resource_id === file.id)) };
         useChatInputStore.getState().setModeDraft(detail.draft);
+        useChatInputStore.getState().saveInputContent(NEW_CHAT_INPUT_DRAFT_KEY, draft.text, draft.mentions);
       };
       window.addEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
       return () => window.removeEventListener(CHAT_CAPTURE_MODE_DRAFT_EVENT, transferDraft, true);
-    }, [runInBackground, value, mentions, composerFiles, sessionId, allowMentions, allowLocalWorkspace]);
+    }, [runInBackground, value, mentions, composerFiles, boundMentions, featuredMentions, allowMentions, allowLocalWorkspace]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
     const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
@@ -940,7 +966,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       ],
     );
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       if (draftRef.current.sessionId === inputDraftKey && draftRef.current.content !== value) {
         draftRef.current = { sessionId: inputDraftKey, content: value, mentions: [] };
       }
@@ -1566,6 +1592,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 conversationId={sessionId}
                 fileCandidates={composerFiles}
                 onQueryOpen={() => setActiveMenu(null)}
+                onEntryModeChange={allowMentions && allowLocalWorkspace ? handleCapabilityModeChange : undefined}
+                entryModeSwitchDisabled={isUploading}
                 initialMentions={inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : props.transferredDraft?.mentions}
                 placeholder={placeholder || t(allowMentions
                   ? "chat.inputPlaceholder"

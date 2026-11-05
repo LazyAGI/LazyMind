@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { message } from "antd";
+import { message, Modal } from "antd";
 import {
   AppstoreOutlined,
   BulbOutlined,
@@ -20,6 +20,8 @@ import {
 } from "@ant-design/icons";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { listSkillAssetsPage } from "@/modules/memory/skillApi";
+import { listShowcaseCases } from "@/modules/showcase/api";
+import { showcaseEntryType, type ShowcaseEntryType } from "@/modules/showcase/classification";
 import {
   ChatServiceApi,
   KnowledgeBaseServiceApi,
@@ -50,6 +52,7 @@ type Candidate = {
   type: CandidateType;
   name: string;
   description?: string;
+  originBuiltinSkillUid?: string;
   content?: string;
   disabled?: boolean;
   disabledReason?: string;
@@ -72,7 +75,9 @@ type MenuPlacement = {
 
 export interface MentionEditorRef {
   focus: () => void;
+  focusAtEnd: () => void;
   getMentions: () => ChatMention[];
+  getDraftWithoutMentions: (excluded: ChatMention[]) => { text: string; mentions: ChatMention[] } | undefined;
   setPlainText: (value: string) => void;
 }
 
@@ -210,7 +215,7 @@ async function loadCandidates(type: CandidateType, keyword: string, runInBackgro
   }
   if (type === "skill") {
     const response = await listSkillAssetsPage({ keyword, page: 1, pageSize: 100 });
-    return response.records.map((item) => ({ id: item.id, type, name: item.name, description: item.description }));
+    return response.records.map((item) => ({ id: item.id, type, name: item.name, description: item.description, originBuiltinSkillUid: item.originBuiltinSkillUid }));
   }
   if (type === "workflow") {
     const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/workflows`, { params: { keyword } });
@@ -272,6 +277,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   conversationId?: string;
   fileCandidates?: Array<{ id: string; name: string; disabled?: boolean }>;
   onQueryOpen?: () => void;
+  entryModeSwitchDisabled?: boolean;
+  onEntryModeChange?: (entryType: ShowcaseEntryType, draft: {
+    text: string;
+    mentions: ChatMention[];
+    featuredSelection: { caseId: string };
+  }) => void;
 }>(({
   value,
   initialMentions,
@@ -289,6 +300,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   conversationId,
   fileCandidates = EMPTY_FILES,
   onQueryOpen,
+  entryModeSwitchDisabled,
+  onEntryModeChange,
 }, ref) => {
   const { t } = useTranslation();
   const menuId = useId();
@@ -311,6 +324,15 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const [loading, setLoading] = useState(false);
   const [conversationPage, setConversationPage] = useState({ token: "", loading: false, error: false });
   const pageRequestRef = useRef<AbortController | null>(null);
+  const selectionRequestRef = useRef<AbortController | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [pendingCapability, setPendingCapability] = useState<{
+    candidate: Candidate;
+    query: QueryState;
+    html: string;
+    entryType: ShowcaseEntryType;
+    caseId: string;
+  } | null>(null);
   const [menuPlacement, setMenuPlacement] = useState<MenuPlacement>({
     direction: "above",
     height: MENU_MAX_HEIGHT,
@@ -318,6 +340,9 @@ const MentionEditor = forwardRef<MentionEditorRef, {
 
   const closeMenu = useCallback(() => {
     requestRef.current += 1;
+    selectionRequestRef.current?.abort();
+    selectionRequestRef.current = null;
+    setSelecting(false);
     pageRequestRef.current?.abort();
     pageRequestRef.current = null;
     queryRef.current = null;
@@ -370,7 +395,26 @@ const MentionEditor = forwardRef<MentionEditorRef, {
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
+    focusAtEnd: () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+      const caret = document.createRange();
+      caret.selectNodeContents(editor);
+      caret.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(caret);
+    },
     getMentions: () => allowMentions && editorRef.current ? serializeEditor(editorRef.current).mentions : [],
+    getDraftWithoutMentions: (excluded) => {
+      const editor = editorRef.current?.cloneNode(true) as HTMLElement | undefined;
+      if (!editor) return;
+      editor.querySelectorAll<HTMLElement>('.chat-mention-chip').forEach(chip => {
+        if (excluded.some(mention => mention.type === chip.dataset.mentionType && mention.resource_id === chip.dataset.resourceId)) chip.remove();
+      });
+      return serializeEditor(editor);
+    },
     setPlainText: (text) => {
       if (!editorRef.current) return;
       editorRef.current.textContent = text;
@@ -414,7 +458,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   useEffect(() => {
     closeMenu();
     candidateCache.current.clear();
-  }, [closeMenu, runInBackground, conversationId]);
+    setPendingCapability(null);
+    return () => {
+      queryRef.current = null;
+      selectionRequestRef.current?.abort();
+    };
+  }, [closeMenu, runInBackground, conversationId, disabled]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -536,10 +585,41 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     candidate.disabled || Boolean(getDisabledReason(candidate))
   ), [getDisabledReason]);
 
-  const insertCandidate = useCallback((candidate: Candidate) => {
+  const commitCandidate = useCallback((candidate: Candidate, currentQuery: QueryState, switchTo?: { entryType: ShowcaseEntryType; caseId: string }) => {
+    const editor = editorRef.current;
+    if (!editor || !editor.contains(currentQuery.range.startContainer)) return;
+    const selection = window.getSelection();
+    currentQuery.range.deleteContents();
+    const mention: ChatMention = {
+      mention_id: crypto.randomUUID(),
+      type: candidate.type,
+      resource_id: candidate.id,
+      display_name: candidate.name,
+    };
+    const holder = document.createElement("span");
+    holder.innerHTML = mentionHtml(mention, t("chat.removeMention"));
+    const chip = holder.firstChild!;
+    const spacer = holder.lastChild!;
+    currentQuery.range.insertNode(spacer);
+    currentQuery.range.insertNode(chip);
+    const caret = document.createRange();
+    caret.setStartAfter(spacer);
+    caret.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(caret);
+    closeMenu();
+    if (switchTo && onEntryModeChange) {
+      onEntryModeChange(switchTo.entryType, { ...serializeEditor(editor), featuredSelection: { caseId: switchTo.caseId } });
+    } else {
+      emit();
+      editor.focus();
+    }
+  }, [closeMenu, emit, onEntryModeChange, t]);
+
+  const insertCandidate = useCallback(async (candidate: Candidate) => {
     const editor = editorRef.current;
     const currentQuery = queryRef.current;
-    if (!editor || !currentQuery) return;
+    if (!editor || !currentQuery || selectionRequestRef.current) return;
     const candidateDisabledReason = getDisabledReason(candidate);
     if (candidate.disabled || candidateDisabledReason) {
       message.info(candidateDisabledReason || "该能力已停用");
@@ -552,29 +632,37 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       message.warning(t("chat.mentionSingleWorkflowOnly"));
       return;
     }
-    const selection = window.getSelection();
-    currentQuery.range.deleteContents();
-      const mention: ChatMention = {
-        mention_id: crypto.randomUUID(),
-        type: candidate.type,
-        resource_id: candidate.id,
-        display_name: candidate.name,
-      };
-      const holder = document.createElement("span");
-      holder.innerHTML = mentionHtml(mention, t("chat.removeMention"));
-      const chip = holder.firstChild!;
-      const spacer = holder.lastChild!;
-      currentQuery.range.insertNode(spacer);
-      currentQuery.range.insertNode(chip);
-      const caret = document.createRange();
-      caret.setStartAfter(spacer);
-      caret.collapse(true);
-      selection?.removeAllRanges();
-      selection?.addRange(caret);
-    closeMenu();
-    emit();
-    editor.focus();
-  }, [closeMenu, emit, getDisabledReason, t]);
+    if (onEntryModeChange && (candidate.type === "skill" || candidate.type === "workflow")) {
+      const controller = new AbortController();
+      selectionRequestRef.current = controller;
+      setSelecting(true);
+      const html = editor.innerHTML;
+      try {
+        const { cases = [] } = await listShowcaseCases({}, { signal: controller.signal });
+        if (controller.signal.aborted || queryRef.current !== currentQuery || editor.innerHTML !== html) return;
+        const item = cases.find(item => item.type !== "page" && (candidate.type === "workflow"
+          ? item.workflow_ref === candidate.id
+          : Boolean(candidate.originBuiltinSkillUid) && item.builtin_skill_uid === candidate.originBuiltinSkillUid));
+        if (item) {
+          const entryType = showcaseEntryType(item.type);
+          if ((entryType === "work") !== runInBackground) {
+            closeMenu();
+            setPendingCapability({ candidate, query: currentQuery, html, entryType, caseId: item.id });
+            return;
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted && queryRef.current === currentQuery) message.error(t("chat.mentionLoadFailed"));
+        return;
+      } finally {
+        if (selectionRequestRef.current === controller) {
+          selectionRequestRef.current = null;
+          setSelecting(false);
+        }
+      }
+    }
+    commitCandidate(candidate, currentQuery);
+  }, [closeMenu, commitCandidate, getDisabledReason, onEntryModeChange, runInBackground, t]);
 
   const removeChip = (chip: HTMLElement) => {
     const parent = chip.parentNode;
@@ -637,6 +725,10 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         onCompositionEnd={() => { composingRef.current = false; onCompositionChange(false); refreshQuery(); }}
         onPaste={onPaste}
         onKeyDown={(event) => {
+          if (selecting || pendingCapability) {
+            event.preventDefault();
+            return;
+          }
           if (isImeComposingEvent(event)) {
             return;
           }
@@ -675,7 +767,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           id={menuId}
           className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}`}
           role="listbox"
-          aria-busy={loading || conversationPage.loading}
+          aria-busy={loading || selecting || conversationPage.loading}
           style={{ height: menuPlacement.height }}
           onMouseDown={(event) => event.preventDefault()}
           onScroll={(event) => {
@@ -721,6 +813,26 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           })}
         </div>
       )}
+      {pendingCapability && <Modal
+        open
+        title={t("chat.capabilityModeSwitchTitle")}
+        okText={t("chat.capabilityModeSwitchConfirm")}
+        cancelText={t("common.cancel")}
+        okButtonProps={{ disabled: entryModeSwitchDisabled }}
+        onCancel={() => setPendingCapability(null)}
+        onOk={() => {
+          if (pendingCapability && !disabled && !entryModeSwitchDisabled && editorRef.current?.innerHTML === pendingCapability.html) {
+            commitCandidate(pendingCapability.candidate, pendingCapability.query, pendingCapability);
+          }
+          setPendingCapability(null);
+        }}
+      >
+        {pendingCapability && t("chat.capabilityModeSwitchDescription", {
+          name: pendingCapability.candidate.name,
+          mode: t(pendingCapability.entryType === "work" ? "layout.newTask" : "layout.newChat"),
+        })}
+        {entryModeSwitchDisabled && <p role="status">{t("chat.capabilityModeSwitchUploading")}</p>}
+      </Modal>}
     </div>
   );
 });

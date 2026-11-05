@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRef } from "react";
+import { message } from "antd";
 import MentionEditor, { type MentionEditorRef } from "./MentionEditor";
 
 type ScrollablePrototype = typeof HTMLElement.prototype & {
@@ -17,7 +18,10 @@ const mocks = vi.hoisted(() => ({
   listPrompts: vi.fn(),
   listConversations: vi.fn(),
   axiosGet: vi.fn(),
+  listShowcaseCases: vi.fn(),
 }));
+
+vi.mock("@/modules/showcase/api", () => ({ listShowcaseCases: mocks.listShowcaseCases }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -69,6 +73,160 @@ describe("MentionEditor", () => {
     });
     fireEvent.scroll(menu);
   };
+
+  it.each(['Chosen', 'Chosen Continue writing'])('places the caret after the complete restored draft: %s', async value => {
+    const ref = createRef<MentionEditorRef>();
+    const onChange = vi.fn();
+    const mention = { mention_id: 'chosen', type: 'workflow' as const, resource_id: 'builtin:chosen', display_name: 'Chosen', start: 0, end: 6 };
+    render(<MentionEditor ref={ref} value={value} initialMentions={[mention]} placeholder='message'
+      onChange={onChange} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole('textbox');
+    const start = document.createRange();
+    start.selectNodeContents(editor);
+    start.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(start);
+    act(() => ref.current?.focusAtEnd());
+    await waitFor(() => {
+      expect(editor).toHaveFocus();
+      const caret = window.getSelection()?.getRangeAt(0);
+      expect(caret?.collapsed).toBe(true);
+      expect(caret?.startContainer).toBe(editor);
+      expect(caret?.startOffset).toBe(editor.childNodes.length);
+    });
+    expect(ref.current?.getMentions()).toEqual([mention]);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('captures a draft without selected capability bindings while retaining other references and offsets', () => {
+    const ref = createRef<MentionEditorRef>();
+    const value = 'Keep Chosen with Knowledge and Other';
+    const mentions = [
+      { mention_id: 'chosen', type: 'workflow' as const, resource_id: 'builtin:chosen', display_name: 'Chosen', start: 5, end: 11 },
+      { mention_id: 'knowledge', type: 'knowledge_base' as const, resource_id: 'kb', display_name: 'Knowledge', start: 17, end: 26 },
+      { mention_id: 'other', type: 'skill' as const, resource_id: 'other', display_name: 'Other', start: 31, end: 36 },
+    ];
+    render(<MentionEditor ref={ref} value={value} initialMentions={mentions} placeholder='message'
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    expect(ref.current?.getDraftWithoutMentions([mentions[0]])).toEqual({
+      text: 'Keep  with Knowledge and Other',
+      mentions: [{ ...mentions[1], start: 11, end: 20 }, { ...mentions[2], start: 25, end: 30 }],
+    });
+    expect(ref.current?.getMentions()).toEqual(mentions);
+  });
+
+  it.each([
+    [false, "workflow", "workflow", "work"],
+    [true, "skill", "chat", "chat"],
+    [false, "skill", "work", "work"],
+    [true, "workflow", "chat", "chat"],
+  ] as const)('confirms a %s mode change for a %s classified as %s', async (runInBackground, type, classification, target) => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ id: 'chosen-case', type: classification,
+      workflow_ref: type === 'workflow' ? 'builtin:chosen' : undefined,
+      builtin_skill_uid: type === 'skill' ? 'chosen-skill' : undefined }] });
+    mocks.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'installed-skill', name: 'Chosen', originBuiltinSkillUid: 'chosen-skill' }] });
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: 'builtin:chosen', name: 'Chosen' }] } });
+    const onEntryModeChange = vi.fn();
+    const onSend = vi.fn();
+    const onChange = vi.fn();
+    render(<MentionEditor value='' placeholder='message' runInBackground={runInBackground} onEntryModeChange={onEntryModeChange}
+      onChange={onChange} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={onSend} onCompositionChange={vi.fn()} />);
+    enterQuery(`Keep /${type}:`);
+    const option = await screen.findByRole('option', { name: 'Chosen' });
+    if (type === 'skill') {
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'ArrowDown' });
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    }
+    else { fireEvent.mouseDown(option); fireEvent.click(option); }
+    const dialog = await screen.findByRole('dialog');
+    expect(onEntryModeChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox').textContent).toBe(`Keep /${type}:`);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'chat.capabilityModeSwitchConfirm' }));
+    expect(onEntryModeChange).toHaveBeenCalledOnce();
+    expect(onEntryModeChange).toHaveBeenCalledWith(target, {
+      text: 'Keep Chosen', featuredSelection: { caseId: 'chosen-case' },
+      mentions: [expect.objectContaining({ type, resource_id: type === 'skill' ? 'installed-skill' : 'builtin:chosen', display_name: 'Chosen', start: 5, end: 11 })],
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenLastCalledWith(`Keep /${type}:`);
+    expect(mocks.listShowcaseCases).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the draft and mode unchanged when cancelling a capability switch', async () => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ id: 'ppt', type: 'workflow', workflow_ref: 'builtin:ppt' }] });
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: 'builtin:ppt', name: 'PPT' }] } });
+    const onEntryModeChange = vi.fn();
+    render(<MentionEditor value='' placeholder='message' onEntryModeChange={onEntryModeChange}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('Draft /');
+    fireEvent.click(await screen.findByRole('option', { name: 'PPT' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'common.cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(onEntryModeChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox').textContent).toBe('Draft /');
+  });
+
+  it.each(['same-mode', 'custom'])('inserts a %s capability without a confirmation', async kind => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: kind === 'custom' ? [] : [{ id: 'skill', type: 'chat', builtin_skill_uid: 'builtin-skill' }] });
+    mocks.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'installed', name: 'Skill', originBuiltinSkillUid: 'builtin-skill' }] });
+    const onMentionsChange = vi.fn();
+    const onEntryModeChange = vi.fn();
+    render(<MentionEditor value='' placeholder='message' onEntryModeChange={onEntryModeChange}
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('/');
+    fireEvent.click(await screen.findByRole('option', { name: 'Skill' }));
+    await waitFor(() => expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ resource_id: 'installed' })]));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onEntryModeChange).not.toHaveBeenCalled();
+  });
+
+  it('ignores a capability lookup that finishes after changing conversation', async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.listShowcaseCases.mockReturnValue(new Promise(done => { resolve = done; }));
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: 'builtin:ppt', name: 'PPT' }] } });
+    const props = { value: '', placeholder: 'message', onEntryModeChange: vi.fn(), onChange: vi.fn(), onMentionsChange: vi.fn(), onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} conversationId='old' />);
+    enterQuery('/');
+    fireEvent.click(await screen.findByRole('option', { name: 'PPT' }));
+    view.rerender(<MentionEditor {...props} conversationId='new' />);
+    await act(async () => resolve({ cases: [{ id: 'ppt', type: 'workflow', workflow_ref: 'builtin:ppt' }] }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(props.onEntryModeChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the switch disabled until uploads complete and dismisses it on a mode change', async () => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ id: 'ppt', type: 'workflow', workflow_ref: 'builtin:ppt' }] });
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: 'builtin:ppt', name: 'PPT' }] } });
+    const props = { value: '', placeholder: 'message', onEntryModeChange: vi.fn(), onChange: vi.fn(), onMentionsChange: vi.fn(), onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} entryModeSwitchDisabled />);
+    enterQuery('/');
+    fireEvent.click(await screen.findByRole('option', { name: 'PPT' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'chat.capabilityModeSwitchConfirm' })).toBeDisabled();
+    view.rerender(<MentionEditor {...props} entryModeSwitchDisabled={false} />);
+    expect(within(dialog).getByRole('button', { name: 'chat.capabilityModeSwitchConfirm' })).toBeEnabled();
+    view.rerender(<MentionEditor {...props} runInBackground />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(props.onEntryModeChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the selection retryable when capability classification cannot be loaded', async () => {
+    const error = vi.spyOn(message, 'error').mockImplementation(vi.fn());
+    mocks.listShowcaseCases.mockRejectedValueOnce(new Error('offline'));
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: 'builtin:ppt', name: 'PPT' }] } });
+    const onEntryModeChange = vi.fn();
+    render(<MentionEditor value='' placeholder='message' onEntryModeChange={onEntryModeChange}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('/');
+    fireEvent.click(await screen.findByRole('option', { name: 'PPT' }));
+    await waitFor(() => expect(error).toHaveBeenCalledWith('chat.mentionLoadFailed'));
+    expect(screen.getByRole('textbox').textContent).toBe('/');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onEntryModeChange).not.toHaveBeenCalled();
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ id: 'ppt', type: 'workflow', workflow_ref: 'builtin:ppt' }] });
+    fireEvent.click(screen.getByRole('option', { name: 'PPT' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
 
   it('separates reference candidates from slash invocations and offers current files', async () => {
     mocks.listDatasets.mockResolvedValue({ data: { datasets: [{ dataset_id: 'split-kb', display_name: 'Reference knowledge' }] } });
@@ -310,6 +468,8 @@ describe("MentionEditor", () => {
     mocks.listPrompts.mockReset();
     mocks.listConversations.mockReset();
     mocks.axiosGet.mockReset();
+    mocks.listShowcaseCases.mockReset();
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [] });
 
     mocks.listSkillAssetsPage.mockResolvedValue({ records: [] });
     mocks.listToolAssetsPage.mockResolvedValue({ records: [] });
