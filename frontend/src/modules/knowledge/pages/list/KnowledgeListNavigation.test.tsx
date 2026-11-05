@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn() }));
+vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarket: mocks.catalog,
@@ -30,6 +31,7 @@ vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: vi.fn().mockRes
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
 vi.mock("@/components/ui", () => ({
   ListPageTable: (props: any) => <div className="list-page-table-scroll">
+    {!props.loading && props.dataSource.length === 0 ? props.locale?.emptyText : null}
     {props.dataSource.map((row: any) => <div key={row.dataset_id || row.id} {...props.onRow?.(row)}>
       {props.columns[0].render(row[props.columns[0].dataIndex], row)}
     </div>)}
@@ -44,12 +46,14 @@ import KnowledgePage from "./index";
 
 const localResponse = { data: { datasets: [{ dataset_id: "local-id", display_name: "本地手册", tags: ["团队"] }], total_size: 55 } };
 const manualCalls = () => mocks.list.mock.calls.filter(([params]) => params.pageSize !== 100);
+const lastManualCall = () => manualCalls().slice(-1)[0];
 const pageOffset = (params: { pageToken: string }) => params.pageToken ? JSON.parse(atob(params.pageToken)).Start : 0;
 
 async function mount(search: string) {
   const router = createMemoryRouter([
     { path: "/lib/knowledge/list", element: <KnowledgePage /> },
     { path: "/lib/knowledge/detail/:id", element: <span>知识库详情</span> },
+    { path: "/agent/chat/home", element: <span>聊天首页</span> },
   ], { initialEntries: [`/lib/knowledge/list${search}`] });
   await act(async () => { render(<ConfigProvider button={{ autoInsertSpace: false }} theme={{ token: { motion: false } }}><RouterProvider router={router} /></ConfigProvider>); });
   return router;
@@ -59,6 +63,10 @@ beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.list.mockResolvedValue(localResponse);
+  mocks.scenes.mockResolvedValue({ profiles: [
+    { key: "general", name_i18n_key: "learning.profile.general.name" },
+    { key: "academic_papers", name_i18n_key: "learning.profile.academicPapers.name" },
+  ] });
   mocks.catalog.mockResolvedValue([{
     id: "official", name: "官方手册", category: "industry", domain: "团队", description: "官方说明",
     tags: ["团队"], icon: "", data_source: "官方", version: "1", online_access_url: "",
@@ -69,6 +77,71 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("knowledge list URL and data restoration", () => {
+  it("defaults the normal entry to all types and queries the selected existing scene", async () => {
+    const router = await mount("");
+    fireEvent.click(screen.getByRole("button", { name: t("knowledge.filterAndSort") }));
+    const types = await screen.findByRole("group", { name: t("knowledge.typeLabel") });
+    await within(types).findByRole("option", { name: t("learning.profile.academicPapers.name") });
+    expect(within(types).getByRole("option", { name: t("knowledge.mineAllTypes") })).toHaveAttribute("aria-selected", "true");
+    expect(manualCalls()[0][0].scene).toBeUndefined();
+    fireEvent.click(within(types).getByRole("option", { name: t("learning.profile.academicPapers.name") }));
+    await waitFor(() => expect(lastManualCall()?.[0].scene).toBe("academic_papers"));
+    expect(lastManualCall()?.[1].params.source).toBe("manual");
+    expect(router.state.location.search).toBe("?scene=academic_papers");
+    expect(screen.getByRole("tab", { name: "本地上传" })).toBeInTheDocument();
+  });
+
+  it("clears the paper type on reset, keeps the entry context, and restores the cleared state from detail", async () => {
+    const router = await mount("?scene=academic_papers&showcase_entry=work&page=2");
+    fireEvent.click(screen.getByRole("button", { name: t("knowledge.filterAndSortWithCount", { count: 1 }) }));
+    const types = await screen.findByRole("group", { name: t("knowledge.typeLabel") });
+    expect(await within(types).findByRole("option", { name: t("learning.profile.academicPapers.name") })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(types).getByRole("option", { name: t("learning.profile.general.name") }));
+    await waitFor(() => expect(lastManualCall()?.[0].scene).toBe("general"));
+    expect(new URLSearchParams(router.state.location.search).get("page")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重置" }));
+    await waitFor(() => expect(lastManualCall()?.[0].scene).toBeUndefined());
+    expect(lastManualCall()?.[1].params.source).toBeUndefined();
+    expect(router.state.location.search).toBe("?showcase_entry=work");
+    expect(screen.getByRole("button", { name: t("showcase.backToHome") })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "本地手册" }));
+    expect(router.state.location.pathname).toBe("/lib/knowledge/detail/local-id");
+    await act(async () => { await router.navigate(-1); });
+    fireEvent.click(await screen.findByRole("button", { name: t("knowledge.filterAndSort") }));
+    expect(await screen.findByRole("option", { name: t("knowledge.mineAllTypes") })).toHaveAttribute("aria-selected", "true");
+    expect(lastManualCall()?.[0].scene).toBeUndefined();
+  });
+
+  it("shows a type-catalog error and loads options when retried", async () => {
+    mocks.scenes.mockRejectedValueOnce(new Error("fixture"));
+    await mount("?scene=academic_papers&showcase_entry=chat");
+    fireEvent.click(screen.getByRole("button", { name: t("knowledge.filterAndSortWithCount", { count: 1 }) }));
+    await screen.findByText(t("knowledge.typeLoadFailed"));
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByRole("option", { name: t("learning.profile.academicPapers.name") })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("selects an accessible paper collection and preserves the filtered origin", async () => {
+    mocks.list.mockResolvedValue({ data: { datasets: [{ dataset_id: "papers", display_name: "已有论文集", scene: "academic_papers" }], total_size: 1 } });
+    const router = await mount("?scene=academic_papers&showcase_entry=work");
+    fireEvent.click(await screen.findByRole("button", { name: /已有论文集/ }));
+    expect(router.state.location.pathname).toBe("/lib/knowledge/detail/papers");
+    expect(router.state.location.state.knowledgeListOrigin.url).toContain("scene=academic_papers");
+    expect(manualCalls()[0][0].scene).toBe("academic_papers");
+    expect(manualCalls()[0][1].params.source).toBeUndefined();
+    await act(async () => { await router.navigate(-1); });
+    expect(await screen.findByText(t("showcase.paperReadingTitle"))).toBeVisible();
+    expect(screen.queryByRole("tab", { name: /本地上传/ })).not.toBeInTheDocument();
+  });
+
+  it.each(["chat", "work"])("handles an empty collection list and cancels back to %s", async (mode) => {
+    mocks.list.mockResolvedValue({ data: { datasets: [], total_size: 0 } });
+    const router = await mount(`?scene=academic_papers&showcase_entry=${mode}`);
+    expect(await screen.findByText(t("showcase.noPaperLibraries"))).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: t("showcase.backToHome") }));
+    expect(await screen.findByText("聊天首页")).toBeInTheDocument();
+    expect(router.state.location.search).toBe(`?showcase_entry=${mode}`);
+  });
   it("returns from an installed official knowledge base with the original filters", async () => {
     const router = await mount("?source=official&keyword=手册&officialTag=团队&sort=most_used");
     fireEvent.click(await screen.findByRole("button", { name: "官方手册" }));

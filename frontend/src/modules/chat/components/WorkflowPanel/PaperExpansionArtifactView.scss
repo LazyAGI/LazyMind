@@ -1,0 +1,144 @@
+.workflow-slot--paper-expansion {
+  display: flex; flex-direction: column; height: 520px; min-height: 0; min-width: 0;
+  box-sizing: border-box; padding: 16px 20px 0; overflow: hidden;
+  background: var(--color-bg-container); color: var(--color-text);
+  border: 1px solid var(--color-border-secondary); border-radius: 8px;
+  > .workflow-slot__text-meta { flex: none; margin-top: 0; padding: 10px 0; border-top: 1px solid var(--color-border-secondary); }
+  > .workflow-slot__text { flex: 1; min-height: 0; overflow: auto; }
+}
+
+// The stage document owns scrolling in compact, expanded and embedded panels.
+.workflow-panel.workflow-panel--paper-expansion {
+  .workflow-panel__topbar {
+    grid-template-areas: 'title actions' 'tabs tabs';
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .workflow-panel__tabs { max-width: 100%; margin-bottom: 6px; }
+  .workflow-panel__body { height: clamp(320px, 56dvh, 600px); max-height: none; min-height: 0; }
+  &.workflow-panel--expanded, &.workflow-panel--embedded {
+    .workflow-panel__body { height: auto; flex: 1 1 0; overflow: hidden; }
+  }
+  .workflow-panel__body > [role='tabpanel']:not([hidden]),
+  .workflow-panel__tab-content--list,
+  .workflow-panel__named-slot,
+  .workflow-panel__named-slot > div[role='button'] {
+    display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: hidden;
+  }
+  .workflow-panel__slot-heading { flex: none; }
+  .workflow-panel__tab-content--list > .workflow-panel__named-slot { flex: 1 1 0; }
+  .workflow-slot--paper-expansion { flex: 1 1 0; height: 100%; }
+}
+@media (max-width: 1000px) {
+  .workflow-panel.workflow-panel--paper-expansion.workflow-panel--expanded { right: 16px; }
+}
+.paper-workflow-result {
+  display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0;
+  font-size: 14px; line-height: 1.75; overflow-wrap: anywhere;
+  p { margin: 6px 0; white-space: pre-wrap; }
+  ul, ol { padding-left: 22px; }
+  li { padding: 6px 0; white-space: pre-wrap; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+}
+.paper-workflow-scroll { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 12px 20px 0; }
+.paper-workflow-section { margin: 0 0 26px; }
+.paper-workflow-section + .paper-workflow-section { border-top: 1px solid var(--color-border-secondary); padding-top: 24px; }
+.paper-workflow-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px;
+  h3 { font-size: 14px; font-weight: 500; margin: 0; }
+  > span { font-size: 12px; color: var(--color-text-secondary); }
+}
+.paper-workflow-heading--centered {
+  justify-content: center; text-align: center; padding: 8px 0; margin-bottom: 20px;
+  h3 { font-size: 18px; font-weight: 600; line-height: 1.6; }
+}
+.paper-workflow-muted, .paper-workflow-number { color: var(--color-text-secondary); font-size: 12px; }
+.paper-workflow-paper { border-bottom: 1px solid var(--color-border-secondary); scroll-margin-top: 8px; }
+.paper-workflow-paper-row {
+  display: flex; align-items: baseline; width: 100%; text-align: left; gap: 14px; min-height: 52px;
+  padding: 14px 0; background: transparent; list-style: none; cursor: pointer;
+  > div { flex: 1; min-width: 0; }
+  > .anticon { flex: none; align-self: center; font-size: 10px; color: var(--color-text-secondary); }
+  &::-webkit-details-marker { display: none; }
+  &:hover { background: var(--color-fill-quaternary); }
+  .ant-tag { margin-top: 6px; }
+}
+.paper-workflow-paper[open] > .paper-workflow-paper-row > .anticon { transform: rotate(90deg); }
+.paper-workflow-number { font-variant-numeric: tabular-nums; flex: none; }
+.paper-workflow-tag { display: inline-block; font-size: 11px; font-weight: 400; line-height: 1.6; padding: 1px 6px; border-radius: 4px; color: var(--color-text-secondary); background: var(--color-fill-tertiary); margin-left: 8px; }
+.paper-workflow-paper-title { font-size: 14px; font-weight: 400; }
+.paper-workflow-paper-title .paper-workflow-muted { margin: 4px 0 0; }
+.paper-workflow-detail { padding: 0 0 20px 38px;
+  h4 { margin: 0 0 8px; font-weight: 400; color: var(--color-text-secondary); font-size: 12px; }
+}
+.paper-workflow-analysis-fields { margin: 0;
+  > div + div { margin-top: 16px; }
+  dt { color: var(--color-text-secondary); font-size: 12px; margin-bottom: 6px; }
+  dd { margin: 0; white-space: pre-wrap; }
+}
+.paper-workflow-reading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 12px; color: var(--color-text-secondary); margin-bottom: 16px; }
+.paper-workflow-notes { border-bottom: 1px solid var(--color-border-secondary);
+  > summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; list-style: none; }
+  > summary::-webkit-details-marker { display: none; }
+  &[open] > summary > .anticon { transform: rotate(180deg); }
+}
+.paper-workflow-scope { container: paper-scope / inline-size; }
+.paper-workflow-directions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 !important; margin: 0; list-style: none; }
+.paper-workflow-direction { min-width: 0; padding: 16px !important; border: 1px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-bg-container);
+  .ant-tag { margin: 0; }
+  p { margin: 10px 0 0; }
+}
+@container paper-scope (max-width: 420px) { .paper-workflow-directions { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .workflow-slot--paper-expansion { padding: 12px 12px 0; }
+  .paper-workflow-heading { flex-wrap: wrap; gap: 6px; }
+  .paper-workflow-paper-row { gap: 10px; }
+  .paper-workflow-detail { padding-left: 28px; }
+}
+.paper-workflow-text-button { padding: 0; border: 0; background: transparent; color: var(--color-primary) !important; text-align: left; }
+.paper-lineage-detail { margin: 18px 0; padding: 16px; border: 1px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-fill-quaternary);
+  .paper-workflow-detail { padding: 16px 0 0; }
+  > .paper-workflow-analysis-fields { margin: 16px 0; }
+  h4 { margin: 16px 0 8px; font-size: 12px; font-weight: 500; color: var(--color-text-secondary); }
+}
+.paper-lineage-associated > div { padding: 10px 0; border-top: 1px solid var(--color-border-secondary); }
+.paper-lineage-table-wrap { overflow: auto; }
+.paper-lineage-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left;
+  th, td { padding: 10px; vertical-align: top; border-bottom: 1px solid var(--color-border-secondary); }
+  th { color: var(--color-text-secondary); font-weight: 500; }
+  td:first-child { min-width: 160px; }
+}
+.paper-lineage-source { margin-top: 4px; font-size: 11px; color: var(--color-text-secondary);
+  summary { cursor: pointer; }
+  code { overflow-wrap: anywhere; }
+}
+.paper-lineage-detail > .paper-workflow-heading {
+  h3 { flex: 1; min-width: 0; }
+  > button { flex: none; white-space: nowrap; align-self: flex-start; }
+}
+.paper-lineage-table { min-width: 640px;
+  th:nth-child(2), td:nth-child(2) { min-width: 72px; white-space: nowrap; }
+}
+.paper-workflow-dates { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 12px; font-size: 12px; color: var(--color-text-secondary);
+  > div { display: flex; gap: 8px; }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+}
+.paper-workflow-direction h4 { margin: 10px 0 4px; font-size: 14px; font-weight: 500; }
+.paper-workflow-change { padding: 12px 0; }
+.paper-workflow-change > p { color: var(--color-text-secondary); font-size: 12px; }
+
+.paper-workflow-direction-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--color-text-secondary);
+  > span:last-child { color: var(--color-primary); font-size: 11px; }
+}
+.paper-workflow-more { margin-top: 14px; }
+.paper-workflow-report {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 8px 0 24px;
+  line-height: 1.8;
+
+  .markdown-body > :first-child { margin-top: 0; }
+  .markdown-body h2 { margin-top: 28px; }
+  .markdown-body p { margin: 12px 0; }
+}

@@ -23,6 +23,7 @@ import {
   type CloudProviderType,
 } from "../constants/cloudProviderOptions";
 import { useCloudDocumentProviders } from "../hooks/useCloudDocumentProviders";
+import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
 import { getCloudKnowledgeCreatePath } from "../utils/cloudDocumentKnowledge";
 import {
   CLOUD_DOCUMENT_CONNECTION_SUCCESS_EVENT,
@@ -40,13 +41,15 @@ const CHAT_PATH = "/agent/chat/home";
 type GuideStage = "roadmap" | "sourceChoice" | "success";
 
 // Query parameters select an account; the authenticated detail API still owns access control.
-function ConnectionRecovery({ provider, connectionId }: { provider: string; connectionId: string }) {
+function ConnectionRecovery({ provider, connectionId, onGitHubReauthorize }: {
+  provider: string; connectionId: string; onGitHubReauthorize: CloudDocumentProvidersVm["handleReauthorizeGitHub"];
+}) {
   const { t } = useTranslation();
   const [connection, setConnection] = useState<CloudConnectionResponse | null>(null);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
-  const supported = provider === "feishu" || provider === "notion" || provider === "googledrive";
+  const supported = provider === "feishu" || provider === "notion" || provider === "googledrive" || provider === "github";
 
   useEffect(() => {
     let disposed = false;
@@ -74,6 +77,11 @@ function ConnectionRecovery({ provider, connectionId }: { provider: string; conn
     setError(false);
     try {
       if (authorize) {
+        if (provider === "github") {
+          await onGitHubReauthorize(connection);
+          setReload(value => value + 1);
+          return;
+        }
         const url = await requestCloudDataSourceAuthorizeUrl(provider, {
           tenantId: "", scopes: [], reauthorizeConnectionId: connection.connection_id,
           returnUrl: window.location.href,
@@ -324,6 +332,7 @@ export default function CloudDocumentsPage() {
         key={`${searchParams.get("provider")}:${recoveryConnection}`}
         provider={searchParams.get("provider") || ""}
         connectionId={recoveryConnection}
+        onGitHubReauthorize={vm.handleReauthorizeGitHub}
       />}
       <CloudDocumentProviderPanel vm={vm} additionalCards={vocabularyEnabled ? <CloudVocabularyConnections onReadyCountChange={setVocabularyReadyCount} /> : null} />
 

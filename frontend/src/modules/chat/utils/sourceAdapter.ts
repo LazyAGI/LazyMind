@@ -48,13 +48,14 @@ export function getSourceFaviconUrl(source: ChatSource) {
     : "";
 }
 
-function externalSourceTarget(source: ChatSource) {
+function externalSourceTarget(source: ChatSource): string | null {
   const target = source.url?.trim() || "";
+  if (!/^https?:\/\//i.test(target)) return null;
   try {
     const url = new URL(target);
     if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) return target;
   } catch { /* Keep unsafe or incomplete sources visible without an executable link. */ }
-  return `#source-${encodeURIComponent(getSourceCitationId(source) || "unknown")}`;
+  return null;
 }
 
 function normalizedExternalUrl(source: ChatSource) {
@@ -161,7 +162,7 @@ export function getReferenceSources(sources: ChatSourceCollection = []) {
 
 export function getSourceHref(source: ChatSource) {
   if (isExternalSource(source)) {
-    return externalSourceTarget(source);
+    return externalSourceTarget(source) || `#source-${encodeURIComponent(getSourceCitationId(source) || "unknown")}`;
   }
   const datasetId = source.dataset_id || "default";
   const documentId = source.document_id || source.file_name || getSourceCitationId(source) || "unknown";
@@ -174,8 +175,13 @@ export function getSourceHref(source: ChatSource) {
   return `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(documentId)}?${query}`;
 }
 
+export function getSourceOriginalHref(source: ChatSource) {
+  return isExternalSource(source) ? externalSourceTarget(source) : getSourceHref(source);
+}
+
 export function openSource(source: ChatSource) {
-  const href = getSourceHref(source);
+  const href = getSourceOriginalHref(source);
+  if (!href) return false;
   window.open(href, "_blank", "noopener,noreferrer");
   return true;
 }

@@ -2752,9 +2752,9 @@
 }
 
 .model-provider-cloud-doc-layout {
-  background: #fff;
   height: 100%;
   min-height: 0;
+  background: #fff;
   overflow: hidden;
 
   > .model-provider-layout-frame {
@@ -2962,6 +2962,7 @@
 }
 
 .model-provider-cloud-doc-grid {
+  flex-shrink: 0;
   overflow: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;

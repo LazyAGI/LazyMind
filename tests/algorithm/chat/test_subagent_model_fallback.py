@@ -191,16 +191,18 @@ def test_background_plan_failure_keeps_starting_raw_and_does_not_consume_candida
     calls = scenario(provider, empty_tool_content=True)
     original = provider.on_request
     plan_started, release_plan, plan_failed = threading.Event(), threading.Event(), threading.Event()
+    # Give slow runners time to reach model-b without dropping the mock HTTP connection.
+    sync_timeout = 15
 
     def respond(request):
         body = json.dumps(request['messages'])
         if 'Create 3 to 5 short user-facing milestones' in body:
             original(request)
             plan_started.set()
-            assert release_plan.wait(3)
+            assert release_plan.wait(sync_timeout), 'fallback request did not release the display plan'
             plan_failed.set()
             return failure()
-        assert plan_started.wait(3)
+        assert plan_started.wait(sync_timeout), 'display plan request did not start'
         if request['model'] == 'model-b':
             release_plan.set()
         return original(request)
@@ -210,7 +212,7 @@ def test_background_plan_failure_keeps_starting_raw_and_does_not_consume_candida
         events, _task = asyncio.run(execute(provider, tmp_path))
     finally:
         release_plan.set()
-    assert plan_failed.wait(3)
+    assert plan_failed.wait(sync_timeout), 'display plan did not send the scripted failure'
     assert [request['model'] for phase, request in calls if phase == 'plan'] == ['model-a']
     assert [request['model'] for phase, request in calls if phase == 'evaluation'] == ['model-b']
     assert next(event for event in events if event['type'] in {'done', 'error'})['status'] == 'succeeded'

@@ -145,9 +145,36 @@ runtime:
   clarification_fields:
     - id: product_goal
       label: 产品目标
-      question: 你想解决什么产品问题，主要给谁使用？
+      question: 这次要解决的核心产品问题是什么？
       type: text
+      required: true
+      reason: 产品目标决定要解决的问题和本次交付范围。
+      validation: {min_length: 1, max_length: 4000, example: '例如：为企业知识库增加支持引用来源的问答功能'}
       binding: request_context
+    - id: requested_stage
+      label: 执行范围
+      question: 本次需要完成哪个产品阶段？
+      reason: 未明确阶段时沿用当前路由选择最小合理入口。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices: [产品方向, 竞品分析, 产品方案, PRD, 交互原型, 方案评审, 研发交付]
+      value_aliases: {产品方向: direction, 竞品分析: competitive, 产品方案: design, PRD: prd, 交互原型: prototype, 方案评审: review, 研发交付: handoff}
+    - id: execution_depth
+      label: 执行深度
+      question: 希望采用哪种执行深度？
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      default: auto
+      choices: [auto, light, minimum-fill, full]
+    - id: word_target
+      label: 目标篇幅
+      question: 希望正文达到多少字？
+      reason: 未指定时采用现有阶段默认篇幅。
+      type: text
+      patterns: ['(?:摘要|abstract)[^0-9，。；;\n]*[0-9]+\s*(?:字|词|words)|([0-9]+)\s*字']
+      validation: {format: positive_integer, min: 300, example: '例如：4500'}
 
 tool_scripts:
   - path: scripts/tools.py

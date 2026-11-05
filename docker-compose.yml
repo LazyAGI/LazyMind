@@ -204,7 +204,7 @@ services:
     expose:
       - "5432"
     volumes:
-      - ./data/state/postgres:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
       - ./db-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U root -d postgres"]
@@ -333,10 +333,20 @@ services:
     volumes:
       - internal-service-credentials:/run/secrets/internal-service:ro
       - ./api/backend:/openapi-export
+    tmpfs:
+      - /run/lazymind-github-cli:rw,noexec,nosuid,nodev,size=32m,mode=0700
+    mem_limit: ${LAZYMIND_AUTH_SERVICE_MEMORY_LIMIT:-512m}
+    memswap_limit: ${LAZYMIND_AUTH_SERVICE_MEMORY_LIMIT:-512m}
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     expose:
       - "8000"
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     environment:
+      WEB_CONCURRENCY: "1"
+      LAZYMIND_GITHUB_CLI_CONTAINER_ENABLED: "1"
       LAZYMIND_DATABASE_URL: postgresql+psycopg://root:123456@db:5432/authservice
       LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
       LAZYMIND_JWT_SECRET: dev-secret-change-me
@@ -500,6 +510,7 @@ services:
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
+      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent
       # Persistent artifact storage has its own setting, even when colocated.
       LAZYMIND_ARTIFACT_STORAGE_ROOT: /data/artifacts
       LAZYMIND_ARTIFACT_V2_ENABLED: ${LAZYMIND_ARTIFACT_V2_ENABLED:-false}
@@ -1019,7 +1030,10 @@ services:
       LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
       LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: /opt/lazymind/chat
       LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
+      # F4 code runs in sandboxed Python children of Chat; no Docker socket/CLI is needed.
       LAZYMIND_WORKFLOWS_DIR: /app/workflows
+      LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT: ${LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT:-12}
+      LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT: ${LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT:-20}
       LAZYMIND_OUTPUT_EDITABLE_PPT: ${LAZYMIND_OUTPUT_EDITABLE_PPT:-false}
       LAZYMIND_PPT_EXPORT_URL: ${LAZYMIND_PPT_EXPORT_URL:-http://ppt-export:8099}
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]

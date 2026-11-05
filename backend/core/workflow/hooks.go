@@ -379,6 +379,7 @@ func stopWorkflowSession(
 	if err != nil || !changed {
 		return err
 	}
+	NotifyWorkflowRuntimeUpdated(ctx, db, session.ID, "", "pause_requested")
 	var cancelErrors []error
 	for _, taskID := range cancelledTaskIDs {
 		if err := notifyTaskCancel(taskID); err != nil {

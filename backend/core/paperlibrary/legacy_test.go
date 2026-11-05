@@ -67,7 +67,10 @@ func TestLegacyConversionPreservesGraphAndNeverReplays(t *testing.T) {
 	if err = db.Take(&ds, "id=?", "library").Error; err != nil || ds.Scene != "academic_papers" || !strings.Contains(string(ds.Ext), `"other":"keep"`) {
 		t.Fatal("scene not preserved", ds, err)
 	}
-	if err = db.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=?", "library").Updates(map[string]any{"status": "read", "metadata_json": json.RawMessage(`{"title":"Corrected","authors":["Changed"]}`)}).Error; err != nil {
+	if err = db.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=?", "library").Updates(map[string]any{"metadata_json": json.RawMessage(`{"title":"Corrected","authors":["Changed"]}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Model(&orm.AcademicUserPaperState{}).Where("user_id=? AND dataset_id=?", "owner", "library").Update("reading_status", "read").Error; err != nil {
 		t.Fatal(err)
 	}
 	reopened := db.Session(&gorm.Session{NewDB: true})
@@ -119,9 +122,14 @@ func TestSnapshotImportIsAtomicAndPreservesEdits(t *testing.T) {
 	if err := EnsureLegacy(t.Context(), db, "library"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND id=?", "library", "paper").Update("status", "read").Error; err != nil {
+	var entry orm.PaperLibraryEntry
+	if err := db.Where("dataset_id=? AND id=?", "library", "paper").Take(&entry).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&orm.AcademicUserPaperState{}).Where("user_id=? AND dataset_id=? AND paper_id=?", "owner", "library", entry.AcademicWorkID).Update("reading_status", "read").Error; err != nil {
+		t.Fatal(err)
+	}
+
 	raw := json.RawMessage(`{"folders":[],"papers":[{"id":"from-zotero","metadata":{"title":"Provider title","authors":[],"identifiers":{"doi":"10.1234/preserved"}},"status":"unread","source":"zotero","zoteroSources":["users:8:OTHER"]}],"attachments":[],"notes":[{"id":"new-note","paperId":"from-zotero","title":"Imported note","content":"Added once","kind":"note"}],"annotations":[{"id":"new-annotation","paperId":"from-zotero","comment":"New highlight"}]}`)
 	for i := 0; i < 2; i++ {
 		if err := ImportSnapshot(t.Context(), db, "library", "owner", raw); err != nil {

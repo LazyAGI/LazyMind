@@ -8,6 +8,14 @@ from fastapi import HTTPException
 from lazymind.chat.api import academic_routes as ar
 
 
+@pytest.fixture
+def expansion_context(monkeypatch):
+    from lazymind.chat.engine.subagent import context
+    ctx = SimpleNamespace(params={'remote_inputs': {'expansion_id': 'owned-expansion'}})
+    monkeypatch.setattr(context, 'require_context', lambda: ctx)
+    return ctx
+
+
 def test_router_serves_authenticated_academic_bridge(monkeypatch):
     import importlib
     from fastapi.testclient import TestClient
@@ -37,7 +45,8 @@ def test_pdf_bridge_validates_version_and_preserves_pages(tmp_path, monkeypatch)
     monkeypatch.setattr(ingest, 'parse_pdf_pages', lambda path: [(2, 'body B'), (1, 'body A')])
     payload = ar.PDFRequest(file_ref='paper.pdf', content_hash=hashlib.sha256(path.read_bytes()).hexdigest())
     result = asyncio.run(ar.parse_pdf(payload, 'token'))
-    assert result == {'pages': [{'page': 1, 'text': 'body A'}, {'page': 2, 'text': 'body B'}]}
+    assert result == {'pages': [{'page': 1, 'text': 'body A'}, {'page': 2, 'text': 'body B'}],
+                      'parser_version': 'pdf-reader-v2'}
     path.write_bytes(b'%PDF-changed')
     with pytest.raises(HTTPException) as exc:
         asyncio.run(ar.parse_pdf(payload, 'token'))
@@ -83,8 +92,11 @@ def test_expansion_result_contract_rejects_nested_relation_metadata(tmp_path, mo
     assert module.academic_validate_result({'type': 'json', 'path': str(carrier)})['status'] == 'valid'
 
 
-def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeypatch):
+def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeypatch, expansion_context):
     import importlib.util
+    import httpx
+    from lazyllm.tools.agent import ToolExecutionError, ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
     path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
     spec = importlib.util.spec_from_file_location('paper_expansion_transport', path)
     module = importlib.util.module_from_spec(spec)
@@ -93,26 +105,112 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
 
     def request(method, url, **kwargs):
         requests.append((method, url, kwargs))
-        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'data': {'papers': []}})
+        if kwargs.get('json', {}).get('cursor') == 'bad-cursor':
+            return httpx.Response(400, json={'code': 'INVALID_CURSOR', 'message': 'invalid cursor'},
+                                  request=httpx.Request(method, url))
+        body = {'papers': []}
+        if url.endswith('/paper-contents:read'):
+            body = {
+                'paper': {'paper_id': 'discovered-paper', 'title': 'Original title',
+                          'authors': ['Author ' + str(index) for index in range(592)],
+                          'published_at': '2025-01-01T00:00:00Z'},
+                'pages': [{'page': 1, 'text': 'Verbatim method and comparison evidence.'}],
+                'positions': [0], 'content_hash': 'checked-body', 'source_version': 'v1',
+                'references': [{'reference_key': '7', 'raw_text': 'Original citation text.',
+                                'paper': {'paper_id': 'resolved-paper', 'title': 'Resolved title',
+                                          'authors': ['Repeated author list']}}],
+            }
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'data': body})
 
     monkeypatch.setattr(module, '_client', lambda: SimpleNamespace(base_url='http://core',
                         transport=SimpleNamespace(request=request), _headers=lambda: {'X-User-Id': 'owner'}))
-    assert module.academic_search_papers('owned-expansion', 'all:agents') == {'papers': []}
+    functions = [module.academic_expansion_context, module.academic_search_papers, module.academic_read_paper]
+    ensure_lazyllm_tool_docs(functions)
+    exposed = {tool.name: tool for tool in ToolManager(functions).all_tools}
+    for tool in exposed.values():
+        with pytest.raises(ValueError, match='expansion_id'):
+            tool._validate_input({'expansion_id': 'another-task'})
+    args = exposed['academic_search_papers']._validate_input({'query': 'all:agents'})
+    assert module.academic_search_papers(**args) == {'papers': []}
     assert requests[-1][1] == 'http://core/academic/papers:search'
-    assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'query': 'all:agents', 'max_results': 10}
-    module.academic_read_paper('owned-expansion', 'discovered-paper')
-    assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper'}
-    module.academic_read_paper('owned-expansion', cursor='bound-cursor')
+    assert requests[-1][2]['json'] == {
+        'expansion_id': 'owned-expansion', 'query': 'all:agents', 'max_results': 10,
+        'sources': [], 'mode': 'keyword', 'paper_id': '',
+    }
+    observation = module.academic_read_paper('discovered-paper')
+    assert observation['pages'][0]['text'] == 'Verbatim method and comparison evidence.'
+    assert observation['positions'] == [0] and observation['content_hash'] == 'checked-body'
+    assert observation['paper']['published_at'] == '2025-01-01T00:00:00Z'
+    assert 'authors' not in observation['paper']
+    assert 'authors' not in observation['references'][0]['paper']
+    assert observation['references'][0]['raw_text'] == 'Original citation text.'
+    assert requests[-1][2]['json'] == {
+        'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper',
+        'view': 'content', 'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5,
+    }
+    module.academic_read_paper(cursor='bound-cursor')
     assert requests[-1][2]['json'] == {'expansion_id': 'owned-expansion', 'cursor': 'bound-cursor'}
     assert requests[-1][2]['headers'] == {'X-User-Id': 'owner'}
+    module.academic_read_paper('discovered-paper', positions=[0, 3])
+    assert requests[-1][2]['json']['positions'] == [0, 3]
+    module.academic_read_paper('discovered-paper', positions=[], page_start=3, page_end=4)
+    assert 'positions' not in requests[-1][2]['json'] and requests[-1][2]['json']['page_start'] == 3
+    before = len(requests)
+    with pytest.raises(ToolExecutionError, match='only its cursor'):
+        module.academic_read_paper('different-paper', cursor='bound-cursor', positions=[1])
+    with pytest.raises(ToolExecutionError, match='max_results must be 1..5'):
+        module.academic_read_paper('discovered-paper', max_results=20)
+    assert len(requests) == before
+    with pytest.raises(ToolExecutionError, match='INVALID_CURSOR: invalid cursor'):
+        module.academic_read_paper(cursor='bad-cursor')
+    module.academic_read_paper('discovered-paper', view='references', reference_keys=['7'])
+    assert requests[-1][2]['json'] == {
+        'expansion_id': 'owned-expansion', 'paper_id': 'discovered-paper', 'view': 'references',
+        'keywords': [], 'reference_keys': ['7'], 'max_results': 5,
+    }
+    monkeypatch.setattr(module, '_call', lambda *args, **kwargs: {'status': 'stage_timeout'})
+    assert module.academic_read_paper('discovered-paper') == {'status': 'stage_timeout'}
 
 
-@pytest.mark.parametrize('package,slot', [
-    ('paper_workflow_mock', 'handoff_receipt'),
-    ('paper_ppt_with_reflection_mock', 'ppt_request'),
+def test_search_tool_validates_search_contract_before_sending_requests(monkeypatch, expansion_context):
+    import importlib.util
+    from lazyllm.tools.agent import ToolExecutionError, ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
+    path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
+    spec = importlib.util.spec_from_file_location('paper_expansion_search_modes', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    requests = []
+    monkeypatch.setattr(module, '_call', lambda method, path, payload: requests.append(payload) or {'papers': []})
+    ensure_lazyllm_tool_docs([module.academic_search_papers])
+    tool = ToolManager([module.academic_search_papers]).all_tools[0]
+    for mode in ['keyword', 'references', 'citations']:
+        args = tool._validate_input({'query': 'agents', 'mode': mode})
+        assert module.academic_search_papers(**args) == {'papers': []}
+        assert requests[-1]['mode'] == mode
+    with pytest.raises(ValueError, match='keyword|references|citations'):
+        tool._validate_input({'query': 'agents', 'mode': 'search'})
+    assert len(requests) == 3
+    args = tool._validate_input({'mode': 'citations', 'paper_id': 'paper', 'max_results': 25})
+    with pytest.raises(ToolExecutionError, match='max_results must be 1..20'):
+        module.academic_search_papers(**args)
+    assert len(requests) == 3
+    args = tool._validate_input({'mode': 'citations', 'paper_id': 'paper', 'max_results': 20})
+    module.academic_search_papers(**args)
+    assert requests[-1]['max_results'] == 20 and requests[-1]['paper_id'] == 'paper'
+    module.academic_search_papers(cursor='saved-source-cursor')
+    assert requests[-1] == {'expansion_id': 'owned-expansion', 'cursor': 'saved-source-cursor'}
+
+
+@pytest.mark.parametrize('package,slot,kind', [
+    ('paper_workflow_mock', 'handoff_receipt', 'review'),
+    ('paper_workflow_mock', 'handoff_receipt', 'reflection'),
+    ('paper_workflow_mock', 'handoff_receipt', 'ppt'),
+    ('paper_ppt_with_reflection_mock', 'ppt_request', 'ppt'),
 ])
-def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, slot):
-    import json
+def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, slot, kind):
+    from lazyllm.tools.agent import ToolExecutionError
     from lazymind.chat.engine.subagent import tools
     from lazymind.chat.service import academic_handoff
     from lazymind.workflow_toolkit import load_workflow_package_tools
@@ -122,15 +220,27 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
         {'files': {'workflow.yaml': (root / 'workflow.yaml').read_bytes(),
                    'scripts/tools.py': (root / 'scripts/tools.py').read_bytes()}},
         ['academic_handoff_context', 'academic_handoff_submit', 'academic_read_paper'], package, 'test-revision')
-    frozen = {'status': 'awaiting_downstream', 'kind': 'ppt',
-              'input': {'papers': [{'paper': {'paper_id': 'original-paper'}}]},
-              'papers': [{'paper_id': 'original-paper'}], 'reflection_markdown': 'saved reflection body',
+    paper = {'paper_id': 'original-paper', 'title': 'Frozen <paper> [method]', 'abstract': 'Full original abstract',
+             'year': 2021, 'source_provider': 'arxiv', 'source_version': 'v2'}
+    papers = [{'paper': paper, 'is_seed': True, 'is_important': False}] if kind == 'review' else [paper]
+    frozen = {'status': 'awaiting_downstream', 'kind': kind,
+              'input': {'user_instruction': 'Study the selected method', 'papers': papers},
               'feedback': 'Mock, no real PPT file'}
+    if slot == 'ppt_request':
+        frozen['reflection_markdown'] = 'saved reflection body'
+    elif kind == 'reflection':
+        frozen['input']['notes'] = [{'paper_id': paper['paper_id'], 'content': 'Original note'}]
     requests = []
 
     def request(method, url, **kwargs):
         requests.append((method, url, kwargs))
-        data = {'handoff_id': 'owned-handoff'} if method == 'GET' else frozen
+        data = ({'handoff_id': 'owned-handoff', 'input': frozen['input']}
+                if method == 'GET' else frozen)
+        if url.endswith('/paper-contents:read'):
+            data = {'paper': paper, 'status': 'ready', 'positions': [0],
+                    'pages': [{'page': 1, 'text': 'Original evidence'}]}
+        if method == 'GET' and kwargs['params'].get('view') == 'summary':
+            data = {'handoff_id': 'owned-handoff'}
         return SimpleNamespace(raise_for_status=lambda: None, json=lambda: data)
     monkeypatch.setattr(academic_handoff, '_client', lambda: SimpleNamespace(base_url='http://core',
                         transport=SimpleNamespace(request=request), _headers=lambda: {'X-User-Id': 'owner'}))
@@ -139,21 +249,204 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
     published = []
     monkeypatch.setattr(tools, '_save_artifact', lambda key, value, **kwargs:
                         published.append((key, value, kwargs)) or {'status': 'ok'})
+    assert functions['academic_handoff_context']()['input'] == frozen['input']
+    assert requests[-1][2]['params'] == {'conversation_id': 'owned-chat'}
+    requests.clear()
     receipt = functions['academic_handoff_submit']()
     assert receipt['artifact']['status'] == 'ok' and receipt['paper_count'] == 1
     assert len(published) == 1 and published[0][0] == slot
     value = published[0][1]
-    saved = json.loads(value.split('```json\n')[1].split('\n```')[0]) if slot == 'handoff_receipt' else value
-    assert saved == frozen
+    if slot == 'handoff_receipt':
+        assert value.count(frozen['feedback']) == 1
+        assert 'Frozen &lt;paper&gt; \\[method\\]' in value and paper['source_version'] in value
+        assert frozen['input']['user_instruction'] in value
+        assert paper['paper_id'] not in value and paper['abstract'] not in value
+        assert '```json' not in value
+        if kind == 'reflection':
+            assert '1 条已有笔记' in value
+    else:
+        assert value == frozen
 
-    assert requests[0][2]['params'] == {'conversation_id': 'owned-chat'}
+    assert requests[0][2]['params'] == {'conversation_id': 'owned-chat', 'view': 'summary'}
     assert requests[1][1] == 'http://core/academic/mock-handoffs/owned-handoff:submit'
     assert requests[1][2]['json'] == {} and requests[1][2]['timeout'] == 30
     functions['academic_read_paper']('original-paper')
-    assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'paper_id': 'original-paper'}
+    assert requests[-1][2]['json'] == {
+        'handoff_id': 'owned-handoff', 'paper_id': 'original-paper', 'view': 'content',
+        'keywords': [], 'page_start': 0, 'page_end': 0, 'max_results': 5}
     functions['academic_read_paper'](cursor='saved-cursor')
     assert requests[-1][2]['json'] == {'handoff_id': 'owned-handoff', 'cursor': 'saved-cursor'}
+    assert requests[-2][2]['params'] == {'conversation_id': 'owned-chat', 'view': 'summary'}
     assert requests[-1][2]['timeout'] == 90
     assert all(request[2]['headers'] == {'X-User-Id': 'owner'} for request in requests)
-    with pytest.raises(ValueError, match='but not both'):
+    with pytest.raises(ToolExecutionError, match='only its cursor'):
         functions['academic_read_paper']('original-paper', cursor='saved-cursor')
+
+
+@pytest.mark.parametrize('status', [401, 402, 403, 429])
+def test_search_bridge_preserves_actionable_source_status(monkeypatch, status):
+    import httpx
+    from lazymind.chat.service import academic_preparation
+    monkeypatch.setattr(ar, 'require_internal_token', lambda _: None)
+
+    def fail(_):
+        response = httpx.Response(status, request=httpx.Request('GET', 'https://source.invalid'))
+        raise httpx.HTTPStatusError('secret must not appear', request=response.request, response=response)
+
+    monkeypatch.setattr(academic_preparation, 'search_registry', fail)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ar.academic_search(ar.AcademicSearchRequest(source='web', query='paper', limit=2), 'token'))
+    assert exc.value.status_code == status
+    assert 'secret' not in exc.value.detail
+
+
+def test_search_registry_preserves_sciverse_pages_and_web_parameters(monkeypatch):
+    from lazymind.chat.service import academic_preparation
+    from lazymind.chat.service.component import tool_registry
+
+    calls = []
+
+    def meta_search(**kwargs):
+        calls.append(kwargs)
+        return {'items': [{'title': 'A paper'}], 'total_count': 3,
+                'page': 1, 'next_cursor': 'next-page'}
+
+    monkeypatch.setattr(tool_registry, '_instance_is_active', lambda _: True)
+    monkeypatch.setattr(tool_registry, '_ACADEMIC_SEARCH_ENGINE_INSTANCES', [
+        SimpleNamespace(source_name='sciverse', meta_search=meta_search),
+    ])
+    payload = {'source': 'sciverse', 'query': 'retrieval', 'limit': 2,
+               'page': 1, 'cursor': 'current-page', 'tool_config': {}}
+    result = academic_preparation.search_registry(payload)
+    assert result['total_count'] == 3 and result['next_cursor'] == 'next-page'
+    assert calls[-1] == {'query': 'retrieval', 'page_size': 2, 'page': 1,
+                         'cursor': 'current-page', 'include_content': False}
+
+    def web_search(query, count=10, date_restrict='m1'):
+        calls.append({'query': query, 'count': count, 'date_restrict': date_restrict})
+        return []
+
+    monkeypatch.setattr(tool_registry, '_WEB_SEARCH_ENGINE_INSTANCES', [SimpleNamespace(search=web_search)])
+    assert academic_preparation.search_registry({**payload, 'source': 'web'}) == {'items': []}
+    assert calls[-1] == {'query': 'retrieval', 'count': 2, 'date_restrict': ''}
+
+
+def test_search_bridge_preserves_cooldown_and_key_pool_failures(monkeypatch):
+    import httpx
+    from lazyllm.common import AllKeysExhaustedError
+    from lazymind.chat.service import academic_preparation
+
+    monkeypatch.setattr(ar, 'require_internal_token', lambda _: None)
+    request = ar.AcademicSearchRequest(source='web', query='paper', limit=2)
+
+    def limited(_):
+        response = httpx.Response(429, headers={'Retry-After': '60'},
+                                  request=httpx.Request('GET', 'https://source.invalid'))
+        raise httpx.HTTPStatusError('private provider detail', request=response.request, response=response)
+
+    monkeypatch.setattr(academic_preparation, 'search_registry', limited)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ar.academic_search(request, 'token'))
+    assert exc.value.status_code == 429
+    assert exc.value.detail['code'] == 'rate_limited' and exc.value.detail['retry_at']
+
+    def exhausted(_):
+        raise AllKeysExhaustedError('private provider detail')
+
+    monkeypatch.setattr(academic_preparation, 'search_registry', exhausted)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ar.academic_search(request, 'token'))
+    assert exc.value.status_code == 401 and exc.value.detail == {'code': 'authentication_failed'}
+
+
+def test_preparation_typed_tools_accept_grounded_direction_schema():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+    from lazymind.chat.service.academic_preparation import PreparationDirection, PreparationQuestion
+
+    def finish(directions: list[PreparationDirection], questions: list[PreparationQuestion] | None = None):
+        """Save grounded directions and questions."""
+        return directions, questions
+
+    ensure_lazyllm_tool_docs([finish])
+    tool = ToolManager([finish]).all_tools[0]
+    value = tool._validate_input({
+        'directions': [{'name': 'retrieval', 'question': 'why', 'reason': 'evidence',
+                        'difference': 'scope', 'paper_ids': ['real-paper']}],
+        'questions': [{'id': 'scope', 'question': 'Which setting?'}],
+    })
+    assert value['directions'][0]['paper_ids'] == ['real-paper']
+
+
+def test_unknown_pdf_locations_preserve_distinct_blocks(tmp_path, monkeypatch):
+    from lazymind.chat.engine.tools.file_resources import ingest
+    monkeypatch.setattr(ar, 'require_internal_token', lambda _: None)
+    monkeypatch.setenv('LAZYMIND_SHARED_UPLOAD_DIR', str(tmp_path))
+    path = tmp_path / 'academic' / 'paper.pdf'
+    path.parent.mkdir()
+    path.write_bytes(b'%PDF-test')
+    monkeypatch.setattr(ingest, 'parse_pdf_pages', lambda _: [(0, 'first block'), (0, 'second block')])
+    result = asyncio.run(ar.parse_pdf(ar.PDFRequest(file_ref='paper.pdf',
+                         content_hash=hashlib.sha256(path.read_bytes()).hexdigest()), 'token'))
+    assert result['pages'] == [{'page': 0, 'text': 'first block'}, {'page': 0, 'text': 'second block'}]
+
+
+def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypatch):
+    import json
+    from lazymind.chat.service import academic_preparation as preparation
+    from lazymind.chat.engine.agent_runtime.workspace_policy import WorkspaceAuthorizationPolicy
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+    from lazyllm.tools.agent import ToolManager
+
+    diagnostics = []
+    monkeypatch.setattr(preparation.lazyllm.LOG, 'warning', diagnostics.append)
+
+    class Client:
+        base_url = 'http://fixture'
+        transport = SimpleNamespace(request=lambda *args, **kwargs: SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {'data': {'papers': [{'paper_id': 'real-paper', 'title': 'Actual candidate'}]}},
+        ))
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def _headers(self):
+            return {}
+
+    def execute(self, llm, plan):
+        assert plan.execution_options.expanded_round_limit == 20
+        assert plan.execution_options.tool_call_limits == {'search_papers': 12, 'read_paper': 20}
+        manager = ToolManager(plan.tools)
+        policy = WorkspaceAuthorizationPolicy(WorkspaceContext(), set(), lambda _: False)
+        batch = manager.prepare_tool_calls([
+            {'id': 'search', 'type': 'function', 'function': {'name': 'search_papers',
+             'arguments': json.dumps({'query': 'RAG'})}},
+        ], authorization_policy=policy)
+        results = manager.execute_prepared(batch)
+        assert 'real-paper' in str(results)
+        directions = [{'name': 'retrieval', 'question': 'why', 'reason': 'evidence',
+                       'difference': 'scope', 'paper_ids': ['real-paper']}]
+        from lazyllm.tools.agent import ToolExecutionError
+        with pytest.raises(ToolExecutionError, match='selected_directions.*exact names'):
+            plan.tools[-1]('Grounded directions', directions, selected_directions=['RAG'])
+        plan.tools[-1]('Grounded directions', directions, selected_directions=['retrieval'])
+
+    monkeypatch.setattr(preparation, 'WorkflowClient', Client)
+    monkeypatch.setattr(preparation, 'inject_model_config', lambda _: None)
+    monkeypatch.setattr(preparation, 'AutoModel', lambda **_: object())
+    monkeypatch.setattr(preparation.AgentExecutor, 'run', execute)
+    result = preparation.run_preparation({
+        'llm_config': {}, 'depth': {'guidance': 'Standard research', 'preparation': {
+            'rounds': 20, 'tool_calls': {'search_papers': 12, 'read_paper': 20}}}, 'user_id': 'u',
+        'expansion_id': 'exp', 'revision': 1, 'preparation': {'user_instruction': 'RAG'}, 'input': {},
+    })
+    assert result['directions'][0]['paper_ids'] == ['real-paper']
+    assert result['selected_directions'] == ['retrieval']
+    diagnostics = [entry for entry in diagnostics if entry.startswith('[AcademicPreparation]')]
+    assert len(diagnostics) == 1
+    diagnostic = json.loads(diagnostics[0].split(': ', 1)[1])
+    assert diagnostic['expansion_id'] == 'exp' and diagnostic['preparation_revision'] == 1
+    assert diagnostic['candidate_names'] == ['retrieval']
+    assert diagnostic['selected_directions'] == ['RAG']
+    assert 'selected_directions must contain distinct exact names' in diagnostic['reason']

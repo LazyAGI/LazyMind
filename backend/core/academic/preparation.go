@@ -1,0 +1,705 @@
+package academic
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/gorilla/mux"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"lazymind/core/asyncjob"
+	"lazymind/core/chat"
+	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
+	"lazymind/core/modelconfig"
+	"lazymind/core/store"
+	"lazymind/core/taskcenter"
+	"lazymind/core/workflow"
+	"lazymind/core/workflow/graphengine"
+	workflowstore "lazymind/core/workflow/store"
+)
+
+const PreparationJobType = "academic.prepare"
+
+const maxPreparationDirections = 5
+
+const confirmedExpansionLaunchInstruction = "请按照已确认范围开展论文拓展。准备成果已保存，请先读取任务上下文。"
+
+type expansionDepth struct {
+	Guidance    string                                `json:"guidance"`
+	Preparation graphengine.ExecutionLimit            `json:"preparation"`
+	Steps       map[string]graphengine.ExecutionLimit `json:"-"`
+}
+
+// Depth bounds investigation by work, rather than by elapsed wall time.
+func depthFor(mode string) (expansionDepth, bool) {
+	var guidance string
+	var preparation, research, compose, searches, reads int
+	switch mode {
+	case "fast":
+		guidance = "快速调研：聚焦核心问题与代表论文，阅读支撑关键结论的段落，分析主要依据并明确材料边界。"
+		preparation, research, compose, searches, reads = 12, 24, 8, 12, 24
+	case "", "balanced":
+		guidance = "标准调研：覆盖主要研究路线，比较代表方法与关键证据，阅读相关正文并说明重要结论及适用条件。"
+		preparation, research, compose, searches, reads = 20, 32, 8, 24, 48
+	case "deep":
+		guidance = "深入研究：在主要路线之外追踪相关工作、前后向引用及不同证据，阅读关键正文，比较主要方法、分歧和适用边界，生成带引用的研究报告。"
+		preparation, research, compose, searches, reads = 28, 48, 12, 36, 72
+	default:
+		return expansionDepth{}, false
+	}
+	return expansionDepth{
+		Guidance:    guidance,
+		Preparation: graphengine.ExecutionLimit{Rounds: preparation, ToolCalls: map[string]int{"search_papers": preparation * 2 / 3, "read_paper": preparation}},
+		Steps: map[string]graphengine.ExecutionLimit{
+			"expand_and_screen": {Rounds: research, ToolCalls: map[string]int{"academic_search_papers": searches}},
+			"analyze_relations": {Rounds: research, Timeout: 1800, ToolCalls: map[string]int{"academic_read_paper": reads, "academic_search_papers": searches / 3}},
+			"compose_result":    {Rounds: compose},
+		},
+	}, true
+}
+
+func depthForExpansion(record orm.AcademicExpansion) (expansionDepth, bool) {
+	depth, ok := depthFor(record.BudgetMode)
+	if !ok {
+		return depth, ok
+	}
+	if record.BudgetMode == "fast" {
+		depth.Guidance = "围绕原问题做一轮定向查找，只保留同机制、同对象的直接来源或不可替代的对照。相同思路只保留最能解释问题的代表工作。"
+		depth.Steps["expand_and_screen"] = graphengine.ExecutionLimit{Rounds: 12, ToolCalls: map[string]int{"academic_search_papers": 5, "academic_read_paper": 3}}
+		return depth, ok
+	}
+	standard, _ := depthFor("balanced")
+	depth.Preparation = standard.Preparation
+	depth.Steps["expand_and_screen"] = standard.Steps["expand_and_screen"]
+	depth.Steps["screen_and_supplement"] = graphengine.ExecutionLimit{Rounds: 12, ToolCalls: map[string]int{"academic_search_papers": 8, "academic_read_paper": 5}}
+	depth.Guidance = "覆盖已确认方向，逐方向找方法来源、同类方法和后续工作，对覆盖薄弱的方向定点补查。"
+	if record.BudgetMode == "deep" {
+		depth.Guidance += " 深入研究在筛选清单基础上阅读关键内容，比较主要方法并生成研究报告与论文关系图；区分原文陈述与研究推断，保留引用和适用条件。"
+	}
+	return depth, ok
+}
+
+const (
+	legacyAcademicExpansionHost = "academic-paper-chat-v1"
+	academicExpansionHost       = "academic-paper-chat-v2"
+)
+
+type preparationDirection struct {
+	Name       string     `json:"name"`
+	Question   string     `json:"question"`
+	Reason     string     `json:"reason"`
+	Difference string     `json:"difference"`
+	PaperIDs   []string   `json:"paper_ids"`
+	Papers     []PaperRef `json:"papers,omitempty"`
+}
+type preparationResearchQuestion struct {
+	ID        string `json:"id"`
+	Direction string `json:"direction"`
+	Question  string `json:"question"`
+	Category  string `json:"category"`
+}
+type preparationNamedClue struct {
+	Name           string            `json:"name"`
+	Role           string            `json:"role"`
+	SourcePaperID  string            `json:"source_paper_id"`
+	SourceLocation string            `json:"source_location"`
+	SourceVersion  string            `json:"source_version"`
+	SourceExcerpt  string            `json:"source_excerpt"`
+	Positions      []int             `json:"positions,omitempty"`
+	ReferenceKey   string            `json:"reference_key,omitempty"`
+	Identity       map[string]string `json:"identity"`
+	QuestionIDs    []string          `json:"question_ids"`
+	PaperID        string            `json:"paper_id,omitempty"`
+}
+type preparationQuestion struct {
+	ID       string   `json:"id"`
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"`
+}
+type preparationAnswer struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+type preparationAttempt struct {
+	Revision   int64           `json:"revision"`
+	StartedAt  *time.Time      `json:"started_at"`
+	FinishedAt time.Time       `json:"finished_at"`
+	Model      string          `json:"model"`
+	Metrics    json.RawMessage `json:"metrics,omitempty"`
+	Error      string          `json:"error,omitempty"`
+}
+type expansionPreparation struct {
+	DirectionSelection  string               `json:"direction_selection,omitempty"`
+	Skipped             bool                 `json:"skipped,omitempty"`
+	OriginalInstruction string               `json:"original_instruction"`
+	Updates             []string             `json:"updates,omitempty"`
+	AnsweredQuestions   []preparationAnswer  `json:"answered_questions,omitempty"`
+	Attempts            []preparationAttempt `json:"attempts,omitempty"`
+
+	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
+	ConfirmedAt        *time.Time `json:"confirmed_at,omitempty"`
+	AutoConfirmed      bool       `json:"auto_confirmed,omitempty"`
+
+	UserInstruction   string                        `json:"user_instruction"`
+	Summary           string                        `json:"summary"`
+	Questions         []preparationQuestion         `json:"questions"`
+	Answers           map[string]string             `json:"answers"`
+	Directions        []preparationDirection        `json:"directions"`
+	Selected          []string                      `json:"selected_directions"`
+	ResearchQuestions []preparationResearchQuestion `json:"research_questions,omitempty"`
+	NamedClues        []preparationNamedClue        `json:"named_clues,omitempty"`
+	StartedAt         *time.Time                    `json:"started_at,omitempty"`
+	FinishedAt        *time.Time                    `json:"finished_at,omitempty"`
+	Error             string                        `json:"error,omitempty"`
+	RequestKey        string                        `json:"request_key,omitempty"`
+	Model             string                        `json:"model,omitempty"`
+	Metrics           json.RawMessage               `json:"metrics,omitempty"`
+}
+
+func init() {
+	asyncjob.Register(PreparationJobType, runPreparation)
+	workflow.ConfigureHostStep = configureAcademicStep
+	workflowstore.InitializeHostSession = initializeAcademicSession
+}
+func enqueuePreparation(ctx context.Context, tx *gorm.DB, record orm.AcademicExpansion) error {
+	_, err := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: PreparationJobType, ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: fmt.Sprintf("%s:%d", record.ID, record.PreparationRevision), Payload: map[string]any{"revision": record.PreparationRevision}, MaxAttempts: 3})
+	return err
+}
+func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
+	db := store.DB().WithContext(ctx)
+	var record orm.AcademicExpansion
+	var payload struct {
+		Revision int64 `json:"revision"`
+	}
+	if json.Unmarshal(job.PayloadJSON, &payload) != nil {
+		return asyncjob.Result{Permanent: true}, errors.New("invalid preparation revision")
+	}
+	if err := db.Where("id=? AND user_id=? AND deleted_at IS NULL", job.ResourceID, job.CreateUserID).Take(&record).Error; err != nil {
+		return asyncjob.Result{Permanent: true}, err
+	}
+	if record.PreparationRevision != payload.Revision || record.Status != "preparing" {
+		return asyncjob.Result{}, nil
+	}
+	var preparation expansionPreparation
+	_ = json.Unmarshal(record.PreparationJSON, &preparation)
+	now := time.Now().UTC()
+	if preparation.StartedAt == nil {
+		preparation.StartedAt = &now
+	}
+	depth, _ := depthForExpansion(record)
+	if err := db.Model(&record).Where("preparation_revision=? AND status='preparing'", payload.Revision).Update("preparation_json", marshal(preparation)).Error; err != nil {
+		return asyncjob.Result{}, err
+	}
+	output := struct {
+		expansionPreparation
+		Title string `json:"title"`
+	}{expansionPreparation: preparation}
+	output.Metrics = nil
+	var llmConfig map[string]any
+	var role map[string]any
+	var err error
+	if record.ConversationID != "" {
+		llmConfig, err = chat.LoadConversationLLMConfig(ctx, db, record.UserID, record.ConversationID)
+		role, _ = llmConfig["llm"].(map[string]any)
+	} else {
+		role, err = chat.LoadDefaultChatLLMConfig(ctx, db, record.UserID)
+		llmConfig = map[string]any{"llm": role}
+	}
+	if err == nil {
+		err = internalAcademic(ctx, "preparation:run", map[string]any{"expansion_id": record.ID, "user_id": record.UserID, "revision": payload.Revision, "input": json.RawMessage(record.ResultJSON), "preparation": preparation, "llm_config": llmConfig, "depth": depth}, &output)
+	}
+	result := output.expansionPreparation
+	// Search tools register candidates while the Agent runs. Validate against
+	// that committed discovery state, fenced to this preparation revision.
+	var latest orm.AcademicExpansion
+	if e := db.Where("id=? AND user_id=? AND preparation_revision=? AND status='preparing' AND deleted_at IS NULL", record.ID, record.UserID, payload.Revision).Take(&latest).Error; e != nil {
+		if errors.Is(e, gorm.ErrRecordNotFound) {
+			return asyncjob.Result{}, nil
+		}
+		return asyncjob.Result{}, e
+	}
+	record = latest
+	attemptMetrics := result.Metrics
+	status := "awaiting_confirmation"
+	if err != nil {
+		status = "preparation_failed"
+		result = preparation
+		result.Metrics = attemptMetrics
+		result.Error = "初步调研未完成，请检查模型或检索配置后重试"
+		if ctx.Err() != nil {
+			return asyncjob.Result{}, ctx.Err()
+		}
+	}
+	if err == nil {
+		if e := validatePreparation(db, record, result); e != nil {
+			status = "preparation_failed"
+			result = preparation
+			result.Metrics = attemptMetrics
+			result.Error = e.Error()
+		} else if len(result.Questions) > 0 {
+			status = "awaiting_info"
+		}
+	}
+	finished := time.Now().UTC()
+	result.StartedAt = preparation.StartedAt
+	result.FinishedAt = &finished
+	for i := range result.Directions {
+		result.Directions[i].Papers = nil
+		for _, id := range result.Directions[i].PaperIDs {
+			if source, e := expansionSource(db, record, id); e == nil {
+				result.Directions[i].Papers = append(result.Directions[i].Papers, source.Paper)
+			}
+		}
+	}
+	// Selection policy belongs to the launch request, never to the model response.
+	result.DirectionSelection = preparation.DirectionSelection
+	result.Answers = preparation.Answers
+	result.RequestKey = preparation.RequestKey
+	result.Model = ""
+	if name, ok := role["model"].(string); ok {
+		result.Model = name
+	}
+	result.Attempts = append(preparation.Attempts, preparationAttempt{Revision: payload.Revision, StartedAt: preparation.StartedAt, FinishedAt: finished, Model: result.Model, Metrics: result.Metrics, Error: result.Error})
+	saveErr := conversationgroup.UserTransaction(ctx, db, record.UserID, func(tx *gorm.DB) error {
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND preparation_revision=? AND status='preparing' AND deleted_at IS NULL", record.ID, payload.Revision).Take(&record).Error; e != nil {
+			if errors.Is(e, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return e
+		}
+		record.Status = status
+		record.PreparationJSON = marshal(result)
+		if err == nil {
+			record.Title = truncateTitle(firstNonEmpty(strings.TrimSpace(output.Title), record.Title))
+		}
+		if e := tx.Model(&record).Updates(map[string]any{"preparation_json": record.PreparationJSON, "status": status, "title": record.Title, "updated_at": finished}).Error; e != nil {
+			return e
+		}
+		if status == "awaiting_confirmation" && (result.DirectionSelection == "all" ||
+			(result.DirectionSelection == "" && len(result.Directions) == 1)) {
+			selected := make([]string, 0, len(result.Directions))
+			for _, direction := range result.Directions {
+				selected = append(selected, direction.Name)
+			}
+			return confirmPreparedExpansion(ctx, tx, &record, selected, fmt.Sprintf("auto:%d", payload.Revision), true)
+		}
+		return taskcenter.NotifyAcademicExpansion(ctx, tx, record.UserID, record.DatasetID, record.ID, payload.Revision, status)
+	})
+	return asyncjob.Result{Permanent: status == "preparation_failed"}, saveErr
+}
+func validatePreparation(db *gorm.DB, record orm.AcademicExpansion, p expansionPreparation) error {
+	if strings.TrimSpace(p.Summary) == "" {
+		return errors.New("调研摘要为空，请重试")
+	}
+	seen := map[string]bool{}
+	for _, q := range p.Questions {
+		if q.ID == "" || strings.TrimSpace(q.Question) == "" || seen[q.ID] {
+			return errors.New("调研问题无效")
+		}
+		seen[q.ID] = true
+	}
+	if len(p.Directions) > maxPreparationDirections {
+		return fmt.Errorf("研究方向最多 %d 个，请合并重复方向后重试", maxPreparationDirections)
+	}
+	for _, clue := range p.NamedClues {
+		if strings.TrimSpace(clue.SourceExcerpt) == "" || len(clue.Positions) == 0 && strings.TrimSpace(clue.ReferenceKey) == "" {
+			return errors.New("原文研究线索须提供真实摘录及正文位置或参考文献编号")
+		}
+		if len(clue.Positions) > 5 {
+			return errors.New("研究线索最多关联5个正文块")
+		}
+		positions := map[int]bool{}
+		for _, position := range clue.Positions {
+			if position < 0 || positions[position] {
+				return errors.New("研究线索正文位置须为非负且不重复的块序号")
+			}
+			positions[position] = true
+		}
+		source, err := expansionSource(db, record, clue.SourcePaperID)
+		if err != nil {
+			return errors.New("研究线索的原文论文尚未登记于本次调研")
+		}
+		if source.Paper.SourceVersion != "" && clue.SourceVersion != source.Paper.SourceVersion {
+			return errors.New("研究线索来源版本与本次调研绑定的原文不一致")
+		}
+	}
+	if len(p.Questions) > 0 {
+		return nil
+	}
+	if len(p.Directions) == 0 {
+		return errors.New("尚未得到有依据的研究方向，请补充范围后重试")
+	}
+	seen = map[string]bool{}
+	for _, d := range p.Directions {
+		if strings.TrimSpace(d.Name) == "" || seen[d.Name] || strings.TrimSpace(d.Question) == "" || strings.TrimSpace(d.Reason) == "" || len(d.PaperIDs) == 0 {
+			return errors.New("研究方向缺少名称、依据或代表论文")
+		}
+		seen[d.Name] = true
+		for _, id := range d.PaperIDs {
+			if _, err := expansionSource(db, record, id); err != nil {
+				return errors.New("代表论文尚未登记于本次调研")
+			}
+		}
+	}
+	for _, name := range p.Selected {
+		if !seen[name] {
+			return errors.New("预选方向不在调研范围内")
+		}
+	}
+	questions := map[string]bool{}
+	for _, question := range p.ResearchQuestions {
+		if question.ID == "" || questions[question.ID] || !seen[question.Direction] || strings.TrimSpace(question.Question) == "" || (question.Category != "predecessor" && question.Category != "successor" && question.Category != "peer") {
+			return errors.New("研究问题缺少有效方向、唯一标识或前序/后续/同层类别")
+		}
+		questions[question.ID] = true
+	}
+	for _, clue := range p.NamedClues {
+		if strings.TrimSpace(clue.Name) == "" || strings.TrimSpace(clue.Role) == "" || len(clue.QuestionIDs) == 0 {
+			return errors.New("原文研究线索缺少名称、作用或关联问题")
+		}
+		if clue.PaperID != "" {
+			if _, err := expansionSource(db, record, clue.PaperID); err != nil {
+				return errors.New("研究线索对应论文尚未登记于本次调研")
+			}
+		}
+		for _, id := range clue.QuestionIDs {
+			if !questions[id] {
+				return errors.New("研究线索关联了不存在的研究问题")
+			}
+		}
+	}
+	return nil
+}
+
+func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	record, ok := ownedExpansion(w, r, user, mux.Vars(r)["expansion_id"])
+	if !ok {
+		return
+	}
+	var req struct {
+		Action      string            `json:"action"`
+		Revision    int64             `json:"revision"`
+		RequestKey  string            `json:"request_key"`
+		Answers     map[string]string `json:"answers"`
+		Instruction string            `json:"user_instruction"`
+		BudgetMode  json.RawMessage   `json:"budget_mode"`
+	}
+	if !parseJSON(r, &req) || req.RequestKey == "" || len(req.RequestKey) > 128 || (req.Action != "answer" && req.Action != "revise" && req.Action != "retry") {
+		replyError(w, 400, "INVALID_REQUEST", "action, revision and request_key are required")
+		return
+	}
+	if len(req.BudgetMode) > 0 {
+		replyError(w, 400, "INVALID_REQUEST", "调研深度在任务启动时固定，后续不能修改")
+		return
+	}
+	err := conversationgroup.UserTransaction(r.Context(), store.DB(), user, func(tx *gorm.DB) error {
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&record).Error; e != nil {
+			return e
+		}
+		var p expansionPreparation
+		_ = json.Unmarshal(record.PreparationJSON, &p)
+		if p.Skipped {
+			return errors.New("快速扩展直接执行，无需初步调研")
+		}
+		if p.RequestKey == req.RequestKey {
+			return nil
+		}
+		if record.PreparationRevision != req.Revision {
+			return errors.New("准备内容已更新，请刷新后重试")
+		}
+		if record.Status != "awaiting_info" && record.Status != "awaiting_confirmation" && record.Status != "preparation_failed" {
+			return errors.New("仅初步调研阶段支持调整研究范围；正式执行后如需改变主题或方向，请新建任务")
+		}
+		if req.Action == "revise" && record.Status != "awaiting_confirmation" && record.Status != "preparation_failed" {
+			return errors.New("请先回答当前待补充问题")
+		}
+		if req.Action == "retry" && record.Status != "preparation_failed" {
+			return errors.New("仅初步调研失败后支持重试")
+		}
+		if req.Action == "answer" {
+			if record.Status != "awaiting_info" {
+				return errors.New("当前没有待回答问题")
+			}
+			if p.Answers == nil {
+				p.Answers = map[string]string{}
+			}
+			for _, q := range p.Questions {
+				answer := strings.TrimSpace(req.Answers[q.ID])
+				if answer == "" {
+					return errors.New("请回答当前待补充问题")
+				}
+				p.Answers[q.ID] = answer
+				p.AnsweredQuestions = append(p.AnsweredQuestions, preparationAnswer{q.Question, answer})
+			}
+		}
+		if req.Action == "revise" && strings.TrimSpace(req.Instruction) == "" {
+			return errors.New("请填写新的研究要求")
+		}
+		if strings.TrimSpace(req.Instruction) != "" {
+			p.UserInstruction = strings.TrimSpace(req.Instruction)
+			p.Updates = append(p.Updates, p.UserInstruction)
+		}
+		p.StartedAt = nil
+		p.FinishedAt = nil
+		p.Error = ""
+		p.Metrics = nil
+		p.RequestKey = req.RequestKey
+		p.Questions = nil
+		p.Selected = nil
+		p.AutoConfirmed = false
+		if e := taskcenter.ResolveAcademicExpansionNotifications(r.Context(), tx, record.ID, record.PreparationRevision); e != nil {
+			return e
+		}
+		if record.ConversationID != "" {
+			if _, e := asyncjob.CancelResourceJobs(r.Context(), tx, ChatLaunchJobType, "conversation", record.ConversationID, "research scope revised"); e != nil {
+				return e
+			}
+		}
+		record.PreparationRevision++
+		record.PreparationJSON = marshal(p)
+		record.Status = "preparing"
+		if e := tx.Model(&record).Updates(map[string]any{"preparation_revision": record.PreparationRevision, "preparation_json": record.PreparationJSON, "status": record.Status, "updated_at": time.Now().UTC()}).Error; e != nil {
+			return e
+		}
+		return enqueuePreparation(r.Context(), tx, record)
+	})
+	if err != nil {
+		replyError(w, 409, "PREPARATION_CONFLICT", err.Error())
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"expansion_id": record.ID, "status": record.Status, "revision": record.PreparationRevision})
+}
+func ConfirmExpansion(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	record, ok := ownedExpansion(w, r, user, mux.Vars(r)["expansion_id"])
+	if !ok {
+		return
+	}
+	var req struct {
+		Revision   int64           `json:"revision"`
+		RequestKey string          `json:"request_key"`
+		Selected   []string        `json:"selected_directions"`
+		BudgetMode json.RawMessage `json:"budget_mode"`
+	}
+	if !parseJSON(r, &req) || req.RequestKey == "" || len(req.RequestKey) > 128 || len(req.Selected) == 0 {
+		replyError(w, 400, "INVALID_REQUEST", "revision, request_key and selected_directions required")
+		return
+	}
+	if len(req.BudgetMode) > 0 {
+		replyError(w, 400, "INVALID_REQUEST", "调研深度在任务启动时固定，后续不能修改")
+		return
+	}
+	err := conversationgroup.UserTransaction(r.Context(), store.DB(), user, func(tx *gorm.DB) error {
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&record).Error; e != nil {
+			return e
+		}
+		if record.PreparationRevision != req.Revision {
+			return errors.New("准备内容已更新，请重新确认")
+		}
+		var p expansionPreparation
+		_ = json.Unmarshal(record.PreparationJSON, &p)
+		if p.RequestKey == "confirm:"+req.RequestKey && record.ConversationID != "" {
+			return nil
+		}
+		return confirmPreparedExpansion(r.Context(), tx, &record, req.Selected, req.RequestKey, false)
+	})
+	if err != nil {
+		replyError(w, 409, "CONFIRM_FAILED", err.Error())
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"expansion_id": record.ID, "conversation_id": record.ConversationID, "status": record.Status})
+}
+func confirmPreparedExpansion(ctx context.Context, tx *gorm.DB, record *orm.AcademicExpansion, selected []string, requestKey string, automatic bool) error {
+	var p expansionPreparation
+	if err := json.Unmarshal(record.PreparationJSON, &p); err != nil {
+		return err
+	}
+	if record.Status != "awaiting_confirmation" {
+		return errors.New("请先完成初步调研和待补充问题")
+	}
+	if len(p.Questions) > 0 {
+		return errors.New("请先回答待补充问题")
+	}
+	if e := validatePreparation(tx, *record, p); e != nil {
+		return e
+	}
+	choices := map[string]bool{}
+	for _, d := range p.Directions {
+		choices[d.Name] = true
+	}
+	seen := map[string]bool{}
+	for _, d := range selected {
+		if !choices[d] || seen[d] {
+			return errors.New("请选择已调研的方向；新方向需先补充调研")
+		}
+		seen[d] = true
+	}
+	var input ReviewWorkflowInput
+	if e := json.Unmarshal(record.ResultJSON, &input); e != nil {
+		return e
+	}
+	input.UserInstruction = p.UserInstruction
+	for _, answer := range p.AnsweredQuestions {
+		input.UserInstruction += "\n补充：" + answer.Question + "：" + answer.Answer
+	}
+	input.CandidateDirections = []string{}
+	for _, d := range p.Directions {
+		input.CandidateDirections = append(input.CandidateDirections, d.Name)
+	}
+	input.SelectedDirections = selected
+	p.Selected = selected
+	p.ExecutionStartedAt = nil
+	p.AutoConfirmed = automatic
+	confirmed := time.Now().UTC()
+	p.ConfirmedAt = &confirmed
+	if e := taskcenter.ResolveAcademicExpansionNotifications(ctx, tx, record.ID, record.PreparationRevision); e != nil {
+		return e
+	}
+	p.RequestKey = "confirm:" + requestKey
+	if record.ConversationID == "" {
+		id, e := newAcademicConversation(tx, record.UserID, record.DatasetID, "论文扩展："+truncateTitle(record.Title), "expansion")
+		if e != nil {
+			return e
+		}
+		record.ConversationID = id
+	}
+	record.Status = "pending"
+	record.ResultJSON = marshal(input)
+	record.PreparationJSON = marshal(p)
+	if e := tx.Model(record).Updates(map[string]any{"conversation_id": record.ConversationID, "status": record.Status, "result_json": record.ResultJSON, "preparation_json": record.PreparationJSON, "updated_at": time.Now().UTC()}).Error; e != nil {
+		return e
+	}
+	return enqueueAcademicChat(ctx, tx, record.UserID, record.ConversationID, "paper_expansion", confirmedExpansionLaunchInstruction, fmt.Sprintf("confirm:%d:%s", record.PreparationRevision, requestKey))
+}
+
+func ExpansionCapabilities(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return
+	}
+	db := store.DB()
+	academic, err := modelconfig.LoadAcademicSearchToolConfig(r.Context(), db, user)
+	if err != nil {
+		replyError(w, 500, "CONFIG_UNAVAILABLE", "无法读取学术搜索配置")
+		return
+	}
+	web, err := modelconfig.LoadSearchToolConfig(r.Context(), db, user)
+	if err != nil {
+		replyError(w, 500, "CONFIG_UNAVAILABLE", "无法读取通用搜索配置")
+		return
+	}
+	key, err := modelconfig.LoadOpenAlexAPIKey(r.Context(), db, user)
+	if err != nil {
+		replyError(w, 500, "CONFIG_UNAVAILABLE", "无法读取 OpenAlex 配置")
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"openalex_key": key != "", "sciverse": academic["sciverse"] != nil, "web_search": len(web) > 0})
+}
+
+func initializeAcademicSession(ctx context.Context, db *gorm.DB, session orm.WorkflowSession, pkg workflowstore.WorkflowPackage) error {
+	if len(pkg.CompiledGraph) == 0 {
+		return nil
+	}
+	var graph graphengine.CompiledStateGraph
+	if err := json.Unmarshal(pkg.CompiledGraph, &graph); err != nil {
+		return err
+	}
+	// Older pinned packages determine these conditions from stage outputs.
+	unified := slices.Contains(graph.Runtime.HostExtensions, academicExpansionHost)
+	if (!unified && !slices.Contains(graph.Runtime.HostExtensions, legacyAcademicExpansionHost)) ||
+		graph.MaterialProducers["analysis_not_required"].Kind != "external" {
+		return nil
+	}
+	var record orm.AcademicExpansion
+	if err := db.WithContext(ctx).Where("conversation_id=? AND user_id=? AND deleted_at IS NULL", session.ConversationID, session.CreateUserID).Take(&record).Error; err != nil {
+		return err
+	}
+	if _, ok := depthForExpansion(record); !ok {
+		return errors.New("invalid research depth")
+	}
+	markers := []string{}
+	legacyReview := !unified && record.Goal != "expansion"
+	if legacyReview || record.BudgetMode == "fast" {
+		markers = append(markers, "screening_not_required")
+	}
+	if !legacyReview && record.BudgetMode != "deep" {
+		markers = append(markers, "analysis_not_required")
+	}
+	for _, slot := range markers {
+		if err := db.Create(&orm.WorkflowSlotRevision{
+			ID: "psr_" + common.GenerateID(), SessionID: session.ID, SlotID: slot, Slot: slot,
+			Revision: 1, Selected: true, StepID: "__start__", Validity: "effective", ChangeSource: "system",
+			ContentSnapshot: marshal(map[string]any{"value": map[string]string{"mode": record.BudgetMode}, "source": "external"}),
+			CreatedAt:       session.CreatedAt,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation string, params *workflow.WorkflowStepParams) error {
+	unified := slices.Contains(params.Runtime.HostExtensions, academicExpansionHost)
+	if (!unified && !slices.Contains(params.Runtime.HostExtensions, legacyAcademicExpansionHost)) || !db.Migrator().HasTable(&orm.AcademicExpansion{}) {
+		return nil
+	}
+	var record orm.AcademicExpansion
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=? AND deleted_at IS NULL", conversation, user).Take(&record).Error; err != nil {
+		return err
+	}
+	if record.Status != "pending" && record.Status != "running" && record.Status != "completed" && record.Status != "failed" && record.Status != "stopped" {
+		return errors.New("请在拓展记录中确认方向后开始正式拓展")
+	}
+	var preparation expansionPreparation
+	if err := json.Unmarshal(record.PreparationJSON, &preparation); err != nil {
+		return err
+	}
+	_, splitWorkflow := params.Runtime.ExecutionLimits["screen_and_supplement"]
+	// Released sessions scoped their research inside the pinned workflow.
+	if !unified && !splitWorkflow && record.PreparationRevision == 0 && len(preparation.Selected) == 0 {
+		return nil
+	}
+	if len(preparation.Selected) == 0 {
+		return errors.New("研究范围尚未确认")
+	}
+	now := time.Now().UTC()
+	if preparation.ExecutionStartedAt == nil || record.Status == "completed" {
+		preparation.ExecutionStartedAt = &now
+	}
+	depth, ok := depthForExpansion(record)
+	if !unified && record.Goal != "expansion" {
+		depth, ok = depthFor(record.BudgetMode)
+	}
+	if !ok {
+		return errors.New("invalid research depth")
+	}
+	limit, ok := depth.Steps[params.StepID]
+	if splitWorkflow && (unified || record.Goal == "expansion") && record.BudgetMode != "fast" && params.StepID == "expand_and_screen" {
+		limit = graphengine.ExecutionLimit{Rounds: 20, ToolCalls: map[string]int{"academic_search_papers": 16}}
+	}
+	if !ok {
+		return errors.New("unknown paper research step")
+	}
+	limits := map[string]graphengine.ExecutionLimit{}
+	for key, value := range params.Runtime.ExecutionLimits {
+		limits[key] = value
+	}
+	limits[params.StepID] = limit
+	params.Runtime.ExecutionLimits = limits
+	return db.Model(&record).Updates(map[string]any{"preparation_json": marshal(preparation), "status": "running"}).Error
+}

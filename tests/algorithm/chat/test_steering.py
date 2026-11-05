@@ -18,6 +18,7 @@ from lazymind.chat.engine.agent_runtime import (
 from lazymind.chat.engine.agent_runtime.models import PromptBundle
 from lazymind.chat.engine.agent_runtime.executor import AgentInvocation
 from lazymind.chat.engine.agent_runtime.steering import (
+    continue_before_invocation,
     continue_in_workspace,
     SteeringInput,
     SteeringInterruptedError,
@@ -253,6 +254,26 @@ def test_late_guidance_moves_completed_history_back_without_copying():
 def test_missing_workspace_never_silently_continues_with_only_latest_guide():
     with pytest.raises(RuntimeError, match='workspace is unavailable'):
         continue_in_workspace(travel_plan(), [SteeringInput('1', '预算2000元', 1)], '')
+
+
+@pytest.mark.parametrize('seeded', [False, True])
+def test_guidance_before_invocation_preserves_original_input_and_prepared_workspace(seeded):
+    plan = travel_plan()
+    saved = deepcopy(plan.history)
+    if seeded:
+        workspace = {'history': deepcopy(plan.history), '_active_groups': ['workflow']}
+        lazyllm.locals['_lazyllm_agent']['workspace'] = workspace
+    guides = [SteeringInput('1', '只比较天津和济南', 1), SteeringInput('2', '预算2000元', 2)]
+    continued = continue_before_invocation(plan, guides)
+    assert plan.history == saved
+    assert continued.history == [*saved, {'role': 'user', 'content': plan.prompt.current_input}]
+    assert '只比较天津和济南' in continued.prompt.current_input
+    assert '预算2000元' in continued.prompt.current_input
+    assert continued.force_summarize_context == plan.force_summarize_context
+    assert continued.history is lazyllm.locals['_lazyllm_agent']['workspace']['history']
+    if seeded:
+        assert lazyllm.locals['_lazyllm_agent']['workspace'] is workspace
+        assert workspace['_active_groups'] == ['workflow']
 
 
 @pytest.mark.parametrize('cancelled', [False, True])

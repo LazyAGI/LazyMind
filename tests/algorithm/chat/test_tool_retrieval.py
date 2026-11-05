@@ -74,6 +74,31 @@ def agent(scope='chat', preview=False, required=(), skills=None):
     return result
 
 
+def test_required_tool_tracks_live_availability_without_an_extra_load(scope):
+    ready = {'value': False}
+    tools = [search_mail, {
+        'name': 'session_tools', 'desc': 'Capabilities available after initialization.',
+        'tools': [read_mail], 'lazy': False, 'key_source': lambda: ready['value'],
+    }]
+    runtime = SimpleNamespace(_tools_manager=ToolManager(tools), _skill_manager=None,
+                              _prompt='tool policy', _tools=tools)
+    plan = SimpleNamespace(
+        role=AgentRole.CHAT, stop_tools=[], prompt=SimpleNamespace(current_input='Read a message'),
+        execution_options=AgentExecutionOptions(required_tool_names=('search_mail', 'read_mail')),
+    )
+    configure_tool_retrieval(runtime, plan)
+
+    def exposed():
+        return {item['function']['name'] for item in runtime._tools_manager.tools_description}
+
+    assert 'search_mail' in exposed()
+    assert 'read_mail' not in exposed()
+    ready['value'] = True
+    assert 'read_mail' in exposed()
+    ready['value'] = False
+    assert 'read_mail' not in exposed()
+
+
 def test_restore_unload_preview_and_atomic_disk_failure(scope, monkeypatch):
     a = agent()
     a._tools_manager.retrieval.load(['search_mail'], [])

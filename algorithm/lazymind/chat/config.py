@@ -17,7 +17,7 @@ CHAT_SPREADSHEET_EXTENSIONS = ('.csv', '.tsv', '.xls', '.xlsx')
 # Keep this list aligned with frontend allowedTextTypes and core common textFileExtensions.
 CHAT_TEXT_EXTENSIONS = (
     '.txt', '.md', '.markdown', '.lmd', '.csv', '.tsv', '.json', '.jsonl', '.ndjson',
-    '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.log', '.sql',
+    '.xml', '.svg', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.log', '.sql',
     '.html', '.htm', '.css', '.scss', '.sass', '.less',
     '.py', '.pyi', '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx',
     '.java', '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.cs',

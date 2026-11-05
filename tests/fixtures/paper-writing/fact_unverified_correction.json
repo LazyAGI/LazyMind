@@ -1,0 +1,626 @@
+{
+  "origin": "Exact R3 and its numerical proposals from the retained final Runtime state response; table projected to the three original columns, all 96 rows retained.",
+  "manuscript": "# 论文写作 Agent 的真实评估\n\n以下结果来自真实模型与真实论文稿件的受控实验。启用绑定的结构化局部修订组有24条记录，目标落实率平均为0.836833。由此我们证明系统在真实论文写作中具有普适优势。\n",
+  "issue": {
+    "severity": "major",
+    "category": "analysis",
+    "location": "论文写作 Agent 的真实评估／首段",
+    "quote": "启用绑定的结构化局部修订组有24条记录，目标落实率平均为0.836833。",
+    "problem": "所给结果表共有96行，其中method为structured_local且binding为with_binding的记录为32条，并非24条；这些32条target_compliance的算术平均值为0.8065625，也不等于0.836833。短稿未说明24条来自何种筛选或分母，因此记录数与均值目前均无法由所附表格复核。",
+    "suggestion": "补充筛选规则、正确分母及对应记录范围，并按该范围重新报告记录数与目标落实率均值；如果24和0.836833只是旧稿残留，则应改为与当前结果表一致且可复算的数值。完成标准是明确列出用于该均值的全部记录选择条件，并使记录数、均值和结果表一致。",
+    "action_type": "text_revision"
+  },
+  "fact_claims": [
+    {
+      "category": "numbers",
+      "location": "论文写作 Agent 的真实评估／首段",
+      "quote": "启用绑定的结构化局部修订组有24条记录，目标落实率平均为0.836833。",
+      "asserted_text": "24条记录",
+      "operation": "denominator",
+      "sources": [
+        {
+          "path": "/result_meta/execution_log",
+          "quote": "实际执行耗时 0.108 秒，返回 96 行。",
+          "value_text": "96",
+          "column": null,
+          "where": {}
+        }
+      ]
+    },
+    {
+      "category": "numbers",
+      "location": "论文写作 Agent 的真实评估／首段",
+      "quote": "启用绑定的结构化局部修订组有24条记录，目标落实率平均为0.836833。",
+      "asserted_text": "0.836833",
+      "operation": "mean",
+      "sources": [
+        {
+          "path": "/evidence/results/columns",
+          "quote": "method",
+          "value_text": null,
+          "column": null,
+          "where": {}
+        },
+        {
+          "path": "/evidence/results/columns",
+          "quote": "binding",
+          "value_text": null,
+          "column": null,
+          "where": {}
+        },
+        {
+          "path": "/evidence/results/columns",
+          "quote": "target_compliance",
+          "value_text": null,
+          "column": null,
+          "where": {}
+        },
+        {
+          "path": "/evidence/results/rows",
+          "quote": null,
+          "value_text": null,
+          "column": "target_compliance",
+          "where": {
+            "method": "structured_local",
+            "binding": "with_binding"
+          }
+        }
+      ]
+    }
+  ],
+  "result_meta": {
+    "schema_version": 1,
+    "execution_status": "succeeded",
+    "data_origin": "synthetic",
+    "method": "simulation",
+    "reason": null,
+    "assumptions": [
+      "本实验为模拟研究，预览值仅用于展示输出结构与量纲，不代表已执行的真实测量结果。",
+      "每个试验对应一个包含目标修订、审稿意见、稿件版本和受保护片段的任务实例；模拟数据按配置中的任务数和重复次数生成。",
+      "三类方法共享相同的任务、底座模型抽象、修改要求和评测规则；结构化局部方法额外使用语义计划、程序化局部补丁、独立校验和版本化意见绑定。",
+      "目标落实率、范围外修改率、计划正确率和一次执行正确率分别独立采样并记录，不将计划正确直接等同于最终执行正确。",
+      "意见版本绑定组的过期或未选意见误执行率低于无绑定组；待补事项保留率在三种方法间独立生成，结构化局部方法仅具有较轻的漂移风险假设。",
+      "所有比例均限制在0到1之间；数值四舍五入到小数点后三位。该模拟不能证明真实模型、真实稿件或学术质量上的优越性。"
+    ],
+    "metrics": [
+      {
+        "column": "target_compliance",
+        "description": "目标修订要求落实率：目标要求中满足的要求比例",
+        "unit": "比例"
+      },
+      {
+        "column": "out_of_scope_change",
+        "description": "范围外修改率：目标范围外发生非必要修改的比例",
+        "unit": "比例"
+      },
+      {
+        "column": "plan_correctness",
+        "description": "计划正确率：语义规划与目标要求一致的比例",
+        "unit": "比例"
+      },
+      {
+        "column": "execution_correctness",
+        "description": "一次执行正确率：在计划正确条件下首次补丁执行正确的比例",
+        "unit": "比例"
+      },
+      {
+        "column": "rollback_rate",
+        "description": "回退率：需要回退或二次修复的试验比例",
+        "unit": "比例"
+      },
+      {
+        "column": "stale_review_misexecution",
+        "description": "过期或未选审稿意见误执行率",
+        "unit": "比例"
+      },
+      {
+        "column": "pending_item_retention",
+        "description": "待补事项保留率：待补事项在修订后仍被保留的比例",
+        "unit": "比例"
+      }
+    ],
+    "seed": 20250308,
+    "column_types": {
+      "method": "string",
+      "binding": "string",
+      "target_compliance": "number",
+      "out_of_scope_change": "number",
+      "plan_correctness": "number",
+      "execution_correctness": "number",
+      "rollback_rate": "number",
+      "stale_review_misexecution": "number",
+      "pending_item_retention": "number"
+    },
+    "execution_log": "",
+    "elapsed_seconds": 0.108
+  },
+  "table": {
+    "columns": [
+      "method",
+      "binding",
+      "target_compliance"
+    ],
+    "rows": [
+      [
+        "structured_local",
+        "with_binding",
+        0.667
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.5
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.8
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.6
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.8
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.75
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.75
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.5
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.8
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.8
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.6
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.667
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.333
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.333
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.25
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.5
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.333
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.667
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.333
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.75
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.25
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.8
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.8
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.8
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.6
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.667
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.333
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.75
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.5
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.5
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.8
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.8
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.6
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.667
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.333
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.75
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.75
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.75
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.667
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.75
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.75
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.75
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.8
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.6
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.8
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.8
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.667
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.75
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.25
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.8
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.8
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.2
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        1.0
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        1.0
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.333
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        1.0
+      ],
+      [
+        "structured_local",
+        "with_binding",
+        0.5
+      ],
+      [
+        "direct_patch",
+        "with_binding",
+        0.75
+      ],
+      [
+        "full_rewrite",
+        "without_binding",
+        0.5
+      ],
+      [
+        "structured_local",
+        "without_binding",
+        0.75
+      ]
+    ]
+  }
+}

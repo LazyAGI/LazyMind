@@ -19,11 +19,17 @@ from __future__ import annotations
 from lazyllm.tools import fc_register
 
 import uuid
-from typing import Any, Dict, List, Optional
+import math
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
 
+from .ask_user_schema import (
+    MAX_MULTIPLE_SUGGESTIONS, MAX_QUESTIONS, MAX_SINGLE_SUGGESTIONS, ModelQuestions, validate_model_questions,
+)
 
 _OTHER_OPTION = '__ask_user_other__'
 _BOOLEAN_CHOICES = ['__ask_user_yes__', '__ask_user_no__']
@@ -37,6 +43,62 @@ def _normalise_choice(raw: Any) -> str:
     return str(raw).strip()
 
 
+class AskUserQuestion(BaseModel):
+    """Read legacy question arguments when restoring workflow history."""
+
+    model_config = ConfigDict(extra='forbid', strict=True, str_strip_whitespace=True)
+
+    text: str = Field(min_length=1, description='Question shown to the user')
+    type: Literal['boolean', 'single', 'multiple', 'text'] = 'text'
+    choices: List[str] = Field(default_factory=list, description='Choice labels, not objects')
+    allow_other: bool = True
+    id: Optional[str] = None
+    attachment: Optional[Dict[str, Any]] = None
+    reason: Optional[str] = None
+    required: Optional[bool] = None
+    choice_policy: Optional[Literal['seed', 'subset', 'fixed']] = None
+    boolean_labels: Optional[Dict[str, str]] = None
+    validation: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalise_model_arguments(cls, raw):
+        """Repair common question/option wrappers before tool argument validation."""
+        if not isinstance(raw, dict):
+            return raw
+        value = dict(raw)
+        uses_options = 'options' in value
+        for alias, canonical in (('question', 'text'), ('options', 'choices')):
+            if alias in value:
+                if canonical in value and value[canonical] != value[alias]:
+                    raise ValueError(f'Conflicting {canonical} and {alias} fields')
+                value[canonical] = value.pop(alias)
+        # Some providers serialize nested lists as {"item": [...]} and boolean
+        # scalars as strings. Decode only these unambiguous wire representations.
+        choices = value.get('choices')
+        if isinstance(choices, dict) and set(choices) == {'item'}:
+            value['choices'] = choices['item']
+        for field in ('allow_other', 'multi_select'):
+            flag = value.get(field)
+            if isinstance(flag, str) and flag.strip().lower() in {'true', 'false'}:
+                value[field] = flag.strip().lower() == 'true'
+        multiple = value.pop('multi_select', None)
+        if multiple is not None and not isinstance(multiple, bool):
+            raise ValueError('multi_select must be a boolean')
+        if uses_options and 'type' not in value:
+            value['type'] = 'multiple' if multiple else 'single'
+        if isinstance(value.get('type'), str):
+            value['type'] = value['type'].strip().lower()
+        # A per-question header is presentation metadata, not its question text.
+        value.pop('header', None)
+        if isinstance(value.get('choices'), list):
+            value['choices'] = [
+                _normalise_choice(item) if isinstance(item, dict) else item
+                for item in value['choices']
+            ]
+        return value
+
+
 def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Validate and normalise the questions list.
 
@@ -46,7 +108,10 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     - For text: clears choices.
     """
     normalised = []
+    ids = set()
     for i, q in enumerate(raw):
+        if isinstance(q, AskUserQuestion):
+            q = q.model_dump(exclude_none=True)
         if not isinstance(q, dict):
             raise ToolExecutionError(
                 f'Question {i} must be a dict, got {type(q).__name__}'
@@ -66,18 +131,28 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 f'Question {i} field "choices" must be a list of strings.'
             )
         choices = list(raw_choices)
+        policy = q.get('choice_policy', 'seed')
+        if policy not in {'seed', 'subset', 'fixed'}:
+            raise ToolExecutionError('choice_policy must be seed, subset, or fixed.')
 
         if q_type == 'boolean':
             choices = list(_BOOLEAN_CHOICES)
         elif q_type in ('single', 'multiple'):
             # Clean and validate each choice; discard blank entries.
-            choices = [choice for item in choices if (choice := _normalise_choice(item))]
+            choices = list(dict.fromkeys(
+                choice for item in choices if (choice := _normalise_choice(item)) and choice != _OTHER_OPTION
+            ))
             if not choices:
                 raise ToolExecutionError(
                     f'Question {i} of type {q_type!r} requires at least one non-empty'
                     ' choice.'
                 )
-            allow_other = q.get('allow_other', True)
+            limit = MAX_SINGLE_SUGGESTIONS if q_type == 'single' else MAX_MULTIPLE_SUGGESTIONS
+            if policy != 'fixed' and len(choices) > limit:
+                raise ToolExecutionError(
+                    'Use at most 3 single-choice or 4 multiple-choice suggestions; do not invent choices.'
+                )
+            allow_other = q.get('allow_other', policy != 'fixed')
             if not isinstance(allow_other, bool):
                 raise ToolExecutionError(
                     f'Question {i} field "allow_other" must be a boolean.'
@@ -89,8 +164,42 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             choices = []
 
         question = {'text': text, 'type': q_type, 'choices': choices}
+        question_id = str(q.get('id') or f'q{i + 1}').strip()
+        if question_id in ids:
+            raise ToolExecutionError('Question ids must be unique.')
+        ids.add(question_id)
+        question['id'] = question_id
+        if 'required' in q and not isinstance(q['required'], bool):
+            raise ToolExecutionError('required must be a boolean.')
+        question['required'] = q.get('required') is True
+        if q.get('reason'):
+            question['reason'] = str(q['reason']).strip()
+        if q_type == 'boolean' and q.get('boolean_labels') is not None:
+            labels = q['boolean_labels']
+            if (not isinstance(labels, dict)
+                    or any(not isinstance(labels.get(key), str) or not labels[key].strip() for key in ('yes', 'no'))
+                    or labels['yes'].strip() == labels['no'].strip()):
+                raise ToolExecutionError('Provide two different, complete yes/no button labels.')
+            question['boolean_labels'] = {key: str(labels[key]).strip() for key in ('yes', 'no')}
+        if q.get('validation') is not None:
+            rule = q['validation']
+            if not isinstance(rule, dict) or rule.get('format', '') not in {'', 'integer', 'positive_integer'}:
+                raise ToolExecutionError('Invalid text validation format.')
+            for key in ('min_length', 'max_length'):
+                if key in rule and (type(rule[key]) is not int or rule[key] < 0):
+                    raise ToolExecutionError('Length limits must be non-negative integers.')
+            for key in ('min', 'max'):
+                if key in rule and (type(rule[key]) not in (int, float) or not math.isfinite(rule[key])):
+                    raise ToolExecutionError('Numeric bounds must be finite numbers.')
+            if ((rule.get('max_length', 0) and rule.get('min_length', 0) > rule['max_length'])
+                    or ('min' in rule and 'max' in rule and rule['min'] > rule['max'])):
+                raise ToolExecutionError('Validation range is reversed.')
+            question['validation'] = {key: rule[key] for key in (
+                'format', 'example', 'min_length', 'max_length', 'min', 'max',
+            ) if key in rule}
         if q_type in ('single', 'multiple'):
             question['allow_other'] = allow_other
+            question['choice_policy'] = policy
         attachment = q.get('attachment')
         if attachment is not None:
             if q_type != 'single' or not isinstance(attachment, dict):
@@ -128,23 +237,52 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return normalised
 
 
+def question_card_payload(questions, title=None, description=None, workflow=None) -> Dict[str, Any]:
+    """Build the same card for direct host checks and model-authored questions."""
+    if not isinstance(questions, list) or not 1 <= len(questions) <= MAX_QUESTIONS:
+        raise ToolExecutionError('Ask one to three questions per clarification card.')
+    normalised = _normalise_questions(questions)
+    if not str(description or '').strip() and any(not question.get('reason') for question in normalised):
+        raise ToolExecutionError('Explain why confirmation is needed in reason or description.')
+    payload = {'ask_id': str(uuid.uuid4()), 'questions': normalised}
+    if title and str(title).strip():
+        payload['title'] = str(title).strip()
+    if description and str(description).strip():
+        payload['description'] = str(description).strip()
+    if workflow:
+        payload['workflow'] = dict(workflow)
+    return payload
+
+
+def emit_question_card(questions, title=None, description=None, workflow=None) -> str:
+    payload = question_card_payload(questions, title, description, workflow)
+    _write_agent_data('ask_pending', **payload)
+    return f'Question sent to user (ask_id={payload["ask_id"]}). Waiting for answer on next turn.'
+
+
 @fc_register(host_file='NONE')
 def ask_user(
-    questions: List[Dict[str, Any]],
+    questions: ModelQuestions,
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
     """Ask the user through an interactive UI card and end the current turn.
 
     Use this for user-facing questions on the first assistant turn as well as
-    later clarification or follow-up turns. No earlier card or tool call is
-    required.
+    later clarification or follow-up turns. Ask only for blocking information or
+    an explicit interview; reuse context and safe defaults. Do not ask optional
+    preferences merely because this tool exists. No earlier tool call is required.
 
     Args:
-        questions: Items with `text` and type `boolean`, `single`, `multiple`,
-            or `text`. Use one item when asked to question the user one at a time.
+        questions: One to three items, each requiring id, text, reason, required, and type.
+            Type is boolean, single, multiple, or text. Use one item when asked one question at a time.
             Use `text` without `choices` when useful suggestions are unavailable.
-            Otherwise use choice types with a few editable string recommendations;
+            Single suggestions have at most three choices, multiple suggestions at most four;
+            do not pad choices. Multiple permits selecting only one item. Fixed enums
+            retain all supported choices; the UI uses search when there are more than six.
+            Boolean uses boolean_labels={yes: '具体同意内容', no: '具体拒绝内容'}.
+            Boolean requires boolean_labels and must not supply choices. Text must not supply choices;
+            it can supply validation with useful example, real min_length/max_length and numeric bounds.
             "Other" is automatic unless `allow_other=false`. Follow-up questions,
             including those after an earlier card, use another call. A host-governed
             conditional `attachment` may augment a single-choice question; it reuses
@@ -152,15 +290,4 @@ def ask_user(
         title: Optional card heading.
         description: Optional subtitle.
     """
-    if not isinstance(questions, list) or len(questions) == 0:
-        raise ToolExecutionError('"questions" must be a non-empty list of question dicts.')
-
-    normalised = _normalise_questions(questions)
-    ask_id = str(uuid.uuid4())
-    payload: Dict[str, Any] = {'ask_id': ask_id, 'questions': normalised}
-    if title and str(title).strip():
-        payload['title'] = str(title).strip()
-    if description and str(description).strip():
-        payload['description'] = str(description).strip()
-    _write_agent_data('ask_pending', **payload)
-    return f'Question sent to user (ask_id={ask_id}). Waiting for answer on next turn.'
+    return emit_question_card(validate_model_questions(questions), title, description)

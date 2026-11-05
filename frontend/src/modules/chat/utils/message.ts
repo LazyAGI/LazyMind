@@ -1,3 +1,4 @@
+import { legacyKnowledgeConfirmation, type KnowledgeConfirmation } from "@/modules/chat/types/knowledgeConfirmation";
 import {
   ChatConversationsResponseFinishReasonEnum,
   type ChatHistory as BaseChatHistory,
@@ -212,6 +213,7 @@ export type ConversationHistoryRecord = Omit<
       intent_updated?: SteeringIntentUpdate;
     }>;
     assistant_remainder?: string;
+    knowledge_confirmations?: KnowledgeConfirmation[];
   };
 
 export interface ExternalExecutionProjection {
@@ -428,7 +430,13 @@ export function buildChatMessageListFromHistory(
     const splitResult = record.model_output
       ? splitModelOutputContent(record.result, record.reasoning_content)
       : splitThinkingContent(record.result, record.reasoning_content);
-    const hasAskPending = !!(record as any).ask_pending;
+    const askState = record as any;
+    const legacyConfirmation = legacyKnowledgeConfirmation(askState.ask_pending, askState.ask_answered, askState.ask_saved_answers);
+    const confirmations = [...(record.knowledge_confirmations ?? [])];
+    if (legacyConfirmation && !confirmations.some(card => card.confirmation_id === legacyConfirmation.confirmation_id)) {
+      confirmations.unshift(legacyConfirmation);
+    }
+    const hasAskPending = !!askState.ask_pending && !legacyConfirmation;
     const fullAssistantContent = stripAskUserReceipt(
       splitResult.content,
       hasAskPending,
@@ -470,7 +478,8 @@ export function buildChatMessageListFromHistory(
       // placeholder, not a completed assistant segment. Omitting it here keeps
       // refreshed history identical to the live steering timeline without
       // affecting ordinary (non-steering) reasoning messages.
-      if (segment.trim()) {
+      const segmentConfirmations = confirmations.filter(card => card.steering_segment === steeringIndex);
+      if (segment.trim() || segmentConfirmations.length) {
         list.push({
           id: `steering-segment:${steeringID}`,
           history_id: `steering-segment:${record.id || "history"}:${steeringID}`,
@@ -485,6 +494,8 @@ export function buildChatMessageListFromHistory(
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
           create_time: steeringMessage.accepted_at || record.create_time,
           steering_segment: true,
+          knowledge_segment: steeringIndex,
+          ...(segmentConfirmations.length ? { knowledge_confirmations: segmentConfirmations } : {}),
           steering_follow_up_id: steeringID,
           model_route: record.model_route,
           fork_read_only: (record as any).fork_read_only,
@@ -522,6 +533,10 @@ export function buildChatMessageListFromHistory(
       : splitResult.reasoning_content;
     const assistantMessage: any = {
       role: RoleTypes.ASSISTANT,
+      knowledge_segment: steeringMessages.length,
+      ...(confirmations.length ? {
+        knowledge_confirmations: confirmations.filter(card => card.steering_segment >= steeringMessages.length),
+      } : {}),
       reasoning_content: displayReasoningContent,
       delta: displayAssistantContent,
       exports: record.exports,
@@ -548,7 +563,6 @@ export function buildChatMessageListFromHistory(
       model_switches: record.model_switches,
       model_output: record.model_output,
       fork_read_only: (record as any).fork_read_only,
-      knowledge_operations: (record as any).knowledge_operations,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

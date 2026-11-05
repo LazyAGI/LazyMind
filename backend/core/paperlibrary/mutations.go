@@ -26,7 +26,7 @@ func SaveEntry(tx *gorm.DB, row *orm.PaperLibraryEntry) error {
 	previous := row.Revision
 	row.Revision++
 	row.UpdatedAt = time.Now().UTC()
-	result := tx.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND id=? AND revision=?", row.DatasetID, row.ID, previous).Select("academic_work_id", "folder_id", "status", "tags_json", "metadata_json", "source", "import_method", "source_url", "arxiv_version", "revision", "removed_at", "updated_at").Updates(row)
+	result := tx.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND id=? AND revision=?", row.DatasetID, row.ID, previous).Select("academic_work_id", "folder_id", "tags_json", "metadata_json", "source", "import_method", "source_url", "arxiv_version", "revision", "removed_at", "updated_at").Updates(row)
 	if result.Error != nil {
 		return result.Error
 	}

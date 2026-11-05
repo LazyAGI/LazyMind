@@ -11,7 +11,6 @@ type PaperLibraryEntry struct {
 	ID             string          `gorm:"type:varchar(255);primaryKey"`
 	AcademicWorkID string          `gorm:"type:varchar(36);not null;uniqueIndex:uk_library_work,priority:2"`
 	FolderID       string          `gorm:"type:varchar(255);not null;default:'';index"`
-	Status         string          `gorm:"type:varchar(16);not null;default:'unread'"`
 	TagsJSON       json.RawMessage `gorm:"type:json;not null"`
 	MetadataJSON   json.RawMessage `gorm:"type:json;not null"`
 	Source         string          `gorm:"type:varchar(32);not null;default:'unknown'"`

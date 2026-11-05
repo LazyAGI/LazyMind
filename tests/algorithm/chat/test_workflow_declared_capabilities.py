@@ -64,3 +64,35 @@ def test_verified_successor_updates_existing_turn_tools_without_domain_redirect(
             contribution.bind_successor({**result, 'session_id': 'unrelated'})
     finally:
         lazyllm.globals['agentic_config'] = previous
+
+
+@pytest.mark.parametrize('timeout', [None, 0])
+def test_work_limits_can_run_without_a_wall_clock_budget(monkeypatch, timeout):
+    import asyncio
+    from lazymind.chat.workflow.execution_policy import bounded_frames
+
+    limit = {'rounds': 8, 'tool_calls': {'read': 3}}
+    if timeout is not None:
+        limit['timeout'] = timeout
+    params = {'step_id': 'research', 'workflow_runtime': {'execution_limits': {'research': limit}}}
+    policy = policy_for(params)
+    assert (policy.rounds, policy.timeout, policy.calls) == (8, 0, {'read': 3})
+
+    def unexpected_timeout(_):
+        raise AssertionError('No wall clock budget should be started')
+
+    monkeypatch.setattr(asyncio, 'timeout', unexpected_timeout)
+    closed = []
+
+    async def frames():
+        try:
+            yield 'first'
+            yield 'second'
+        finally:
+            closed.append(True)
+
+    async def collect():
+        return [frame async for frame in bounded_frames(frames(), params, lambda: None)]
+
+    assert asyncio.run(collect()) == ['first', 'second']
+    assert closed == [True]

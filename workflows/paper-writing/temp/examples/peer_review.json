@@ -1,0 +1,106 @@
+{
+  "step": "peer_review",
+  "input": {
+    "topic": "方法得分比较",
+    "request": "",
+    "constraints": {
+      "paper_language": "zh-CN",
+      "word_target": null,
+      "paper_type": "research",
+      "citation_style": "GB/T 7714",
+      "focus": []
+    },
+    "papers": [
+      {
+        "id": "P1",
+        "title": "方法比较示例",
+        "text": "比较方法时应报告评价指标与实验条件。",
+        "url": null,
+        "authors": [],
+        "year": null,
+        "doi": null,
+        "content_type": "excerpt",
+        "source": "upload",
+        "truncated": false
+      }
+    ],
+    "manuscript": "# 示例研究\n\n## 方法\n比较两个方法的单次得分。\n\n## 结果\n新方法得分高 15 分。\n\n## 局限\n尚未进行重复实验。",
+    "evidence": {
+      "summary": "评价方法需要说明指标及实验条件。",
+      "items": [
+        {
+          "id": "E1",
+          "paper_id": "P1",
+          "claim": "方法比较应明确指标和实验条件。",
+          "quote": "比较方法时应报告评价指标与实验条件。",
+          "locator": null,
+          "relation": "background"
+        }
+      ],
+      "gaps": [
+        "现有材料未给出重复实验结果。"
+      ],
+      "limitations": [
+        "仅提供一段节选。"
+      ]
+    },
+    "analysis": {
+      "data_sha256": "262603dbeb95d726f1f6b08d89731256d0d1a055f0d52a5256a18da6d5121e98",
+      "summary": "新方法单次得分比基线高 15 分。",
+      "row_count": 2,
+      "methods": [
+        "按 method 比较 score，计算差值。"
+      ],
+      "findings": [
+        {
+          "statement": "新方法得分比基线高 15 分。",
+          "columns": [
+            "method",
+            "score"
+          ],
+          "calculation": "75 - 60",
+          "value": 15,
+          "unit": "point",
+          "sample_size": 2
+        }
+      ],
+      "limitations": [
+        "每种方法只有一次记录，不能推断统计显著性。"
+      ]
+    }
+  },
+  "output": {
+    "is_demo": true,
+    "review": {
+      "manuscript_sha256": "72317445e5799a819ea555711a8734680a2d9e03cc1009b847c2ef002782dc87",
+      "summary": "需补充评价指标的定义。",
+      "decision": "revise",
+      "issues": [
+        {
+          "id": "R1",
+          "severity": "minor",
+          "category": "method",
+          "target": {
+            "node_id": null,
+            "heading_path": [
+              "示例研究",
+              "方法"
+            ],
+            "placeholder_id": null,
+            "document_root": false,
+            "occurrence": 1
+          },
+          "quote": "比较两个方法的单次得分。",
+          "problem": "未说明得分指标。",
+          "suggestion": "补充指标定义；未知时明确标为待补充。",
+          "source_refs": [
+            "P1"
+          ]
+        }
+      ],
+      "limitations": [
+        "无原始实验记录，未核验结果真实性。"
+      ]
+    }
+  }
+}
