@@ -24,3 +24,5 @@ See LazyMind in action through published demos. All videos and articles below ar
 ### Runnable experiments
 
 - [Superpowers dispatch reliability](superpowers-workflow-reliability/README.md): try a native Brief gate from Codex and inspect Panel Artifacts; Advanced Git/Coverage checks, verified CLI recovery and explicit native recovery limits.
+
+- [Research synthesis from an external Skill](research-synthesis/README.md): pinned source, automatic conversion, explicit inputs, and a report corrected through review; requires the documented test-version fixes.

@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-05",
+  "outcome": "REVIEWED_E2E_PASS",
+  "autonomous_showcase_ready": false,
+  "model": "deepseek-flash",
+  "core_commit": "405f31aec1166dd44d780b112f0719baa3d1d06d",
+  "algorithm_commit": "59d2a836e7d56aa6004010113c09a53e9ce6c7ca",
+  "lazyllm_commit": "89f4e031196f1d1f0fd3cafab99624b6ce06e7fd",
+  "task_id": "3277e51c-ef6d-4d40-ba54-77a34e0d5b41",
+  "session_id": "55ebc40e-393e-5070-931f-00ad4619829b",
+  "workflow_revision_id": "f3aefe72-f745-4624-9c0e-64c17749c8d6",
+  "conversion_reused": false,
+  "workflow_yaml_manually_edited": false,
+  "session_status": "completed",
+  "attempts": {
+    "compose_synthesis": [
+      "succeeded",
+      "failed",
+      "failed",
+      "succeeded"
+    ],
+    "develop_segments_opportunities": [
+      "succeeded"
+    ],
+    "gather_and_normalize_inputs": [
+      "succeeded"
+    ],
+    "identify_themes": [
+      "succeeded"
+    ],
+    "prioritize_findings": [
+      "succeeded"
+    ]
+  },
+  "editorial_review": {
+    "method": "Public Artifact PATCH after explicit user retry; preserved original model artifacts",
+    "changes": [
+      "shorten to 1196 whitespace-separated words",
+      "correct cohort range and assistance attribution",
+      "remove unsupported unaided-completion claim from opportunity map"
+    ],
+    "report_artifact_id": "3fc0077d-e95e-491c-a5e1-a1adfd739be1",
+    "opportunity_map_artifact_id": "7c64a150-b36b-4965-a782-13d2bb103e57",
+    "report_sha256": "5a4e03602ca536cf5bf2dfe785cb27f7744d61adca4aca3acad69fe749ece495"
+  },
+  "checks": [
+    "six participant IDs and exact quotes",
+    "4 first-use and 2 weekly users",
+    "source-linked theme counts 3/6, 2/6, 1/6",
+    "P06 counterexample and unknown completion preserved",
+    "no implemented improvements claimed"
+  ],
+  "limits": [
+    "Human-guided recovery and editorial patch required",
+    "Approval not exercised",
+    "Task remained succeeded while rewound Session was failed; inspect Session",
+    "Earlier intermediate analysis contains unsupported inferences; final report explicitly corrected against source",
+    "Only one fixture/model run; not a reliability or speed benchmark"
+  ]
+}

@@ -24,3 +24,5 @@
 ### 可运行实验
 
 - [Superpowers 派发可靠性](superpowers-workflow-reliability/README.CN.md)：从 Codex 体验原生 Brief Gate 与 Panel 产物；保留 Advanced Git/Coverage、已验证的 CLI 恢复，并明确原生恢复限制。
+
+- [外部 Skill 转研究综合 Workflow](research-synthesis/README.CN.md)：固定来源、自动转换、显式输入与审阅纠错后的报告；依赖案例标明的测试版本修复。
