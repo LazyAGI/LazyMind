@@ -1,4 +1,5 @@
 export interface DocumentChatSelection {
+  question?: string;
   source: "pdf" | "segment";
   text: string;
   context?: string;

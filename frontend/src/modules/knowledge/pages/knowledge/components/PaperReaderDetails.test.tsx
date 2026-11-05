@@ -1,0 +1,188 @@
+import {act,fireEvent,render,screen,waitFor,cleanup,within} from '@testing-library/react';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import PaperReaderDetails from './PaperReaderDetails';
+vi.mock('react-i18next',()=>({useTranslation:()=>({i18n:{language:'en-US'}})}));
+const api=vi.hoisted(()=>({get:vi.fn(),add:vi.fn()}));
+vi.mock('@/components/request',()=>({BASE_URL:'',axiosInstance:{get:api.get}}));
+vi.mock('@/modules/knowledge/paper/store',async()=>{const original=await vi.importActual<any>('@/modules/knowledge/paper/store');return {...original,addLibraryNote:api.add};});
+const library=()=>({can_write:true,paper_count:1,pdf_attachment_count:1,active:true,data:{folders:[],papers:[{id:'paper',revision:1,metadata:{title:'Real {paper} & result',authors:['Ada Example'],year:2025,venue:'Test journal',abstract:'A real abstract.',identifiers:{doi:'10.1234/example'}},tags:[],attachmentIds:['a'],noteIds:['n']}],attachments:[{id:'a',paperId:'paper',contentRef:'doc'}],notes:[{id:'n',paperId:'paper',title:'Earlier note',content:'Read the evaluation.',createdAt:'2026-01-01'}]}});
+beforeEach(()=>{api.get.mockReset().mockResolvedValue({data:library()});api.add.mockReset();Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockResolvedValue(undefined)}});});
+afterEach(cleanup);
+const props={datasetId:'dataset',documentId:'doc',canWrite:true,fileName:'source.pdf'};
+it('reads server metadata without migration and copies escaped BibTeX',async()=>{
+ render(<PaperReaderDetails {...props}/>);expect(await screen.findByText('Real {paper} & result')).toBeInTheDocument();
+ expect(api.get).toHaveBeenCalledWith('/api/core/academic/library',expect.objectContaining({params:{target_dataset_id:'dataset',include_processing:false},signal:expect.any(AbortSignal)}));
+ fireEvent.click(screen.getByRole('button',{name:'Copy BibTeX'}));
+ await waitFor(()=>expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('Real \\{paper\\} \\& result')));
+ expect(screen.getByRole('link',{name:'10.1234/example'})).toHaveAttribute('href','https://doi.org/10.1234/example');
+});
+it('retains note and id on failure then renders authoritative saved note',async()=>{
+ api.add.mockRejectedValueOnce(new Error('Storage offline'));const saved=library().data;saved.notes.push({id:'new',paperId:'paper',title:'New note',content:'Keep this insight',createdAt:'2026-01-02'});saved.papers[0].noteIds.push('new');api.add.mockResolvedValueOnce({data:saved});
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);await screen.findByText('Read the evaluation.');
+ fireEvent.click(screen.getByText('Write a note'));
+ fireEvent.change(screen.getByRole('textbox',{name:'New note'}),{target:{value:'Keep this insight'}});fireEvent.click(screen.getByRole('button',{name:'Save note'}));
+ await screen.findByText('Storage offline');expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('Keep this insight');
+ fireEvent.click(screen.getByRole('button',{name:'Save note'}));await screen.findByText('Keep this insight');
+ expect(api.add.mock.calls[0]).toEqual(api.add.mock.calls[1]);expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('');
+});
+it.each([false,true])('requires both parent and server write access (parent %s)',async(parent)=>{
+ const value=library();value.can_write=!parent;api.get.mockResolvedValue({data:value});render(<PaperReaderDetails {...props} canWrite={parent} initialTab="notes"/>);await screen.findByText('Read the evaluation.');expect(screen.queryByRole('button',{name:'Save note'})).not.toBeInTheDocument();
+});
+it('does not infer a paper from filename when the attachment mapping is missing',async()=>{
+ const value=library();value.data.attachments=[];api.get.mockResolvedValue({data:value});render(<PaperReaderDetails {...props} initialTab="notes"/>);await screen.findByText(/not linked to a paper/);expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+});
+it('ignores an old library response after switching documents',async()=>{
+ let resolve!:(value:any)=>void;api.get.mockImplementationOnce(()=>new Promise(r=>resolve=r));const next=library();next.data.attachments=[];api.get.mockResolvedValueOnce({data:next});const view=render(<PaperReaderDetails {...props}/>);view.rerender(<PaperReaderDetails {...props} documentId="other"/>);await screen.findByText('source.pdf');await act(async()=>resolve({data:library()}));expect(screen.queryByText('Real {paper} & result')).not.toBeInTheDocument();
+});
+it('does not apply an earlier note save after switching away and back to a document',async()=>{
+ let complete!:(value:any)=>void;api.add.mockImplementation(()=>new Promise(r=>complete=r));
+ const view=render(<PaperReaderDetails {...props} initialTab="notes"/>);await screen.findByText('Read the evaluation.');
+ fireEvent.click(screen.getByText('Write a note'));
+ fireEvent.change(screen.getByRole('textbox',{name:'New note'}),{target:{value:'Old request'}});fireEvent.click(screen.getByRole('button',{name:'Save note'}));
+ view.rerender(<PaperReaderDetails {...props} documentId="other" initialTab="notes"/>);await screen.findByText(/not linked to a paper/);
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes"/>);await screen.findByText('Read the evaluation.');
+ fireEvent.click(screen.getByText('Write a note'));
+ fireEvent.change(screen.getByRole('textbox',{name:'New note'}),{target:{value:'Current draft'}});
+ await act(async()=>complete({data:library().data}));expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('Current draft');
+});
+it('keeps the quote draft supplied before metadata loads and appends without replacing an existing note',async()=>{
+ const request={documentId:'doc',requestId:1,text:'> Quoted finding\n\nMy thought'};
+ const view=render(<PaperReaderDetails {...props} initialTab="notes" draftRequest={request}/>);
+ await screen.findByText('Read the evaluation.');
+ expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue(request.text);
+ fireEvent.change(screen.getByRole('textbox',{name:'New note'}),{target:{value:'Unfinished note'}});
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes" draftRequest={{...request,requestId:2}}/>);
+ expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('Unfinished note\n\n'+request.text);
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes" draftRequest={{...request,requestId:2}}/>);
+ expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('Unfinished note\n\n'+request.text);
+});
+it('retains a captured note draft when retrying metadata after a network failure',async()=>{
+ api.get.mockRejectedValueOnce(new Error('Metadata unavailable')).mockResolvedValueOnce({data:library()});
+ render(<PaperReaderDetails {...props} initialTab="notes" draftRequest={{documentId:'doc',requestId:12,text:'> Source quote\n\nDo not lose this note'}}/>);
+ await screen.findByText('Metadata unavailable');fireEvent.click(screen.getByRole('button',{name:'Retry'}));
+ await screen.findByText('Read the evaluation.');expect(screen.getByRole('textbox',{name:'New note'})).toHaveValue('> Source quote\n\nDo not lose this note');
+});
+
+it('keeps document vocabulary accessible without a linked paper and retains it between info and notes',async()=>{
+ const value=library();value.data.attachments=[];api.get.mockResolvedValue({data:value});
+ const view=render(<PaperReaderDetails {...props} documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ await screen.findByText(/not linked to a paper/);
+ const section=screen.getByText('Vocabulary').closest('details')!;
+ fireEvent.click(screen.getByText('Vocabulary'));section.open=true;
+ const filter=screen.getByRole('textbox',{name:'Vocabulary filter'});
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes" documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ expect(filter).not.toBeVisible();
+ view.rerender(<PaperReaderDetails {...props} documentVocabulary={<input aria-label="Vocabulary filter" defaultValue="saved word"/>}/>);
+ expect(filter).toBeVisible();expect(filter).toHaveValue('saved word');
+ view.rerender(<PaperReaderDetails {...props}/>);
+ expect(screen.queryByText('Vocabulary')).not.toBeInTheDocument();
+});
+it('labels damaged imported notes and keeps their original text available',async()=>{
+ const data=library();data.data.notes[0].title='???????? PDF';data.data.notes[0].content='???????????????? PDF ?????????????';api.get.mockResolvedValue({data});
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);
+ expect(await screen.findByText('Imported note text is damaged')).toBeInTheDocument();
+ expect(screen.getByText('View original text').closest('details')).not.toHaveAttribute('open');
+ expect(screen.getByText('???????????????? PDF ?????????????')).toBeInTheDocument();
+});
+it('does not duplicate an auto-generated title that repeats the note body',async()=>{
+ const data=library();data.data.notes[0].title='Read the evaluation.';api.get.mockResolvedValue({data});
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);
+ expect(await screen.findAllByText('Read the evaluation.')).toHaveLength(1);
+});
+it('shows written note content without displaying its captured source quote',async()=>{
+ const data=library() as any;
+ data.data.notes[0]={...data.data.notes[0],title:'新笔记',content:'> Original PDF quote\n> Continued source text (第 3 页)\n\nMy own interpretation'};
+ data.data.annotations=[{id:'annotation',paperId:'paper',quote:'Another original quote',comment:'My annotation',page:3}];
+ api.get.mockResolvedValue({data});
+ const onNavigatePage=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigatePage={onNavigatePage}/>);
+ const writtenNote=await screen.findByRole('button',{name:/My own interpretation/});
+ fireEvent.click(writtenNote);expect(onNavigatePage).toHaveBeenCalledWith(3);
+ expect(screen.getByText('My annotation')).toBeInTheDocument();
+ expect(screen.queryByText(/Original PDF quote/)).not.toBeInTheDocument();
+ expect(screen.queryByText(/Continued source text/)).not.toBeInTheDocument();
+ expect(screen.queryByText('Another original quote')).not.toBeInTheDocument();
+ expect(screen.queryByText('新笔记')).not.toBeInTheDocument();
+});
+it('keeps source location in saved content while editing only the note text',async()=>{
+ const draftRequest={documentId:'doc',requestId:17,text:'My note',sourceQuote:'> Original PDF quote (第 4 页)'};
+ api.add.mockResolvedValue({data:library().data});
+ render(<PaperReaderDetails {...props} initialTab="notes" draftRequest={draftRequest}/>);
+ const draft=await screen.findByRole('textbox',{name:'New note'});
+ expect(draft).toHaveValue('My note');
+ fireEvent.click(screen.getByRole('button',{name:'Save note'}));
+ await waitFor(()=>expect(api.add).toHaveBeenCalledWith('dataset','paper',expect.any(String),'> Original PDF quote (第 4 页)\n\nMy note'));
+});
+it('preserves a manually written Markdown quote without source metadata',async()=>{
+ const data=library();data.data.notes[0].content='> My own quoted idea\n\nHere is why';api.get.mockResolvedValue({data});
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);
+ expect((await screen.findByText(/My own quoted idea/)).textContent).toBe('> My own quoted idea\n\nHere is why');
+});
+it('shows saved selection notes newest first, with their color and precise PDF jump',async()=>{
+ const data=library() as any;
+ const source={attachmentId:'a',page:3,rects:[[0.12,0.23,0.64,0.26]],bbox:[24,48,128,56],quote:'Original PDF sentence',color:'blue'};
+ data.data.notes=[data.data.notes[0],{id:'recent',paperId:'paper',title:'新笔记',content:'This design is the key insight.',kind:'note',createdAt:'2026-01-02T00:00:00Z',updatedAt:'2026-01-02T00:00:00Z',source}];
+ data.data.papers[0].noteIds=['n','recent'];api.get.mockResolvedValue({data});
+ const onNavigateNote=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote}/>);
+ const list=await screen.findByRole('list',{name:'Saved notes'});
+ const entries=within(list).getAllByRole('listitem');
+ expect(within(entries[0]).getByText('This design is the key insight.')).toBeInTheDocument();
+ expect(within(entries[0]).getByText('Page 3')).toBeInTheDocument();
+ expect(within(entries[0]).getByLabelText('Blue')).toBeInTheDocument();
+ expect(screen.queryByText('Original PDF sentence')).not.toBeInTheDocument();
+ fireEvent.click(within(entries[0]).getByRole('button',{name:/This design is the key insight/}));
+ expect(onNavigateNote).toHaveBeenCalledWith(source);
+});
+it('refreshes the saved note list after an external popup save without replacing the panel',async()=>{
+ const first=library() as any;const second=library() as any;
+ second.data.notes.push({id:'new',paperId:'paper',title:'新笔记',content:'Saved in the selection popup',kind:'note',createdAt:'2026-01-02',updatedAt:'2026-01-02'});
+ second.data.papers[0].noteIds.push('new');
+ api.get.mockResolvedValueOnce({data:first}).mockResolvedValueOnce({data:second});
+ const view=render(<PaperReaderDetails {...props} initialTab="notes" refreshToken={0}/>);
+ await screen.findByText('Read the evaluation.');
+ view.rerender(<PaperReaderDetails {...props} initialTab="notes" refreshToken={1}/>);
+ expect(await screen.findByText('Saved in the selection popup')).toBeInTheDocument();
+ expect(api.get).toHaveBeenCalledTimes(2);
+});
+it('does not jump to the wrong PDF when a note belongs to another attachment of the paper',async()=>{
+ const data=library() as any;
+ data.data.notes[0]={...data.data.notes[0],content:'Thought about the supplement',source:{attachmentId:'supplement',page:7,color:'green'}};
+ api.get.mockResolvedValue({data});
+ const onNavigateNote=vi.fn(),onNavigatePage=vi.fn();
+ render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote} onNavigatePage={onNavigatePage}/>);
+ const entry=(await screen.findByText('Thought about the supplement')).closest('li')!;
+ expect(within(entry).getByText('Another attachment')).toBeInTheDocument();
+ expect(within(entry).queryByRole('button')).toBeNull();
+ expect(onNavigateNote).not.toHaveBeenCalled();expect(onNavigatePage).not.toHaveBeenCalled();
+});
+it('keeps imported PDF annotations compact, color coded and clickable as a whole entry',async()=>{
+ const data=library() as any;
+ data.data.annotations=[{id:'mark',paperId:'paper',attachmentId:'a',comment:'Check this result',quote:'PDF quote',page:5,color:'green'}];
+ api.get.mockResolvedValue({data});
+ const onNavigatePage=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigatePage={onNavigatePage}/>);
+ const button=await screen.findByRole('button',{name:/Check this result/});
+ expect(within(button).getByLabelText('Green')).toBeInTheDocument();
+ expect(screen.queryByText('PDF quote')).not.toBeInTheDocument();
+ fireEvent.click(button);expect(onNavigatePage).toHaveBeenCalledWith(5);
+});
+it('shows saved notes first and opens the manual editor only when requested',async()=>{
+ render(<PaperReaderDetails {...props} initialTab="notes"/>);
+ await screen.findByText('Read the evaluation.');
+ const editor=screen.getByText('Write a note').closest('details')!;
+ expect(editor).not.toHaveAttribute('open');
+ fireEvent.click(screen.getByText('Write a note'));
+ expect(editor).toHaveAttribute('open');
+ expect(screen.getByRole('textbox',{name:'New note'})).toBeVisible();
+});
+it('shows a saved color even when the note has no usable page and avoids a broken jump',async()=>{
+ const data=library() as any;
+ data.data.notes[0]={...data.data.notes[0],source:{attachmentId:'a',color:'purple',quote:'Quote without page'}};
+ data.data.annotations=[{id:'mark',paperId:'paper',attachmentId:'a',comment:'Imported mark without page',color:'red'}];
+ api.get.mockResolvedValue({data});
+ const onNavigateNote=vi.fn();render(<PaperReaderDetails {...props} initialTab="notes" onNavigateNote={onNavigateNote}/>);
+ const entry=(await screen.findByText('Read the evaluation.')).closest('li')!;
+ expect(within(entry).getByLabelText('Purple')).toBeInTheDocument();
+ expect(within(entry).queryByRole('button')).toBeNull();
+ const imported=(await screen.findByText('Imported mark without page')).closest('li')!;
+ expect(within(imported).getByLabelText('Red')).toBeInTheDocument();
+ expect(within(imported).queryByRole('button')).toBeNull();
+});

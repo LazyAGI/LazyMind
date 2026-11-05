@@ -21,6 +21,8 @@ from lazyllm.module.llms.onlinemodule.base.model_request import (
 from pydantic import BaseModel, Field
 
 from lazymind.model_config import inject_model_config
+from lazymind.structured_tasks import is_structured_task
+from lazymind.structured_tasks.runner import run_registered_task
 
 
 TaskMode = Literal['llm', 'agent']
@@ -114,6 +116,10 @@ _WORKFLOW_TASKS = {
 
 def run_llm_task(request: LLMTaskRequest, *, validate_output=None) -> LLMTaskResult:
     task_id = str(uuid4())
+    if is_structured_task(request.task_type):
+        return run_registered_task(request, task_id, call_model=_call_model,
+                                   configure_model=inject_model_config, call_error=LLMTaskCallError,
+                                   result_type=LLMTaskResult)
     if request.task_type.startswith('conversation.'):
         return LLMTaskResult(status='failed', task_id=task_id, error='unsupported_task_type',
                              error_code='unsupported_task_type')

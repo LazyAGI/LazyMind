@@ -8,6 +8,17 @@ export interface PdfReferenceAction {
   bbox?: [number, number, number, number];
 }
 
+export interface PdfCitationRegion {
+  page: number;
+  bbox: [number, number, number, number];
+}
+
+export interface PdfCitationTarget extends Omit<PdfReferenceAction, "page" | "bbox" | "referenceKey"> {
+  referenceKey: string;
+  fallbackPage?: number;
+  regions: PdfCitationRegion[];
+}
+
 export function referenceActionAtPoint(actions: PdfReferenceAction[], page: number, x: number, y: number) {
   return actions.find((action) => action.page === page && action.bbox
     && x >= action.bbox[0] && x <= action.bbox[2]

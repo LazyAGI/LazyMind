@@ -25,12 +25,13 @@ export default function PaperAttachmentPreview({ datasetId, attachment, position
         setFailed(false);
         void DocumentServiceApi().documentServiceGetDocument({ dataset: datasetId, document: attachment.contentRef! }).then(({ data }) => {
             if (cancelled) return;
-            if (!data.file_url) throw new Error('原文件暂不可用');
-            setFile(normalizeProxyableUrl(`${window.location.origin}/api/core${data.file_url}`));
+            const sourceUrl = /\.pdf$/i.test(attachment.name) ? data.download_file_url || data.file_url : data.file_url;
+            if (!sourceUrl) throw new Error('原文件暂不可用');
+            setFile(normalizeProxyableUrl(`${window.location.origin}/api/core${sourceUrl}`));
         }).catch(() => { if (!cancelled) setFailed(true); }).finally(() => { if (!cancelled) setLoading(false); });
         return () => { cancelled = true; };
-    }, [datasetId, attachment.contentRef, retry]);
+    }, [datasetId, attachment.contentRef, attachment.name, retry]);
     if (loading) return <div className="paper-attachment-preview-status" role="status"><Spin />正在加载附件预览…</div>;
     if (failed) return <Alert type="warning" showIcon message="附件预览暂时无法加载" description="可以重试，或通过阅读入口打开原文件。" action={<Button size="small" onClick={() => setRetry(value => value + 1)}>重试</Button>} />;
-    return <div className="paper-attachment-preview"><Suspense fallback={<div className="paper-attachment-preview-status"><Spin />正在加载附件预览…</div>}><FileViewer file={file} fileName={attachment.name} pdfViewPosition={position} onPdfViewPositionChange={onPositionChange} /></Suspense></div>;
+    return <div className="paper-attachment-preview"><Suspense fallback={<div className="paper-attachment-preview-status"><Spin />正在加载附件预览…</div>}><FileViewer pdfIRTarget={{dataset: datasetId, document: attachment.contentRef!}} file={file} fileName={attachment.name} pdfViewPosition={position} onPdfViewPositionChange={onPositionChange} /></Suspense></div>;
 }

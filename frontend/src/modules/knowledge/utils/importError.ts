@@ -15,10 +15,13 @@ function text(value: unknown): string {
 
 /** Preserve the actual import error instead of replacing it with a generic success/failure. */
 export function getImportErrorMessage(error: unknown, fallback = "导入失败，请重试"): string {
-  const source = error as { response?: { data?: { message?: unknown; detail?: unknown; error?: unknown; err_msg?: unknown } }; message?: unknown; detail?: unknown } | null;
+  const source = error as { response?: { data?: { message?: unknown; detail?: unknown; error?: unknown; err_msg?: unknown; data?: { detail?: unknown } } }; message?: unknown; detail?: unknown } | null;
   const data = source?.response?.data;
   const message = text(data?.message) || text(data?.err_msg) || text(data?.error) || text(source?.message) || text(error);
-  const detail = text(data?.detail) || text(source?.detail);
+  const detail = text(data?.data?.detail) || text(data?.detail) || text(source?.detail);
+  if (detail === "target already contains this name") {
+    return "当前文件夹中已有同名文件，请重命名后重试，或先处理已有文件";
+  }
   const resolved = localizeErrorCode(message, message) || fallback;
   return detail && detail !== message ? `${resolved}（${detail}）` : resolved;
 }
