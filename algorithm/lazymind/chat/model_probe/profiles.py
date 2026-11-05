@@ -79,7 +79,8 @@ def build_plan(request: ProbeInput) -> ProbePlan:
     source = runtime_source(request.source)
     embedding_input = request.embedding.get('query_prefix', '') + 'test'
     if kind in {'llm', 'vlm'}:
-        if source not in COMPATIBLE | {'openai_responses', 'anthropic', 'claude', 'qwen', 'doubao', 'sensenova', 'minimax'}:
+        supported = COMPATIBLE | {'openai_responses', 'anthropic', 'claude', 'qwen', 'doubao', 'sensenova', 'minimax'}
+        if source not in supported:
             raise UnsupportedProbe('unsupported_provider')
         plan = _chat(request, source)
         if source == 'kimi' and not urlsplit(request.url).path.rstrip('/').endswith('/v1'):
