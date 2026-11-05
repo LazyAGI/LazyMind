@@ -641,7 +641,23 @@ def _safe_session_tools(
 
     @_register_host_file(capability)
     def read_artifact(artifact_ref: str) -> Dict[str, Any]:
-        """Read a selected Artifact by exact slot handle such as report or images[0]."""
+        """Read the selected revision of one Artifact, including upstream evidence.
+
+        Args:
+            artifact_ref (str): Exact artifact_id or unambiguous slot handle from
+                list_artifacts, e.g. material_summary or images[0]. Copy list
+                indices as returned; do not convert them to 1-based positions.
+                Do not pass a filename, path, {{placeholder}}, or a JSON object.
+
+        Returns:
+            Artifact content and revision. Text is under value.text, JSON under
+            value.data; a file reference is not an empty body. For existence-only
+            acceptance, the list/get record is sufficient: do not read content.
+            On lookup failure,
+            use available_artifacts to correct the reference; if reading still
+            fails, report the exact reference and error upstream, not "no evidence".
+            Example: read_artifact(artifact_ref="material_summary").
+        """
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         return artifact_output(toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or '')))
 

@@ -217,3 +217,34 @@ def test_real_generator_receives_selected_template_and_preserves_background(sour
     assert 'data-lazymind-template' in html and '../images/template-' in html
     assert 'Approved facts' in html and 'lazymind-template-page" content="2"' in html
     assert template.page_context(tmp_path, 6, 'Revise this page')['page']['source_page'] == 2
+
+
+def test_template_typography_prefers_white_run_over_black_defaults():
+    white = {'font_ea': '微软雅黑', 'font_latin': 'Arial', 'font_size_px': 60,
+             'b': '0', 'color': {'css': '#ffffff'}}
+    title = {'id': '75', 'visible': True, 'placeholder': {'type': 'ctrTitle'},
+             'text': {'paragraphs': [{'default_run_style': {'font_size_px': 73.333,
+                      'b': '1', 'color': {'css': '#000000'}},
+                      'runs': [{'text': 'Template title', 'style': white}]}]}}
+    body = {'id': '5', 'placeholder': {}, 'text': {'paragraphs': [{'runs': [
+        {'text': 'Supporting copy', 'style': {**white, 'font_size_px': 33.333}}]}]}}
+    context = {'page': {'shapes': [title, body]}}
+    html = '<html><head></head><body><div id="ct"><h1 data-el="title">Approved title</h1></div></body></html>'
+    result = template.apply_typography(html, context)
+    assert 'font-family:"微软雅黑","Arial",sans-serif!important' in result
+    assert 'font-size:60px!important' in result
+    assert 'font-weight:400!important' in result
+    assert 'color:#ffffff!important' in result
+    assert 'color:#000000' not in result
+    assert 'data-template-shape-id="75"' in result
+    assert 'Approved title' in result and 'Template title' not in result
+    assert template.apply_typography(result, context) == result
+    assert template.apply_typography(html, None) == html
+
+
+def test_template_typography_does_not_invent_missing_title_or_body_roles():
+    html = '<html><head></head></html>'
+    assert template.apply_typography(html, {'page': {'shapes': []}}) == html
+    style = {'font_ea': 'A</style><script>bad</script>', 'color': {'css': 'red;display:none'}}
+    css = template._typography_css(style)
+    assert '</style>' not in css and 'display:none' not in css

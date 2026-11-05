@@ -1896,17 +1896,50 @@ async def run_subagent_stream(
             ev['task_id'] = task_id
             yield _sse(ev)
         artifacts = [*db.load_artifacts(task_id), *ctx.local_artifacts()]
+        # Workflow acceptance checks publication records only. A saved locator or
+        # resumed record is sufficient; do not open bodies or rejudge their content.
         deliverable_artifacts = [
             artifact for artifact in artifacts
-            if subagent_tools.artifact_is_deliverable(ctx, artifact)
+            if (bool(artifact.get('slot')) if effective_agent_type == 'workflow_step'
+                else subagent_tools.artifact_is_deliverable(ctx, artifact))
         ]
         saved = {
             str(artifact.get('slot')) for artifact in deliverable_artifacts
             if artifact.get('slot')
         }
         missing = [k for k in required_output_keys if k not in saved]
+        if missing and effective_agent_type == 'workflow_step' and ctx.params.get('session_id'):
+            try:
+                # A prior attempt may already have published these slots. Only
+                # inspect the public inventory, never read the artifact bodies.
+                previous = await asyncio.to_thread(
+                    subagent_tools._public_workflow_artifacts, str(ctx.params['session_id']),
+                )
+                saved.update(str(item.get('slot')) for item in previous if item.get('slot'))
+                missing = [key for key in required_output_keys if key not in saved]
+            except Exception as exc:
+                if cancel_check is not None:
+                    cancel_check(None)
+                message = (
+                    f'Could not verify saved output records for {", ".join(missing)} '
+                    f'({type(exc).__name__}). Upstream action: retry the artifact inventory lookup; '
+                    'this does not mean the outputs are absent.'
+                )
+                yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
+                            'current_phase': 'completion_evaluation_failed',
+                            'summary': message, 'message': message,
+                            'cost': round(time.time() - start_time, 3)})
+                yield 'data: [DONE]\n\n'
+                return
+            if cancel_check is not None:
+                cancel_check(None)
         if missing:
-            message = f'Required output artifacts are missing or have the wrong type: {", ".join(missing)}'
+            message = (
+                f'No saved artifact record for required outputs: {", ".join(missing)}. '
+                'Upstream action: publish these outputs with the step-declared artifact tools, then retry.'
+                if effective_agent_type == 'workflow_step' else
+                f'Required output artifacts are missing or have the wrong type: {", ".join(missing)}'
+            )
             yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
                         'current_phase': 'missing_required_artifacts',
                         'summary': message, 'message': message,
@@ -1918,10 +1951,11 @@ async def run_subagent_stream(
                    if effective_agent_type == 'workflow_step'
                    and workflow_terminal_completed and required_output_keys
                    else _result_summary(final_result, required_output_keys))
-        # A successful terminal publisher with required outputs has already delivered.
-        # Keep main's completion review for missing output contracts or uncertain
-        # non-terminal outcomes, including side effects without artifacts.
-        if not required_output_keys or (not workflow_terminal_completed and _has_completion_concern(final_result)):
+        # Workflow acceptance ends at record existence. Ordinary tasks retain
+        # completion review for uncertain outcomes and undeclared deliverables.
+        if effective_agent_type != 'workflow_step' and (
+            not required_output_keys or (not workflow_terminal_completed and _has_completion_concern(final_result))
+        ):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=(agent._model_fallback_state.raw_llm if agent is not None else llm),
                 objective=ctx.objective + '\n'.join(_build_intent_context_section(ctx.params)),

@@ -1647,39 +1647,40 @@ def _html_has_background_image(html: str, expected_path: str) -> bool:
     return False
 
 
-def _strip_missing_local_imgs(html: str, deck: Path) -> tuple[str, int]:
-    """Remove <img> tags whose local ../images/... file is missing on disk.
+def _prepare_local_imgs(html: str, deck: Path, approved_prompt: str = '') -> tuple[str, int]:
+    """Localize approved input images; fail on missing images without deleting tags."""
+    approved = {
+        Path(path).resolve() for path in re.findall(
+            r'/(?:Users|home|var|mnt|tmp)/[^\n）"<>]+?\.(?:png|jpe?g|gif|webp|bmp)',
+            approved_prompt, re.IGNORECASE,
+        )
+    }
+    copied = 0
 
-    Keeps data:/http(s): URLs. Prevents broken-image icons + prompt-as-alt text
-    when the HTML generator invents local image paths that were never produced.
-    """
-    pattern = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
-    removed = 0
+    def prepare(match: re.Match) -> str:
+        nonlocal copied
+        src = match.group(3).strip()
+        if src.startswith(('data:', 'http://', 'https://')):
+            return match.group(0)
+        candidate = (deck / 'pages' / src.removeprefix('file://')).resolve()
+        if not candidate.is_file():
+            raise ValueError(f'Image file is missing: {src}; restore the material before publishing')
+        if candidate.is_relative_to(deck.resolve()):
+            return match.group(0)
+        if candidate not in approved:
+            raise ValueError(f'Image is outside the deck and not an approved input: {src}')
+        if _read_image_size(candidate) is None:
+            raise ValueError(f'Image cannot be decoded: {src}')
+        content = candidate.read_bytes()
+        name = 'material-' + hashlib.sha256(content).hexdigest()[:20] + candidate.suffix.lower()
+        target = deck / 'images' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        copied += 1
+        return f'{match.group(1)}{match.group(2)}../images/{name}{match.group(2)}'
 
-    def _keep_or_drop(m: re.Match) -> str:
-        nonlocal removed
-        tag = m.group(0)
-        src_m = re.search(r'\bsrc\s*=\s*"([^"]*)"', tag, re.IGNORECASE)
-        if not src_m:
-            src_m = re.search(r"\bsrc\s*=\s*'([^']*)'", tag, re.IGNORECASE)
-        if not src_m:
-            return tag
-        src = (src_m.group(1) or "").strip()
-        if not src or src.startswith(("data:", "http://", "https://")):
-            return tag
-        # Resolve relative to pages/ (canonical form is ../images/...)
-        candidate = (deck / "pages" / src).resolve()
-        try:
-            candidate.relative_to(deck.resolve())
-        except ValueError:
-            removed += 1
-            return ""
-        if candidate.is_file():
-            return tag
-        removed += 1
-        return ""
-
-    return pattern.sub(_keep_or_drop, html), removed
+    pattern = re.compile(r"(<img\b[^>]*\bsrc\s*=\s*)([\"'])([^\"']*)\2", re.IGNORECASE)
+    return pattern.sub(prepare, html), copied
 
 
 def _read_image_size(path: Path) -> dict | None:
@@ -2221,7 +2222,10 @@ def _write_page_html_from_query(
     if inherited_image and inherited_image.get('local_path'):
         extra_paths.append(inherited_image['local_path'])
     html, fixed = _normalize_img_srcs(html, page_plan, extra_paths=extra_paths)
-    html, imgs_dropped = _strip_missing_local_imgs(html, deck)
+    try:
+        html, imgs_localized = _prepare_local_imgs(html, deck, rewritten_query)
+    except (ValueError, OSError) as exc:
+        return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
 
     required_image_path = (inherited_image or {}).get('local_path')
     required_background_path = (background_image or {}).get('local_path')
@@ -2275,9 +2279,12 @@ def _write_page_html_from_query(
         if not _HTML_DOC_RE.fullmatch(html.strip()):
             return _fail(f'page-html p{page_no}: incomplete HTML document after one repair attempt', page_no=page_no)
         html, retry_fixed = _normalize_img_srcs(html, page_plan, extra_paths=extra_paths)
-        html, retry_dropped = _strip_missing_local_imgs(html, deck)
+        try:
+            html, retry_localized = _prepare_local_imgs(html, deck, rewritten_query)
+        except (ValueError, OSError) as exc:
+            return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
         fixed += retry_fixed
-        imgs_dropped += retry_dropped
+        imgs_localized += retry_localized
         html, retry_background_restored = _restore_background_image(html, required_background_path)
         background_restored = background_restored or retry_background_restored
         if required_image_path and not _html_has_foreground_image(html, required_image_path):
@@ -2300,6 +2307,7 @@ def _write_page_html_from_query(
     if template_context and not edit_instruction:
         try:
             html = template_html.apply_background(html, template_context)
+            html = template_html.apply_typography(html, template_context)
         except ValueError as exc:
             return _fail(f'page-html template p{page_no}: {exc}', page_no=page_no)
     if edit_instruction and html.strip() == current_html.strip():
@@ -2312,7 +2320,7 @@ def _write_page_html_from_query(
         query_path=str(query_path.relative_to(deck)),
         prompt_mode=prompt_mode,
         img_srcs_fixed=fixed,
-        missing_imgs_stripped=imgs_dropped,
+        images_localized=imgs_localized,
         background_restored=background_restored,
         named_assets=named_assets,
         template_source_page=template_context['page']['source_page'] if template_context else None,

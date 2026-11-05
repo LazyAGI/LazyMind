@@ -754,10 +754,18 @@ def _resolve_list_index_from_sort_order(
 
 def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[str] = None,
                  start_line: Optional[int] = None, end_line: Optional[int] = None) -> Dict[str, Any]:
-    """Read a previously saved artifact by key.
+    """Locate a saved artifact, or read its content directly with a line range.
+
+    For content in one call use get_artifact(key="material_summary", start_line=1,
+    end_line=200). Passing only key returns a locator, not an empty body. Use the
+    exact slot key from the artifact inventory, never a filename or {{placeholder}}.
+    For an existence check the locator or saved record is sufficient; do not read
+    the body. Only request line ranges when the task actually needs the content.
+    A failed lookup/read is not proof that the upstream artifact is empty; report
+    the key and actual error to the caller.
 
     Args:
-        key (str): The artifact key to read.
+        key (str): Exact artifact slot, e.g. material_summary or deck_outline.
         sort_order (int): Optional. 1-based display position within a list slot.
             For workflow sessions: resolves via workflow_slot_order → fetches that specific
             selected revision (human or AI).

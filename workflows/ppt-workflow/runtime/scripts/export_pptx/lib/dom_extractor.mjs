@@ -59,6 +59,7 @@ const BROWSER_EXTRACT_FN = () => {
         styles[kebabToCamel(prop)] = val;
       }
     }
+    if (el.__pptExportFontFamily) styles.fontFamily = el.__pptExportFontFamily;
     return styles;
   }
 
@@ -98,29 +99,6 @@ const BROWSER_EXTRACT_FN = () => {
       w: r.width,
       h: r.height,
     };
-  }
-
-  /**
-   * 提取表格数据。
-   * @param {HTMLTableElement} table
-   * @returns {Array<Array<{text:string, isHeader:boolean, colspan:number, rowspan:number, styles:Object}>>}
-   */
-  function extractTableData(table) {
-    const rows = [];
-    for (const tr of table.rows) {
-      const cells = [];
-      for (const cell of tr.cells) {
-        cells.push({
-          text: cell.innerText || '',
-          isHeader: cell.tagName === 'TH',
-          colspan: cell.colSpan || 1,
-          rowspan: cell.rowSpan || 1,
-          styles: extractStyles(cell),
-        });
-      }
-      rows.push(cells);
-    }
-    return rows;
   }
 
   /**
@@ -265,7 +243,7 @@ const BROWSER_EXTRACT_FN = () => {
             italic: cs.getPropertyValue('font-style') === 'italic',
             fontSize: cs.getPropertyValue('font-size'),
             color: cs.getPropertyValue('color'),
-            fontFamily: cs.getPropertyValue('font-family'),
+            fontFamily: node.parentElement?.__pptExportFontFamily || cs.getPropertyValue('font-family'),
             // I-vi: 用 text-decoration-line（非继承）代替 text-decoration（继承），
 // 避免父节点的 underline 误传给子文本 run（如 company-11th p2 黄色下划线 bug）
 underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
@@ -318,7 +296,7 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
           // R5: 装饰子元素的文字在父 textbox 中用透明色占位（不实际渲染），
           // 真正的文字由它独立的 IR child shape+textbox 显示。
           color: isDecorated ? 'rgba(0, 0, 0, 0)' : cs.getPropertyValue('color'),
-          fontFamily: cs.getPropertyValue('font-family'),
+          fontFamily: node.__pptExportFontFamily || cs.getPropertyValue('font-family'),
           // I-vi: 用 text-decoration-line（非继承）代替 text-decoration（继承），
           // 避免父节点的 underline 误传给子文本 run（如 company-11th p2 黄色下划线 bug）
           underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
@@ -583,14 +561,24 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
       return node;
     }
 
-    // TABLE: 提取 tableData，不递归子节点
+    // TABLE: preserve each measured cell as editable text and geometry.
     if (tag === 'TABLE') {
-      node.tableData = extractTableData(el);
+      // Keep measured cell geometry, including unequal columns and spans.
+      // Native addTable reflows rows and cannot reproduce browser sizing.
+      node.children = Array.from(el.rows).flatMap(row => Array.from(row.cells))
+        .map(cell => extractNode(cell, wrapperRect)).filter(Boolean);
       return node;
     }
 
-    // UL/OL: 提取 listData，不递归子节点
+    // Plain lists use native bullets; styled lists retain their DOM layout.
     if (tag === 'UL' || tag === 'OL') {
+      const customLayout = cs.listStyleType === 'none'
+        || ['grid', 'flex', 'inline-grid', 'inline-flex'].includes(cs.display)
+        || Array.from(el.children).some(child => ['grid', 'flex', 'inline-grid', 'inline-flex'].includes(getComputedStyle(child).display));
+      if (customLayout) {
+        node.children = Array.from(el.children).map(child => extractNode(child, wrapperRect)).filter(Boolean);
+        return node;
+      }
       node.listData = extractListData(el);
       node.listType = tag === 'OL' ? 'ordered' : 'unordered';
       // F-ii: 若 list bounds 被 flex 容器折叠（h < 4px），用 listData 估算高度。
@@ -753,9 +741,10 @@ export async function extractPage(page, htmlPath) {
   // 先用较大 viewport 加载，以便检测实际画布尺寸
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(fileUrl, { waitUntil: 'load' });
-  const { localFontCss } = await import('./local_fonts.mjs');
+  const { localFontCss, installMissingFontFallbacks } = await import('./local_fonts.mjs');
   const managedFontCss = await localFontCss(await page.content());
   if (managedFontCss) await page.addStyleTag({ content: managedFontCss });
+  await installMissingFontFallbacks(page);
   await page.waitForTimeout(200);
 
   // CSS @import web fonts may finish after the document load event. Waiting
@@ -843,6 +832,7 @@ export async function extractPage(page, htmlPath) {
     return result;
   });
 
+  await resolveRenderedFonts(page);
   const ir = await page.evaluate(BROWSER_EXTRACT_FN);
 
   // Reuse the computed-style SVG clone, whose attributes are safely escaped by
@@ -962,4 +952,38 @@ export async function extractPages(htmlPaths) {
   }
 
   return results;
+}
+
+/** Record the fonts Chromium actually used, not the first CSS fallback name.
+ * Per-node glyph counts also handle Latin headings containing Chinese text.
+ * Only annotates the DOM; it does not change the measured page layout.
+ */
+export async function resolveRenderedFonts(page) {
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send('DOM.enable');
+    await client.send('CSS.enable');
+    const { root } = await client.send('DOM.getDocument', { depth: -1 });
+    const nodes = [];
+    const visit = node => {
+      if (node.nodeType === 1 && node.children?.some(child => child.nodeType === 3 && child.nodeValue?.trim())) nodes.push(node.nodeId);
+      for (const child of node.children || []) visit(child);
+    };
+    visit(root);
+    for (let i = 0; i < nodes.length; i += 12) {
+      await Promise.all(nodes.slice(i, i + 12).map(async nodeId => {
+        const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId });
+        const font = fonts.filter(font => font.glyphCount > 0).sort((a, b) => b.glyphCount - a.glyphCount)[0];
+        if (!font) return;
+        const { object } = await client.send('DOM.resolveNode', { nodeId });
+        try {
+          await client.send('Runtime.callFunctionOn', {
+            objectId: object.objectId,
+            functionDeclaration: 'function(family) { this.__pptExportFontFamily = family; }',
+            arguments: [{ value: font.familyName }],
+          });
+        } finally { await client.send('Runtime.releaseObject', { objectId: object.objectId }); }
+      }));
+    }
+  } finally { await client.detach(); }
 }

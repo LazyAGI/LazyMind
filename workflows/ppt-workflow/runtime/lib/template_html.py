@@ -538,7 +538,10 @@ def prompt(context):
             'available content space, not permission to invent facts. Never copy master color swatches, '
             'instructional placeholders or sample dates. Source asset local_path uses ../ from pages/. '
             'Do not add an opaque content canvas or redraw original logo/background. '
-            'The exporter restores the selected original background independently of model output.\n'
+            'Bind each text region with data-template-shape-id matching its source shape id; use source run styles '
+            'before default_run_style: explicit run font, size, weight and color override inherited defaults. '
+            'Do not replace white cover text with the generic dark body palette. '
+            'The runtime restores original background and bound text typography independently of model output.\n'
             + json.dumps(context, ensure_ascii=False, separators=(',', ':')))
 
 
@@ -588,3 +591,80 @@ def apply_background(html, context):
     html = re.sub(r'<meta name="lazymind-template-page" content="\d+">', '', html)
     return re.sub(r'</head\s*>', lambda m: '<meta name="lazymind-template-page" content="'
                   + str(page['source_page']) + '">' + m[0], html, count=1, flags=re.I)
+
+
+def _shape_typography(shape):
+    """Use rendered run overrides before paragraph defaults (theme defaults may differ)."""
+    paragraphs = shape.get('text', {}).get('paragraphs', [])
+    runs = [(len(r.get('text', '').strip()), r.get('style', {}))
+            for p in paragraphs for r in p.get('runs', []) if r.get('text', '').strip()]
+    return max(runs, key=lambda item: item[0])[1] if runs else next(
+        (p['default_run_style'] for p in paragraphs if p.get('default_run_style')), {})
+
+
+def _typography_css(style, family_only=False):
+    families = list(dict.fromkeys(style[k] for k in ('font_ea', 'font_latin') if style.get(k)))
+    css = ('font-family:' + ','.join(json.dumps(f, ensure_ascii=False).replace('<', '\\3c ')
+                                   for f in families) + ',sans-serif!important;') if families else ''
+    if family_only:
+        return css
+    size = _num(style.get('font_size_px'))
+    if size > 0:
+        css += f'font-size:{size:g}px!important;'
+    css += 'font-weight:' + ('700' if style.get('b') in ('1', 'true') else '400') + '!important;'
+    css += 'font-style:' + ('italic' if style.get('i') in ('1', 'true') else 'normal') + '!important;'
+    color = (style.get('color') or {}).get('css', '')
+    if re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        css += f'color:{color}!important;'
+    if 'letter_spacing_px' in style:
+        css += f"letter-spacing:{_num(style['letter_spacing_px']):g}px!important;"
+    return css
+
+
+def apply_typography(html, context):
+    """Restore template text styles by explicit shape binding or semantic title roles.
+
+    Unbound body text inherits the source family only: different body regions may
+    have intentionally different sizes/colors. Explicit shape bindings preserve
+    their complete source style. Call only for initial generation; user revisions
+    remain authoritative, like apply_background.
+    """
+    if not context:
+        return html
+    shapes = [s for s in context['page']['shapes'] if s.get('visible', True)
+              and s.get('text', {}).get('paragraphs')]
+    role = lambda s: s.get('placeholder', {}).get('type')
+    titles = [s for s in shapes if role(s) in {'title', 'ctrTitle'}]
+    content = [s for s in shapes if role(s) not in {'sldNum', 'ftr', 'dt'}]
+    title = next(iter(titles), None)
+    if title is None and content:
+        title = max(content, key=lambda s: _num(_shape_typography(s).get('font_size_px')))
+    body = next((s for s in content if role(s) in {'body', 'obj', 'subTitle'}), None)
+    if body is None:
+        body = next((s for s in content if s is not title), title)
+    rules = []
+    if body:
+        rules.append('#ct,#ct :is(p,li,td,th,span,div){' + _typography_css(_shape_typography(body), True) + '}')
+    if title:
+        rules.append('#ct h1,#ct [data-el="title"],#ct [data-el="title"] *{'
+                     + _typography_css(_shape_typography(title)) + '}')
+    subtitle = next((s for s in content if role(s) == 'subTitle'), None)
+    # Cover supporting copy uses the other visible template textbox, not a
+    # generic dark-text recipe over the inherited red background.
+    if subtitle is None and role(title or {}) == 'ctrTitle' and len(content) == 2:
+        subtitle = body
+    if subtitle:
+        rules.append('#ct [data-el="subtitle"],#ct [data-el="narrative"]{'
+                     + _typography_css(_shape_typography(subtitle)) + '}')
+    for shape in shapes:
+        identity = str(shape.get('id', ''))
+        if re.fullmatch(r'\d+', identity):
+            selector = f'#ct [data-template-shape-id="{identity}"]'
+            rules.append(selector + ',' + selector + ' *{' + _typography_css(_shape_typography(shape)) + '}')
+    html = re.sub(r'<style data-lazymind-template-typography>.*?</style>', '', html, flags=re.S)
+    if not rules:
+        return html
+    if not re.search(r'</head\s*>', html, re.I):
+        raise ValueError('Template typography requires an HTML head')
+    return re.sub(r'</head\s*>', lambda m: '<style data-lazymind-template-typography>'
+                  + ''.join(rules) + '</style>' + m[0], html, count=1, flags=re.I)
