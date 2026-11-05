@@ -20,6 +20,7 @@ import (
 	"lazymind/core/capability/internal/scanadapter"
 	mcpadapter "lazymind/core/capability/mcp"
 	"lazymind/core/externalcapability"
+	"lazymind/core/vocabulary"
 )
 
 type Config struct {
@@ -43,6 +44,7 @@ type Config struct {
 
 type Runtime struct {
 	MCP               http.Handler
+	VocabularyMCP     http.Handler
 	KnowledgeInternal http.Handler
 	KnowledgeMCP      http.Handler
 	KnowledgeDecision http.HandlerFunc
@@ -135,6 +137,14 @@ func NewRuntime(config Config) (*Runtime, error) {
 		return nil, err
 	}
 	runtime := &Runtime{MCP: handler}
+	if vocabulary.Enabled() {
+		runtime.VocabularyMCP, err = mcpadapter.NewHandler(service, mcpadapter.HandlerConfig{
+			Verifier: vocabularyVerifier(config.InternalServiceToken), VocabularyOnly: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	if config.EnableKnowledgeManagement {
 		kr, e := knowledgeruntime.New(config.State, config.ValidateKnowledgeExecution, func(ctx context.Context, id knowledgeruntime.Identity, name string, args json.RawMessage) (doc.ResourceSnapshot, error) {
 			permissions := []string{}

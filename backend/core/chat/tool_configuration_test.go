@@ -214,7 +214,7 @@ func TestMCPConfigurationTargetAndBatchReuse(t *testing.T) {
 	}
 	calls = map[string]int{}
 	body := map[string]any{}
-	applyMCPRuntimeConfig(t.Context(), db.DB, "owner", "", body)
+	applyMCPRuntimeConfig(t.Context(), db.DB, "owner", body)
 	if calls["target"] != 1 || calls["unrelated"] != 1 {
 		t.Fatalf("runtime snapshot resolved twice: %v", calls)
 	}

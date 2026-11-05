@@ -1131,6 +1131,16 @@ def get_all_tool_groups(locale: str | None = None, *, system_mcp_config: list[di
         'can_disable': True, 'active': bool(management and mcp_allowed_tools(management)),
         'module': 'data', 'capability_id': 'knowledge_management', 'provider_id': BUILTIN_ID,
     })
+    from lazymind.chat.service.vocabulary_mcp import BUILTIN_ID as VOCABULARY_ID, TOOLS as VOCABULARY_TOOLS
+    vocabulary = next((server for server in servers if server.get('id') == VOCABULARY_ID), None)
+    result.append({
+        'name': 'vocabulary', 'label': 'Vocabulary queries' if use_english else '词汇查询',
+        'description': ('Query the current account\'s wordbooks and words.' if use_english
+                        else '查询当前账号的词本和单词。'),
+        'methods': [{'name': name, 'summary': ''} for name in VOCABULARY_TOOLS],
+        'can_disable': True, 'active': bool(vocabulary and mcp_allowed_tools(vocabulary)),
+        'module': 'data', 'capability_id': 'vocabulary', 'provider_id': VOCABULARY_ID,
+    })
     result.append({
         'name': SKILL_TOOL_CONFIG.name,
         'label': SKILL_TOOL_CONFIG.label_en or SKILL_TOOL_CONFIG.label if use_english else SKILL_TOOL_CONFIG.label,

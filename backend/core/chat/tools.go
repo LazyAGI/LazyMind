@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -288,7 +287,7 @@ func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, b
 	return nil
 }
 
-func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID, authorization string, body map[string]any) {
+func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) {
 	delete(body, "mcp_config") // Never accept client-supplied OAuth identities or MCP credentials.
 	delete(body, "mcp_capabilities")
 	catalog, err := mcp.LoadCapabilities(ctx, db, userID)
@@ -307,18 +306,9 @@ func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID, authorizati
 	if err != nil {
 		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)
 	} else {
-		values := make([]any, len(mcpConfig), len(mcpConfig)+1)
+		values := make([]any, len(mcpConfig))
 		for i := range mcpConfig {
 			values[i] = mcpConfig[i]
-		}
-		if strings.TrimSpace(os.Getenv("LAZYMIND_VOCABULARY_ENABLED")) == "true" && strings.TrimSpace(authorization) != "" {
-			endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("LAZYMIND_CORE_MCP_URL")), "/")
-			if endpoint == "" {
-				// Core's container-to-container listener uses the raw route. Kong adds
-				// /api/core only for public requests.
-				endpoint = "http://core:8000/mcp/capabilities/v1"
-			}
-			values = append(values, map[string]any{"id": "lazymind-vocabulary", "name": "LazyMind Vocabulary", "transport": "streamable-http", "url": endpoint, "headers": map[string]any{"Authorization": authorization}, "allowed_tools": []string{"vocabulary.wordbook.list", "vocabulary.word.list", "vocabulary.review.next", "vocabulary.review.start", "vocabulary.review.answer", "vocabulary.review.report"}, "timeout": 10})
 		}
 		if len(values) > 0 {
 			body["mcp_config"] = values
