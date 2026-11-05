@@ -19,6 +19,7 @@ import type { ImportTaskState } from "../../importTaskFailures";
 
 interface IProps {
   datasetId: string;
+  active?: boolean;
   initialTab?: TaskTab;
   onClose: () => void;
   onSuspendSuccess?: () => void;
@@ -56,11 +57,12 @@ const ImportTaskList = (props: IProps) => {
   // pageTokens[i] is the token to fetch page i+1 (index 0 = first page, no token needed).
   const [pageTokens, setPageTokens] = useState<(string | undefined)[]>([undefined]);
   const pollingRef = useRef(new Polling());
+  const requestVersionRef = useRef(0);
   const suspendingTaskIdsRef = useRef(new Set<string>());
   const [suspendingTaskIds, setSuspendingTaskIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const { datasetId, onClose, onSuspendSuccess } = props;
+  const { datasetId, active = true, onClose, onSuspendSuccess } = props;
   const hasOnlyReadPermission = useDatasetPermissionStore((state) =>
     state.hasOnlyReadPermission(),
   );
@@ -80,14 +82,17 @@ const ImportTaskList = (props: IProps) => {
     tokens?: (string | undefined)[];
   }) => {
     const { page = 1, size = pageSize, currentTab = tab, tokens = pageTokens } = params || {};
+    pollingRef.current.cancel();
+    const requestVersion = ++requestVersionRef.current;
+    if (!active || !datasetId) return;
     setPage(page);
     setPageSize(size);
-    pollingRef.current.cancel();
 
     const taskStatus = TAB_TO_TASK_STATUS[currentTab];
     const pageToken = getTaskPageToken(page, size, tokens);
 
     const updateTableData = ({ data = {} }: { data?: { tasks?: any[]; total_size?: number; next_page_token?: string } }) => {
+      if (requestVersion !== requestVersionRef.current) return;
       setRequestError("");
       const tasks: any[] = data.tasks || [];
       setTotal(data.total_size ?? 0);
@@ -131,6 +136,7 @@ const ImportTaskList = (props: IProps) => {
       requestFn()
         .then(updateTableData)
         .catch((err) => {
+          if (requestVersion !== requestVersionRef.current) return;
           console.error(err);
           setRequestError(getImportErrorMessage(err));
         });
@@ -142,6 +148,7 @@ const ImportTaskList = (props: IProps) => {
       request: requestFn,
       onSuccess: updateTableData,
       onError: (err) => {
+        if (requestVersion !== requestVersionRef.current) return;
         console.error(err);
         setRequestError(getImportErrorMessage(err));
       },
@@ -342,9 +349,10 @@ const ImportTaskList = (props: IProps) => {
   useEffect(() => {
     getTableData();
     return () => {
+      requestVersionRef.current += 1;
       pollingRef.current.cancel();
     };
-  }, []);
+  }, [active, datasetId]);
 
   return (
     <div className="import-task-list">

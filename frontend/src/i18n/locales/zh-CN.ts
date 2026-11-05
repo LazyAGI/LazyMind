@@ -919,6 +919,9 @@ const zhCN = {
       notionSetupRequiredHint: "新增 Notion 账号以连接云文档",
       notionAuthPendingHint: "新增 Notion 账号并完成授权",
       notionConnectAction: "新增 Notion 账号",
+      notionSingleConnectionHint: "目前仅支持一个 Notion 连接，已有连接请管理或重新授权。",
+      notionReauthorizeRequired: "现有 Notion 连接需要重新授权",
+      notionConnectionsLoadFailed: "无法确认已有 Notion 连接，请稍后重试",
       notionManagedAuthorizationFailed: "无法启动 Notion 授权，请检查 LazyMind Cloud 连接和 Provider 服务状态后重试",
       githubCli: {
         quickMode: "快捷授权",

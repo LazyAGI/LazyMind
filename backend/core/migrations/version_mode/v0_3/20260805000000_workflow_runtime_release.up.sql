@@ -635,10 +635,11 @@ CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     user_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     normalized_name VARCHAR(255) NOT NULL,
+    is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    CONSTRAINT uk_conversation_archive_folders_user_name
-        UNIQUE (user_id, normalized_name)
+    CONSTRAINT uk_conversation_archive_folders_user_kind_name
+        UNIQUE (user_id, is_task_conv, normalized_name)
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
     ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
@@ -716,10 +717,11 @@ CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     user_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     normalized_name VARCHAR(255) NOT NULL,
+    is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    CONSTRAINT uk_conversation_archive_folders_user_name
-        UNIQUE (user_id, normalized_name)
+    CONSTRAINT uk_conversation_archive_folders_user_kind_name
+        UNIQUE (user_id, is_task_conv, normalized_name)
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
     ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);

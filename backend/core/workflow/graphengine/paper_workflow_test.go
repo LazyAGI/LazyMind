@@ -3,6 +3,7 @@ package graphengine
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -34,9 +35,8 @@ func TestPaperGraphAllForwardScenarios(t *testing.T) {
 	paths := [][]string{
 		{"research_topic", "literature_review", "refine_topic"},
 		{"literature_review", "write_document", "peer_review", "revise_document"},
+		{"experiment", "data_analysis", "write_document"}, {"revise_document"}, {"write_document", "revise_document"}, {"reading_reflection"}, {"literature_review", "reading_reflection"},
 		{"experiment", "data_analysis"},
-		{"experiment", "data_analysis", "write_document"},
-		{"revise_document"}, {"write_document", "revise_document"}, {"reading_reflection"}, {"literature_review", "reading_reflection"},
 		{"literature_review", "experiment", "data_analysis"},
 	}
 	for _, node := range []string{"research_topic", "literature_review", "experiment", "write_document", "peer_review", "reading_reflection"} {
@@ -64,6 +64,24 @@ func TestPaperGraphAllForwardScenarios(t *testing.T) {
 				previous = step
 			}
 		})
+	}
+}
+
+func TestPaperDataAnalysisRequiresPreparation(t *testing.T) {
+	graph := paperGraph(t, nil)
+	snapshot := RuntimeSnapshot{Materials: []MaterialValue{{MaterialID: "paper_input", RevisionID: "input-1", Valid: true}}}
+	candidates := DecideRoute(graph, "__start__", snapshot.Materials)
+	if slices.Contains(candidates.Activated, "data_analysis") || !slices.Contains(candidates.Activated, "experiment") {
+		t.Fatalf("analysis must enter through experiment preparation: %+v", candidates)
+	}
+	choice := SelectRouteTarget(graph, "__start__", "experiment", candidates)
+	snapshot.Routes = []RouteFact{{From: "__start__", Activated: choice.Activated, Pruned: choice.Pruned, Validity: "effective"}}
+	projected := Project(graph, snapshot)
+	if node := projected.Nodes["experiment"]; node.Reachability != "reachable" || node.Readiness != "ready" {
+		t.Fatalf("preparation is not executable: %+v", node)
+	}
+	if node := projected.Nodes["data_analysis"]; node.Reachability != "unreachable" || node.Readiness == "ready" {
+		t.Fatalf("analysis is executable before preparation finishes: %+v", node)
 	}
 }
 

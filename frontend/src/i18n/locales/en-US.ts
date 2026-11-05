@@ -936,6 +936,9 @@ const enUS = {
       notionSetupRequiredHint: "Add a Notion account to connect cloud documents",
       notionAuthPendingHint: "Add a Notion account and complete authorization",
       notionConnectAction: "Add Notion account",
+      notionSingleConnectionHint: "Only one Notion connection is supported. Manage or reauthorize your existing connection.",
+      notionReauthorizeRequired: "Your existing Notion connection needs reauthorization",
+      notionConnectionsLoadFailed: "Unable to check existing Notion connections. Please try again later.",
       notionManagedAuthorizationFailed: "Unable to start Notion authorization. Check the LazyMind Cloud connection and Provider service, then try again.",
       githubCli: {
         quickMode: "Quick authorization",

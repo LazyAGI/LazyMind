@@ -3721,6 +3721,11 @@ components:
             type: object
         ConversationArchiveFolderRequest:
             properties:
+                kind:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
                 name:
                     type: string
             required:
@@ -22827,6 +22832,15 @@ paths:
             summary: Download Cloud resource
     /api/core/conversation-archive-folders:
         get:
+            parameters:
+                - in: query
+                  name: kind
+                  required: false
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
             responses:
                 "200":
                     content:
