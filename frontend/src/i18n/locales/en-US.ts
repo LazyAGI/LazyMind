@@ -150,6 +150,7 @@ const enUS = {
     noPinned: "Pin frequently used directories to keep them available.",
     noDirectories: "Directories organized after searches appear here. You can also create one.",
     intro: "Keep related sources together for reading, search and follow-up questions.",
+    unreadResult: "Unread organization result",
     pinned: "Pinned",
     documentCount: "{{count}} documents",
     pendingCount: "{{count}} with limited inclusion evidence",

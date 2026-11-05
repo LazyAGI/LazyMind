@@ -150,6 +150,7 @@ const zhCN = {
     noPinned: "将常用目录设为长期保留，方便随时回来查阅。",
     noDirectories: "检索后的资料会在这里整理，也可以手动新建目录。",
     intro: "把分散的资料组织在一起，继续检索、阅读与提问。",
+    unreadResult: "有未读的整理结果",
     pinned: "长期保留",
     documentCount: "{{count}} 份资料",
     pendingCount: "{{count}} 份收录依据较弱",
