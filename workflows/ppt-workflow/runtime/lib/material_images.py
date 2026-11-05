@@ -17,7 +17,13 @@ _IMG_SRC = re.compile(r"(<img\b[^>]*?\bsrc\s*=\s*)([\"'])(.*?)\2", re.I)
 
 
 def _key(value: str) -> str:
-    return unquote(unescape(str(value))).removeprefix('file://').replace('\\', '/')
+    key = unquote(unescape(str(value))).replace('\\', '/')
+    if key.lower().startswith('file://'):
+        key = key[len('file://'):]
+        # Windows as_uri() adds a slash before the drive; native aliases do not.
+        if re.match(r'^/[A-Za-z]:/', key):
+            key = key[1:]
+    return key
 
 
 def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:

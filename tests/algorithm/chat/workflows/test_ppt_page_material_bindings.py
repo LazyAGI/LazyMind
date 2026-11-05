@@ -4,7 +4,7 @@ import hashlib
 import importlib.util
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from PIL import Image
@@ -133,6 +133,30 @@ def test_trusted_input_alias_survives_deleted_input_and_encoded_file_uri(runtime
     rewritten, required = bind_prompt_materials(deck, uri)
     assert rewritten == '../images/material_01.png'
     assert required == ['images/material_01.png']
+
+
+@pytest.mark.parametrize('origin', [
+    r'C:\planning\inputs\material_images\封面 with spaces.png',
+    'D:/planning/inputs/material_images/封面 with spaces.png',
+])
+def test_windows_material_alias_survives_deleted_source_as_file_uri(runtime, deck, tmp_path, origin):
+    from material_images import bind_prompt_materials, record_material_aliases
+    source = tmp_path / 'uploaded.png'
+    source.write_bytes((deck / 'images/material_01.png').read_bytes())
+    record_material_aliases(deck, [{'path': str(source), 'origin': origin}])
+    source.unlink()
+
+    # Exercise Windows drive URIs on every CI platform, not just the host's as_uri().
+    for reference in (origin, PureWindowsPath(origin).as_uri()):
+        code, result, calls = generate(runtime, deck, f'Use {reference} on the cover', [html([reference])])
+        assert code == 0 and result['status'] == 'ok'
+        assert len(calls) == 1 and reference not in calls[0]
+        saved = (deck / 'pages/page_001.html').read_text(encoding='utf-8')
+        assert '../images/material_01.png' in saved and reference not in saved
+
+    unregistered = PureWindowsPath('Z:/unregistered/封面 with spaces.png').as_uri()
+    with pytest.raises(ValueError, match='Unregistered'):
+        bind_prompt_materials(deck, unregistered)
 
 
 def test_material_alias_cannot_authorize_an_out_of_deck_target(runtime, deck):
