@@ -1,11 +1,13 @@
 """Explicit, conflict-checked Obsidian IO owned by LazyMind."""
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
 import tempfile
+from threading import Lock
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from filelock import FileLock
@@ -35,18 +37,66 @@ class ObsidianTargetError(ValueError):
 
 
 class _PublicationObsidianFS(ObsidianFS):
+    _vaults_by_root = {}
+    _pending_discoveries = {}
+    _discovery_lock = Lock()
+
     @classmethod
-    def discover_vaults_for_root(cls, root):
-        # Destination checks must see newly added/removed vaults immediately.
-        vaults = []
-        for current, directories, _ in os.walk(Path(root).resolve(), followlinks=False):
-            path = Path(current)
-            if (path / '.obsidian').is_dir():
-                vaults.append(ObsidianVault(
-                    vault_id='vlt_' + hashlib.sha256(str(path).encode()).hexdigest()[:16],
-                    root=path, display_name=path.name))
-                directories[:] = []
-        return sorted(vaults, key=lambda item: (item.display_name.lower(), str(item.root)))
+    def discover_vaults_for_root(cls, root, *, refresh=False):
+        root = Path(root).resolve()
+        cached = cls._vaults_by_root.get(root)
+        if cached is not None and not refresh:
+            return list(cached)
+        with cls._discovery_lock:
+            cached = cls._vaults_by_root.get(root)
+            if cached is not None and not refresh:
+                return list(cached)
+            pending = cls._pending_discoveries.get(root)
+            should_scan = pending is None
+            if should_scan:
+                pending = cls._pending_discoveries[root] = Future()
+        if not should_scan:
+            return list(pending.result())
+        try:
+            # Keep the previous snapshot available until traversal finishes.
+            def scan(scan_root, split=False):
+                vaults, subtrees = [], []
+                if os.path.islink(scan_root):
+                    return vaults, subtrees
+                for current, directories, _ in os.walk(scan_root, followlinks=False):
+                    path = Path(current)
+                    if (path / '.obsidian').is_dir():
+                        vaults.append(ObsidianVault(
+                            vault_id='vlt_' + hashlib.sha256(str(path).encode()).hexdigest()[:16],
+                            root=path, display_name=path.name))
+                        directories[:] = []
+                    elif split and path != root:
+                        subtrees.extend(path / name for name in directories if not os.path.islink(path / name))
+                        directories[:] = []
+                return vaults, subtrees
+
+            # Partition below the first level; each worker still traverses its entire subtree.
+            vaults, subtrees = scan(root, split=True)
+            if subtrees:
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    for found, _ in executor.map(scan, subtrees):
+                        vaults.extend(found)
+            vaults = tuple(sorted(vaults, key=lambda item: (item.display_name.lower(), str(item.root))))
+            with cls._discovery_lock:
+                cls._vaults_by_root[root] = vaults
+            pending.set_result(vaults)
+        except BaseException as exc:
+            pending.set_exception(exc)
+            raise
+        finally:
+            with cls._discovery_lock:
+                del cls._pending_discoveries[root]
+        return list(vaults)
+
+    def _note_from_relative(self, vault, relative_path):
+        if vault.root.resolve() != vault.root.absolute() or not (vault.root / '.obsidian').is_dir():
+            raise ValueError('Obsidian Vault is no longer available.')
+        return super()._note_from_relative(vault, relative_path)
 
 
 def _safe_path(root: Path, relative: str) -> Path:
@@ -135,12 +185,12 @@ class LazyMindObsidianProvider(ObsidianWriterProvider):
                     asset.local_path = asset.uri or f'lazymind-media:{quote(asset.media_asset_id, safe="")}'
         return ObsidianWriterProvider._serialize_writer_document(document, stable_assets)
 
-    def _vaults(self):
+    def _vaults(self, *, refresh=False):
         fs = self._fs()
         # ObsidianFS otherwise falls back to the process working directory.
         if not config['obsidian_vault_path'] and Path(fs._vault_root) == Path.cwd():
             raise ObsidianTargetError('OBSIDIAN_NOT_CONFIGURED')
-        vaults = [vault for vault in fs.discover_vaults()
+        vaults = [vault for vault in fs.discover_vaults_for_root(fs._vault_root, refresh=refresh)
                   if vault.root.resolve() == vault.root.absolute()
                   and (vault.root / '.obsidian').is_dir()]
         if not vaults:
@@ -149,7 +199,7 @@ class LazyMindObsidianProvider(ObsidianWriterProvider):
 
     def status(self):
         try:
-            _, vaults = self._vaults()
+            _, vaults = self._vaults(refresh=True)
             items = [{'id': vault.vault_id, 'name': vault.display_name, 'writable': _writable(vault.root)}
                      for vault in vaults]
             return {'state': 'ready' if any(item['writable'] for item in items) else 'permission_required',
