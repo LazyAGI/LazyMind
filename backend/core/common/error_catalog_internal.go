@@ -115,6 +115,12 @@ func init() {
 		"reference metadata is missing",
 		"dataset_id, source_path, and user_id are required",
 		"source file is not regular",
+		"这条参考文献包含冲突的论文编号，请先核对原文",
+		"参考文献的 DOI 与原文不一致，请先核对原文",
+		"已保存的 DOI 与原文题名或年份不符，请核对参考文献",
+		"参考文献的 arXiv 编号与原文不一致，请先核对原文",
+		"已保存的 arXiv 编号与原文题名或年份不符，请核对参考文献",
+		"未能从 OpenAlex 或 arXiv 可靠匹配这条参考文献，请先核对 DOI 或 arXiv 编号",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -137,6 +143,7 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
+	registerAdditionalErrorAlias("查询参考文献来源失败", "Upstream service error", http.StatusBadGateway, 2000110)
 	registerAdditionalErrorPattern("paper download returned http %d", "Upstream service error", http.StatusBadGateway, 2000110)
 	registerAdditionalErrorPattern("reference page returned http %d", "Upstream service error", http.StatusBadGateway, 2000110)
 	registerAdditionalErrorPattern("reference page has unsupported content type %s", "Upstream service error", http.StatusBadGateway, 2000110)
