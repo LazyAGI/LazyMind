@@ -127,7 +127,8 @@ function Logo({ provider }: { provider: ProviderOption }) {
 
 function hasProviderConfiguration(provider: AddedProvider): boolean {
   return provider.groups.some(
-    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 || group.models.length > 0,
+    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 ||
+      group.models.length > 0 || group.verified && canDiscoverWithoutApiKey(provider, group),
   );
 }
 
@@ -623,7 +624,8 @@ export function ProviderWorkspace(props: Props) {
       }
     }
   });
-  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0)) ? (
+  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) =>
+    candidate.apiKeyConfigured || candidate.keys.length > 0 || candidate.verified && canDiscoverWithoutApiKey(item, candidate))) ? (
     <i className={items.some((item) => item.groups.some((candidate) => candidate.verified &&
       (candidate.keys.some((key) => key.enabled) || (!candidate.keys.length && candidate.apiKeyConfigured) || canDiscoverWithoutApiKey(item, candidate)))) ? "is-ready" : ""}
       aria-label={label("configured")} />

@@ -676,12 +676,29 @@ describe("compact provider workspace", () => {
     expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
   });
 
-  it("shows a verified keyless custom supplier as connected without adding a sidebar status dot", () => {
+  it("shows a verified keyless custom supplier as connected with a green sidebar dot", () => {
     const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: true }] };
     setup({ providers: [custom], configuredProviders: [custom] });
     expect(document.querySelector(".provider-workspace-status")).toHaveTextContent("modelProvider.workspace.connected");
     const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name: /Local models/ }).querySelector("i")).toHaveClass("is-ready");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.configured" }));
+    expect(navigation.getByRole("button", { name: /Local models/ })).toBeInTheDocument();
+  });
+
+  it("does not mark an unverified keyless supplier as connected", () => {
+    const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: false }] };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
     expect(navigation.getByRole("button", { name: /Local models/ }).querySelector("i")).not.toBeInTheDocument();
+  });
+
+  it.each(["vLLM", "LMDeploy"])("shows a verified keyless %s preset with a green sidebar dot", (name) => {
+    const local = { ...provider, id: name.toLowerCase(), name, source: name,
+      groups: [{ ...provider.groups[0], baseUrl: "http://localhost:8000/v1/", keys: [], apiKeyConfigured: false, verified: true }] };
+    setup({ providers: [local], configuredProviders: [local] });
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name }).querySelector("i")).toHaveClass("is-ready");
   });
 
   it("separates pointer focus from keyboard navigation without removing focused controls", () => {
