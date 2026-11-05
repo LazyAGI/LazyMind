@@ -168,7 +168,7 @@ class Reader:
         target = self.deck / 'images' / ('template-' + digest[:20] + suffix)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
-        result = {'local_path': str(target.relative_to(self.deck)), 'sha256': digest, 'source_part': source}
+        result = {'local_path': target.relative_to(self.deck).as_posix(), 'sha256': digest, 'source_part': source}
         self.assets[source] = result
         return result
 

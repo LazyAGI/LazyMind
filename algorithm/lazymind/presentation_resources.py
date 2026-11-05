@@ -53,9 +53,12 @@ def _extract(archive, directory):
         if len(entries) > 10000 or sum(e.file_size for e in entries) > 1024 ** 3:
             raise ValueError('PPT library archive exceeds extraction limits')
         for entry in entries:
-            path = PurePosixPath(entry.filename)
-            if (path.is_absolute() or '..' in path.parts or '\\' in entry.filename
-                    or ':' in entry.filename or stat.S_ISLNK(entry.external_attr >> 16)):
+            # ZipInfo normalizes separators on Windows; inspect the archive's
+            # original name so unsafe paths are rejected on every platform.
+            name = entry.orig_filename
+            path = PurePosixPath(name)
+            if (path.is_absolute() or '..' in path.parts or '\\' in name
+                    or ':' in name or stat.S_ISLNK(entry.external_attr >> 16)):
                 raise ValueError('Unsafe PPT library archive path')
         bundle.extractall(directory)
 

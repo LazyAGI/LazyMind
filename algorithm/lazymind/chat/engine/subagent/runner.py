@@ -563,7 +563,8 @@ def _build_partial_sort_order_hints(
 def _build_intent_context_section(params: Dict[str, Any]) -> List[str]:
     """Render immutable instructions already present in public Attempt Context."""
     request = str(params.get('launch_user_input') or params.get('user_input') or '').strip()
-    current = str(params.get('current_user_input') or '').strip()
+    from lazymind.chat.workflow.image_request import image_request_update
+    current = image_request_update({**params, 'user_input': ''})
     instruction = str(params.get('runtime_instruction') or '').strip()
     retry_hint = str(params.get('retry_hint') or '').strip()
     if not request and not current and not instruction and not retry_hint:

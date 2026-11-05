@@ -73,7 +73,11 @@ def test_concurrent_consumers_download_once(bundle, monkeypatch):
 def test_rejects_archive_escape(tmp_path, name):
     archive = tmp_path / 'bad.zip'
     with zipfile.ZipFile(archive, 'w') as stream:
-        stream.writestr(name, 'bad')
+        entry = zipfile.ZipInfo('placeholder')
+        # ZipInfo's constructor normalizes backslashes on Windows. Preserve the
+        # hostile archive name so the reader, not the writer, validates it.
+        entry.filename = name
+        stream.writestr(entry, 'bad')
     with pytest.raises(ValueError, match='Unsafe'):
         resources._extract(archive, tmp_path / 'out')
     assert not (tmp_path / 'escape').exists()
@@ -90,6 +94,13 @@ def test_prefetch_returns_while_download_is_running_and_deduplicates(bundle, mon
         return httpx.Response(200, content=bundle)
 
     transport(monkeypatch, handler)
+    monkeypatch.setattr(resources, '_JOBS', {})
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        monkeypatch.setattr(resources, '_EXECUTOR', executor)
+        _check_prefetch(entered, release, resources, calls)
+
+
+def _check_prefetch(entered, release, resources, calls):
     try:
         resources.prefetch()
         assert entered.wait(5)
