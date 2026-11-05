@@ -321,6 +321,7 @@ export interface AcademicExpansion {
     'discovery_mode'?: AcademicExpansionDiscoveryModeEnum;
     'goal'?: string;
     'id': string;
+    'material_progress'?: AcademicMaterialProgress;
     'preparation'?: AcademicExpansionPreparation;
     'preparation_revision': number;
     'progress'?: object;
@@ -707,6 +708,10 @@ export const AcademicInvestigationStatusEnum = {
 
 export type AcademicInvestigationStatusEnum = typeof AcademicInvestigationStatusEnum[keyof typeof AcademicInvestigationStatusEnum];
 
+export interface AcademicMaterialProgress {
+    'distinct_ready_count'?: number;
+    'processing_count': number;
+}
 export interface AcademicModelMetrics {
     'currency_cost'?: number | null;
     'model'?: string;
@@ -1409,12 +1414,14 @@ export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
     'chat_status'?: ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum;
     'contents'?: Array<object>;
     'handoffs'?: Array<AcademicHandoffLink>;
+    'material_progress'?: AcademicMaterialProgress;
     'paper_importance'?: { [key: string]: boolean; };
     'presence'?: Array<AcademicPresence>;
     'record'?: AcademicExpansion;
     'research_guidance'?: string;
     'rounds'?: Array<object>;
     'source_queries'?: Array<AcademicSourceQueryReceipt>;
+    'workflow_steps'?: Array<ApiCoreAcademicExpansionsExpansionIdGet200ResponseWorkflowStepsInner>;
 }
 
 export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = {
@@ -1426,6 +1433,11 @@ export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = 
 
 export type ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum];
 
+export interface ApiCoreAcademicExpansionsExpansionIdGet200ResponseWorkflowStepsInner {
+    'label'?: string;
+    'status': string;
+    'step_id': string;
+}
 export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
     'paper_ids': Array<string>;
 }
@@ -1536,6 +1548,7 @@ export interface ApiCoreAcademicLibraryFoldersPostRequest {
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
     'content': string;
     'id': string;
+    'source'?: PaperLibraryNoteSource;
 }
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
     'metadata'?: PaperLibraryMetadata;
@@ -6818,6 +6831,7 @@ export interface OrdinaryTaskView {
     'display_key': string;
     'execution_id': string;
     'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
+    'input_required'?: string;
     'knowledge_operations'?: Array<KnowledgeOperation>;
     'model_switch'?: ChatModelSwitchRecord;
     'order': number;
@@ -7093,9 +7107,32 @@ export interface PaperLibraryNote {
     'id': string;
     'kind': string;
     'paperId': string;
+    'source'?: PaperLibraryNoteSource;
     'title': string;
     'updatedAt': string;
 }
+export interface PaperLibraryNoteSource {
+    'attachmentId': string;
+    'bbox'?: Array<number>;
+    'color'?: PaperLibraryNoteSourceColorEnum;
+    'page': number;
+    'quote'?: string;
+    'rects'?: Array<Array<number>>;
+}
+
+export const PaperLibraryNoteSourceColorEnum = {
+    Red: 'red',
+    Orange: 'orange',
+    Yellow: 'yellow',
+    Green: 'green',
+    Blue: 'blue',
+    Indigo: 'indigo',
+    Purple: 'purple',
+    Rainbow: 'rainbow'
+} as const;
+
+export type PaperLibraryNoteSourceColorEnum = typeof PaperLibraryNoteSourceColorEnum[keyof typeof PaperLibraryNoteSourceColorEnum];
+
 export interface PaperLibraryPaper {
     'academicWorkId'?: string;
     'arxivVersion'?: string;
@@ -8928,6 +8965,7 @@ export interface SkillWriteOpenAPIResponse {
 export interface SlotDTO {
     'artifact_id': string;
     'artifact_value'?: any;
+    'attempt': number;
     'caption'?: string;
     'change_source'?: string;
     'content_type'?: string;
@@ -8940,6 +8978,7 @@ export interface SlotDTO {
     'last_synced_version'?: number;
     'list_index'?: number;
     'order_version'?: number;
+    'producer_attempt_id'?: string;
     'provider'?: string;
     'provider_document_id'?: string;
     'revision': number;
@@ -10929,12 +10968,13 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {string} targetDatasetId
+         * @param {boolean} [includeProcessing]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryGet: async (targetDatasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicLibraryGet: async (targetDatasetId: string, includeProcessing?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'targetDatasetId' is not null or undefined
             assertParamExists('apiCoreAcademicLibraryGet', 'targetDatasetId', targetDatasetId)
             const localVarPath = `/api/core/academic/library`;
@@ -10951,6 +10991,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (targetDatasetId !== undefined) {
                 localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            if (includeProcessing !== undefined) {
+                localVarQueryParameter['include_processing'] = includeProcessing;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -11841,13 +11885,14 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {string} targetDatasetId
+         * @param {boolean} [includeProcessing]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicLibraryGet(targetDatasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, options);
+        async apiCoreAcademicLibraryGet(targetDatasetId: string, includeProcessing?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, includeProcessing, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -12251,13 +12296,13 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
-            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, requestParameters.includeProcessing, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -12590,6 +12635,8 @@ export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest {
  */
 export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
     readonly targetDatasetId: string
+
+    readonly includeProcessing?: boolean
 }
 
 /**
@@ -12913,13 +12960,13 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read paper entries, logical folders and active materials
+     * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
      * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, requestParameters.includeProcessing, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

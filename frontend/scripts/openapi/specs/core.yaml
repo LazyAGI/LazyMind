@@ -461,6 +461,8 @@ components:
                     type: string
                 id:
                     type: string
+                material_progress:
+                    $ref: '#/components/schemas/AcademicMaterialProgress'
                 preparation:
                     properties:
                         answers:
@@ -1227,6 +1229,15 @@ components:
                 - queries
                 - unresolved_clues
                 - gaps
+            type: object
+        AcademicMaterialProgress:
+            properties:
+                distinct_ready_count:
+                    type: integer
+                processing_count:
+                    type: integer
+            required:
+                - processing_count
             type: object
         AcademicModelMetrics:
             properties:
@@ -10098,6 +10109,8 @@ components:
                         - model_fallback_exhausted
                         - model_context_not_fit
                     type: string
+                input_required:
+                    type: string
                 knowledge_operations:
                     items:
                         $ref: '#/components/schemas/KnowledgeOperation'
@@ -10661,6 +10674,8 @@ components:
                     type: string
                 paperId:
                     type: string
+                source:
+                    $ref: '#/components/schemas/PaperLibraryNoteSource'
                 title:
                     type: string
                 updatedAt:
@@ -10674,6 +10689,41 @@ components:
                 - kind
                 - createdAt
                 - updatedAt
+            type: object
+        PaperLibraryNoteSource:
+            properties:
+                attachmentId:
+                    type: string
+                bbox:
+                    items:
+                        format: double
+                        type: number
+                    type: array
+                color:
+                    enum:
+                        - red
+                        - orange
+                        - yellow
+                        - green
+                        - blue
+                        - indigo
+                        - purple
+                        - rainbow
+                    type: string
+                page:
+                    type: integer
+                quote:
+                    type: string
+                rects:
+                    items:
+                        items:
+                            format: double
+                            type: number
+                        type: array
+                    type: array
+            required:
+                - attachmentId
+                - page
             type: object
         PaperLibraryPaper:
             properties:
@@ -18694,6 +18744,8 @@ components:
                 artifact_id:
                     type: string
                 artifact_value: {}
+                attempt:
+                    type: integer
                 caption:
                     type: string
                 change_source:
@@ -18720,6 +18772,8 @@ components:
                     type: integer
                 order_version:
                     type: integer
+                producer_attempt_id:
+                    type: string
                 provider:
                     type: string
                 provider_document_id:
@@ -18752,6 +18806,7 @@ components:
                     type: string
             required:
                 - artifact_id
+                - attempt
                 - created_at
                 - revision
                 - selected
@@ -19828,6 +19883,8 @@ paths:
                                         items:
                                             $ref: '#/components/schemas/AcademicHandoffLink'
                                         type: array
+                                    material_progress:
+                                        $ref: '#/components/schemas/AcademicMaterialProgress'
                                     paper_importance:
                                         additionalProperties:
                                             type: boolean
@@ -19848,6 +19905,20 @@ paths:
                                     source_queries:
                                         items:
                                             $ref: '#/components/schemas/AcademicSourceQueryReceipt'
+                                        type: array
+                                    workflow_steps:
+                                        items:
+                                            properties:
+                                                label:
+                                                    type: string
+                                                status:
+                                                    type: string
+                                                step_id:
+                                                    type: string
+                                            required:
+                                                - step_id
+                                                - status
+                                            type: object
                                         type: array
                                 type: object
                     description: Read saved rounds, current papers, content states and Chat availability
@@ -20286,14 +20357,19 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: include_processing
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PaperLibraryResponse'
-                    description: Read paper entries, logical folders and active materials
-            summary: Read paper entries, logical folders and active materials
+                    description: Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
+            summary: Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
             tags:
                 - AcademicWorkflows
     /api/core/academic/library/folders:
@@ -20510,6 +20586,8 @@ paths:
                                     type: string
                                 id:
                                     type: string
+                                source:
+                                    $ref: '#/components/schemas/PaperLibraryNoteSource'
                             required:
                                 - id
                                 - content
@@ -26949,7 +27027,6 @@ paths:
                                 $ref: '#/components/schemas/ErrorResponse'
                     description: Model request failed or response invalid
             summary: Explain a figure or table using extracted text and cells
-
     /api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation:
         post:
             description: Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
