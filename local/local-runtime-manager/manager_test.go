@@ -1875,25 +1875,26 @@ func TestDerivedToolInstallPathsUseLocalBuildRoot(t *testing.T) {
 			t.Fatalf("%s is outside runtime root %s", path, paths.RuntimeRoot)
 		}
 	}
-	if paths.AuthServiceVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", "auth-service") {
+	platform := runtime.GOOS + "-" + runtime.GOARCH
+	if paths.AuthServiceVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", platform, "auth-service") {
 		t.Fatalf("auth-service venv = %q", paths.AuthServiceVenvDir)
 	}
-	if paths.ChannelGatewayVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", "channel-gateway") {
+	if paths.ChannelGatewayVenvDir != filepath.Join(paths.BuildRoot, "deps", "python", platform, "channel-gateway") {
 		t.Fatalf("channel gateway venv = %q", paths.ChannelGatewayVenvDir)
 	}
-	if paths.AlgorithmVenv != filepath.Join(paths.BuildRoot, "deps", "python", "algorithm") {
+	if paths.AlgorithmVenv != filepath.Join(paths.BuildRoot, "deps", "python", platform, "algorithm") {
 		t.Fatalf("algorithm venv = %q", paths.AlgorithmVenv)
 	}
 	if paths.FrontendNodeModules != filepath.Join(paths.BuildRoot, "deps", "node", "frontend") {
 		t.Fatalf("frontend node_modules = %q", paths.FrontendNodeModules)
 	}
-	if paths.PythonRuntimeDir != filepath.Join(paths.BuildRoot, "runtimes", "python") {
+	if paths.PythonRuntimeDir != filepath.Join(paths.BuildRoot, "runtimes", "python", platform) {
 		t.Fatalf("python runtime dir = %q", paths.PythonRuntimeDir)
 	}
 	if paths.NodeRuntimeDir != filepath.Join(paths.BuildRoot, "runtimes", "node") {
 		t.Fatalf("node runtime dir = %q", paths.NodeRuntimeDir)
 	}
-	if paths.PythonStateDir != filepath.Join(paths.RuntimeRoot, "state", "python") {
+	if paths.PythonStateDir != filepath.Join(paths.RuntimeRoot, "state", "python", platform) {
 		t.Fatalf("python state dir = %q", paths.PythonStateDir)
 	}
 }

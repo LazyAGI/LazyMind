@@ -7,8 +7,89 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
+
+func TestPythonReadyMarkersDoNotBypassEnvironmentCheck(t *testing.T) {
+	for _, service := range []string{"algorithm", "auth-service", "channel-gateway"} {
+		t.Run(service, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfg, paths, err := NewRuntimeConfig("local", repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Algorithm.RAGDisabled = true
+			if err := paths.EnsureAllDirs(); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"LAZYLLM_VERSION", "algorithm/requirements.txt", authServiceSourceDirName + "/requirements.txt", channelGatewaySourceDirName + "/requirements.txt"} {
+				path := filepath.Join(repo, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				contents := "httpx\n"
+				if name == "LAZYLLM_VERSION" {
+					contents = "1.4.0\n"
+				}
+				if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			requirementsHash, err := fileSHA256(filepath.Join(repo, authServiceSourceDirName, "requirements.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, venv := range []string{paths.AlgorithmVenv, paths.AuthServiceVenvDir, paths.ChannelGatewayVenvDir} {
+				python := venvExecutable(venv, "python")
+				if err := os.MkdirAll(filepath.Dir(python), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(python, []byte("existing python"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(venv, ".lazymind-requirements.sha256"), []byte(requirementsHash), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stamp, err := algorithmReadyStamp(paths, false, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(stamp, []byte("ready\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			probeFailure := func(cmd Command) (CommandResult, error) {
+				if len(cmd.Args) == 2 && cmd.Args[1] == "import pkg_resources" {
+					return CommandResult{}, nil
+				}
+				if service != "auth-service" && cmd.Args[len(cmd.Args)-1] == "false" {
+					return CommandResult{}, nil
+				}
+				return CommandResult{Stderr: "OSError: [Errno 22] Invalid argument: certifi/cacert.pem"}, errors.New("exit status 1")
+			}
+			runner := &fakeRunner{t: t, handlers: []func(Command) (CommandResult, error){probeFailure, probeFailure}}
+			switch service {
+			case "algorithm":
+				err = NewAlgorithmServiceManager(runner).preparePython(context.Background(), cfg, paths, false)
+			case "auth-service":
+				err = NewAuthServiceManager(runner).preparePythonEnv(context.Background(), cfg, paths)
+			case "channel-gateway":
+				err = NewChannelGatewayManager(runner).preparePythonEnv(context.Background(), cfg, paths)
+			}
+			if err == nil {
+				t.Fatal("ready environment was accepted without validating Python/SSL")
+			}
+			if !strings.Contains(err.Error(), "certifi/cacert.pem") {
+				t.Fatalf("validation error lost certificate diagnostic: %v", err)
+			}
+		})
+	}
+}
 
 func TestAlgorithmPreparePythonKeepsExistingVenvAfterInstallFailure(t *testing.T) {
 	installFakeUVOnPath(t)
@@ -44,13 +125,19 @@ func TestAlgorithmPreparePythonKeepsExistingVenvAfterInstallFailure(t *testing.T
 		t.Fatal(err)
 	}
 	runner := &fakeRunner{t: t, handlers: []func(Command) (CommandResult, error){
+		func(cmd Command) (CommandResult, error) {
+			if cmd.Name != paths.AlgorithmPython {
+				t.Fatalf("expected existing Python check, got %s", cmd.Name)
+			}
+			return CommandResult{}, nil
+		},
 		func(Command) (CommandResult, error) { return CommandResult{}, errors.New("installer failed") },
 	}}
 	err = NewAlgorithmServiceManager(runner).preparePython(context.Background(), cfg, paths, false)
 	if err == nil {
 		t.Fatal("expected install failure")
 	}
-	runner.assertCommandCount(1)
+	runner.assertCommandCount(2)
 	data, err := os.ReadFile(paths.AlgorithmPython)
 	if err != nil || string(data) != "existing python" {
 		t.Fatalf("existing python changed: %q, %v", data, err)
@@ -127,6 +214,12 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
+			if cmd.Name != paths.AlgorithmPython {
+				t.Fatalf("expected new venv check, got %s", cmd.Name)
+			}
+			return CommandResult{}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
 			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "setuptools<81")
 			return CommandResult{}, nil
 		},
@@ -146,12 +239,18 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "-r", localRequirements)
 			return CommandResult{}, nil
 		},
+		func(cmd Command) (CommandResult, error) {
+			if cmd.Name != paths.AlgorithmPython || cmd.Args[len(cmd.Args)-1] != "true" {
+				t.Fatalf("expected installed certificate check, got %+v", cmd)
+			}
+			return CommandResult{}, nil
+		},
 	)
 
 	if err := manager.preparePython(context.Background(), cfg, paths, false); err != nil {
 		t.Fatalf("prepare algorithm python: %v", err)
 	}
-	runner.assertCommandCount(8)
+	runner.assertCommandCount(10)
 }
 
 func TestEnsureLazyLLMSubmoduleInitializesMissingSubmodule(t *testing.T) {

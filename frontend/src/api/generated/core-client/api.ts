@@ -4168,6 +4168,15 @@ export interface DatasetCapabilities {
     'retrieve': boolean;
     'search': boolean;
 }
+export interface DatasetDeletionProgress {
+    'completed': number;
+    'dataset_id': string;
+    'display_name': string;
+    'error'?: string;
+    'failed': number;
+    'status': string;
+    'total': number;
+}
 export interface DatasetMember {
     'create_time'?: string;
     'dataset_id'?: string;
@@ -18536,6 +18545,40 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Get dataset cleanup progress
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDeletionGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDeletionGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/deletion`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get dataset
          * @param {string} dataset
          * @param {*} [options] Override http request option.
@@ -18832,10 +18875,23 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsDatasetDelete(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+        async apiCoreDatasetsDatasetDelete(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ResourceOperationResult>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDelete(dataset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsDatasetDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get dataset cleanup progress
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDeletionGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DatasetDeletionProgress>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDeletionGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsDatasetDeletionGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -18954,8 +19010,18 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+        apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<ResourceOperationResult> {
             return localVarFp.apiCoreDatasetsDatasetDelete(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get dataset cleanup progress
+         * @param {DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDeletionGet(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DatasetDeletionProgress> {
+            return localVarFp.apiCoreDatasetsDatasetDeletionGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -19033,6 +19099,13 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
  * Request parameters for apiCoreDatasetsDatasetDelete operation in DatasetsApi.
  */
 export interface DatasetsApiApiCoreDatasetsDatasetDeleteRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDeletionGet operation in DatasetsApi.
+ */
+export interface DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest {
     readonly dataset: string
 }
 
@@ -19120,6 +19193,17 @@ export class DatasetsApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig) {
         return DatasetsApiFp(this.configuration).apiCoreDatasetsDatasetDelete(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get dataset cleanup progress
+     * @param {DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDeletionGet(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest, options?: RawAxiosRequestConfig) {
+        return DatasetsApiFp(this.configuration).apiCoreDatasetsDatasetDeletionGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

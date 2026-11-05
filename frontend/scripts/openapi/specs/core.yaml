@@ -6175,6 +6175,31 @@ components:
                 - retrieve
                 - search
             type: object
+        DatasetDeletionProgress:
+            properties:
+                completed:
+                    type: integer
+                dataset_id:
+                    type: string
+                display_name:
+                    type: string
+                error:
+                    type: string
+                failed:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+                total:
+                    type: integer
+            required:
+                - completed
+                - dataset_id
+                - display_name
+                - failed
+                - status
+                - total
+            type: object
         DatasetMember:
             properties:
                 create_time:
@@ -25761,8 +25786,8 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/EmptyObject'
-                    description: Deleted successfully
+                                $ref: '#/components/schemas/ResourceOperationResult'
+                    description: Cleanup submission
             summary: Delete dataset
             tags:
                 - datasets
@@ -25804,6 +25829,24 @@ paths:
                                 $ref: '#/components/schemas/Dataset'
                     description: Updated dataset
             summary: Update dataset
+            tags:
+                - datasets
+    /api/core/datasets/{dataset}/deletion:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatasetDeletionProgress'
+                    description: Cleanup progress
+            summary: Get dataset cleanup progress
             tags:
                 - datasets
     /api/core/datasets/{dataset}/documents:

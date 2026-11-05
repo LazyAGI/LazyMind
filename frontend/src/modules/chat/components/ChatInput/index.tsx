@@ -771,7 +771,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const session = state.sessionByConversation[sessionId];
       return (
         session?.status === "active" ||
-        session?.status === "waiting" ||
         Boolean(state.autoRunningByConversation[sessionId])
       );
     });

@@ -23,8 +23,7 @@ import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
 } from "@/api/generated/chatbot-client";
-import type { ChatModelRoute, ChatModelSwitchRecord } from "@/api/generated/core-client";
-import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay";
+import type { ChatModelRoute } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
 import {
   isAskPendingReadOnly,
@@ -166,29 +165,6 @@ function ModelRouteSummary({ route }: { route?: ChatModelRoute }) {
   return reason ? <Tooltip title={reason}>{content}</Tooltip> : content;
 }
 
-function ModelSwitchHistory({ records }: { records?: ChatModelSwitchRecord[] }) {
-  const { t } = useTranslation();
-  if (!records?.length) return null;
-  const unknownWindow = t("chat.modelFallbackWindowUnknown");
-  return (
-    <details style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-      <summary>{t("chat.modelFallbackHistory")}</summary>
-      <ol>
-        {records.map(record => (
-          <li key={record.event_id}>
-            <span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow)}</span>{" → "}
-            <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow)}</span>
-            <div>{record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
-              ? t(`chat.modelFallbackReason.${record.reason_code}`)
-              : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</div>
-            <div>{t("chat.modelFallbackSucceeded")}</div>
-            {record.context_compacted === true ? <div>{t("chat.modelFallbackContextAdapted")}</div> : null}
-          </li>
-        ))}
-      </ol>
-    </details>
-  );
-}
 
 type FeedbackAction =
   | { type: "OPEN_MODAL"; historyId: string }
@@ -1445,6 +1421,12 @@ const AssistantMessage = (props: any) => {
     hasMultipleAnswers &&
     (item.selected_answer_index === undefined ||
       item.selected_answer_index === null);
+  const hasVisibleAnswer = Boolean(trim(item.display_delta || item.delta || "")) ||
+    Boolean(shouldUseMultiAnswerStyle && item.answers?.some((answer: any) => trim(answer.content || "")));
+  const displayTerminal = item.run_terminal ? {
+    ...item.run_terminal,
+    partial_output: item.run_terminal.partial_output && hasVisibleAnswer,
+  } : undefined;
   const modalFeedbackRecord = getFeedbackRecord(feedbackState.targetHistoryId);
 
   if (shouldUseMultiAnswerStyle) {
@@ -1460,7 +1442,7 @@ const AssistantMessage = (props: any) => {
             <ModelRouteSummary route={item.model_route} />
             <ExternalExecutionSummary execution={item.execution} />
             <RunStatusCard
-              terminal={item.run_terminal}
+              terminal={displayTerminal}
               conversationId={sessionId}
               providerId={item.model_route?.provider_id}
               providerName={item.model_route?.provider_name}
@@ -1563,10 +1545,9 @@ const AssistantMessage = (props: any) => {
       <div className="chat-bot-box-single">
         <div className="chat-bot">
           <ModelRouteSummary route={item.model_route} />
-          <ModelSwitchHistory records={item.model_switches} />
           <ExternalExecutionSummary execution={item.execution} />
           <RunStatusCard
-            terminal={item.run_terminal}
+            terminal={displayTerminal}
             conversationId={sessionId}
             providerId={item.model_route?.provider_id}
             providerName={item.model_route?.provider_name}

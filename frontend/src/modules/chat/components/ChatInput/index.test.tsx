@@ -54,10 +54,13 @@ vi.mock("react-i18next", async (importOriginal) => ({
 vi.mock("../ChatModelSelector", () => ({
   default: ({
     onSavingChange,
+    disabled,
   }: {
     onSavingChange?: (saving: boolean) => void;
+    disabled?: boolean;
   }) => (
     <>
+      <button type="button" aria-label="model selection" disabled={disabled}>model selection</button>
       <button type="button" onClick={() => onSavingChange?.(true)}>
         begin model save
       </button>
@@ -185,6 +188,23 @@ vi.mock("@/modules/memory/toolApi", () => ({
 describe("ChatInput model switch save lock", () => {
   beforeEach(() => {
     vi.mocked(getRuntimeMode).mockReturnValue("local");
+  });
+
+  it.each([
+    ["waiting", false, false],
+    ["active", false, true],
+    ["waiting", true, true],
+  ] as const)("model recovery for workflow %s, auto running %s", (status, autoRunning, blocked) => {
+    useWorkflowStore.setState({ sessionByConversation: { "model-recovery": {
+      session_id: "waiting-flow", conversation_id: "model-recovery", controller_host: "lazymind",
+      workflow_id: "workflow", workflow_mode: "dynamic", status, current_step_id: "step", created_at: "", updated_at: "",
+    } }, autoRunningByConversation: { "model-recovery": autoRunning } });
+    onTestFinished(() => useWorkflowStore.setState({ sessionByConversation: {}, autoRunningByConversation: {} }));
+    render(<ChatInput value="继续" onChange={vi.fn()} sessionId="model-recovery" isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false}
+      showSkillDeposit={false} showThinkingDepth={false} />);
+    if (blocked) expect(screen.getByRole("button", { name: "model selection" })).toBeDisabled();
+    else expect(screen.getByRole("button", { name: "model selection" })).toBeEnabled();
   });
 
   it.each([
