@@ -4,7 +4,13 @@ const reasonFor = error => /^[a-z_]{1,64}$/.test(error?.code || "") ? error.code
 function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runtime, context, download, cancelDownload, rediscover,
   publish, getState, revealPackage, clearDownloadIntent, invalidateOffer = () => ({}), clock = { setTimeout, clearTimeout }, now = Date.now }) {
   let saved, operation, disposed = false, epoch = now(), loadFailed = false, repairRequired = false;
-  const write = value => { try { store.write(value); saved = value; } catch { throw failure("update_record_write"); } };
+  const write = value => {
+    try {
+      const result = store.write(value);
+      if (result?.then) return result.then(() => { saved = value; }, () => { throw failure("update_record_write"); });
+      saved = value;
+    } catch { throw failure("update_record_write"); }
+  };
   const supported = configuration => Boolean(nativeInstaller?.capability(configuration).supported && runtime && store);
   const fields = () => saved ? { releaseId: saved.releaseId, nextVersion: saved.nextVersion, pendingUpdate: true, pendingDownload: false,
     packageAvailable: Boolean(saved.packagePath) } : {};
@@ -30,7 +36,18 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
       if (!selected.receipt || selected.offer?.next.releaseId !== saved.releaseId) throw failure(getState().reason || "download_not_ready");
       write({ ...saved, packagePath: selected.receipt.packagePath, dataProfile: selected.receipt.dataProfile });
       publish({ packageAvailable: true, phase: "preparing", pendingDownload: false });
-      await verifyComponents(selected.offer.next, selected.receipt);
+      if (selected.configuration.updaterProtocol === 2) {
+        if (typeof runtime.prepareComponents !== "function") throw failure("updater_protocol");
+        const plan = await runtime.prepareComponents(selected.offer.next, selected.receipt);
+        if (!alive(op)) return;
+        if (plan?.status !== "prepared" || !/^[a-f0-9]{32}$/.test(plan.transactionId || "")
+          || typeof plan.sourceHadRAG !== "boolean" || !/^[A-Za-z0-9._-]{1,128}$/.test(plan.dataProfile || "")
+          || (plan.sourceHadRAG ? plan.componentMode !== "sync-target" || !/^[a-f0-9]{64}$/.test(plan.targetRAG?.revision || "")
+            : plan.componentMode !== "absent" || plan.targetRAG !== undefined)) throw failure("component_state_unknown");
+        write({ ...saved, ...plan, version: 2, phase: "pending" });
+      } else {
+        await verifyComponents(selected.offer.next, selected.receipt);
+      }
       if (!alive(op)) return;
       const stage = await nativeInstaller.prepare({ configuration: selected.configuration, release: selected.offer.next, receipt: selected.receipt });
       if (!alive(op)) return;
@@ -71,7 +88,7 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
         if (finalPause.active !== 0) { await resume(op); continue; }
         // Persist the uncertain outcome before stopping any service. A crash at
         // this boundary must lead to repair, never a blind second installation.
-        write({ ...saved, phase: "installing", dataProfile: local.dataProfile });
+        await write({ ...saved, phase: "installing", dataProfile: local.dataProfile, ...(saved.version === 2 ? { epoch: op.epoch } : {}) });
         op.stopping = true;
         publish({ phase: "installing", secondsRemaining: undefined, pendingUpdate: false });
         await runtime.stop(op.epoch);
@@ -82,9 +99,10 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
         return;
       }
     } catch (error) {
+      if (error?.handoffStarted) op.handoff = true;
       if (alive(op)) {
         op.incompatible = !op.stopping && reasonFor(error) === "component_update_incompatible";
-        try { if (saved && op.stopping) write({ ...saved, phase: "repair" }); } catch { error = failure("update_record_write"); }
+        try { if (saved && op.stopping) await write({ ...saved, phase: "repair" }); } catch { error = failure("update_record_write"); }
         publish({ ...fields(), updating: false, pendingUpdate: !op.stopping, phase: op.stopping ? "repair" : "error", reason: reasonFor(error), secondsRemaining: undefined });
       }
     } finally {
@@ -96,7 +114,7 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
             // Do not lose the failed recovery when the operation is released.
             // Repeated Later/Install must not claim that admission reopened.
             repairRequired = true;
-            try { write({ ...saved, phase: "repair" }); } catch { loadFailed = true; }
+            try { await write({ ...saved, phase: "repair" }); } catch { loadFailed = true; }
             publish({ phase: "repair", reason: "update_resume_failed", updating: false, pendingUpdate: false, secondsRemaining: undefined });
           }
         }
@@ -125,7 +143,7 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
       const selected = context();
       if (!supported(selected.configuration) || selected.offer?.next.releaseId !== releaseId) throw failure("native_install_unavailable");
       if (saved && saved.releaseId !== releaseId) throw failure("offer_changed");
-      write({ version: 1, phase: "pending", sourceVersion: currentVersion, releaseId, nextVersion: selected.offer.next.version,
+      write({ version: selected.configuration.updaterProtocol === 2 ? 2 : 1, phase: "pending", sourceVersion: currentVersion, releaseId, nextVersion: selected.offer.next.version,
         ...(saved?.packagePath ? { packagePath: saved.packagePath } : {}) });
       const op = { cancelled: false }; operation = op;
       publish({ ...fields(), updating: true, pendingUpdate: false, reason: undefined });
@@ -136,7 +154,7 @@ function createUpdateInstallFlow({ currentVersion, store, nativeInstaller, runti
       if (operation?.stopping || saved?.phase === "installing" || saved?.phase === "repair" || loadFailed || repairRequired) throw failure("update_incomplete");
       cancelDownload();
       const op = operation;
-      if (op) { op.cancelled = true; if (op.timer) clock.clearTimeout(op.timer); op.wake?.(); await op.promise; if (op.resumeFailed) throw failure("update_resume_failed"); }
+      if (op) { op.cancelled = true; await runtime.cancelPreparation?.(); if (op.timer) clock.clearTimeout(op.timer); op.wake?.(); await op.promise; if (op.resumeFailed) throw failure("update_resume_failed"); }
       await nativeInstaller?.discardPreparation?.();
       // A complete cache stays intact. The separate download reminder retains
       // explicit continuation after restart when no installation is pending.

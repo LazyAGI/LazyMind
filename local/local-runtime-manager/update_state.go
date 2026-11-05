@@ -22,9 +22,13 @@ import (
 // UpdateStorageSnapshot records the paths selected by the runtime that actually
 // started, rather than reconstructing them later from potentially changed env.
 type UpdateStorageSnapshot struct {
-	Version      int               `json:"version"`
-	Databases    map[string]string `json:"databases"`
-	SegmentStore string            `json:"segmentStore"`
+	Version        int               `json:"version"`
+	Databases      map[string]string `json:"databases"`
+	SegmentStore   string            `json:"segmentStore"`
+	VectorEngine   string            `json:"vectorEngine,omitempty"`
+	VectorPath     string            `json:"vectorPath,omitempty"`
+	LayoutSource   string            `json:"layoutSource,omitempty"`
+	OptionalAbsent []string          `json:"optionalAbsent,omitempty"`
 }
 
 func captureUpdateStorage(paths RuntimePaths, authURL string) *UpdateStorageSnapshot {
@@ -40,7 +44,18 @@ func captureUpdateStorage(paths RuntimePaths, authURL string) *UpdateStorageSnap
 			files[family] = override
 		}
 	}
-	return &UpdateStorageSnapshot{Version: 1, Databases: files, SegmentStore: localSegmentStoreType()}
+	snapshot := &UpdateStorageSnapshot{Version: 1, Databases: files, SegmentStore: localSegmentStoreType()}
+	if raw, err := os.ReadFile(filepath.Join(paths.ResourcesRoot, "config", "update-format-v2.json")); err == nil {
+		var supplied, compiled localFormatRecipe
+		if json.Unmarshal(raw, &supplied) == nil && json.Unmarshal(updateFormatRecipe, &compiled) == nil {
+			a, _ := json.Marshal(supplied)
+			b, _ := json.Marshal(compiled)
+			if bytes.Equal(a, b) {
+				snapshot.Version = 2
+			}
+		}
+	}
+	return snapshot
 }
 
 func cloneUpdateStorage(source *UpdateStorageSnapshot) *UpdateStorageSnapshot {
@@ -152,7 +167,7 @@ func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths Run
 		return empty, updateStateFailure("data_unknown")
 	}
 	storage := persisted.Config.UpdateStorage
-	if storage == nil || storage.Version != 1 || len(storage.Databases) != 9 {
+	if storage == nil || (storage.Version != 1 && storage.Version != 2) || len(storage.Databases) != 9 {
 		return empty, updateStateFailure("data_unknown")
 	}
 	if !strings.EqualFold(storage.SegmentStore, "SQLiteStore") || persisted.Config.Algorithm.EnableEvo || persisted.Config.ModeProfile.VectorStore.Engine != "milvus-lite" {
@@ -165,35 +180,9 @@ func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths Run
 	shapes := map[string]updateDatabaseShape{}
 	seen := map[string]bool{}
 	for _, family := range []string{"core", "auth", "lazyllm", "segments", "channel", "scan", "core-state", "auth-state", "scan-state"} {
-		file := storage.Databases[family]
-		if !filepath.IsAbs(file) {
-			return empty, updateStateFailure("data_unknown")
-		}
-		canonical, err := filepath.EvalSymlinks(file)
-		optional := family == "core-state" || family == "auth-state" || ((family == "scan" || family == "scan-state") && persisted.Config.Algorithm.RAGDisabled)
-		if os.IsNotExist(err) && optional {
-			shapes[family] = updateDatabaseShape{}
-			continue
-		}
+		shape, dirty, err := inspectBoundUpdateDatabase(ctx, storage.Databases[family], family, persisted.Config.Algorithm.RAGDisabled, seen)
 		if err != nil {
-			return empty, updateStateFailure("data_unknown")
-		}
-		canonical = filepath.Clean(canonical)
-		// Multiple owners sharing one SQLite path are not a supported layout.
-		key := canonical
-		if runtime.GOOS == "windows" {
-			key = strings.ToLower(key)
-		}
-		if seen[key] {
-			return empty, updateStateFailure("unsupported_storage")
-		}
-		seen[key] = true
-		shape, dirty, err := inspectUpdateSQLite(ctx, canonical, family == "core")
-		if ctx.Err() != nil {
-			return empty, ctx.Err()
-		}
-		if err != nil {
-			return empty, updateStateFailure("data_unknown")
+			return empty, err
 		}
 		if dirty {
 			return desktopupdate.LocalState{Dirty: true, Components: map[string]string{}}, nil
@@ -203,6 +192,21 @@ func measureDesktopUpdateState(ctx context.Context, cfg RuntimeConfig, paths Run
 	components, err := measuredUpdateComponents(paths, persisted.Config.Algorithm.RAGDisabled)
 	if err != nil {
 		return empty, err
+	}
+	if storage.Version == 2 {
+		profile, err := stableUpdateFormat(shapes)
+		if err != nil {
+			return empty, err
+		}
+		metadata, err := measuredComponentMetadata(paths, components)
+		if err != nil {
+			return empty, err
+		}
+		after, err := readUpdateStateBytes(paths.StateFile)
+		if err != nil || !bytes.Equal(raw, after) {
+			return empty, updateStateFailure("data_unknown")
+		}
+		return desktopupdate.LocalState{DataProfile: profile, Components: components, ComponentMetadata: metadata}, ctx.Err()
 	}
 	// This versioned encoding is a fingerprint, not a compatibility assertion.
 	// Only signed policy edges explicitly accepting it may authorize an upgrade.
@@ -370,4 +374,35 @@ func measuredComponentsFromCatalog(paths RuntimePaths, ragDisabled bool, catalog
 		result[id] = entry.Revision
 	}
 	return result, nil
+}
+
+func inspectBoundUpdateDatabase(ctx context.Context, file, family string, ragDisabled bool, seen map[string]bool) (updateDatabaseShape, bool, error) {
+	if !filepath.IsAbs(file) {
+		return updateDatabaseShape{}, false, updateStateFailure("data_unknown")
+	}
+	canonical, err := filepath.EvalSymlinks(file)
+	optional := family == "core-state" || family == "auth-state" || ((family == "scan" || family == "scan-state") && ragDisabled)
+	if os.IsNotExist(err) && optional {
+		return updateDatabaseShape{}, false, nil
+	}
+	if err != nil {
+		return updateDatabaseShape{}, false, updateStateFailure("data_unknown")
+	}
+	canonical = filepath.Clean(canonical)
+	key := canonical
+	if runtime.GOOS == "windows" {
+		key = strings.ToLower(key)
+	}
+	if seen[key] {
+		return updateDatabaseShape{}, false, updateStateFailure("unsupported_storage")
+	}
+	seen[key] = true
+	shape, dirty, err := inspectUpdateSQLite(ctx, canonical, family == "core")
+	if ctx.Err() != nil {
+		return updateDatabaseShape{}, false, ctx.Err()
+	}
+	if err != nil {
+		return updateDatabaseShape{}, false, updateStateFailure("data_unknown")
+	}
+	return shape, dirty, nil
 }

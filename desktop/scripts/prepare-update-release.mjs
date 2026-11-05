@@ -24,7 +24,7 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
   if (status.status !== "enabled" || status.config?.mode !== "official") throw new Error("Update configuration must be enabled in the built helper");
   const config = status.config;
   const native = JSON.parse(fs.readFileSync(path.join(resources, "app-update.yml"), "utf8"));
-  const expected = { protocol: 1, releaseId: config.releaseId, version: config.version, mode: config.mode,
+  const expected = { protocol: config.updaterProtocol, releaseId: config.releaseId, version: config.version, mode: config.mode,
     platform: config.platform, arch: config.arch, signingIdentity: config.signingIdentity };
   if (!isDeepStrictEqual(native.lazymind, expected)) throw new Error("Native metadata does not match the built helper");
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(config.releaseId)) throw new Error("Invalid release identity");
@@ -63,13 +63,34 @@ export async function prepareRelease({ resources, packagePath, baseURL, minimumS
     path: `package${extension}`, sha512: packageHash.sha512 };
   fs.writeFileSync(path.join(directory, "feed.json"), JSON.stringify(feed) + "\n", { flag: "wx" });
   const release = { releaseId: config.releaseId, version: config.version, platform: config.platform, arch: config.arch,
-    minimumSystemVersion, minUpdaterProtocol: 1, updaterProtocol: config.updaterProtocol, signingIdentity: config.signingIdentity };
+    minimumSystemVersion, minUpdaterProtocol: config.updaterProtocol, updaterProtocol: config.updaterProtocol, signingIdentity: config.signingIdentity };
   const prefix = new URL(`releases/${config.releaseId}/`, base.href.endsWith("/") ? base.href : base.href + "/");
   for (const [kind, filename] of [["package", `package${extension}`], ["feed", "feed.json"], ["components", "components.json"]]) {
     const { size, sha256 } = await fingerprint(path.join(directory, filename));
     release[kind] = { url: new URL(filename, prefix).href, size, sha256 };
   }
+  if (config.updaterProtocol === 2) {
+    const application = config.platform === "darwin" ? path.resolve(resources, "..", "..") : path.dirname(resources);
+    const allocated = directory => fs.readdirSync(directory, { withFileTypes: true }).reduce((total, entry) => {
+      const filename = path.join(directory, entry.name), info = fs.lstatSync(filename);
+      return total + (entry.isDirectory() ? allocated(filename) : Math.max(info.size, (info.blocks || 0) * 512));
+    }, 0);
+    release.package.unpackedBytes = allocated(application);
+  }
   const record = { config, release, manifestSHA256: manifestHash };
+  if (config.updaterProtocol === 2) {
+    const recipe = JSON.parse(fs.readFileSync(path.join(runtime, "config", "update-format-v2.json"), "utf8"));
+    const normalized = { version: recipe.version,
+      families: Object.fromEntries(Object.entries(recipe.families).sort(([a], [b]) => a.localeCompare(b))),
+      segments: recipe.segments.map(entry => ({ type: entry.type, name: entry.name, table: entry.table, sql: entry.sql })),
+      lazyllmVariants: recipe.lazyllmVariants ?? null };
+    record.formatProfile = "format-v2-" + createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
+    // Build metadata stays in the pinned catalog, outside the strict protocol descriptor.
+    record.componentDescriptor = { ...catalog.components.rag };
+    delete record.componentDescriptor.schemaVersion;
+    delete record.componentDescriptor.signingMode;
+    if (!record.componentDescriptor || !/^[a-f0-9]{64}$/.test(record.componentDescriptor.revision || "")) throw new Error("Final target component descriptor is required");
+  }
   fs.writeFileSync(path.join(directory, "release.json"), JSON.stringify(record, null, 2) + "\n", { flag: "wx" });
   return record;
 }

@@ -26,6 +26,8 @@ type Gate struct {
 	stopping, drained chan struct{}
 	highest, resumed  uint64
 	pause             *Ticket
+	bootstrap         *Ticket
+	bootstrapKey      string
 }
 
 type Ticket struct {
@@ -42,7 +44,7 @@ func New() *Gate {
 func (g *Gate) Enter() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.stopped || g.pause != nil {
+	if g.stopped || g.pause != nil || g.bootstrap != nil {
 		return false
 	}
 	g.active++
@@ -54,7 +56,7 @@ func (g *Gate) Enter() bool {
 func (g *Gate) Continue() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.active == 0 && (g.stopped || g.pause != nil) {
+	if g.active == 0 && (g.stopped || g.pause != nil || g.bootstrap != nil) {
 		panic("maintenance continuation without admitted work")
 	}
 	g.active++
@@ -68,6 +70,9 @@ func (g *Gate) Leave() {
 	}
 	g.active--
 	if g.active == 0 {
+		if g.bootstrap != nil {
+			g.bootstrap.signal()
+		}
 		if g.pause != nil {
 			g.pause.signal()
 		}
@@ -178,11 +183,51 @@ func (t *Ticket) Validate() error {
 	if g.stopped {
 		return ErrStopped
 	}
-	if g.pause != t {
+	if g.pause != t && g.bootstrap != t {
 		return ErrStale
 	}
 	if g.active != 0 {
 		return ErrActive
 	}
+	return nil
+}
+
+// Seal is independent of ordinary preparation epochs and has no lease expiry.
+func (g *Gate) Seal(key string) (*Ticket, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stopped {
+		return nil, ErrStopped
+	}
+	if key == "" {
+		return nil, ErrInvalidEpoch
+	}
+	if g.bootstrap != nil {
+		if g.bootstrapKey == key {
+			return g.bootstrap, nil
+		}
+		return nil, ErrConflict
+	}
+	g.bootstrapKey = key
+	g.bootstrap = &Ticket{gate: g, changed: make(chan struct{})}
+	if g.active == 0 {
+		g.bootstrap.signal()
+	}
+	return g.bootstrap, nil
+}
+func (g *Gate) Unseal(key string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if key == "" || key != g.bootstrapKey {
+		return ErrStale
+	}
+	if g.bootstrap == nil {
+		return nil
+	}
+	if g.active != 0 {
+		return ErrActive
+	}
+	g.bootstrap.signal()
+	g.bootstrap = nil
 	return nil
 }

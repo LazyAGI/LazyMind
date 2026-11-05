@@ -147,6 +147,8 @@ func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) str
 
 func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {
 	values := []string{
+		"LAZYMIND_COMPONENT_MAINTENANCE_MANAGER=" + filepath.Join(paths.BuildRoot, "bin", executableName("local-runtime-manager")),
+		"LAZYMIND_RUNTIME_RESOURCES_ROOT=" + paths.ResourcesRoot,
 		"LAZYMIND_PYTHON_COMPONENT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "python-components.json"),
 		"LAZYMIND_ALGORITHM_PYTHON=" + paths.AlgorithmPython,
 		"LAZYMIND_ALGORITHM_SOURCE=" + filepath.Join(paths.RepoRoot, "algorithm"),

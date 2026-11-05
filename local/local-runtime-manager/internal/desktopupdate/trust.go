@@ -61,6 +61,11 @@ func acceptPolicy(ctx context.Context, root string, c Config, sequence uint64, d
 			return failure("trust_corrupt", nil)
 		}
 		policy, payload, err := decodeSigned(previous.Envelope, c)
+		if err != nil && c.UpdaterProtocol == 2 {
+			legacy := c
+			legacy.UpdaterProtocol = 1
+			policy, payload, err = decodeSigned(previous.Envelope, legacy)
+		}
 		hash := sha256.Sum256(payload)
 		if err != nil || previous.Sequence != policy.Sequence || previous.Digest != hex.EncodeToString(hash[:]) {
 			return failure("trust_corrupt", err)
@@ -147,4 +152,16 @@ func atomicWrite(destination string, data []byte) error {
 		return err
 	}
 	return replaceFile(name, destination)
+}
+
+func ReadAcceptedEnvelope(c Config, root string) ([]byte, error) {
+	partition := sha256.Sum256([]byte(c.TrustDomain + "\x00" + c.Audience + "\x00" + c.Channel))
+	var stored ledger
+	if err := readMetadata(filepath.Join(root, "trust", "v1", hex.EncodeToString(partition[:]), "ledger.json"), &stored); err != nil {
+		return nil, failure("trust_missing", err)
+	}
+	if stored.Version != 1 {
+		return nil, failure("trust_corrupt", nil)
+	}
+	return stored.Envelope, nil
 }

@@ -50,6 +50,10 @@ func NewScanner(db *gorm.DB, cfg Config, workerID string) *Scanner {
 }
 
 func (s *Scanner) RunOnce(ctx context.Context) (ScannerRunResult, error) {
+	if !updateWork.Enter() {
+		return ScannerRunResult{}, nil
+	}
+	defer updateWork.Leave()
 	var result ScannerRunResult
 	if s == nil || s.db == nil {
 		return result, errors.New("resource update scanner db is nil")

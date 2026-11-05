@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -32,19 +33,22 @@ type ProcessComposeState struct {
 }
 
 type RuntimeConfigSnapshot struct {
-	UpdateStorage      *UpdateStorageSnapshot    `json:"updateStorage,omitempty"`
-	MaintenanceMode    string                    `json:"maintenanceMode,omitempty"`
-	FrontendPort       int                       `json:"frontendPort,omitempty"`
-	ModeProfile        RuntimeModeProfileConfig  `json:"modeProfile,omitempty"`
-	NetworkProfile     string                    `json:"networkProfile,omitempty"`
-	LocalProxy         LocalProxyConfig          `json:"localProxy,omitempty"`
-	AuthService        AuthServiceConfig         `json:"authService,omitempty"`
-	ChannelGateway     ChannelGatewayConfig      `json:"channelGateway,omitempty"`
-	Algorithm          AlgorithmConfig           `json:"algorithm,omitempty"`
-	FileWatcher        FileWatcherConfigSnapshot `json:"fileWatcher,omitempty"`
-	ProcessComposePort int                       `json:"processComposePort,omitempty"`
-	SQLiteServerPort   int                       `json:"sqliteServerPort,omitempty"`
-	PortResolutions    []PortResolution          `json:"portResolutions,omitempty"`
+	UpdateBootstrap          *RuntimeUpdateBootstrap   `json:"updateBootstrap,omitempty"`
+	NativeCommittedTx        string                    `json:"nativeCommittedTx,omitempty"`
+	NativeCommittedReleaseID string                    `json:"nativeCommittedReleaseId,omitempty"`
+	UpdateStorage            *UpdateStorageSnapshot    `json:"updateStorage,omitempty"`
+	MaintenanceMode          string                    `json:"maintenanceMode,omitempty"`
+	FrontendPort             int                       `json:"frontendPort,omitempty"`
+	ModeProfile              RuntimeModeProfileConfig  `json:"modeProfile,omitempty"`
+	NetworkProfile           string                    `json:"networkProfile,omitempty"`
+	LocalProxy               LocalProxyConfig          `json:"localProxy,omitempty"`
+	AuthService              AuthServiceConfig         `json:"authService,omitempty"`
+	ChannelGateway           ChannelGatewayConfig      `json:"channelGateway,omitempty"`
+	Algorithm                AlgorithmConfig           `json:"algorithm,omitempty"`
+	FileWatcher              FileWatcherConfigSnapshot `json:"fileWatcher,omitempty"`
+	ProcessComposePort       int                       `json:"processComposePort,omitempty"`
+	SQLiteServerPort         int                       `json:"sqliteServerPort,omitempty"`
+	PortResolutions          []PortResolution          `json:"portResolutions,omitempty"`
 }
 
 type FileWatcherConfigSnapshot struct {
@@ -100,11 +104,42 @@ func readRuntimeState(path string) (RuntimeState, error) {
 }
 
 func writeRuntimeState(path string, state RuntimeState) error {
-	b, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o644)
+	return withFileLock(path+".lock", func() error {
+		// A supervisor holding an earlier snapshot must not erase the durable
+		// native commit receipt or restore a bootstrap whose peers already ACKed.
+		if previous, err := readRuntimeState(path); err == nil && previous.OwnerToken == state.OwnerToken && previous.RuntimeRoot == state.RuntimeRoot && previous.ResourcesRoot == state.ResourcesRoot && previous.Config.NativeCommittedTx != "" {
+			if state.Config.NativeCommittedTx == "" {
+				state.Config.NativeCommittedTx = previous.Config.NativeCommittedTx
+				state.Config.NativeCommittedReleaseID = previous.Config.NativeCommittedReleaseID
+			}
+			if state.Config.NativeCommittedTx == previous.Config.NativeCommittedTx && state.Config.NativeCommittedReleaseID == "" {
+				state.Config.NativeCommittedReleaseID = previous.Config.NativeCommittedReleaseID
+			}
+			if state.Config.UpdateBootstrap != nil && state.Config.UpdateBootstrap.TransactionID == previous.Config.NativeCommittedTx && previous.Config.UpdateBootstrap == nil {
+				state.Config.UpdateBootstrap = nil
+			}
+		}
+		b, err := json.MarshalIndent(state, "", "  ")
+		if err != nil {
+			return err
+		}
+		file, err := os.CreateTemp(filepath.Dir(path), ".runtime-state-*")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(file.Name())
+		defer file.Close()
+		if _, err := file.Write(b); err != nil {
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		return replaceRuntimeState(file.Name(), path)
+	})
 }
 
 func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) RuntimeState {
@@ -133,6 +168,7 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 	return RuntimeConfigSnapshot{
 		UpdateStorage:   cloneUpdateStorage(cfg.UpdateStorage),
+		UpdateBootstrap: cfg.UpdateBootstrap,
 		MaintenanceMode: cfg.MaintenanceMode,
 		FrontendPort:    cfg.FrontendPort,
 		ModeProfile:     cfg.ModeProfile,
@@ -156,6 +192,9 @@ func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 
 func applyStateConfig(cfg RuntimeConfig, state RuntimeState) RuntimeConfig {
 	cfg.UpdateStorage = cloneUpdateStorage(state.Config.UpdateStorage)
+	if cfg.UpdateBootstrap == nil {
+		cfg.UpdateBootstrap = state.Config.UpdateBootstrap
+	}
 	if state.Config.MaintenanceMode != "" {
 		cfg.MaintenanceMode = state.Config.MaintenanceMode
 	}

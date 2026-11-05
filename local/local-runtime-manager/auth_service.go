@@ -281,7 +281,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{
+	environment := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_DATABASE_URL=" + cfg.AuthService.DatabaseURL,
 		"LAZYMIND_REDIS_URL=",
@@ -299,7 +299,8 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) ([]string, error) {
 		"LAZYMIND_CHAT_UNLIKE_SWITCH=" + envText("LAZYMIND_CHAT_UNLIKE_SWITCH", "true"),
 		authServicePermissionsEnvVar + "=" + authServicePermissionsPath(paths),
 		authServiceOpenAPIExportEnvVar + "=0",
-	}, nil
+	}
+	return append(environment, bootstrapStateEnvironment(cfg, "auth-state")...), nil
 }
 
 func waitForAuthDatabase(ctx context.Context, databaseURL string) error {

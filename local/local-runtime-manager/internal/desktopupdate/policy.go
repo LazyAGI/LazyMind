@@ -59,7 +59,7 @@ func decodeStrict(raw []byte, result any) error {
 }
 
 func ValidateConfig(c Config) error {
-	if !identifier.MatchString(c.TrustDomain) || !identifier.MatchString(c.Audience) || !identifier.MatchString(c.ReleaseID) || c.SigningIdentity == "" || c.UpdaterProtocol != Protocol {
+	if !identifier.MatchString(c.TrustDomain) || !identifier.MatchString(c.Audience) || !identifier.MatchString(c.ReleaseID) || c.SigningIdentity == "" || (c.UpdaterProtocol != 1 && c.UpdaterProtocol != 2) {
 		return failure("configuration_invalid", nil)
 	}
 	if _, err := releaseversion.Compare(c.Version, c.Version); err != nil {
@@ -149,8 +149,22 @@ func decodeSigned(raw []byte, c Config) (Policy, []byte, error) {
 	if err := decodeStrict(payload, &policy); err != nil {
 		return policy, nil, failure("policy_invalid", err)
 	}
-	if policy.SchemaVersion != 1 {
+	if policy.SchemaVersion != c.UpdaterProtocol {
 		return policy, nil, failure("policy_schema", nil)
+	}
+	if policy.SchemaVersion == 1 {
+		var legacy map[string]json.RawMessage
+		_ = json.Unmarshal(payload, &legacy)
+		if _, ok := legacy["repairAcceptances"]; ok {
+			return policy, nil, failure("policy_invalid", nil)
+		}
+		var edges []map[string]json.RawMessage
+		_ = json.Unmarshal(legacy["edges"], &edges)
+		for _, e := range edges {
+			if _, ok := e["componentTransitions"]; ok {
+				return policy, nil, failure("policy_invalid", nil)
+			}
+		}
 	}
 	if policy.TrustDomain != c.TrustDomain || policy.Audience != c.Audience || policy.Channel != c.Channel {
 		return policy, nil, failure("policy_identity", nil)
@@ -214,6 +228,15 @@ func validatePolicy(p *Policy, c Config, now time.Time) error {
 		if edge.MigrationProfile == "same-v1" && (len(edge.SourceDataProfiles) != 1 || edge.SourceDataProfiles[0] != edge.TargetDataProfile) {
 			return failure("migration_contract_invalid", nil)
 		}
+		if p.SchemaVersion == 2 {
+			if edge.MigrationProfile != "format-v2" || len(edge.SourceDataProfiles) != 1 || edge.SourceDataProfiles[0] != edge.TargetDataProfile || len(edge.RequiredComponents) != 0 || edge.Recovery.Version != 0 {
+				return failure("migration_contract_invalid", nil)
+			}
+			if err := validateComponentTransitions(edge.ComponentTransitions, target.Components.SHA256); err != nil {
+				return err
+			}
+			continue
+		}
 		r := edge.Recovery
 		if r.Version != 1 || r.Direction != "target-to-source" || r.HelperProtocolMin < 1 || r.HelperProtocolMax < r.HelperProtocolMin || r.SourcePackageSHA256 != source.Package.SHA256 || !digestPattern.MatchString(r.SourceManifestSHA256) {
 			return failure("recovery_contract_invalid", nil)
@@ -227,6 +250,22 @@ func validatePolicy(p *Policy, c Config, now time.Time) error {
 			if component == "" || identity == "" {
 				return failure("policy_invalid", nil)
 			}
+		}
+	}
+	if len(p.RepairAcceptances) > 512 {
+		return failure("policy_invalid", nil)
+	}
+	for _, r := range p.RepairAcceptances {
+		source, failed, target := releases[r.SourceID], releases[r.FailedTargetID], releases[r.RepairID]
+		if p.SchemaVersion != 2 || source == nil || failed == nil || target == nil || r.SourceDataProfile == "" || r.SourceDataProfile != r.TargetDataProfile || r.TargetComponentsSHA256 != target.Components.SHA256 {
+			return failure("repair_contract_invalid", nil)
+		}
+		order, _ := releaseversion.Compare(target.Version, failed.Version)
+		if order <= 0 {
+			return failure("repair_contract_invalid", nil)
+		}
+		if err := validateComponentTransitions(r.ComponentTransitions, target.Components.SHA256); err != nil {
+			return err
 		}
 	}
 	return nil

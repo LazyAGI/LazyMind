@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -616,6 +617,9 @@ func loadDesktopCredentialManifest(cloudIssuer string) (*credentialvault.Manifes
 }
 
 func main() {
+	if runComponentMaintenanceEntry() {
+		return
+	}
 	log.Init()
 
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
@@ -633,6 +637,15 @@ func main() {
 		}
 		log.Logger.Info().Msg("OpenAPI artifacts exported")
 		return
+	}
+	if b, err := loadCoreBootstrap(); err != nil {
+		log.Logger.Error().Msg("update_bootstrap_invalid")
+		os.Exit(1)
+	} else if b != nil {
+		if err := verifyOwnBootstrapStorage(context.Background(), b); err != nil {
+			log.Logger.Error().Msg("update_bootstrap_invalid")
+			os.Exit(1)
+		}
 	}
 	if err := loadInternalServiceTokenEnvironment(); err != nil {
 		log.Logger.Fatal().Msg("invalid Core internal service token file")
@@ -785,6 +798,19 @@ func (e *startupError) Unwrap() error { return e.err }
 // ordered shutdown completes. It returns an error only when initialization or
 // the HTTP listener fails; a signal-triggered shutdown is a nil return.
 func run(ctx context.Context) error {
+	bootstrap, err := loadCoreBootstrap()
+	if err != nil {
+		return err
+	}
+	var deferredWrites []func() error
+	initializeWriteStage := func(fn func() error) error {
+		if bootstrap != nil {
+			deferredWrites = append(deferredWrites, fn)
+			return nil
+		}
+		return fn()
+	}
+
 	modelconfig.SetConversationResolver(chat.LoadConversationLLMConfig)
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
@@ -803,32 +829,52 @@ func run(ctx context.Context) error {
 	}
 	modelprovider.SetCredentialKeyManager(credentialKeys)
 	userenv.SetCredentialKeyManager(credentialKeys)
-	if err := migrate.RunUp(); err != nil {
-		return &startupError{msg: "run SQL migrations", err: err}
-	}
-	if err := episode.Initialize(db.DB); err != nil {
-		return &startupError{msg: "initialize Episode Memory search", err: err}
-	}
-	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
-		return &startupError{msg: "migrate model provider credentials", err: err}
+	if err := initializeWriteStage(func() error {
+		if err := migrate.RunUp(); err != nil {
+			return &startupError{msg: "run SQL migrations", err: err}
+		}
+		if err := episode.Initialize(db.DB); err != nil {
+			return &startupError{msg: "initialize Episode Memory search", err: err}
+		}
+		if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
+			return &startupError{msg: "migrate model provider credentials", err: err}
+		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 	modelprovider.MustLoadContextWindows(filepath.Join(".", "config", "model_context_windows.yaml"))
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	upstreamCatalogPath := filepath.Join(".", "config", "upstream_model_catalog.json")
 	if modelprovider.HardcodedModelCatalogEnabled() {
 		// Legacy path. The YAML model lists and SeedModelCatalog stay in the tree.
-		modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+		if err := initializeWriteStage(func() error { modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath); return nil }); err != nil {
+			return err
+		}
 	} else {
-		modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, upstreamCatalogPath)
+		if err := initializeWriteStage(func() error {
+			modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, upstreamCatalogPath)
+			return nil
+		}); err != nil {
+			return err
+		}
 		if err := modelprovider.LoadUpstreamModelRecognitionCatalog(upstreamCatalogPath); err != nil {
 			return &startupError{msg: "load upstream model recognition catalog", err: err}
 		}
 	}
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
-	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
+	if err := initializeWriteStage(func() error { modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath); return nil }); err != nil {
+		return err
+	}
 
 	knowledgeMarketCatalogPath := filepath.Join(".", "config", "knowledge_market_catalog.yaml")
-	knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
+	if err := initializeWriteStage(func() error {
+		knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))
@@ -879,15 +925,21 @@ func run(ctx context.Context) error {
 	localworkspace.SetStopConversationFunc(func(ctx context.Context, userID, conversationID string) error {
 		return chat.StopConversationExecution(ctx, db.DB, store.State(), userID, conversationID, "", "workspace authorization revoked")
 	})
-	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
-		return &startupError{msg: "seed built-in workflows", err: err}
+	if err := initializeWriteStage(func() error {
+		if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
+			return &startupError{msg: "seed built-in workflows", err: err}
+		}
+		if err := runHistoryInjections(ctx, store.DB()); err != nil {
+			return &startupError{msg: "inject bundled history", err: err}
+		}
+		if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
+			return &startupError{msg: "initialize conversation result read baseline", err: err}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if err := runHistoryInjections(ctx, store.DB()); err != nil {
-		return &startupError{msg: "inject bundled history", err: err}
-	}
-	if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
-		return &startupError{msg: "initialize conversation result read baseline", err: err}
-	}
+
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
@@ -931,60 +983,114 @@ func run(ctx context.Context) error {
 			return desktopUpdateTaskCount(ctx, store.DB(), store.LazyLLMDB(), systemdeps.PythonComponentActive("rag"))
 		},
 	}
-	if !startBackgroundJobs {
-		log.Logger.Info().Msg("core background jobs are disabled")
-	} else {
-		// History samples have already been downloaded and imported above.
-		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
-		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
-		if !systemdeps.PythonComponentActive("rag") {
-			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
-				doc.MarketUpdateAllJobType, "document_pdf_translation")
+	if bootstrap != nil {
+		if err := updateControl.BeginUpdateBootstrap(bootstrap.TransactionID, bootstrap.Owner); err != nil {
+			return err
 		}
-		runner = updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{
-			Concurrency:     asyncConfig.Concurrency,
-			ExcludeJobTypes: excludedJobs,
-			PollInterval:    asyncConfig.PollInterval,
-			LockTTL:         asyncConfig.LockTTL,
+	}
+	var jobsOnce sync.Once
+	var jobsError error
+	jobsStarted := make(chan struct{})
+	startJobs := func() error {
+		jobsOnce.Do(func() {
+			defer close(jobsStarted)
+			for _, initialize := range deferredWrites {
+				if err := initialize(); err != nil {
+					jobsError = err
+					return
+				}
+			}
+			if !startBackgroundJobs {
+				log.Logger.Info().Msg("core background jobs are disabled")
+			} else {
+				// History samples have already been downloaded and imported above.
+				backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
+				asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
+				excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
+				if !systemdeps.PythonComponentActive("rag") {
+					excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
+						doc.MarketUpdateAllJobType, "document_pdf_translation")
+				}
+				runner = updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{
+					Concurrency:     asyncConfig.Concurrency,
+					ExcludeJobTypes: excludedJobs,
+					PollInterval:    asyncConfig.PollInterval,
+					LockTTL:         asyncConfig.LockTTL,
+				})
+				backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+				paperChatRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				backgroundDone = append(backgroundDone, paperChatRunner.Done())
+				academic.RecoverPaperExpansions(runtimeCtx, store.DB())
+				backgroundDone = append(backgroundDone, workflow.StartDocumentImageExportCleanup(runtimeCtx))
+				directoryRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
+
+				backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
+				backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
+				backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
+				backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB(), func(r *asyncjob.Runner) {
+					updateControl.participants = append(updateControl.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
+				})...)
+				if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+					backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
+				}
+
+				importConfig := evalset.LoadImportRuntimeConfigFromEnv()
+				backgroundDone = append(backgroundDone,
+					evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
+
+				backgroundDone = append(backgroundDone, updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())...)
+				resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
+				resourceupdate.LogStartup(resourceUpdateEnabled)
+				if resourceUpdateEnabled {
+					resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
+
+				}
+				backgroundDone = append(backgroundDone, recovery.Start(runtimeCtx, store.DB(), recovery.DefaultCleanupInterval))
+
+				// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
+				if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
+					log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
+				} else if n > 0 {
+					log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
+				}
+			}
+
+			// Start the schedule ticker.
+			if startBackgroundJobs {
+				backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
+				backgroundDone = append(backgroundDone, taskcenter.RunNotificationDelivery(runtimeCtx, store.DB()))
+			}
+			initializeCloudSession(context.Background())
+			if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {
+				log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential backup is unavailable")
+			}
+			if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
+				log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
+			}
+
 		})
-		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
-		paperChatRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
-		backgroundDone = append(backgroundDone, paperChatRunner.Done())
-		academic.RecoverPaperExpansions(runtimeCtx, store.DB())
-		backgroundDone = append(backgroundDone, workflow.StartDocumentImageExportCleanup(runtimeCtx))
-		directoryRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
-		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
-		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
-		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
-		backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
-		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
-		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB(), func(r *asyncjob.Runner) {
-			updateControl.participants = append(updateControl.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
-		})...)
-		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
-			backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
+		return jobsError
+	}
+	groupDone := make(chan struct{})
+	go func() {
+		defer close(groupDone)
+		select {
+		case <-jobsStarted:
+		case <-runtimeCtx.Done():
+			return
 		}
-
-		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
-		backgroundDone = append(backgroundDone,
-			evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
-
-		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
-		resourceupdate.LogStartup(resourceUpdateEnabled)
-		if resourceUpdateEnabled {
-			resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
-			backgroundDone = append(backgroundDone,
-				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
+		<-runtimeCtx.Done()
+		for _, done := range backgroundDone {
+			<-done
 		}
-		backgroundDone = append(backgroundDone, recovery.Start(runtimeCtx, store.DB(), recovery.DefaultCleanupInterval))
-
-		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
-		if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
-			log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
-		} else if n > 0 {
-			log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
+	}()
+	if bootstrap == nil {
+		if err := startJobs(); err != nil {
+			return err
 		}
+	} else {
+		updateControl.onBootstrapRelease = startJobs
 	}
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
@@ -994,19 +1100,6 @@ func run(ctx context.Context) error {
 	subagent.EventHooks.RegisterConversationEventHook(chat.PublishConversationEvent)
 
 	log.Logger.Info().Msg("plugin subagent hooks registered")
-
-	// Start the schedule ticker.
-	if startBackgroundJobs {
-		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
-		backgroundDone = append(backgroundDone, taskcenter.RunNotificationDelivery(runtimeCtx, store.DB()))
-	}
-	initializeCloudSession(context.Background())
-	if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {
-		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential backup is unavailable")
-	}
-	if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
-		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
-	}
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -1086,5 +1179,5 @@ func run(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Logger.Info().Dur("timeout", shutdownTimeout()).Msg("core graceful shutdown armed")
-	return coordinateShutdown(ctx, server, listener, backgroundDone, shutdownTimeout(), cancelRuntime, nil)
+	return coordinateShutdown(ctx, server, listener, []<-chan struct{}{groupDone}, shutdownTimeout(), cancelRuntime, nil)
 }

@@ -27,7 +27,7 @@ func newUpdateHostPollFixture(t *testing.T) (*gorm.DB, *mux.Router) {
 	}
 	sql, _ := db.DB()
 	t.Cleanup(func() { _ = sql.Close() })
-	for _, model := range []any{&orm.TaskCenterTask{}, &orm.AsyncJob{}, &orm.SubAgentTask{}, &orm.ExternalChatRun{}, &orm.ExternalChatHost{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.Task{}} {
+	for _, model := range []any{&orm.ResourceUpdateTask{}, &orm.TaskCenterTask{}, &orm.AsyncJob{}, &orm.SubAgentTask{}, &orm.ExternalChatRun{}, &orm.ExternalChatHost{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.Task{}} {
 		if err := db.AutoMigrate(model); err != nil {
 			t.Fatal(err)
 		}

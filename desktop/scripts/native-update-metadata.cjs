@@ -14,7 +14,7 @@ async function nativeUpdateMetadata(options) {
     provider: "generic", url: "https://updates.invalid/disabled/",
     updaterCacheDirName: `LazyMind-${config.trustDomain}-${config.audience}-${config.channel}`,
     ...(config.platform === "windows" && config.mode === "official" ? { publisherName: [config.signingIdentity] } : {}),
-    lazymind: { protocol: 1, releaseId: config.releaseId, version: config.version, mode: config.mode,
+    lazymind: { protocol: config.updaterProtocol, releaseId: config.releaseId, version: config.version, mode: config.mode,
       platform: config.platform, arch: config.arch, signingIdentity: config.signingIdentity },
   };
 }
@@ -42,6 +42,12 @@ async function writeNativeUpdateMetadata(context, options = {}) {
   fs.mkdirSync(resources, { recursive: true });
   // JSON is valid YAML; the runtime can verify these exact fields without a
   // second YAML parser. The updater never checks this disabled remote URL.
+  if (metadata.lazymind.protocol === 2) {
+    const recipe = path.join(__dirname, "..", "..", "local", "local-runtime-manager", "update-format-v2.json");
+    const configDirectory = path.join(resources, "runtime", "config");
+    fs.mkdirSync(configDirectory, { recursive: true });
+    fs.copyFileSync(recipe, path.join(configDirectory, "update-format-v2.json"));
+  }
   fs.writeFileSync(destination, `${JSON.stringify(metadata, null, 2)}\n`);
   return destination;
 }

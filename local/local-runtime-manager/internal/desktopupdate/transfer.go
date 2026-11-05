@@ -278,3 +278,14 @@ func acquireDownloadLock(ctx context.Context, dir string) (func(), error) {
 		}
 	}
 }
+
+func VerifyArtifact(ctx context.Context, filename string, artifact Artifact) error {
+	ok, err := verifyCachedArtifact(ctx, filename, artifact)
+	if err != nil {
+		return failure("artifact_hash", err)
+	}
+	if !ok {
+		return failure("artifact_hash", nil)
+	}
+	return nil
+}

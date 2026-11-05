@@ -73,11 +73,18 @@ func TestCoreStartsResourceUpdateRuntime(t *testing.T) {
 		"resourceupdate.EnabledFromEnv()",
 		"resourceupdate.LogStartup(resourceUpdateEnabled)",
 		"resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)",
-		"resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig())",
+		"updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())",
 	} {
 		if !strings.Contains(content, token) {
 			t.Fatalf("core main must wire resource update runtime: missing %q", token)
 		}
+	}
+	owner, err := os.ReadFile(filepath.Join("..", "desktop_update.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(owner), "resourceupdate.Start(ctx, db, store, cfg)") {
+		t.Fatal("registered resource owner must start the actual runtime")
 	}
 	// The runtime must be driven by a context derived from the app context
 	// (not context.Background) so it stops on SIGINT/SIGTERM or a fatal serve

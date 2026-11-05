@@ -11,3 +11,8 @@ func PauseDeferredIndexingForUpdate(epoch uint64) (*maintenancegate.Ticket, erro
 func ResumeDeferredIndexingFromUpdate(epoch uint64) error {
 	return deferredIndexingWork.Resume(epoch)
 }
+
+func SealDeferredIndexingForBootstrap(key string) (*maintenancegate.Ticket, error) {
+	return deferredIndexingWork.Seal(key)
+}
+func UnsealDeferredIndexingBootstrap(key string) error { return deferredIndexingWork.Unseal(key) }

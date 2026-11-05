@@ -70,6 +70,7 @@ type EnqueueRequest struct {
 }
 
 type Options struct {
+	BootstrapKey       string
 	SerializeResources bool
 	JobTypes           []string
 	ExcludeJobTypes    []string

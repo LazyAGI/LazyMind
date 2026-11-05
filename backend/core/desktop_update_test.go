@@ -192,7 +192,7 @@ func TestDesktopUpdateCountsDurableWorkIncludingArchivedAndRemoteDocuments(t *te
 	}
 	sql, _ := db.DB()
 	defer sql.Close()
-	for _, model := range []any{&orm.TaskCenterTask{}, &orm.AsyncJob{}, &orm.SubAgentTask{}, &orm.ExternalChatRun{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}} {
+	for _, model := range []any{&orm.ResourceUpdateTask{}, &orm.TaskCenterTask{}, &orm.AsyncJob{}, &orm.SubAgentTask{}, &orm.ExternalChatRun{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}} {
 		if err := db.AutoMigrate(model); err != nil {
 			t.Fatal(err)
 		}

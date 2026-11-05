@@ -137,7 +137,7 @@ func decide(p Policy, c Config, state LocalState) Decision {
 			if _, exists := visited[e.TargetID]; exists {
 				continue
 			}
-			if e.MigrationProfile != "same-v1" {
+			if e.MigrationProfile != "same-v1" && !(p.SchemaVersion == 2 && e.MigrationProfile == "format-v2") {
 				unknownMigration = true
 				continue
 			}
@@ -145,13 +145,19 @@ func decide(p Policy, c Config, state LocalState) Decision {
 				continue
 			}
 			next := releases[e.TargetID]
-			if next.MinUpdaterProtocol > node.protocol || e.Recovery.HelperProtocolMin > node.protocol || e.Recovery.HelperProtocolMax < node.protocol {
+			if next.MinUpdaterProtocol > node.protocol || (p.SchemaVersion == 1 && (e.Recovery.HelperProtocolMin > node.protocol || e.Recovery.HelperProtocolMax < node.protocol)) {
 				protocolBlocked = true
 				continue
 			}
 			// Future hops are predictions, not installation authorizations. Their
 			// actual component/data state is measured again after the next restart.
 			if len(node.route) == 0 {
+				if p.SchemaVersion == 2 {
+					if reason := matchSourceComponents(e.ComponentTransitions, state, c); reason != "" {
+						componentBlocked = true
+						continue
+					}
+				}
 				match := true
 				for name, identity := range e.RequiredComponents {
 					if state.Components[name] != identity {
@@ -183,6 +189,9 @@ func decide(p Policy, c Config, state LocalState) Decision {
 		}
 	}
 	if componentBlocked {
+		if p.SchemaVersion == 2 {
+			return result("blocked", "component_update_incompatible")
+		}
 		return result("blocked", "component_mismatch")
 	}
 	if unknownMigration {

@@ -33,6 +33,7 @@ export function prepareUpdateBuildConfig({ configuration, packageVersion, platfo
       || (configuration.channel === "stable" && prerelease)
       || (configuration.channel === "beta" && prerelease && !/^(beta|rc)(\.|$)/.test(prerelease))) throw new Error("Package version does not match its update channel");
   } else throw new Error("Invalid update mode");
+  if (![1, 2].includes(configuration.updaterProtocol)) throw new Error("Unsupported updater protocol");
   if (!configuration.publicKeys || Array.isArray(configuration.publicKeys) || typeof configuration.publicKeys !== "object" || !Object.keys(configuration.publicKeys).length) throw new Error("Update public keys are required");
   for (const value of Object.values(configuration.publicKeys)) {
     if (typeof value !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(value) || Buffer.from(value, "base64").length !== 32) throw new Error("Only raw Ed25519 public keys may be embedded");

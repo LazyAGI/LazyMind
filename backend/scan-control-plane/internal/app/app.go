@@ -102,21 +102,31 @@ func New(cfg config.Config) *App {
 }
 
 func NewWithConfig(cfg config.Config, options ...BuildOption) (*App, error) {
+	bootstrap, err := loadUpdateBootstrap(cfg.UpdateBootstrapTx, cfg.UpdateBootstrapOwner, cfg.UpdateBootstrapStorage)
+	if err != nil {
+		return nil, err
+	}
+	var gate *desktopUpdateGate
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+		gate = &desktopUpdateGate{token: cfg.AuthServiceInternalToken}
+		if bootstrap != nil {
+			if err := gate.BeginUpdateBootstrap(bootstrap.TransactionID, bootstrap.Owner); err != nil {
+				return nil, err
+			}
+		}
+	} else if bootstrap != nil {
+		return nil, fmt.Errorf("update_bootstrap_invalid")
+	}
 	built, err := Build(cfg, options...)
 	if err != nil {
 		return nil, err
 	}
 	handler := newHandlerWithComponents(built)
-	runtime := NewRuntime(built, cfg)
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
-		gate := &desktopUpdateGate{token: built.InternalToken, count: built.Repository.CountDesktopUpdateWork}
-		runtime.updateGate = gate
+	if gate != nil {
+		gate.count = built.Repository.CountDesktopUpdateWork
 		handler = gate.wrap(handler)
 	}
-	return &App{
-		server:  server.NewHTTPServer(cfg.ListenAddr(), handler),
-		runtime: runtime,
-	}, nil
+	return &App{server: server.NewHTTPServer(cfg.ListenAddr(), handler), runtime: NewRuntime(built, cfg, gate)}, nil
 }
 
 func WithDBOpener(opener DBOpener) BuildOption {
@@ -128,6 +138,19 @@ func WithDBOpener(opener DBOpener) BuildOption {
 }
 
 func Build(cfg config.Config, options ...BuildOption) (Components, error) {
+	bootstrap, err := loadUpdateBootstrap(cfg.UpdateBootstrapTx, cfg.UpdateBootstrapOwner, cfg.UpdateBootstrapStorage)
+	if err != nil {
+		return Components{}, err
+	}
+	if bootstrap != nil {
+		if !sameBootstrapPath(cfg.DBDSN, bootstrap.Databases["scan"]) || !sameBootstrapPath(os.Getenv("LAZYMIND_STATE_SQLITE_PATH"), bootstrap.Databases["scan-state"]) {
+			return Components{}, fmt.Errorf("update_bootstrap_invalid")
+		}
+		if err := verifyOwnBootstrapStorage(context.Background(), bootstrap); err != nil {
+			return Components{}, err
+		}
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return Components{}, err
 	}
@@ -153,9 +176,11 @@ func buildSQLComponents(cfg config.Config, opener DBOpener) (Components, error) 
 	}
 	repo := store.NewSQLRepositoryWithDriver(driver, db)
 	if driver == "sqlite" {
-		if err := repo.AutoMigrate(); err != nil {
-			_ = db.Close()
-			return Components{}, fmt.Errorf("migrate sqlite repository: %w", err)
+		if cfg.UpdateBootstrapTx == "" {
+			if err := repo.AutoMigrate(); err != nil {
+				_ = db.Close()
+				return Components{}, fmt.Errorf("migrate sqlite repository: %w", err)
+			}
 		}
 	} else {
 		bootstrapResult, err := dbbootstrap.Bootstrap(context.Background(), db, dbbootstrap.Options{
@@ -817,8 +842,13 @@ const (
 	agentCommandMaintenanceBatch    = 5000
 )
 
-func NewRuntime(built Components, cfg config.Config) *Runtime {
+func NewRuntime(built Components, cfg config.Config, gates ...*desktopUpdateGate) *Runtime {
+	var gate *desktopUpdateGate
+	if len(gates) > 0 {
+		gate = gates[0]
+	}
 	return &Runtime{
+		updateGate:           gate,
 		workerID:             defaultWorkerID(),
 		scheduler:            built.Scheduler,
 		watcherRecovery:      built.Repository,
@@ -946,4 +976,13 @@ func defaultWorkerID() string {
 		return "scan-control-plane"
 	}
 	return "scan-control-plane-" + hostname
+}
+
+func sameBootstrapPath(a, b string) bool {
+	if !filepath.IsAbs(a) || !filepath.IsAbs(b) {
+		return false
+	}
+	aa, ea := filepath.EvalSymlinks(a)
+	bb, eb := filepath.EvalSymlinks(b)
+	return ea == nil && eb == nil && filepath.Clean(aa) == filepath.Clean(bb)
 }

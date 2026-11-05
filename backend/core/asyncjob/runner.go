@@ -31,11 +31,12 @@ const (
 )
 
 type Runner struct {
-	db             *gorm.DB
-	opts           Options
-	done           chan struct{}
-	recoveryTicker func(time.Duration) (<-chan time.Time, func())
-	admission      *maintenancegate.Gate
+	db              *gorm.DB
+	opts            Options
+	done            chan struct{}
+	recoveryTicker  func(time.Duration) (<-chan time.Time, func())
+	admission       *maintenancegate.Gate
+	bootstrapTicket *maintenancegate.Ticket
 }
 
 func Start(ctx context.Context, db *gorm.DB, opts Options) *Runner {
@@ -101,7 +102,7 @@ func recoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time, jobTypes,
 
 func newRunner(db *gorm.DB, opts Options) *Runner {
 	opts = normalizeOptions(opts)
-	return &Runner{
+	runner := &Runner{
 		db:        db,
 		opts:      opts,
 		done:      make(chan struct{}),
@@ -111,6 +112,14 @@ func newRunner(db *gorm.DB, opts Options) *Runner {
 			return ticker.C, ticker.Stop
 		},
 	}
+	if opts.BootstrapKey != "" {
+		var err error
+		runner.bootstrapTicket, err = runner.admission.Seal(opts.BootstrapKey)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return runner
 }
 
 func normalizeOptions(opts Options) Options {

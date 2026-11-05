@@ -56,7 +56,7 @@ func SignPublication(p Policy, c Config, keyID string, key ed25519.PrivateKey, n
 	}
 	for _, edge := range p.Edges {
 		source, target := releases[edge.SourceID], releases[edge.TargetID]
-		if edge.MigrationProfile != "same-v1" || source.Platform != target.Platform || source.Arch != target.Arch || source.SigningIdentity != target.SigningIdentity {
+		if (p.SchemaVersion == 1 && edge.MigrationProfile != "same-v1" || p.SchemaVersion == 2 && edge.MigrationProfile != "format-v2") || source.Platform != target.Platform || source.Arch != target.Arch || source.SigningIdentity != target.SigningIdentity {
 			return nil, failure("publication_compatibility", nil)
 		}
 	}

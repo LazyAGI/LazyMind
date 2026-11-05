@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -14,12 +15,13 @@ import (
 // All scan admissions share this lock with the background loop. A failed or
 // disconnected desktop controller loses its pause after the short lease.
 type desktopUpdateGate struct {
-	mu                      sync.Mutex
-	epoch, highest, renewal uint64
-	active                  int64
-	timer                   *time.Timer
-	token                   string
-	count                   func(context.Context) (int64, error)
+	mu                                                       sync.Mutex
+	bootstrapTx, bootstrapOwner, completedTx, completedOwner string
+	epoch, highest, renewal                                  uint64
+	active                                                   int64
+	timer                                                    *time.Timer
+	token                                                    string
+	count                                                    func(context.Context) (int64, error)
 }
 
 func (g *desktopUpdateGate) enter() bool {
@@ -28,7 +30,7 @@ func (g *desktopUpdateGate) enter() bool {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.epoch != 0 {
+	if g.epoch != 0 || g.bootstrapTx != "" {
 		return false
 	}
 	g.active++
@@ -68,14 +70,23 @@ func (g *desktopUpdateGate) control(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Action string `json:"action"`
-		Epoch  uint64 `json:"epoch"`
+		Action        string `json:"action"`
+		TransactionID string `json:"transactionId,omitempty"`
+		Owner         string `json:"owner,omitempty"`
+		Epoch         uint64 `json:"epoch"`
 	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 	d.DisallowUnknownFields()
-	if d.Decode(&req) != nil || d.Decode(new(any)) != io.EOF || (req.Action != "status" && req.Action != "pause" && req.Action != "resume") || (req.Action != "status" && req.Epoch == 0) {
+	if d.Decode(&req) != nil || d.Decode(new(any)) != io.EOF || (req.Action != "status" && req.Action != "pause" && req.Action != "resume" && req.Action != "bootstrap-complete") || (req.Action != "status" && req.Action != "bootstrap-complete" && req.Epoch == 0) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+	if req.Action == "bootstrap-complete" {
+		if g.CompleteUpdateBootstrap(req.TransactionID, req.Owner) != nil {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		req.Action = "status"
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -118,5 +129,38 @@ func (g *desktopUpdateGate) control(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"active": n + g.active, "paused": g.epoch != 0, "epoch": g.epoch})
+	wire := map[string]any{"active": n + g.active, "paused": g.epoch != 0, "epoch": g.epoch}
+	if g.bootstrapTx != "" {
+		wire["bootstrap"] = map[string]any{"transactionId": g.bootstrapTx, "owner": g.bootstrapOwner, "sealed": true}
+	}
+	_ = json.NewEncoder(w).Encode(wire)
+}
+
+func (g *desktopUpdateGate) BeginUpdateBootstrap(tx, owner string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(tx) != 32 || owner == "" {
+		return errors.New("update_bootstrap_invalid")
+	}
+	if g.bootstrapTx != "" && (g.bootstrapTx != tx || g.bootstrapOwner != owner) {
+		return errors.New("update_bootstrap_conflict")
+	}
+	g.bootstrapTx, g.bootstrapOwner = tx, owner
+	return nil
+}
+func (g *desktopUpdateGate) CompleteUpdateBootstrap(tx, owner string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.bootstrapTx == "" {
+		if tx != "" && tx == g.completedTx && owner == g.completedOwner {
+			return nil
+		}
+		return errors.New("update_bootstrap_stale")
+	}
+	if tx != g.bootstrapTx || owner != g.bootstrapOwner || g.active != 0 {
+		return errors.New("update_bootstrap_stale")
+	}
+	g.completedTx, g.completedOwner = tx, owner
+	g.bootstrapTx, g.bootstrapOwner = "", ""
+	return nil
 }

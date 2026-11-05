@@ -146,7 +146,7 @@ test("native handoff waits for explicit spawn or native acceptance, including de
     else f.updater.emit("error", new Error("fixture native failure"));
     const outcome = await attempt;
     assert.equal(Boolean(outcome.error), !succeeds);
-    if (!succeeds) { assert.equal(f.quitting, false); assert.ok(!f.calls.includes("quit")); }
+    if (!succeeds) { assert.equal(f.quitting, platform === "darwin"); assert.ok(!f.calls.includes("quit")); }
     if (platform === "win32" && succeeds) assert.equal(f.calls.filter(value => value === "quit").length, 1);
   }
 });
@@ -180,10 +180,10 @@ test("Windows spawn failures neither elevate nor quit and are not automatically 
   }
 });
 
-test("Mac native failure restores the quit guard and keeps the downloaded package", async t => {
+test("Mac native dispatch failure retains the quit guard and downloaded package", async t => {
   const f = fixture(t, { platform: "darwin", macError: true });
   const prepared = await f.installer.prepare({ configuration: f.configuration, release: f.release, receipt: f.receipt });
-  await assert.rejects(prepared.install()); assert.equal(f.quitting, false);
+  await assert.rejects(prepared.install()); assert.equal(f.quitting, true);
   assert.ok(existsSync(f.packagePath));
 });
 

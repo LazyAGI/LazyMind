@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 	"io"
 	"log"
 	"os"
@@ -47,12 +48,20 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
+	case "install-component":
+		return c.installComponentCommand(ctx, args[1:])
+	case "update-bootstrap":
+		return c.updateBootstrapCommand(ctx, manager, args[1:])
 	case "update-components-check":
 		return c.updateComponentsCommand(ctx, args[1:])
 	case "update-control":
 		return c.desktopUpdateCommand(ctx, manager, args[1:])
 	case "startup-guard":
 		opts, err := parseCommonArgs("startup-guard", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		opts, err = nativeRuntimeOptions(ctx, opts)
 		if err != nil {
 			return err
 		}
@@ -95,6 +104,15 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if cfg.Profile != "local" {
 			return fmt.Errorf("source RAG installation requires local profile")
 		}
+		root, err := resolveRuntimeRecoveryRoot()
+		if err != nil {
+			return err
+		}
+		writer, err := desktopupdate.BeginIndependentComponentWrite(ctx, root, paths.RuntimeRoot)
+		if err != nil {
+			return err
+		}
+		defer desktopupdate.ReleaseNativeLock(writer)
 		release, err := acquireAlgorithmPythonLock(ctx, paths)
 		if err != nil {
 			return err
@@ -116,8 +134,15 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		opts, err = nativeRuntimeOptions(ctx, opts)
+		if err != nil {
+			return err
+		}
 		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
+			return err
+		}
+		if err := bindNativeStartup(ctx, &cfg, &paths, opts.UpdateBootstrapTx, opts.UpdateBootstrapOwner); err != nil {
 			return err
 		}
 		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Up(ctx, cfg, paths) })
@@ -221,6 +246,12 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 			return err
 		}
 		if sub == "algorithm-run" {
+			if err := inheritCommittedRuntimeStorage(&cfg, &paths); err != nil {
+				return err
+			}
+			if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+				return err
+			}
 			return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.algorithm.Run(ctx, cfg, paths, service) })
 		}
 		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.algorithm.Down(ctx, paths, service) })
@@ -232,6 +263,14 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 	if err != nil {
 		return err
+	}
+	if strings.HasSuffix(sub, "-run") {
+		if err := inheritCommittedRuntimeStorage(&cfg, &paths); err != nil {
+			return err
+		}
+		if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+			return err
+		}
 	}
 
 	lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
@@ -389,8 +428,11 @@ func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 	runtimeRoot := fs.String("runtime-root", "", "")
 	buildRoot := fs.String("build-root", "", "")
 	resourcesRoot := fs.String("resources-root", "", "")
+	bootstrapTx := fs.String("update-bootstrap", "", "")
+	bootstrapOwner := fs.String("bootstrap-owner", "", "")
 	return func() RuntimeConfigOptions {
 		return RuntimeConfigOptions{
+			UpdateBootstrapTx: *bootstrapTx, UpdateBootstrapOwner: *bootstrapOwner,
 			Profile:         *profile,
 			MaintenanceMode: *maintenanceMode,
 			OwnerToken:      *ownerToken,

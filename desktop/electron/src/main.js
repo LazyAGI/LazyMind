@@ -28,11 +28,11 @@ const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const { createDesktopUpdater, registerUpdateIPC, sendUpdateState } = require("./update-controller");
 const { createUpdateHelperClient } = require("./update-helper-client");
 const { createDownloadIntentStore } = require("./update-download-intent");
-const { createInstallIntentStore } = require("./update-install-intent");
+const { createInstallIntentStore, createCLIInstallIntentStore } = require("./update-install-intent");
 const { createNativeUpdateInstaller } = require("./native-update-installer");
 const { createUpdateRuntimeClient } = require("./update-runtime-client");
 const { readRuntimeUpdateState } = require("./runtime-update-state");
-const { guardDesktopStartup } = require("./update-startup");
+const { guardDesktopStartup, prepareDesktopStartup, adoptDesktopRepair } = require("./update-startup");
 const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
@@ -106,6 +106,9 @@ const windowsDesktopPaths = isWindows
   : null;
 
 const isPackaged = app.isPackaged;
+const currentVersion = app.getVersion();
+let currentReleaseId;
+let runtimePrestarted = false;
 const desktopDevURL = !isPackaged
   ? normalizeLoopbackURL(process.env.LAZYMIND_DESKTOP_DEV_URL, "LAZYMIND_DESKTOP_DEV_URL")
   : "";
@@ -134,7 +137,7 @@ const cloudBaseURL = cloudConfiguration.baseURL;
 const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
-const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
+let explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
 try {
@@ -727,7 +730,7 @@ function broadcastStartupDiagnostics(extra = {}) {
 
 function runSidecar(command, extra = [], options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(sidecarPath, sidecarArgs(command, extra), {
+    const child = execFile(sidecarPath, sidecarArgs(command, extra), {
       env: options.env || sidecarEnv(),
       timeout: options.timeout,
       windowsHide: isWindows,
@@ -739,6 +742,7 @@ function runSidecar(command, extra = [], options = {}) {
       }
       resolve(stdout);
     });
+    options.onSpawn?.(child);
   });
 }
 
@@ -779,6 +783,10 @@ function runAgentConnector(agent, action, refreshInstallations = false) {
 }
 
 function startAgentLogin(agent) {
+  assertDesktopUpdateAdmission();
+  desktopUpdateWork++;
+  let released = false;
+  const release = () => { if (!released) { released = true; desktopUpdateWork--; } };
   clearAgentLogin(agent);
   const login = { status: { state: "running" }, child: null, timer: null };
   agentLogins.set(agent, login);
@@ -806,6 +814,7 @@ function startAgentLogin(agent) {
     child.stderr?.on("data", (chunk) => { stderr = (stderr + chunk).slice(-8192); });
     child.once("error", (error) => finish("failed", error.message));
     child.once("close", (code, signal) => {
+      release();
       if (signal) {
         finish("cancelled", "Login was cancelled.");
         return;
@@ -829,6 +838,7 @@ function startAgentLogin(agent) {
       }
     });
   } catch (error) {
+    release();
     finish("failed", error.message);
   }
   return runAgentConnector(agent, "status");
@@ -1239,6 +1249,7 @@ function startWindowsGuard() {
 }
 
 function detachRuntimeMonitor() {
+ runtimePrestarted = false;
   const proc = runtimeProcess;
   if (!proc) {
     return;
@@ -1460,6 +1471,7 @@ function logStartupContext() {
 }
 
 function startRuntime() {
+  if (runtimePrestarted) return;
   if (isExternalRuntimeDev) {
     return;
   }
@@ -2593,7 +2605,13 @@ const updateRuntime = createUpdateRuntimeClient({
 const desktopUpdater = createDesktopUpdater({
   currentVersion: app.getVersion(),
   downloadIntent: createDownloadIntentStore(path.join(app.getPath("userData"), "update-download-intent.json")),
-  installIntent: createInstallIntentStore(path.join(app.getPath("userData"), "update-install-intent.json")),
+  installIntent: isPackaged ? createCLIInstallIntentStore(path.join(app.getPath("userData"), "update-install-intent.json"), {
+    invokeSync: (action, tx) => require("node:child_process").execFileSync(sidecarPath,
+      sidecarArgs("update-bootstrap", ["--action", action, ...(tx ? ["--transaction-id", tx] : [])]),
+      { env: sidecarEnv(), encoding: "utf8", timeout: 180_000, maxBuffer: 1024 * 1024, windowsHide: isWindows }),
+    invoke: (action, tx, epoch) => runSidecar("update-bootstrap",
+      ["--action", action, "--transaction-id", tx, ...(epoch ? ["--epoch", String(epoch)] : [])], { timeout: 180_000 }),
+  }) : createInstallIntentStore(path.join(app.getPath("userData"), "update-install-intent.json")),
   nativeInstaller: nativeUpdateInstaller, runtime: updateRuntime,
   invokeHelper: invokeUpdateHelper,
   readLocalState: () => readRuntimeUpdateState(runSidecar, process.getSystemVersion()),
@@ -3305,6 +3323,23 @@ if (!hasSingleInstanceLock) {
     void showActiveWindow();
   });
   app.whenReady().then(async () => {
+    const startupParameters = { isPackaged, currentVersion, currentReleaseId, ownerToken,
+      invoke: runSidecar, onRuntimeStarted: () => startGuard() };
+    try {
+      let startup = await prepareDesktopStartup(startupParameters);
+      if (!startup.allowed) {
+        const choice = await dialog.showMessageBox({ type: "warning", title: "LazyMind update needs repair",
+          message: "Update verification has not finished. Install a supported repair version, then verify this version.",
+          buttons: ["Verify this version", "Exit"], defaultId: 1, cancelId: 1 });
+        if (choice.response !== 0) { app.exit(1); return; }
+        startup = await adoptDesktopRepair(startupParameters);
+      }
+      if (startup.runtimeRoot && path.isAbsolute(startup.runtimeRoot)) explicitRuntimeRoot = startup.runtimeRoot;
+      runtimePrestarted = startup.runtimeStarted;
+    } catch (error) {
+      dialog.showErrorBox("LazyMind update needs repair", "The installed version could not be verified. Reopen the app or install a supported repair version.");
+      app.exit(1); return;
+    }
     installScreenCapture({ session: session.defaultSession, desktopCapturer, Menu, getWindow: () => mainWindow,
       log: (stage, details = {}) => appendStartupLog("screen-capture", `${stage} ${JSON.stringify(details)}`),
       onSelected: (source) => {

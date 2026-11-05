@@ -1,7 +1,18 @@
 const path = require("node:path");
 const failure = code => Object.assign(new Error(code), { code });
 function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAuxiliary, verifyStartup }) {
-  let epoch;
+  let epoch, transactionId, preparation;
+  async function bootstrap(action, extra = [], timeout = 180_000) {
+    let value;
+    try {
+      const raw = await runSidecar("update-bootstrap", ["--action", action,
+        ...(transactionId ? ["--transaction-id", transactionId] : []), ...extra], { timeout, onSpawn: action === "prepare-components" ? child => { preparation = child; } : undefined });
+      if (typeof raw !== "string" || Buffer.byteLength(raw) > 1024 * 1024) throw new Error();
+      value = JSON.parse(raw);
+    } catch { throw failure("component_maintenance_failed"); }
+    if (value?.status === "blocked") throw failure(/^[a-z_]{1,64}$/.test(value.reason || "") ? value.reason : "component_maintenance_failed");
+    return value;
+  }
   async function invoke(action, requestedEpoch) {
     let value;
     try {
@@ -15,7 +26,21 @@ function createUpdateRuntimeClient({ runSidecar, localWork, setAdmission, stopAu
     } catch { throw failure(action === "stop" ? "runtime_stop_failed" : "task_state_unknown"); }
   }
   return {
+    async prepareComponents(release, receipt) {
+      const value = await bootstrap("prepare-components", ["--release-id", release.releaseId,
+        "--package", receipt.packagePath, "--components", receipt.componentsPath, "--control-stdin"], 40 * 60_000);
+      if (!/^[a-f0-9]{32}$/.test(value?.transactionId || "")) throw failure("component_state_unknown");
+      preparation = undefined;
+      transactionId = value.transactionId;
+      return value;
+    },
+    async cancelPreparation() { preparation?.stdin?.end("cancel\n"); },
     async verifyComponents(release, receipt) {
+      if (transactionId) {
+        const result = await bootstrap("verify-components");
+        if (result?.status !== "compatible" || !/^[A-Za-z0-9._-]{1,128}$/.test(result.dataProfile || "")) throw failure("component_state_unknown");
+        return result;
+      }
       const artifact = release?.components, filename = receipt?.componentsPath;
       if (typeof filename !== "string" || !path.isAbsolute(filename) || filename.includes("\0")
         || !/^[a-f0-9]{64}$/.test(artifact?.sha256 || "") || !Number.isSafeInteger(artifact?.size)

@@ -41,3 +41,42 @@ function createInstallIntentStore(filename) {
   };
 }
 module.exports = { createInstallIntentStore };
+
+// v2 has one backend-owned intent. The frontend holds only a transient view;
+// the existing v1 file remains readable for already-published old consumers.
+function createCLIInstallIntentStore(filename, { invokeSync, invoke }) {
+  const legacy = createInstallIntentStore(filename);
+  let view;
+  const readBackend = () => {
+    const raw = invokeSync("inspect-store");
+    if (typeof raw !== "string" || Buffer.byteLength(raw) > 1024 * 1024) throw new Error("update_record_read");
+    const value = JSON.parse(raw);
+    if (value.status === "blocked") throw new Error("update_record_read");
+    return value.transactionId ? value : null;
+  };
+  return {
+    read() { view = readBackend(); return view || legacy.read(); },
+    write(record) {
+      if (record.version !== 2 && !record.transactionId) return legacy.write(record);
+      if (!record.transactionId) { view = record; return; }
+      const tx = record.transactionId;
+      if (record.phase === "installing" || record.phase === "repair") {
+        return invoke(record.phase, tx, record.epoch).then(raw => {
+          const result = typeof raw === "string" ? JSON.parse(raw) : raw;
+          if (result?.status !== record.phase) throw new Error("update_record_write");
+          view = record;
+        });
+      }
+      view = record;
+    },
+    clear() {
+      const active = readBackend();
+      if (active?.transactionId) {
+        const result = JSON.parse(invokeSync("cancel", active.transactionId));
+        if (result.status !== "cancelled") throw new Error("update_record_write");
+      } else legacy.clear();
+      view = undefined;
+    },
+  };
+}
+module.exports.createCLIInstallIntentStore = createCLIInstallIntentStore;

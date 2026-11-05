@@ -66,9 +66,9 @@ for (const platform of ["win32", "darwin"]) {
     t.mock.timers.tick(1); await f.attempt;
     const error = f.outcome().error;
     assert.equal(error.code, "native_handoff_unknown"); assert.equal(error.handoffStarted, true);
-    assert.equal(f.quitting(), false); assert.ok(!f.calls.includes("quit"));
+    assert.equal(f.quitting(), platform === "darwin"); assert.ok(!f.calls.includes("quit"));
     f.accept(); f.fail(); await settle();
-    assert.equal(f.outcome().error, error); assert.equal(f.quitting(), false);
+    assert.equal(f.outcome().error, error); assert.equal(f.quitting(), platform === "darwin");
     assert.ok(!f.calls.includes("quit"), "late acceptance cannot quit the running app");
     await assert.rejects(f.stage.install(), e => e === error);
     await assert.rejects(f.installer.prepare(f.input), { code: "native_update_busy" });

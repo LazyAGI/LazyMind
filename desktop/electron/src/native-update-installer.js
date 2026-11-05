@@ -70,19 +70,33 @@ function createNativeUpdateInstaller({ platform = process.platform, arch = proce
     try {
       if (disposed || !isPackaged || !["win32", "darwin"].includes(platform) || configuration?.mode !== "official"
         || configuration.version !== currentVersion || configuration.platform !== nativePlatform || configuration.arch !== nativeArch
-        || configuration.updaterProtocol !== 1 || ![configuration.trustDomain, configuration.audience, configuration.channel, configuration.releaseId].every(id)
+        || ![1, 2].includes(configuration.updaterProtocol) || ![configuration.trustDomain, configuration.audience, configuration.channel, configuration.releaseId].every(id)
         || typeof configuration.signingIdentity !== "string" || !configuration.signingIdentity.trim()) throw new Error();
       const filename = path.join(resourcesPath, "app-update.yml");
       const stat = fs.lstatSync(filename);
       if (!stat.isFile() || stat.size > 64 * 1024) throw new Error();
       const meta = JSON.parse(fs.readFileSync(filename, "utf8"));
-      const expected = { protocol: 1, releaseId: configuration.releaseId, version: currentVersion, mode: "official",
+      const expected = { protocol: configuration.updaterProtocol, releaseId: configuration.releaseId, version: currentVersion, mode: "official",
         platform: nativePlatform, arch: nativeArch, signingIdentity: configuration.signingIdentity };
       if (!meta.lazymind || Object.entries(expected).some(([key, value]) => meta.lazymind[key] !== value)
         || meta.updaterCacheDirName !== `LazyMind-${configuration.trustDomain}-${configuration.audience}-${configuration.channel}`
         || (platform === "win32" && (!Array.isArray(meta.publisherName) || meta.publisherName.length !== 1 || meta.publisherName[0] !== configuration.signingIdentity))) throw new Error();
       return { supported: true };
     } catch { return { supported: false, reason: "native_install_unavailable" }; }
+  };
+
+  const spaceFor = async (configuration, release, packagePath) => {
+    if (configuration.updaterProtocol !== 2) return;
+    const expanded = release.package?.unpackedBytes, size = release.package?.size;
+    if (!Number.isSafeInteger(expanded) || expanded <= 0 || !Number.isSafeInteger(size) || size <= 0) throw failure("native_space_unknown");
+    const needed = expanded * 2 + size * 2 + 256 * 1024 * 1024;
+    if (!Number.isSafeInteger(needed)) throw failure("native_space_unknown");
+    for (const directory of [path.dirname(packagePath), path.dirname(resourcesPath)]) {
+      let stat;
+      try { stat = await fs.promises.statfs(directory, { bigint: true }); }
+      catch { throw failure("native_space_unknown"); }
+      if (stat.bavail * stat.bsize < BigInt(needed)) throw failure("native_space_insufficient");
+    }
   };
 
   const windowsInstall = filename => new Promise((resolve, reject) => {
@@ -107,25 +121,42 @@ function createNativeUpdateInstaller({ platform = process.platform, arch = proce
     } catch { finish(failure("native_install_failed")); }
   });
 
+  // electron-updater 6.6.2's quitAndInstall registers an anonymous native
+  // downloaded callback. Own that one callback so a cancelled attempt cannot
+  // install later; retain its handleUpdateDownloaded implementation unchanged.
   const macInstall = () => new Promise((resolve, reject) => {
     const native = nativeAutoUpdater || require("electron").autoUpdater;
-    let settled = false;
+    let settled = false, dispatched = false;
     const finish = error => {
       if (settled) return;
       settled = true; clearTimeout(timer); cancelHandoff = undefined;
+      native.removeListener("update-downloaded", downloaded);
       native.removeListener("before-quit-for-update", accepted);
       updater.removeListener("error", failed);
-      if (error) { setQuitting(false); reject(error); } else resolve({ handoff: true });
+      if (error) { if (!dispatched) setQuitting(false); reject(error); }
+      else resolve({ handoff: true });
     };
     const accepted = () => finish();
-    const failed = () => finish(failure("native_install_failed", true));
-    const timer = setTimeout(() => finish(failure("native_handoff_unknown", true)), handoffTimeoutMs);
-    cancelHandoff = () => finish(failure("native_handoff_unknown", true));
+    const failed = () => finish(failure(dispatched ? "native_handoff_unknown" : "native_install_failed", dispatched));
+    const downloaded = () => {
+      if (settled || disposed || dispatched) return;
+      dispatched = true; terminal = true;
+      native.removeListener("update-downloaded", downloaded);
+      try {
+        setQuitting(true);
+        if (typeof updater.handleUpdateDownloaded === "function") updater.handleUpdateDownloaded();
+        else updater.quitAndInstall(); // External adapter's synchronous handoff boundary.
+      } catch { failed(); }
+    };
+    const timer = setTimeout(failed, handoffTimeoutMs);
+    cancelHandoff = failed;
     native.once("before-quit-for-update", accepted);
     updater.once("error", failed);
-    terminal = true;
-    try { setQuitting(true); updater.quitAndInstall(); }
-    catch { failed(); }
+    if (typeof updater.handleUpdateDownloaded !== "function" || updater.squirrelDownloadedUpdate) downloaded();
+    else {
+      native.on("update-downloaded", downloaded);
+      try { native.checkForUpdates(); } catch { failed(); }
+    }
   });
 
   return {
@@ -142,6 +173,7 @@ function createNativeUpdateInstaller({ platform = process.platform, arch = proce
       let source, feed;
       try {
         source = await verifiedFile(receipt.packagePath, expected);
+        await spaceFor(configuration, release, receipt.packagePath);
         if (disposed) throw failure("native_install_unavailable");
         if (!updater) {
           updater = createUpdater ? createUpdater() : new (require("electron-updater")[platform === "win32" ? "NsisUpdater" : "MacUpdater"])();
@@ -175,6 +207,7 @@ function createNativeUpdateInstaller({ platform = process.platform, arch = proce
             if (disposed || currentStage !== stage || preparing || installing || terminal) throw failure("native_install_unavailable");
             installing = true;
             try {
+              await spaceFor(configuration, release, stage.filename);
               const final = await verifiedFile(stage.filename, expected);
               await final.file.close();
               if (disposed || currentStage !== stage) throw failure("native_install_unavailable");

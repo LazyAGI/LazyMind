@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -21,24 +22,30 @@ import (
 )
 
 type record struct {
-	Config         update.Config  `json:"config"`
-	Release        update.Release `json:"release"`
-	ManifestSHA256 string         `json:"manifestSHA256"`
+	FormatProfile       string                      `json:"formatProfile,omitempty"`
+	ComponentDescriptor *update.ComponentDescriptor `json:"componentDescriptor,omitempty"`
+	Config              update.Config               `json:"config"`
+	Release             update.Release              `json:"release"`
+	ManifestSHA256      string                      `json:"manifestSHA256"`
 }
 type edgePlan struct {
-	Source             string            `json:"sourceReleaseId"`
-	Target             string            `json:"targetReleaseId"`
-	Priority           int               `json:"priority"`
-	DataProfile        string            `json:"dataProfile"`
-	RequiredComponents map[string]string `json:"requiredComponents"`
+	ComponentTransitions map[string]update.ComponentTransition `json:"componentTransitions,omitempty"`
+	FormatEvidence       string                                `json:"formatEvidence,omitempty"`
+	Source               string                                `json:"sourceReleaseId"`
+	Target               string                                `json:"targetReleaseId"`
+	Priority             int                                   `json:"priority"`
+	DataProfile          string                                `json:"dataProfile"`
+	RequiredComponents   map[string]string                     `json:"requiredComponents"`
 }
 type plan struct {
-	Sequence   uint64     `json:"policySequence"`
-	IssuedAt   string     `json:"issuedAt"`
-	ExpiresAt  string     `json:"expiresAt"`
-	ReleaseIDs []string   `json:"releaseIds"`
-	Edges      []edgePlan `json:"edges"`
-	Revoked    []string   `json:"revoked"`
+	RepairFormatEvidence map[string]string         `json:"repairFormatEvidence,omitempty"`
+	RepairAcceptances    []update.RepairAcceptance `json:"repairAcceptances,omitempty"`
+	Sequence             uint64                    `json:"policySequence"`
+	IssuedAt             string                    `json:"issuedAt"`
+	ExpiresAt            string                    `json:"expiresAt"`
+	ReleaseIDs           []string                  `json:"releaseIds"`
+	Edges                []edgePlan                `json:"edges"`
+	Revoked              []string                  `json:"revoked"`
 }
 
 func readJSON(name string, value any) error {
@@ -95,11 +102,14 @@ func assemble(p plan, records map[string]record) (update.Policy, update.Config, 
 		}
 		if len(selected) == 0 {
 			config = r.Config
+			policy.SchemaVersion = config.UpdaterProtocol
+			policy.MinUpdaterProtocol = config.UpdaterProtocol
+			policy.RepairAcceptances = p.RepairAcceptances
 			policy.TrustDomain = config.TrustDomain
 			policy.Audience = config.Audience
 			policy.Channel = config.Channel
 		}
-		if r.Config.TrustDomain != config.TrustDomain || r.Config.Audience != config.Audience || r.Config.Channel != config.Channel || r.Config.PolicyURL != config.PolicyURL {
+		if r.Config.TrustDomain != config.TrustDomain || r.Config.Audience != config.Audience || r.Config.Channel != config.Channel || r.Config.PolicyURL != config.PolicyURL || r.Config.UpdaterProtocol != config.UpdaterProtocol {
 			return policy, config, errors.New("release trust configuration mismatch")
 		}
 		selected[id] = r
@@ -111,9 +121,33 @@ func assemble(p plan, records map[string]record) (update.Policy, update.Config, 
 		if !hasSource || !hasTarget || edge.DataProfile == "" {
 			return policy, config, errors.New("edge requires known releases and an explicit compatible data profile")
 		}
+		if config.UpdaterProtocol == 2 {
+			target := selected[edge.Target]
+			if source.FormatProfile == "" || edge.DataProfile != source.FormatProfile || edge.DataProfile != target.FormatProfile || target.ComponentDescriptor == nil || len(edge.RequiredComponents) != 0 {
+				return policy, config, errors.New("explicit same-format records are required")
+			}
+			if err := verifyFormatEvidence(edge.FormatEvidence, edge.Source, edge.Target, edge.DataProfile, target.Release.Components.SHA256, edge.ComponentTransitions["rag"].SourceClasses); err != nil {
+				return policy, config, err
+			}
+			policy.Edges = append(policy.Edges, update.Edge{SourceID: edge.Source, TargetID: edge.Target, Priority: edge.Priority, MigrationProfile: "format-v2", SourceDataProfiles: []string{edge.DataProfile}, TargetDataProfile: edge.DataProfile, ComponentTransitions: edge.ComponentTransitions})
+			continue
+		}
 		policy.Edges = append(policy.Edges, update.Edge{SourceID: edge.Source, TargetID: edge.Target, Priority: edge.Priority, MigrationProfile: "same-v1",
 			SourceDataProfiles: []string{edge.DataProfile}, TargetDataProfile: edge.DataProfile, RequiredComponents: edge.RequiredComponents,
 			Recovery: update.RecoveryContract{Version: 1, SourcePackageSHA256: source.Release.Package.SHA256, SourceManifestSHA256: source.ManifestSHA256, HelperProtocolMin: 1, HelperProtocolMax: 1, Direction: "target-to-source"}})
+	}
+	if config.UpdaterProtocol == 2 {
+		for _, acceptance := range p.RepairAcceptances {
+			source, ok := selected[acceptance.SourceID]
+			target, ok2 := selected[acceptance.RepairID]
+			if !ok || !ok2 || source.FormatProfile != acceptance.SourceDataProfile || target.FormatProfile != acceptance.TargetDataProfile {
+				return policy, config, errors.New("repair requires verified same-format release records")
+			}
+			key := acceptance.SourceID + "/" + acceptance.FailedTargetID + "/" + acceptance.RepairID
+			if err := verifyFormatEvidence(p.RepairFormatEvidence[key], acceptance.SourceID, acceptance.RepairID, acceptance.SourceDataProfile, target.Release.Components.SHA256, acceptance.ComponentTransitions["rag"].SourceClasses); err != nil {
+				return policy, config, err
+			}
+		}
 	}
 	return policy, config, nil
 }
@@ -250,4 +284,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// The report is an offline release gate, not a remotely executable migration.
+// It must come from the native old-index/new-environment verification job.
+func verifyFormatEvidence(filename, source, target, profile, componentsSHA string, classes []update.ComponentSourceClass) error {
+	var evidence struct {
+		SourceClasses []update.ComponentSourceClass `json:"sourceClasses"`
+		Source        string                        `json:"sourceReleaseId"`
+		Target        string                        `json:"targetReleaseId"`
+		Profile       string                        `json:"dataProfile"`
+		ComponentsSHA string                        `json:"targetComponentsSHA256"`
+		FixtureSHA    string                        `json:"fixtureSHA256"`
+		Passed        bool                          `json:"passed"`
+		ReadOnly      bool                          `json:"readOnly"`
+	}
+	if filename == "" || readJSON(filename, &evidence) != nil || evidence.Source != source || evidence.Target != target || evidence.Profile != profile || evidence.ComponentsSHA != componentsSHA || len(evidence.FixtureSHA) != 64 || !evidence.Passed || !evidence.ReadOnly || !reflect.DeepEqual(classes, evidence.SourceClasses) {
+		return errors.New("native same-index format evidence is required before signing")
+	}
+	return nil
 }

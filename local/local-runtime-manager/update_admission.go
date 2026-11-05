@@ -75,6 +75,9 @@ func registerRuntimeUpdateLease(ctx context.Context, cfg RuntimeConfig, paths Ru
 	return desktopupdate.BeginStartup(ctx, root, scope, cfg.OwnerToken, "writer", actor)
 }
 func registerDesktopUpdateCoordinator(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := nativeShellStartup(ctx, cfg, paths); err != nil {
+		return err
+	}
 	root, err := resolveRuntimeRecoveryRoot()
 	if err != nil {
 		return err

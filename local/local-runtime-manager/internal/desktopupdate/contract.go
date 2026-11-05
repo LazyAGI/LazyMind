@@ -20,10 +20,11 @@ type Config struct {
 // LocalState is measured locally; unknown/dirty data must never be inferred
 // compatible merely from the current application version.
 type LocalState struct {
-	SystemVersion string            `json:"systemVersion"`
-	DataProfile   string            `json:"dataProfile"`
-	Dirty         bool              `json:"dirty"`
-	Components    map[string]string `json:"components"`
+	SystemVersion     string                         `json:"systemVersion"`
+	DataProfile       string                         `json:"dataProfile"`
+	Dirty             bool                           `json:"dirty"`
+	Components        map[string]string              `json:"components"`
+	ComponentMetadata map[string]ComponentDescriptor `json:"componentMetadata,omitempty"`
 }
 
 type Decision struct {
@@ -39,9 +40,10 @@ type Decision struct {
 }
 
 type Artifact struct {
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size"`
+	UnpackedBytes int64  `json:"unpackedBytes,omitempty"`
+	URL           string `json:"url"`
+	SHA256        string `json:"sha256"`
+	Size          int64  `json:"size"`
 }
 
 type Release struct {
@@ -67,27 +69,65 @@ type RecoveryContract struct {
 	Direction            string `json:"direction"`
 }
 
+type ComponentDescriptor struct {
+	URL             string            `json:"url,omitempty"`
+	FallbackURL     string            `json:"fallbackUrl,omitempty"`
+	CatalogURL      string            `json:"catalogUrl,omitempty"`
+	Filename        string            `json:"filename,omitempty"`
+	SizeBytes       int64             `json:"sizeBytes,omitempty"`
+	UnpackedBytes   int64             `json:"unpackedBytes,omitempty"`
+	ID              string            `json:"id"`
+	Revision        string            `json:"revision"`
+	SHA256          string            `json:"sha256"`
+	Tag             string            `json:"tag"`
+	PythonABI       string            `json:"pythonAbi"`
+	BaseFingerprint string            `json:"baseFingerprint"`
+	Platform        string            `json:"platform"`
+	Arch            string            `json:"arch"`
+	Packages        map[string]string `json:"packages"`
+}
+type ComponentSourceClass struct {
+	Tag             string            `json:"tag"`
+	PythonABI       string            `json:"pythonAbi"`
+	BaseFingerprint string            `json:"baseFingerprint"`
+	Packages        map[string]string `json:"packages"`
+}
+type ComponentTransition struct {
+	SourceClasses          []ComponentSourceClass `json:"sourceClasses"`
+	TargetComponentsSHA256 string                 `json:"targetComponentsSHA256"`
+}
+type RepairAcceptance struct {
+	SourceID               string                         `json:"sourceReleaseId"`
+	FailedTargetID         string                         `json:"failedTargetReleaseId"`
+	RepairID               string                         `json:"repairReleaseId"`
+	SourceDataProfile      string                         `json:"sourceDataProfile"`
+	TargetDataProfile      string                         `json:"targetDataProfile"`
+	ComponentTransitions   map[string]ComponentTransition `json:"componentTransitions"`
+	TargetComponentsSHA256 string                         `json:"targetComponentsSHA256"`
+}
 type Edge struct {
-	SourceID           string            `json:"sourceReleaseId"`
-	TargetID           string            `json:"targetReleaseId"`
-	Priority           int               `json:"priority"`
-	MigrationProfile   string            `json:"migrationProfile"`
-	SourceDataProfiles []string          `json:"sourceDataProfiles"`
-	TargetDataProfile  string            `json:"targetDataProfile"`
-	RequiredComponents map[string]string `json:"requiredComponents"`
-	Recovery           RecoveryContract  `json:"recoveryContract"`
+	ComponentTransitions map[string]ComponentTransition `json:"componentTransitions,omitempty"`
+	SourceID             string                         `json:"sourceReleaseId"`
+	TargetID             string                         `json:"targetReleaseId"`
+	Priority             int                            `json:"priority"`
+	MigrationProfile     string                         `json:"migrationProfile"`
+	SourceDataProfiles   []string                       `json:"sourceDataProfiles"`
+	TargetDataProfile    string                         `json:"targetDataProfile"`
+	RequiredComponents   map[string]string              `json:"requiredComponents"`
+	Recovery             RecoveryContract               `json:"recoveryContract"`
 }
 
 type Policy struct {
-	SchemaVersion      int       `json:"schemaVersion"`
-	MinUpdaterProtocol int       `json:"minUpdaterProtocol"`
-	TrustDomain        string    `json:"trustDomain"`
-	Audience           string    `json:"audience"`
-	Channel            string    `json:"channel"`
-	Sequence           uint64    `json:"policySequence"`
-	IssuedAt           string    `json:"issuedAt"`
-	ExpiresAt          string    `json:"expiresAt"`
-	Releases           []Release `json:"releases"`
-	Edges              []Edge    `json:"edges"`
-	Revoked            []string  `json:"revoked"`
+	RepairAcceptances  []RepairAcceptance `json:"repairAcceptances,omitempty"`
+	SchemaVersion      int                `json:"schemaVersion"`
+	MinUpdaterProtocol int                `json:"minUpdaterProtocol"`
+	TrustDomain        string             `json:"trustDomain"`
+	Audience           string             `json:"audience"`
+	Channel            string             `json:"channel"`
+	Sequence           uint64             `json:"policySequence"`
+	IssuedAt           string             `json:"issuedAt"`
+	ExpiresAt          string             `json:"expiresAt"`
+	Releases           []Release          `json:"releases"`
+	Edges              []Edge             `json:"edges"`
+	Revoked            []string           `json:"revoked"`
 }

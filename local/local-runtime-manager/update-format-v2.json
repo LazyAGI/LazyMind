@@ -1,0 +1,92 @@
+{
+  "families": {
+    "auth": "6c64686befaeb402a132f16cbe8011a1ea3d32d9b110cb882dd17609d127927b",
+    "auth-state": "a01d388d302549380fd238b2e78db7ba95889f8e82623c7174141c7a073bb747",
+    "channel": "dbd34e4f14b35fa1cf1419fdac0e53ade64b5525c251bdd416e835abe2614e4a",
+    "core": "41bfa1cb526457b960cdd2c4d0328456e7e73accf7260b603585e1c74ca1d268",
+    "core-state": "f7dbfbac6032c813b85d62cbcfba322939c2e1dce55fb54a909f510e6c4e0cd2",
+    "lazyllm": "1971ea1937471a46c7acc0c1b13e3ea8590a732ec7bbf39540d88150b075c3ad",
+    "scan": "3cc55c1add5d4cfdf77af6545f6e29c97df95f550694a704bec43906017df0ae",
+    "scan-state": "a4c7898be7e29ac5a993b37ad39eeddf5055b34ec90bd5d4c5a901c0e0b7c3b8",
+    "segments": "ea6cde604873051b4ad5225c887ca5694ccb814f9f8a1a3827de88d169d4eddf"
+  },
+  "lazyllmVariants": [
+    "b3de27b172bab6832ba9ddc7d1f3c0099fadecd6f6dd55be1682c4cc09756e02",
+    "ea6cde604873051b4ad5225c887ca5694ccb814f9f8a1a3827de88d169d4eddf"
+  ],
+  "segments": [
+    {
+      "name": "idx_$group_doc_id",
+      "sql": "CREATE INDEX idx_$group_doc_id ON \"$group\"(doc_id)",
+      "table": "$group",
+      "type": "index"
+    },
+    {
+      "name": "idx_$group_group",
+      "sql": "CREATE INDEX idx_$group_group ON \"$group\"(\"group\")",
+      "table": "$group",
+      "type": "index"
+    },
+    {
+      "name": "idx_$group_kb_id",
+      "sql": "CREATE INDEX idx_$group_kb_id ON \"$group\"(kb_id)",
+      "table": "$group",
+      "type": "index"
+    },
+    {
+      "name": "idx_$group_number",
+      "sql": "CREATE INDEX idx_$group_number ON \"$group\"(number)",
+      "table": "$group",
+      "type": "index"
+    },
+    {
+      "name": "idx_$group_parent",
+      "sql": "CREATE INDEX idx_$group_parent ON \"$group\"(parent)",
+      "table": "$group",
+      "type": "index"
+    },
+    {
+      "name": "$group",
+      "sql": "CREATE TABLE \"$group\" (uid TEXT PRIMARY KEY, doc_id TEXT NOT NULL, \"group\" TEXT, content TEXT, meta TEXT, global_meta TEXT, type INTEGER, number INTEGER, kb_id TEXT, excluded_embed_metadata_keys TEXT, excluded_llm_metadata_keys TEXT, parent TEXT, answer TEXT, image_keys TEXT)",
+      "table": "$group",
+      "type": "table"
+    },
+    {
+      "name": "$group_fts",
+      "sql": "CREATE VIRTUAL TABLE \"$group_fts\" USING fts5(uid UNINDEXED, content, tokenize='unicode61')",
+      "table": "$group_fts",
+      "type": "table"
+    },
+    {
+      "name": "$group_fts_config",
+      "sql": "CREATE TABLE '$group_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID",
+      "table": "$group_fts_config",
+      "type": "table"
+    },
+    {
+      "name": "$group_fts_content",
+      "sql": "CREATE TABLE '$group_fts_content'(id INTEGER PRIMARY KEY, c0, c1)",
+      "table": "$group_fts_content",
+      "type": "table"
+    },
+    {
+      "name": "$group_fts_data",
+      "sql": "CREATE TABLE '$group_fts_data'(id INTEGER PRIMARY KEY, block BLOB)",
+      "table": "$group_fts_data",
+      "type": "table"
+    },
+    {
+      "name": "$group_fts_docsize",
+      "sql": "CREATE TABLE '$group_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)",
+      "table": "$group_fts_docsize",
+      "type": "table"
+    },
+    {
+      "name": "$group_fts_idx",
+      "sql": "CREATE TABLE '$group_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+      "table": "$group_fts_idx",
+      "type": "table"
+    }
+  ],
+  "version": 2
+}

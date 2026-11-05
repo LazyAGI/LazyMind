@@ -100,17 +100,67 @@ func normalizeScope(scope UpdateScope) (UpdateScope, error) {
 }
 
 func scopesOverlap(a, b UpdateScope) bool {
-	if a.Installation != "" && b.Installation != "" && overlaps(a.Installation, b.Installation) {
-		return true
-	}
-	for _, x := range a.DataRoots {
-		for _, y := range b.DataRoots {
-			if overlaps(x, y) {
+	for _, x := range append(append([]string(nil), a.DataRoots...), a.Installation) {
+		for _, y := range append(append([]string(nil), b.DataRoots...), b.Installation) {
+			if x != "" && y != "" && overlaps(x, y) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func ScopesIntersect(a, b UpdateScope) (bool, error) {
+	a, err := normalizeScope(a)
+	if err != nil {
+		return false, err
+	}
+	b, err = normalizeScope(b)
+	if err != nil {
+		return false, err
+	}
+	return scopesOverlap(a, b), nil
+}
+
+// Existing coordinator registrations retain the data scopes needed to find a
+// terminal runtime receipt after a native relaunch loses custom-root arguments.
+func RegisteredCoordinatorScopes(ctx context.Context, root string) ([]UpdateScope, error) {
+	dir := filepath.Join(root, "startup", "v1")
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, failure("update_record_read", err)
+	}
+	lock, err := acquireAdmission(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseLock(lock)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) > 4096 {
+		return nil, failure("update_record_read", err)
+	}
+	var scopes []UpdateScope
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var record startupRecord
+		if readMetadata(filepath.Join(root, "startup", "v1", entry.Name()), &record) != nil || record.Version != 1 {
+			return nil, failure("update_record_read", nil)
+		}
+		if record.Role != "coordinator" {
+			continue
+		}
+		scope, err := normalizeScope(record.Scope)
+		if err != nil {
+			return nil, err
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, nil
 }
 
 func acquireAdmission(ctx context.Context, root string) (*os.File, error) {

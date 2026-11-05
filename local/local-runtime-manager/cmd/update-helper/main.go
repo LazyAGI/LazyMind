@@ -34,9 +34,18 @@ func main() {
 	limit := 30 * time.Second
 	if len(os.Args) == 2 && os.Args[1] == "download" {
 		limit = 2 * time.Hour
+	} else if len(os.Args) == 2 && os.Args[1] == "verify-identity" {
+		limit = 75 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(signals, limit)
 	defer cancel()
+	if len(os.Args) == 2 && os.Args[1] == "verify-identity" {
+		if err := verifyInstalledIdentity(ctx, embeddedConfig); err != nil {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "check_failed", "reason": "build_identity_mismatch"})
+			os.Exit(1)
+		}
+		os.Args[1] = "config"
+	}
 	base, err := resolveRecoveryBase()
 	root := filepath.Join(base, "LazyMindUpdater")
 	if err == nil {

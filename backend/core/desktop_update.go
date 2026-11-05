@@ -19,6 +19,11 @@ import (
 	"lazymind/core/common/maintenancegate"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/doc"
+	"lazymind/core/resourceupdate"
+	"lazymind/core/scheduler"
+	"lazymind/core/state"
+	"lazymind/core/taskcenter"
 )
 
 type desktopUpdateParticipant struct {
@@ -29,14 +34,18 @@ type desktopUpdateParticipant struct {
 // This lease only closes admissions during the short update countdown. It is
 // not a task cancellation API. Losing the desktop controller reopens admission.
 type desktopUpdateControl struct {
-	mu                      sync.Mutex
-	token                   string
-	epoch, highest, renewal uint64
-	active                  int64
-	timer                   *time.Timer
-	participants            []desktopUpdateParticipant
-	tickets                 []*maintenancegate.Ticket
-	count                   func(context.Context) (int64, error)
+	mu                                                       sync.Mutex
+	bootstrapTx, bootstrapOwner, completedTx, completedOwner string
+	onBootstrapRelease                                       func() error
+	bootstrapTickets                                         []*maintenancegate.Ticket
+	bootstrapResumes                                         []func(string) error
+	token                                                    string
+	epoch, highest, renewal                                  uint64
+	active                                                   int64
+	timer                                                    *time.Timer
+	participants                                             []desktopUpdateParticipant
+	tickets                                                  []*maintenancegate.Ticket
+	count                                                    func(context.Context) (int64, error)
 }
 
 func (c *desktopUpdateControl) resumeLocked() error {
@@ -58,14 +67,23 @@ func (c *desktopUpdateControl) control(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Action string `json:"action"`
-		Epoch  uint64 `json:"epoch"`
+		Action        string `json:"action"`
+		TransactionID string `json:"transactionId,omitempty"`
+		Owner         string `json:"owner,omitempty"`
+		Epoch         uint64 `json:"epoch"`
 	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 	d.DisallowUnknownFields()
-	if d.Decode(&request) != nil || d.Decode(new(any)) != io.EOF || (request.Action != "status" && request.Action != "pause" && request.Action != "resume") || (request.Action != "status" && request.Epoch == 0) {
+	if d.Decode(&request) != nil || d.Decode(new(any)) != io.EOF || (request.Action != "status" && request.Action != "pause" && request.Action != "resume" && request.Action != "bootstrap-complete") || (request.Action != "status" && request.Action != "bootstrap-complete" && request.Epoch == 0) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+	if request.Action == "bootstrap-complete" {
+		if c.CompleteUpdateBootstrap(request.TransactionID, request.Owner) != nil {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		request.Action = "status"
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -131,7 +149,11 @@ func (c *desktopUpdateControl) control(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{"active": n, "paused": c.epoch != 0, "epoch": c.epoch})
+	wire := map[string]any{"active": n + 0, "paused": c.epoch != 0, "epoch": c.epoch}
+	if c.bootstrapTx != "" {
+		wire["bootstrap"] = map[string]any{"transactionId": c.bootstrapTx, "owner": c.bootstrapOwner, "sealed": true}
+	}
+	_ = json.NewEncoder(w).Encode(wire)
 }
 
 func (c *desktopUpdateControl) wrap(next http.Handler) http.Handler {
@@ -153,7 +175,7 @@ func (c *desktopUpdateControl) wrap(next http.Handler) http.Handler {
 				countRequest = template != "/external-chat/hosts/{provider}/claim"
 			}
 			c.mu.Lock()
-			if c.epoch != 0 {
+			if c.epoch != 0 || c.bootstrapTx != "" {
 				c.mu.Unlock()
 				common.ReplyErr(w, "desktop update is preparing", http.StatusServiceUnavailable)
 				return
@@ -174,9 +196,17 @@ func desktopUpdateTaskCount(ctx context.Context, db, lazy *gorm.DB, ragEnabled b
 	if db == nil {
 		return 0, errors.New("task state unavailable")
 	}
-	var total int64
+	total, err := taskcenter.ActiveForDesktopUpdate(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+	resources, err := resourceupdate.ActiveForUpdate(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+	total += resources
 	queries := []*gorm.DB{
-		db.Model(&orm.TaskCenterTask{}).Where("status IN ? AND (scheduled_fire_at IS NULL OR scheduled_fire_at <= ?)", []string{"pending", "running", "waiting"}, time.Now()),
+
 		db.Model(&orm.AsyncJob{}).Where("status IN ?", []string{"pending", "running"}),
 		db.Model(&orm.SubAgentTask{}).Where("status IN ?", []string{"pending", "running"}),
 		db.Model(&orm.ExternalChatRun{}).Where("status IN ?", []string{"pending", "running"}),
@@ -255,7 +285,94 @@ func desktopUpdateTaskCount(ctx context.Context, db, lazy *gorm.DB, ragEnabled b
 // Register each background owner at construction so a new runner cannot be
 // omitted from the update pause/resume lifecycle.
 func (c *desktopUpdateControl) startRunner(ctx context.Context, db *gorm.DB, options asyncjob.Options) *asyncjob.Runner {
+	if c.bootstrapTx != "" {
+		options.BootstrapKey = c.bootstrapTx + "\x00" + c.bootstrapOwner
+	}
 	r := asyncjob.Start(ctx, db, options)
+	if r.BootstrapTicket() != nil {
+		c.bootstrapTickets = append(c.bootstrapTickets, r.BootstrapTicket())
+		c.bootstrapResumes = append(c.bootstrapResumes, r.UnsealBootstrap)
+	}
 	c.participants = append(c.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
 	return r
+}
+
+// Register before starting either the full runtime or its independent idle path.
+func (c *desktopUpdateControl) startResourceUpdates(ctx context.Context, db *gorm.DB, store state.Store, cfg resourceupdate.Config, enabled bool) []<-chan struct{} {
+	c.participants = append(c.participants, desktopUpdateParticipant{resourceupdate.PauseForUpdate, resourceupdate.ResumeFromUpdate})
+
+	done := []<-chan struct{}{resourceupdate.StartIdle(ctx, db, store, cfg, enabled)}
+	if enabled {
+		done = append(done, resourceupdate.Start(ctx, db, store, cfg))
+	}
+	return done
+}
+
+func (c *desktopUpdateControl) BeginUpdateBootstrap(tx, owner string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(tx) != 32 || owner == "" {
+		return maintenancegate.ErrInvalidEpoch
+	}
+	if c.bootstrapTx != "" {
+		if c.bootstrapTx == tx && c.bootstrapOwner == owner {
+			return nil
+		}
+		return maintenancegate.ErrConflict
+	}
+	key := tx + "\x00" + owner
+	owners := []struct {
+		seal   func(string) (*maintenancegate.Ticket, error)
+		resume func(string) error
+	}{
+		{scheduler.SealForBootstrap, scheduler.UnsealBootstrap}, {doc.SealDeferredIndexingForBootstrap, doc.UnsealDeferredIndexingBootstrap}, {resourceupdate.SealForBootstrap, resourceupdate.UnsealBootstrap},
+	}
+	for _, o := range owners {
+		ticket, err := o.seal(key)
+		if err != nil {
+			for _, resume := range c.bootstrapResumes {
+				_ = resume(key)
+			}
+			c.bootstrapTickets = nil
+			c.bootstrapResumes = nil
+			return err
+		}
+		c.bootstrapTickets = append(c.bootstrapTickets, ticket)
+		c.bootstrapResumes = append(c.bootstrapResumes, o.resume)
+	}
+	c.bootstrapTx, c.bootstrapOwner = tx, owner
+	return nil
+}
+func (c *desktopUpdateControl) CompleteUpdateBootstrap(tx, owner string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.bootstrapTx == "" {
+		if tx == c.completedTx && owner == c.completedOwner && tx != "" {
+			return nil
+		}
+		return maintenancegate.ErrStale
+	}
+	if tx != c.bootstrapTx || owner != c.bootstrapOwner {
+		return maintenancegate.ErrStale
+	}
+	for _, t := range c.bootstrapTickets {
+		if err := t.Validate(); err != nil {
+			return err
+		}
+	}
+	if c.onBootstrapRelease != nil {
+		if err := c.onBootstrapRelease(); err != nil {
+			return err
+		}
+	}
+	for _, resume := range c.bootstrapResumes {
+		if err := resume(tx + "\x00" + owner); err != nil {
+			return err
+		}
+	}
+	c.completedTx, c.completedOwner = tx, owner
+	c.bootstrapTx, c.bootstrapOwner = "", ""
+	c.bootstrapTickets = nil
+	c.bootstrapResumes = nil
+	return nil
 }
