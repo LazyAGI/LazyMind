@@ -2091,6 +2091,13 @@ def resolve_workflow_injection(
         ref = str(clarification.get('workflow_ref') or '')
         if any(item.get('workflow_ref') == ref for item in (workflow_catalog or [])):
             allowed_workflow_refs = [ref]
+            # Discovery-triggered startup cards have no explicit mention activation.
+            # Rebind only the still-authorized catalog entry on the answer turn.
+            if not any(item.get('workflow_ref') == ref for item in (workflow_activations or [])):
+                selected = next(item for item in workflow_catalog if item.get('workflow_ref') == ref)
+                activation = workflow_activation_from_catalog_item(selected)
+                if activation:
+                    workflow_activations = [*(workflow_activations or []), activation]
             pinned_revision = str(clarification.get('revision_id') or '')
             if pinned_revision:
                 workflow_activations = [{**item, 'revision_id': pinned_revision} if item.get('workflow_ref') == ref

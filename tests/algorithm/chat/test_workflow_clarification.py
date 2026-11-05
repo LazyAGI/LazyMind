@@ -206,7 +206,8 @@ def test_model_cannot_fill_unstated_academic_decisions():
     assert values == {'research_topic': 'RAG', 'output_format': 'docx'}
 
 
-def test_owned_continuation_returns_only_remaining_questions_without_prepare(monkeypatch):
+@pytest.mark.parametrize('explicit_activation', [False, True])
+def test_owned_continuation_returns_only_remaining_questions_without_prepare(monkeypatch, explicit_activation):
     from unittest.mock import MagicMock
     from lazymind.chat.workflow import workflow_manager as manager
     runtime = policy('academic_research_pipeline')
@@ -221,7 +222,7 @@ def test_owned_continuation_returns_only_remaining_questions_without_prepare(mon
         }], workflow_activations=[{
             'workflow_id': 'academic', 'workflow_ref': 'builtin:academic', 'revision_id': 'r2',
             'tool_name': 'trigger_academic_workflow', 'runtime': runtime,
-        }], clarification={
+        }] if explicit_activation else [], clarification={
             'workflow_ref': 'builtin:academic', 'revision_id': 'r1', 'startup_request_id': 'launch',
             'original_request': '写论文', 'values': {
                 'research_topic': 'RAG', 'paper_type': '文献综述', 'word_target': '8000',
@@ -234,3 +235,53 @@ def test_owned_continuation_returns_only_remaining_questions_without_prepare(mon
     assert card['workflow']['revision_id'] == 'r1'
     client.get_workflow.assert_called_once_with('academic', 'r1')
     toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('authorized', [False, True])
+def test_discovered_startup_answer_restores_only_authorized_trigger(monkeypatch, authorized):
+    from unittest.mock import MagicMock
+    from lazymind.chat.workflow import workflow_manager as manager
+    runtime = policy('ppt-workflow')
+    values, _ = resolve_fields(runtime, '制作个人答辩PPT，12页，15分钟，不生成AI底图', {
+        'topic': '个人答辩', 'slide_count': '12', 'template_pptx': 'template.pptx',
+        'presentation_output_format': 'html',
+    })
+    values['presentation_output_format'] = 'html'
+    client = MagicMock()
+    client.get_workflow.return_value.result = {'revision_id': 'r1', 'runtime': runtime}
+    client.get_state.return_value = {'session_id': 'session-1', 'state_version': 1,
+                                     'projection': {'reachable': ['analysis'], 'ready': ['analysis']}}
+    monkeypatch.setattr(manager, '_client', lambda: client)
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['analysis']}
+    monkeypatch.setattr(manager, 'HostWorkflowToolkit', lambda *a, **kw: toolkit)
+    contribution = manager.resolve_workflow_injection(
+        None, current_query='HTML', workflow_catalog=[{
+            'workflow_id': 'ppt-workflow', 'workflow_ref': 'builtin:ppt-workflow',
+            'revision_id': 'r2', 'runtime': runtime,
+        }] if authorized else [], workflow_activations=[], clarification={
+            'workflow_ref': 'builtin:ppt-workflow', 'revision_id': 'r1',
+            'original_request': '制作个人答辩PPT，12页，15分钟，不生成AI底图', 'values': values,
+        },
+    )
+    pending, triggers = list(contribution.tools), []
+    while pending:
+        tool = pending.pop()
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        elif tool.__name__ == 'trigger_ppt_workflow':
+            triggers.append(tool)
+    if not authorized:
+        assert not triggers
+        client.get_workflow.assert_not_called()
+        toolkit.prepare_workflow.assert_not_called()
+        return
+    assert len(triggers) == 1
+    assert 'trigger_ppt_workflow' in contribution.required_tool_names
+    result = triggers[0]()
+    assert result['session_id'] == 'session-1'
+    submitted = toolkit.prepare_workflow.call_args.kwargs
+    assert submitted['revision_id'] == 'r1'
+    assert submitted['clarification_values']['presentation_output_format'] == 'html'
+    assert submitted['clarification_values']['slide_count'] == '12'
+    assert '15分钟' in submitted['request_context']

@@ -327,6 +327,22 @@ def _enrich_role_types(model_config: Dict[str, Any]) -> Dict[str, Any]:
     return enriched
 
 
+def _select_chat_transport(model_config: Dict[str, Any]) -> Dict[str, Any]:
+    selected = {}
+    for role, config in model_config.items():
+        if not isinstance(config, dict):
+            selected[role] = config
+            continue
+        config = dict(config)
+        if (config.get('source') == 'openai'
+                and config.get('type', 'llm') in ('llm', 'chat', 'vlm')
+                and re.match(r'^gpt-6(?:[.-]|$)', str(config.get('model') or ''))
+                and urlsplit(config.get('base_url') or 'https://api.openai.com').hostname == 'api.openai.com'):
+            config['source'] = 'openai_responses'
+        selected[role] = config
+    return selected
+
+
 def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     '''Inject per-request model configuration into lazyllm globals.
 
@@ -338,7 +354,7 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     if isinstance(normalized, dict):
         normalized = _enrich_role_types(normalized)
         normalized = resolve_request_api_keys(normalized)
-    _lazyllm_inject(normalized)
+    _lazyllm_inject(_select_chat_transport(normalized) if isinstance(normalized, dict) else normalized)
     from lazymind.embedding_options import configure_embedding_options
     from lazymind.provider_request import configure_request_advanced
     configure_embedding_options(normalized)
