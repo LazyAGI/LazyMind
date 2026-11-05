@@ -9,6 +9,20 @@
 
 Mac 桌面版的本地打包、RAG 依赖上传和安装测试，请看 [Mac 构建、上传与安装验证流程](../desktop/INSTALL.zh-CN.md)。该流程使用原生桌面运行环境，不需要下面的 Docker 前置条件。
 
+## 原生本地模式的 Python 依赖
+
+使用 `make local-up`（macOS/Linux/WSL）或 `make local-win-up`（原生 Windows）时，Python 依赖按系统、架构隔离，例如：
+
+- `local/build/deps/python/windows-amd64/algorithm`
+- `local/build/deps/python/linux-amd64/algorithm`
+
+Python 基础运行时位于 `local/build/runtimes/python/<os>-<arch>/`，准备状态位于 `<用户 runtime>/state/python/<os>-<arch>/`。
+首次使用新目录会重新准备依赖；原有未区分平台的目录保留，不会自动迁移或删除。
+启动会检查实际目录目标、解释器及算法/channel-gateway 使用的证书；发现不匹配会停止准备并输出错误。
+状态查询和停止命令不要求 Python 环境可用，仍可用于诊断和停止已有服务。
+此时应根据报错检查目录链接或证书配置，在对应平台重新准备独立环境后重试，不要将 Windows venv 链接到 WSL 依赖目录。
+桌面安装包继续使用打包清单定义的 Python 路径。
+
 ## 前置条件
 
 - 已安装 Docker 和 Docker Compose

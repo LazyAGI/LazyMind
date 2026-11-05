@@ -22,6 +22,7 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/displaystate"
 )
 
 const (
@@ -665,17 +666,38 @@ func conversationModelSwitchBlock(ctx context.Context, db *gorm.DB, userID, conv
 		return "workflow_running", nil
 	}
 
-	var activeTasks int64
+	var activeTasks []orm.TaskCenterTask
 	if err := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
 		Where(
 			"user_id = ? AND conversation_id = ? AND status IN ? AND task_type IN ?",
 			userID, conversationID, []string{"pending", "running"}, []string{"background_chat", "workflow_run"},
 		).
-		Count(&activeTasks).Error; err != nil {
+		Find(&activeTasks).Error; err != nil {
 		return "", err
 	}
-	if activeTasks > 0 {
-		return "background_task_running", nil
+	for _, task := range activeTasks {
+		if task.WorkflowSessionID == nil || strings.TrimSpace(*task.WorkflowSessionID) == "" {
+			return "background_task_running", nil
+		}
+		var session orm.WorkflowSession
+		err := db.WithContext(ctx).Where(
+			"id = ? AND conversation_id = ? AND create_user_id = ? AND dismissed = ? AND status = ? AND controller_host = ?",
+			*task.WorkflowSessionID, conversationID, userID, false, workflow.SessionStatusWaiting, "lazymind",
+		).Take(&session).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "background_task_running", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		// Workflow task rows stay running while their execution is waiting for the user.
+		view, err := displaystate.Read(db.WithContext(ctx), session)
+		if err != nil {
+			return "", err
+		}
+		if view.Status != "waiting" {
+			return "background_task_running", nil
+		}
 	}
 	return "", nil
 }

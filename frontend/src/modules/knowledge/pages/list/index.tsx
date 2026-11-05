@@ -1,3 +1,4 @@
+import { DatasetDeletionProgressList, useDatasetDeletions } from "./DatasetDeletionProgress";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
   FC,
@@ -286,6 +287,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     boolean | null
   >(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
+  const { deletions, trackDeletion, dismissDeletion } = useDatasetDeletions();
   const syncCreateVm = useSyncKnowledgeBaseCreation({
     onSuccess: () => {
       getTableData();
@@ -1034,12 +1036,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           await KnowledgeBaseServiceApi().datasetServiceDeleteDataset({
             dataset: item.datasetId,
           });
-          message.success(t("knowledge.uninstallSuccess", { name: item.name }));
+          trackDeletion(item.datasetId!, item.name);
+          message.info(t("knowledge.cleanupAccepted"));
           await loadKnowledgeMarket();
         },
       });
     },
-    [loadKnowledgeMarket, t],
+    [loadKnowledgeMarket, t, trackDeletion],
   );
 
   const loadOfficialDatasetOrder = useCallback(
@@ -1668,8 +1671,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   function onDelete(id: string) {
     KnowledgeBaseServiceApi()
       .datasetServiceDeleteDataset({ dataset: id })
-      .then(() => {
-        message.success(t("knowledge.deleteSuccess"));
+      .then((response) => {
+        trackDeletion(id, dataSource.find((item) => item.dataset_id === id)?.display_name || t("layout.knowledgeBase"));
+        const item = (response.data as { items?: { cleanup_status?: string; error?: unknown }[] })?.items?.[0];
+        if (item?.cleanup_status === "failed" || item?.error) message.error(t("knowledge.cleanupFailed"));
+        else message.info(t("knowledge.cleanupAccepted"));
         void getLocalTags();
         getTableData();
       });
@@ -1839,6 +1845,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         />
       ) : null}
 
+      <DatasetDeletionProgressList deletions={deletions} onDismiss={dismissDeletion} />
       {!fromPaperReading ? <div className="knowledge-view-tabs" role="tablist" aria-label={t("knowledge.viewTabs")}>
         <button
           type="button"

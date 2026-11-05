@@ -740,6 +740,10 @@ func TestDeleteDatasetDeletesScanSourceFirst(t *testing.T) {
 	if got := strings.Join(calls, ","); got != "/api/scan/internal/sources/by-dataset/ds-delete,/v1/kbs/kb-delete" {
 		t.Fatalf("unexpected external delete order: %q", got)
 	}
+	var cleanup ResourceOperationResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &cleanup); err != nil || len(cleanup.Items) != 1 || cleanup.Items[0].CleanupStatus != "submitted" {
+		t.Fatalf("delete must expose cleanup submission, not an empty success: %s (%v)", rec.Body.String(), err)
+	}
 	var row orm.Dataset
 	if err := db.First(&row, "id = ?", "ds-delete").Error; err != nil {
 		t.Fatalf("query deleted dataset: %v", err)

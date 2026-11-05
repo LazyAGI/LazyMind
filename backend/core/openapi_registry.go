@@ -3262,7 +3262,11 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:    "Delete dataset",
 			Tags:       []string{"datasets"},
 			PathParams: datasetPathParams{},
-			Responses:  map[int]openAPIResponse{200: refResp("Deleted successfully", "EmptyObject")},
+			Responses:  map[int]openAPIResponse{200: resp("Cleanup submission", doc.ResourceOperationResult{})},
+		},
+		{
+			Method: "GET", Path: "/datasets/{dataset}/deletion", Summary: "Get dataset cleanup progress", Tags: []string{"datasets"}, PathParams: datasetPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Cleanup progress", doc.DatasetDeletionProgress{})},
 		},
 		{
 			Method:      "POST",

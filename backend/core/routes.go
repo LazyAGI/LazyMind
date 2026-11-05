@@ -281,6 +281,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets", []string{"document.write"}, doc.CreateDataset)
 	handleAPI(r, "POST", "/datasets/processing/preflight", []string{"document.write"}, doc.ProcessingPreflight)
 	handleAPI(r, "GET", "/datasets/{dataset}", []string{"document.read"}, doc.GetDataset)
+	handleAPI(r, "GET", "/datasets/{dataset}/deletion", []string{"document.read"}, doc.GetDatasetDeletion)
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.DeleteDataset))
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDataset))
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)

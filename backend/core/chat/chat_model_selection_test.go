@@ -20,6 +20,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/graphengine"
 )
 
 type chatModelRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -1145,6 +1146,160 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 	backgroundBusy := patch(`{"mode":"auto","expected_version":2}`)
 	if backgroundBusy.Code != http.StatusConflict {
 		t.Fatalf("background patch status=%d body=%s", backgroundBusy.Code, backgroundBusy.Body.String())
+	}
+}
+
+func TestWaitingWorkflowCanReplaceDeletedConversationModel(t *testing.T) {
+	db := newChatModelTestDB(t).DB
+	if err := db.AutoMigrate(&orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}); err != nil {
+		t.Fatal(err)
+	}
+	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	store.Init(db, nil, stateStore)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fake-a")
+	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "OpenAI", "B", "gpt-b", "llm", true, "fake-b")
+	seedSelectedChatModel(t, db, "user-1", "model-a", false)
+	binding, err := resolveInitialChatModelBinding(context.Background(), db, "user-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation := orm.Conversation{ID: "waiting-model-recovery", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+	applyResolvedChatModelBinding(&conversation, binding)
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-a").Update("deleted_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"review": {ID: "review", Mode: "human"}}}
+	if err := db.Create(&orm.WorkflowRevision{ID: "waiting-revision", WorkflowResourceID: "resource", RevisionNo: 1, CompiledGraph: graph.JSON()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := orm.WorkflowSession{ID: "waiting-workflow", ConversationID: conversation.ID, WorkflowID: "workflow-1", WorkflowRevisionID: "waiting-revision", WorkflowMode: "dynamic", ControllerHost: "lazymind", Status: workflow.SessionStatusWaiting, CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "waiting-review", SessionID: session.ID, StepID: "review", TaskID: "review-task", Status: "succeeded", Validity: "effective", Attempt: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.TaskCenterTask{ID: "waiting-task", UserID: "user-1", ConversationID: conversation.ID, WorkflowSessionID: &session.ID, TaskType: "workflow_run", Status: "running", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/core/chat/models?conversation_id="+conversation.ID, nil)
+	listRequest.Header.Set("X-User-Id", "user-1")
+	listed := httptest.NewRecorder()
+	ListChatModels(listed, listRequest)
+	var catalog struct {
+		Data chatModelsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &catalog); err != nil || listed.Code != http.StatusOK || !catalog.Data.SwitchAllowed {
+		t.Fatalf("waiting recovery catalog status=%d body=%s error=%v", listed.Code, listed.Body.String(), err)
+	}
+	if catalog.Data.Selection.Availability != chatModelAvailabilityUnavailable {
+		t.Fatalf("deleted model was not reported unavailable: %+v", catalog.Data.Selection)
+	}
+	request := httptest.NewRequest(http.MethodPatch, "/api/core/conversations/"+conversation.ID+"/model", strings.NewReader(`{"mode":"fixed","model_id":"model-b","expected_version":1}`))
+	request.Header.Set("X-User-Id", "user-1")
+	request = mux.SetURLVars(request, map[string]string{"conversation_id": conversation.ID})
+	response := httptest.NewRecorder()
+	PatchConversationModel(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("waiting recovery status=%d body=%s", response.Code, response.Body.String())
+	}
+	config, err := LoadConversationLLMConfig(context.Background(), db, "user-1", conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config["llm"].(map[string]any)["model"]; got != "gpt-b" {
+		t.Fatalf("continuation still uses %v", got)
+	}
+}
+
+func TestWorkflowTaskModelSwitchProtection(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"approval", ""},
+		{"linked background workflow", ""},
+		{"active workflow", "workflow_running"},
+		{"running sibling", "background_task_running"},
+		{"queued sibling", "background_task_running"},
+		{"automatic waiting", "background_task_running"},
+		{"initializing", "background_task_running"},
+		{"other background chat", "background_task_running"},
+		{"unlinked task", "background_task_running"},
+		{"missing session", "background_task_running"},
+		{"other conversation", "background_task_running"},
+		{"other owner", "background_task_running"},
+		{"dismissed session", "background_task_running"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newChatModelTestDB(t).DB
+			if err := db.AutoMigrate(&orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}); err != nil {
+				t.Fatal(err)
+			}
+			store.Init(db, nil, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			now := time.Now().UTC()
+			session := orm.WorkflowSession{ID: "workflow", ConversationID: "conversation", CreateUserID: "owner", WorkflowID: "test", WorkflowRevisionID: "revision", ControllerHost: "lazymind", WorkflowMode: "dynamic", Status: "waiting", CreatedAt: now, UpdatedAt: now}
+			task := orm.TaskCenterTask{ID: "task", UserID: "owner", ConversationID: "conversation", WorkflowSessionID: &session.ID, TaskType: "workflow_run", Status: "running", CreatedAt: now, UpdatedAt: now}
+			mode := "human"
+			switch tc.name {
+			case "linked background workflow":
+				task.TaskType = "background_chat"
+			case "active workflow":
+				session.Status = "active"
+			case "automatic waiting":
+				session.WorkflowMode, mode = "auto", "auto"
+			case "unlinked task":
+				task.WorkflowSessionID = nil
+			case "missing session":
+				missing := "missing"
+				task.WorkflowSessionID = &missing
+			case "other conversation":
+				session.ConversationID = "other-conversation"
+			case "other owner":
+				session.CreateUserID = "other-owner"
+			case "dismissed session":
+				session.Dismissed = true
+			}
+			graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"review": {ID: "review", Mode: mode}}}
+			if err := db.Create(&orm.WorkflowRevision{ID: "revision", WorkflowResourceID: "resource", RevisionNo: 1, CompiledGraph: graph.JSON()}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&session).Error; err != nil {
+				t.Fatal(err)
+			}
+			if tc.name != "initializing" {
+				if err := db.Create(&orm.WorkflowSessionStep{ID: "review-attempt", SessionID: session.ID, StepID: "review", TaskID: "review-task", Status: "succeeded", Validity: "effective", Attempt: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Create(&task).Error; err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "running sibling" || tc.name == "queued sibling" {
+				status := strings.TrimSuffix(tc.name, " sibling")
+				if err := db.Create(&orm.WorkflowSessionStep{ID: "sibling", SessionID: session.ID, StepID: "sibling", TaskID: "sibling-task", Status: status, Validity: "effective", Attempt: 1, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.name == "other background chat" {
+				if err := db.Create(&orm.TaskCenterTask{ID: "background", UserID: "owner", ConversationID: "conversation", TaskType: "background_chat", Status: "running", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			reason, err := conversationModelSwitchBlock(t.Context(), db, "owner", "conversation")
+			if err != nil || reason != tc.want {
+				t.Fatalf("switch blocked reason=%q error=%v, want %q", reason, err, tc.want)
+			}
+		})
 	}
 }
 

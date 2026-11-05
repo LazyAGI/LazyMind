@@ -564,14 +564,16 @@ func encodeBody(in any) (io.Reader, error) {
 
 func decodeCoreError(resp *http.Response) error {
 	var body map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&body)
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	_ = decoder.Decode(&body)
 	code := stringFromAny(body["code"])
 	message := stringFromAny(body["message"])
 	if code == "" {
 		code = ErrCodeCoreSubmitFailed
-	}
-	if resp.StatusCode == http.StatusConflict {
-		code = ErrCodeIdempotencyKeyReused
+		if resp.StatusCode == http.StatusConflict {
+			code = ErrCodeIdempotencyKeyReused
+		}
 	}
 	return &Error{Code: code, Message: message, StatusCode: resp.StatusCode, Body: body}
 }
