@@ -101,3 +101,14 @@ it('loads historical offloaded research analysis as Markdown without requiring a
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
   expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(text);
 });
+
+it('opens the complete PPT design source for editing without treating section toggles as edits', async () => {
+  const text = '**设计风格：** 蓝白\n\n布局：左右双栏\n\n设计要求：保留全部文字 <div>原始示例</div>';
+  const slot: SlotRevision = { slot_id: 'slide_outline', slot: 'slide_outline', selected: true,
+    revision: 1, created_at: '', content_type: 'text', artifact_value: { text }, list_index: 6 };
+  const { container } = render(<SlotRenderer slot={slot} sessionId='ppt-design-edit' widget={{ widgetType: 'ppt-prompt' }} />);
+  fireEvent.click(container.querySelector('summary')!);
+  expect(screen.queryByRole('textbox', { name: '编辑文本' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '编辑文本' }));
+  expect(await screen.findByRole('textbox', { name: '编辑文本' })).toHaveValue(text);
+});

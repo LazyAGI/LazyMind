@@ -1,3 +1,4 @@
+import { PptPromptDocument } from './PptPromptDocument';
 import { ArtifactSourceButton } from './ArtifactSourceButton';
 import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
 import { WriterProviderChoice } from "./DocumentProviderChoice";
@@ -2372,7 +2373,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         />
       ) : (
         <>
-          {widget?.widgetType === 'text-markdown' ? (
+          {widget?.widgetType === 'ppt-prompt' ? (
+            <PptPromptDocument key={editingKey} text={displayText}
+              onEdit={canEdit ? () => handleEdit() : undefined} maxHeight={widget.maxHeight} />
+          ) : widget?.widgetType === 'text-markdown' ? (
             <div
               className={`workflow-slot__text workflow-slot__text--markdown${canEdit ? ' workflow-slot__text--editable' : ''}`}
               {...textDisplayProps}
