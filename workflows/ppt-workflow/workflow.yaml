@@ -77,7 +77,7 @@ runtime:
       artifact revision. Do not write speeches or edit files in main Chat, and do
       not rewind any Workflow step. Report the task result and stop.
     agent_type: pptx_edit
-    title: PPTX 内容、字体与讲稿编辑
+    title: PPTX 内容、布局、表格与讲稿编辑
     session_params:
     - _pptx_edit_session_id
     - session_id
@@ -105,6 +105,14 @@ runtime:
         artifact, not the uploaded template. Preserve every unspecified page, chart value and note.
         For chart colors use chart_edits=[{page:5,chart_index:1,palette:'teal'}] on publish_pptx_edit;
         inspect chart_index first. Available palettes: blue, teal, orange, purple, or distinct RGB colors.
+        For move/resize/alignment/layer changes, adding/removing objects, lists, tables or row/column edits,
+        inspect layout (shape_id, box, table.rows, paragraphs), then pass structure_edits to publish_pptx_edit.
+        Each op has page and shape_id/shape_ids; add_text/add_list/add_table use box in inches.
+        resize(dw,dh), move(dx,dy), align(edge), distribute(axis), duplicate_shape(box), delete_shape,
+        bring_to_front/send_to_back, set_list(values,ordered), list_insert_item/list_set_item(index,text),
+        list_delete_item(index), table_set_cell(row,column,text), table_insert_row/table_insert_column(index,values),
+        table_delete_row/table_delete_column(index) are local edits. Indices are 1-based in the edited state;
+        delete multiple indices descending. All pages/objects belong in one batch; never restart generation.
         For timing edits include per-page suggested duration and cumulative range in speaker_notes;
         reuse presentation_timing where available and keep the total within the user's budget.
         Publish exactly once then stop. If the requested edit is unsupported or overflows, report the limitation.
@@ -116,7 +124,8 @@ runtime:
     - publish_pptx_edit
     routing: >-
       For date, title, slide text, typography (font/size/bold/italic/underline/text color on whole deck/page/selected
-      text), chart palette/color changes, or speaker-note/timing changes on the selected native_pptx,
+      text), chart palette/color changes, move/resize/alignment/layer changes, adding/deleting objects,
+      list/table edits including row/column insertion/deletion, or speaker-note/timing changes on the selected native_pptx,
       including 修改第几页 and every-page detailed speeches,
       MUST delegate to edit_current_pptx with the complete user instruction. Its dedicated SubAgent performs
       inspection, writing and publication; main Chat must not write speeches or edit the file itself. Do
@@ -168,6 +177,10 @@ runtime:
     omit pages for the entire deck, pages=[1] for page one, text_scope=titles
     for all titles. For exact custom text use ppt_read_page_html and
     ppt_edit_page_html with set_style. These are deterministic sparse patches.
+    For local HTML list/table/object additions, deletions, row/column edits or width/height changes,
+    inspect each page with ppt_read_page_html then use ppt_edit_pages_html for the complete batch.
+    Pass source hashes and exact element IDs. Use set_style for explicit dimensions and adjust_style
+    for relative inline dimensions. Never generate pages for a supported local edit.
     NEVER call ppt_generate_pages, page-html, batch-page-html, style generation,
     outline generation or regenerate any page for font replacement, even when
     the user requests fonts across the whole deck. A font failure must be
@@ -472,6 +485,7 @@ tool_scripts:
       - ppt_read_page_outline
       - ppt_patch_page_outline
       - ppt_edit_page_html
+      - ppt_edit_pages_html
       - ppt_delete_page
       - ppt_preview_selection_edit
       - ppt_apply_selection_edit

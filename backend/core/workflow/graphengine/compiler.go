@@ -217,6 +217,28 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			))
 		}
 	}
+	actionNames := map[string]bool{}
+	actionNamePattern := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	for i, action := range graph.Runtime.CompletedActions {
+		valid := actionNamePattern.MatchString(action.Name) && !actionNames[action.Name] &&
+			action.Name != "advance_step" && action.Name != "advance_step_and_hand_off" && action.Name != "get_ready_steps" &&
+			knownMaterials[action.RequiresSlot] && strings.TrimSpace(action.Description) != "" &&
+			strings.TrimSpace(action.AgentType) != "" && strings.TrimSpace(action.Title) != "" &&
+			strings.TrimSpace(action.Routing) != "" && len(action.Tools) > 0 && len(action.OutputSlots) > 0
+		for _, values := range [][]string{action.Tools, action.OutputSlots, action.SessionParams} {
+			for _, value := range values {
+				valid = valid && strings.TrimSpace(value) != ""
+			}
+		}
+		if !valid {
+			result.Diagnostics = append(result.Diagnostics, materialDiag(
+				"E_RUNTIME_COMPLETED_ACTION_INVALID", "error",
+				fmt.Sprintf("workflow.yaml.runtime.completed_actions[%d]", i), action.RequiresSlot,
+				"completed actions require a unique safe name, declared artifact slot and complete editor contract",
+			))
+		}
+		actionNames[action.Name] = true
+	}
 	if stepID := strings.TrimSpace(graph.Runtime.CompletedEditStep); stepID != "" {
 		graph.Runtime.CompletedEditStep = stepID
 		if _, ok := workflowSteps[stepID]; !ok {

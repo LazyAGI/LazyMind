@@ -198,3 +198,15 @@ def test_extension_preserves_editor_failure_budget():
     with pytest.raises(ToolExecutionError, match='failed twice'):
         extension.on_tool_results(event, state)
     assert resolve_runtime_extension('research').on_tool_results is None
+
+
+def test_structure_batch_reaches_publisher_and_creates_single_receipt(context, monkeypatch):
+    edit = MagicMock(return_value={'status': 'ok', 'workflow_artifact': {'id': 'revision-2'}})
+    monkeypatch.setattr(pptx_edit.tools, 'edit_presentation', edit)
+    operations = [{'op': 'table_delete_row', 'page': 2, 'shape_id': 4, 'index': 3},
+                  {'op': 'resize', 'page': 1, 'shape_ids': [3, 4], 'dw': .5}]
+    pptx_edit.publish_pptx_edit('hash', structure_edits=operations)
+    assert edit.call_args.kwargs['structure_edits'] == operations
+    assert edit.call_args.kwargs['source_sha256'] == 'hash'
+    assert len(context.local_artifacts()) == 1
+    context.emit.assert_called_once()

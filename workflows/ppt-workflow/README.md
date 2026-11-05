@@ -205,6 +205,39 @@ deletion comes back: the rewriter keeps four columns and the generator invents a
 filler card. `ppt_patch_page_outline` warns about this, and both page prompts
 forbid padding a grid.
 
+## Batch partial edits
+
+After generation, requests such as “把第 2、3 页的卡片加宽”, “给这张表加一列负责人”,
+“删除第 4 行”, “把要点改为编号列表” use the existing presentation revision.
+No material collection, outline generation, or full slide generation runs.
+
+| Operation | Native PPTX | HTML deck |
+| --- | --- | --- |
+| Position and size | Move/resize selected shape IDs; exact boxes in inches | Explicit CSS size/position; relative numeric inline dimensions |
+| Layout | Align edges/centers, distribute, front/back, duplicate text/shapes/pictures | Scoped CSS changes and existing sibling insertion |
+| Add objects | Native text box, list, editable table | Text, ordered/unordered list, table inside an existing container |
+| List edits | Replace list; insert/change/delete items | Replace list; insert/change/delete items |
+| Table edits | Change cells; insert/delete rows and columns | Change cells; insert/delete rows and columns |
+| Delete objects | Delete selected shape IDs | Delete selected element IDs/groups |
+
+`inspect_current_pptx` exposes shape IDs, boxes, table values and paragraphs.
+`publish_pptx_edit(structure_edits=[...])` applies ordered operations in memory and
+publishes one revision after validating the inspected source hash. Untouched ZIP
+parts retain their bytes, including notes and font resources. Row/column insertion
+keeps the table box and redistributes dimensions; existing cell styles are reused.
+Merged tables reject structural edits. Removing the final row/column/item requires
+an explicit whole-object deletion. New content may need a preview check for fit.
+
+For HTML, inspect each page with `ppt_read_page_html`, then submit
+`ppt_edit_pages_html(deck_dir, edits_json=[{page,expected_sha256,ops}])`.
+A single operation may use `els` for several targets. Every page is validated
+before writing; publication failure restores local originals and attempts to
+republish them. Preview rollback failures are reported explicitly. This is
+compensating recovery, not a server transaction across multiple page revisions.
+Table/list indices are 1-based in the sequentially edited state. Delete multiple
+indices in descending order. Preserve the outline when content changes so a later
+user-requested redesign can reuse the revised content.
+
 ## Font replacement and portable exports
 
 Font-only follow-ups patch existing content; they never call page generation,

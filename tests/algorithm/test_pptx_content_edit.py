@@ -97,7 +97,7 @@ def test_stale_source_and_text_rejected(deck, tmp_path):
 
 
 @pytest.mark.parametrize('id_key', ['id', 'artifact_id'])
-@pytest.mark.parametrize('edit_kind', ['notes', 'layout', 'combined'])
+@pytest.mark.parametrize('edit_kind', ['notes', 'layout', 'structure', 'combined'])
 def test_generated_deck_tool_publishes_selected_revision_with_cas(deck, tmp_path, monkeypatch, id_key, edit_kind):
     from lazymind.chat.engine.subagent import tools
     from lazymind.chat.engine.tools.file_resources.attachment_edit import AttachmentEditDraft
@@ -120,6 +120,11 @@ def test_generated_deck_tool_publishes_selected_revision_with_cas(deck, tmp_path
         shape = info['pages'][1]['layout']['shapes'][0]
         edits['layout_edits'] = [{'page': 2, 'shape_id': shape['shape_id'],
                                   'expected_box': shape['box'], 'box': [1, 1, 8, 1]}]
+    if edit_kind in ('structure', 'combined'):
+        edits['structure_edits'] = [
+            {'op': 'add_table', 'page': 2, 'box': [1, 3, 5, 2], 'rows': [['Name', 'Value'], ['A', '10']]},
+            {'op': 'add_list', 'page': 1, 'box': [1, 4, 4, 2], 'values': ['One', 'Two']},
+        ]
     result = tools.edit_presentation('native_pptx', 'edit_content', workflow_session_id='session',
                                      source_sha256=info['sha256'], **edits)
     args, kwargs = client.patch_artifact.call_args
@@ -134,6 +139,11 @@ def test_generated_deck_tool_publishes_selected_revision_with_cas(deck, tmp_path
         assert result['updated_layout_pages'] == [2]
     if edit_kind in ('notes', 'combined'):
         assert revised.slides[1].notes_slide.notes_text_frame.text == 'Detailed notes'
+    if edit_kind in ('structure', 'combined'):
+        assert revised.slides[1].shapes[-1].table.cell(1, 1).text == '10'
+        assert revised.slides[0].shapes[-1].text == 'One\nTwo'
+        assert result['updated_structure_pages'] == [1, 2]
+    client.patch_artifact.assert_called_once()
     assert result['workflow_artifact']['revision'] == 6
     assert 'value' not in result['workflow_artifact']
     assert 'NEVER_EXPOSE_FILE_BYTES' not in str(result)

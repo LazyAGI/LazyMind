@@ -120,7 +120,8 @@ def publish_pptx_edit(source_sha256: str,
                       font_filename: Optional[str] = None,
                       style_edits: Optional[List[StyleEdit]] = None,
                       chart_edits: Optional[List[Dict[str, Any]]] = None,
-                      layout_edits: Optional[List[LayoutEdit]] = None) -> Dict[str, Any]:
+                      layout_edits: Optional[List[LayoutEdit]] = None,
+                      structure_edits: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Publish sparse text edits and/or notes once, then finish the task.
 
     Use the inspected source_sha256. text_edits: [{id,expected_text,text}],
@@ -150,6 +151,26 @@ def publish_pptx_edit(source_sha256: str,
     shapes; boxes are [x,y,width,height] in inches. Copy expected_box from layout.
     Use this for local layout changes instead of rebuilding the deck. Top-level
     groups move/resize as a unit. Content and all unmentioned shapes are retained.
+    structure_edits is an ordered batch, published atomically. Every op has page.
+    Existing targets use inspected shape_id or shape_ids (batch). Supported ops:
+    add_text(box,text,font_size_pt?), add_list(box,values,ordered?,font_size_pt?),
+    add_table(box,rows,font_size_pt?) create editable native objects. box uses inches,
+    rows is a rectangular list of lists of strings. values is a list of strings.
+    delete_shape; duplicate_shape(box); bring_to_front; send_to_back;
+    resize(dw,dh) changes width/height by inches, move(dx,dy) offsets coordinates;
+    align(shape_ids,edge=left|right|top|bottom|center|middle),
+    distribute(shape_ids,axis=horizontal|vertical) needs at least three shapes.
+    set_list(values,ordered?), list_insert_item(index,text), list_set_item(index,text),
+    list_delete_item(index); table_set_cell(row,column,text),
+    table_insert_row(index,values), table_delete_row(index),
+    table_insert_column(index,values), table_delete_column(index).
+    All row/column/item indices are 1-based in the sequentially edited state;
+    insertion index length+1 appends. Delete several indices from largest first.
+    Tables retain their box; insertion redistributes space and preserves cell styles.
+    Merged tables reject structural operations; deleting the last row/column/item
+    requires explicit delete_shape. No chart/image regeneration. Inspect all target
+    pages before publishing one batch. Example: [{op:'resize',page:1,shape_id:4,dw:1},
+    {op:'table_insert_row',page:2,shape_id:6,index:3,values:['A','B']}].
     """
     session = _session()
     ctx = require_context()
@@ -165,6 +186,7 @@ def publish_pptx_edit(source_sha256: str,
         style_edits=style_edits,
         chart_edits=chart_edits,
         layout_edits=layout_edits,
+        structure_edits=structure_edits,
     )
     if result.get('status') != 'ok' or not result.get('workflow_artifact'):
         raise ToolExecutionError('PPTX publication did not return a successful artifact revision')

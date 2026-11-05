@@ -1754,7 +1754,23 @@ steps:
         ppt_find_deck() → ppt_delete_page(deck_dir, page=N)
       Stop after delete. Do NOT re-run outline/style/batch-page-html.
 
-      ### C) Single-page content edit
+      ### C) Local content and structure edits (one or many pages)
+      Width/height/position, text/list/table additions and deletions, row/column
+      insertion/deletion and cell edits use deterministic patches. They NEVER
+      require page generation. Inspect each page with ppt_read_page_html, then
+      call ppt_edit_pages_html with [{page,expected_sha256,ops}]. Use set_style
+      for explicit dimensions, adjust_style for relative inline dimensions;
+      add_text/add_list/add_table append inside an inspected container. Use
+      set_list/list_insert_item/list_set_item/list_delete_item and
+      table_set_cell/table_insert_row/table_delete_row/table_insert_column/
+      table_delete_column for structured edits. All indices are 1-based in the
+      sequentially edited state; delete several indices descending. Use delete_node
+      for the complete object. els:[id1,id2] applies one operation to multiple
+      inspected elements. Validate the whole batch; stop after automatic publication.
+      Preserve all unmentioned pages and content. Unsupported targets must be
+      reported, never silently regenerated.
+
+      Other design changes:
       Visual-only requests such as "第3页留白少一点", "页面紧凑些", "整体改成
       米白和橄榄绿，不要蓝色" MUST use ppt_find_deck then ppt_restyle_pages.
       Simple palette-only changes such as 白底黑字 or 黑底白字 MUST instead call
@@ -1795,8 +1811,8 @@ steps:
            ppt_patch_page_outline(deck_dir, page=N, ops_json=[...])
          Do not run page-html after this when step 3 already updated the HTML.
       5. Use ppt_run_stage(deck_dir, stage='page-html', page=N) ONLY when the user
-         explicitly requests a structural/layout redesign, a new visual block, or
-         the existing HTML has no addressable element for the requested content.
+         explicitly requests a new design. Adding a text/list/table block or
+         changing geometry uses the structured operations above.
          Pass edit_instruction=<the full current change request> for an existing
          page. Otherwise the renderer receives only the stale brief and style.
       6. ppt_edit_page_html and page-html auto-publish. Stop immediately afterward:
@@ -1948,6 +1964,7 @@ steps:
       - ppt_read_page_outline
       - ppt_patch_page_outline
       - ppt_edit_page_html
+      - ppt_edit_pages_html
       - ppt_delete_page
       - ppt_register_material_images
       - ppt_collect_kb_images

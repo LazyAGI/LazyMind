@@ -1109,3 +1109,56 @@ func TestCompileUserVisibilityDoesNotChangeExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletedArtifactEditorSurvivesCompilationAndSerialization(t *testing.T) {
+	declaration := `
+runtime:
+  completed_actions:
+    - name: edit_current_pptx
+      requires_slot: final
+      description: Edit the existing artifact.
+      agent_type: pptx_edit
+      title: Edit
+      routing: Apply a sparse patch.
+      session_params: [_pptx_edit_session_id]
+      params:
+        tools_only: true
+        instruction: Use structure_edits.
+        terminal_tools: [publish_pptx_edit]
+      tools: [inspect_current_pptx, publish_pptx_edit]
+      output_slots: [receipt]
+`
+	result := Compile(validWorkflow+declaration, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("%+v", result.Diagnostics)
+	}
+	data, err := json.Marshal(result.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded CompiledStateGraph
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Runtime.CompletedActions) != 1 {
+		t.Fatal("artifact editor was lost", string(data))
+	}
+	editor := decoded.Runtime.CompletedActions[0]
+	if editor.Params["instruction"] != "Use structure_edits." || editor.SessionParams[0] != "_pptx_edit_session_id" ||
+		editor.Tools[1] != "publish_pptx_edit" || editor.OutputSlots[0] != "receipt" {
+		t.Fatalf("incomplete editor contract: %+v", editor)
+	}
+	if (RuntimePolicy{CompletedActions: decoded.Runtime.CompletedActions}).IsZero() {
+		t.Fatal("editor-only runtime policy must be retained")
+	}
+	for _, invalid := range []string{
+		strings.Replace(declaration, "requires_slot: final", "requires_slot: missing", 1),
+		strings.Replace(declaration, "name: edit_current_pptx", "name: advance_step", 1),
+		strings.Replace(declaration, "tools: [inspect_current_pptx, publish_pptx_edit]", "tools: []", 1),
+	} {
+		rejected := Compile(validWorkflow+invalid, validState, "", ProfilePublish)
+		if rejected.Valid {
+			t.Fatal("invalid editor contract accepted")
+		}
+	}
+}

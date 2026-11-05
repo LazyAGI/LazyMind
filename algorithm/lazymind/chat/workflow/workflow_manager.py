@@ -674,7 +674,8 @@ def _safe_session_tools(
             raise ValueError('HTML slides require their scoped page-editing tool')
         if not old_text or text.count(old_text) != 1:
             raise ValueError('old_text must match exactly once; read the current artifact and retry')
-        revised = normalize_generated_markdown(text.replace(old_text, new_text, 1))
+        # Normalize only the replacement; unrelated document sections are immutable.
+        revised = text.replace(old_text, normalize_generated_markdown(new_text), 1)
         revised_value = {**value, field: revised} if field else revised
         return artifact_output(toolkit.patch_artifact(
             artifact_id, int(current.get('revision') or artifact.get('revision') or 0),

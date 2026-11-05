@@ -1841,6 +1841,7 @@ def edit_presentation(
     template_filename: Optional[str] = None,
     template_turn: Optional[int] = None,
     layout_edits: Optional[List[Dict[str, Any]]] = None,
+    structure_edits: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Inspect or directly edit an uploaded PPTX without starting a Workflow.
 
@@ -1865,6 +1866,8 @@ def edit_presentation(
     layout_edits: [{page,shape_id,expected_box,box}] moves/resizes inspected native
     shapes, using inches and geometry from inspect_content.layout. It preserves
     all unmentioned objects and package parts; do not regenerate for local edits.
+    structure_edits applies ordered native shape/list/table operations (see publish_pptx_edit).
+    Each operation has page and inspected shape_id or shape_ids; additions use box in inches.
     chart_edits=[{page,chart_index,palette}] changes only an inspected chart's colors;
     palette is blue/teal/orange/purple or distinct #RRGGBB colors. Values stay unchanged.
     import_font imports an uploaded TTF/OTF named by filename into the shared font library.
@@ -1997,9 +2000,9 @@ def edit_presentation(
                                         pages, slot_ids, text_scope, allow_font_download))
                 os.replace(font_output, candidate)
             if not candidate.exists():
-                if not style_edits and not layout_edits:
+                if not style_edits and not layout_edits and not structure_edits:
                     raise ToolExecutionError(
-                        'Provide text_edits, speaker_notes, target_font, style_edits or layout_edits')
+                        'Provide text_edits, speaker_notes, target_font, style_edits, layout_edits or structure_edits')
             if style_edits is not None:
                 from lazymind.chat.engine.tools.file_resources.pptx_font_edit import edit_style_batch
                 if text_edits and any(isinstance(e, Mapping) and e.get('slot_ids') for e in style_edits):
@@ -2021,6 +2024,14 @@ def edit_presentation(
                 stats.update(apply_layout_repairs(layout_source, layout_output, {'moves': layout_edits},
                                                   source_sha256=layout_hash))
                 os.replace(layout_output, candidate)
+            if structure_edits is not None:
+                from lazymind.chat.engine.tools.file_resources.pptx_structure_edit import edit_structure
+                structure_source = candidate if candidate.exists() else Path(effective)
+                structure_hash = hashlib.sha256(structure_source.read_bytes()).hexdigest() if (
+                    candidate.exists()) else source_sha256
+                structure_output = Path(temporary) / 'structure.pptx'
+                stats.update(edit_structure(structure_source, structure_output, structure_hash, structure_edits))
+                os.replace(structure_output, candidate)
             if native_artifact is not None:
                 import base64
                 raw = candidate.read_bytes()

@@ -702,10 +702,13 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
 		}
 		if req.Operation == "retry" && req.RetryOrigin == "automatic" {
+			before := targets[0].UserInput
 			if err := inheritAutomaticRetryIntent(ctx, tx, session.ID, &targets[0]); err != nil {
 				return err
 			}
-			currentInputs[targets[0].TaskID] = targets[0].UserInput
+			if targets[0].UserInput != before {
+				currentInputs[targets[0].TaskID] = targets[0].UserInput
+			}
 		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
 		if req.Operation == "retry" || req.Operation == "rewind" {

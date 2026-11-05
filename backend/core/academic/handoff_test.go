@@ -206,14 +206,14 @@ func TestPaperTaskHandoffIncludesApplicableNotesAndFreezesInput(t *testing.T) {
 	}
 }
 
-func TestOtherHandoffRoutesKeepMockWorkflows(t *testing.T) {
+func TestPPTHandoffRoutesUseNativeWorkflow(t *testing.T) {
 	db := paperFixture(t)
 	for _, tc := range []struct {
 		kind, workflow  string
 		reflectionFirst bool
-	}{{"ppt", "paper_workflow_mock", false}, {"ppt", "paper_ppt_with_reflection_mock", true}} {
+	}{{"ppt", "ppt-workflow", false}, {"ppt", "ppt-workflow", true}} {
 		input := ReviewWorkflowInput{UserInstruction: "原始要求", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", Title: "论文 A", SourceDocumentID: "a"}, IsSeed: true}}}
-		handoff, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", "", 0, tc.kind, tc.workflow+tc.kind, input, nil, tc.reflectionFirst)
+		handoff, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", "", 0, tc.kind, fmt.Sprintf("%s-%t", tc.kind, tc.reflectionFirst), input, nil, tc.reflectionFirst)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,8 +223,8 @@ func TestOtherHandoffRoutesKeepMockWorkflows(t *testing.T) {
 		}
 		var payload map[string]string
 		_ = json.Unmarshal(job.PayloadJSON, &payload)
-		if payload["workflow_id"] != tc.workflow || !strings.Contains(academicChatContext(t.Context(), db.DB, "u", handoff.ConversationID), "生成能力待对接") {
-			t.Fatal("unrelated task route changed", tc, payload)
+		if payload["workflow_id"] != tc.workflow || academicChatContext(t.Context(), db.DB, "u", handoff.ConversationID) != "" {
+			t.Fatal("PPT must launch the real workflow with ordinary attachments", tc, payload)
 		}
 	}
 }

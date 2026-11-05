@@ -86,7 +86,14 @@ def test_mid_workflow_questions_only_enabled_in_approval_mode(fixture, mode, ent
                 }],
             )
             lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
-            tools = {tool.__name__: tool for tool in contribution.tools if callable(tool)}
+            pending = list(contribution.tools)
+            tools = {}
+            while pending:
+                tool = pending.pop(0)
+                if isinstance(tool, dict):
+                    pending.extend(tool.get('tools') or [])
+                elif callable(tool):
+                    tools[tool.__name__] = tool
             assert ('answer_workflow_questions' in tools) is (mode == 'dynamic')
             if entry != 'active':
                 tools['trigger_ppt_workflow']()

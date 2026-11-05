@@ -3126,7 +3126,19 @@ def _parse_ops_payload(
 def _apply_outline_ops(page: dict, ops: list[dict]) -> list[str]:
     """Mutate one outline page in place. Raises ValueError on an invalid op."""
     applied: list[str] = []
+    expanded = []
     for op in ops:
+        if 'els' in op:
+            if (not isinstance(op['els'], list) or not op['els']
+                    or any(not isinstance(el, str) or not el for el in op['els'])
+                    or len(op['els']) != len(set(op['els']))):
+                raise ValueError('els must contain unique inspected element IDs')
+            expanded.extend({**{k: v for k, v in op.items() if k != 'els'}, 'el': el} for el in op['els'])
+        else:
+            expanded.append(op)
+    if len(expanded) > 200:
+        raise ValueError('At most 200 operations per page')
+    for op in expanded:
         name = _coerce_str(op.get('op')).lower().replace('-', '_')
         if name == 'delete_bullet':
             bullets = _page_list(page, 'bullets')
@@ -3213,7 +3225,19 @@ def _stale_count_hints(page: dict, ops: list[dict]) -> list[str]:
     """Warn when visual_hints still states a count the page may no longer match."""
     changed_counts = False
     hints_updated = False
+    expanded = []
     for op in ops:
+        if 'els' in op:
+            if (not isinstance(op['els'], list) or not op['els']
+                    or any(not isinstance(el, str) or not el for el in op['els'])
+                    or len(op['els']) != len(set(op['els']))):
+                raise ValueError('els must contain unique inspected element IDs')
+            expanded.extend({**{k: v for k, v in op.items() if k != 'els'}, 'el': el} for el in op['els'])
+        else:
+            expanded.append(op)
+    if len(expanded) > 200:
+        raise ValueError('At most 200 operations per page')
+    for op in expanded:
         name = _coerce_str(op.get('op')).lower().replace('-', '_')
         if name in {'delete_bullet', 'insert_bullet', 'set_bullets',
                     'delete_data_point', 'set_data_points'}:
@@ -3962,7 +3986,12 @@ _HTML_EDIT_OPS_HELP = (
     'Valid ops: delete_node(el|group|class|match, index?), '
     'replace_text(el|match, value, all?), '
     'replace_text_segments(el, values), set_style(el, styles), '
-    'insert_sibling(el, values, position=before|after).'
+    'insert_sibling(el, values, position=before|after), '
+    'add_text(el,text,new_el?), add_list(el,values,ordered?,new_el?), add_table(el,rows,new_el?), '
+    'set_list(el,values,ordered?), list_insert_item/list_set_item(el,index,text), '
+    'list_delete_item(el,index), table_set_cell(el,row,column,text), '
+    'table_insert_row/table_insert_column(el,index,values), table_delete_row/table_delete_column(el,index), '
+    'adjust_style(el,deltas). Indices are 1-based; deletion is from highest index first.'
 )
 
 _SAFE_STYLE_PROPERTY_RE = re.compile(r'^(?:--)?[a-z][a-z0-9-]{0,63}$')
@@ -4208,13 +4237,20 @@ def _element_inventory(tree: _HtmlTree) -> dict[str, Any]:
     """
     elements = [
         {
-            'el': node['el'],
+            'el': node['el'] or node['id'],
             'group': node['group'] or None,
             'tag': node['tag'],
             'classes': node['classes'] or None,
             'text': tree.node_text(index).strip()[:80],
+            'inline_style': node['attrs'].get('style') or None,
+            **({'items': [tree.node_text(i).strip() for i in node['children']
+                          if tree.nodes[i]['tag'] == 'li']} if node['tag'] in ('ul', 'ol') else {}),
+            **({'rows': [[tree.node_text(c).strip() for c in row['children']
+                          if tree.nodes[c]['tag'] in ('td', 'th')]
+                         for i, row in enumerate(tree.nodes)
+                         if row['tag'] == 'tr' and index in tree.ancestors(i)]} if node['tag'] == 'table' else {}),
         }
-        for index, node in enumerate(tree.nodes) if node['el']
+        for index, node in enumerate(tree.nodes) if node['el'] or node['id']
     ]
     groups: dict[str, list[str]] = {}
     for item in elements:
@@ -4275,7 +4311,7 @@ def _resolve_el(tree: _HtmlTree, el: str, op: dict) -> list[int]:
     or deleting every match would silently hit unrelated content, so require an
     index instead.
     """
-    matches = [i for i, node in enumerate(tree.nodes) if node['el'] == el]
+    matches = [i for i, node in enumerate(tree.nodes) if el and (node['el'] == el or node['id'] == el)]
     if not matches:
         raise ValueError(f'no element has data-el="{el}". Known: {_known_element_ids(tree)}')
     if len(matches) == 1:
@@ -4748,6 +4784,14 @@ def _insert_sibling(html: str, tree: _HtmlTree, op: dict) -> tuple[str, str]:
     return html, ' / '.join(values)
 
 
+def _html_structure_module():
+    library = str((_RUNTIME / 'lib').resolve())
+    if library not in sys.path:
+        sys.path.insert(0, library)
+    import html_structure
+    return html_structure
+
+
 def _apply_html_ops(html: str, ops: list[dict]) -> tuple[str, list[str], list[str], list[str]]:
     """Apply deterministic edits to one page's HTML. Raises ValueError on bad ops.
 
@@ -4756,9 +4800,24 @@ def _apply_html_ops(html: str, ops: list[dict]) -> tuple[str, list[str], list[st
     applied: list[str] = []
     notes: list[str] = []
     removed_texts: list[str] = []
+    expanded = []
     for op in ops:
+        if 'els' in op:
+            if (not isinstance(op['els'], list) or not op['els']
+                    or any(not isinstance(el, str) or not el for el in op['els'])
+                    or len(op['els']) != len(set(op['els']))):
+                raise ValueError('els must contain unique inspected element IDs')
+            expanded.extend({**{k: v for k, v in op.items() if k != 'els'}, 'el': el} for el in op['els'])
+        else:
+            expanded.append(op)
+    if len(expanded) > 200:
+        raise ValueError('At most 200 operations per page')
+    for op in expanded:
         name = _coerce_str(op.get('op')).lower().replace('-', '_')
-        if name in {'replace_academic_element', 'set_image_source'}:
+        if name in _html_structure_module().OPERATIONS:
+            html = _html_structure_module().apply(html, {**op, 'op': name}, _HtmlTree, _resolve_el, _set_inline_styles)
+            applied.append(f'{name}: {op.get("el")}')
+        elif name in {'replace_academic_element', 'set_image_source'}:
             tree = _HtmlTree(html)
             target = _resolve_el(tree, _coerce_str(op.get('el')), op)[0]
             node = tree.nodes[target]
@@ -8454,11 +8513,22 @@ def _reject_font_regeneration(deck: Path, instruction: str = '') -> None:
             instruction = _coerce_str(params.get('current_user_input'))
         except ToolExecutionError:
             return
-    if not re.search(r'字体|font(?:[ -]?family)?', instruction, re.I):
-        return
     positive = re.sub(r'(?:不要|不用|不需要|不|无需).{0,4}(?:重新生成|重生成|生成|重画|重排|修改内容|改内容|改布局)', '', instruction)
     positive = re.sub(r"(?:do not|don't|without|no)\s+(?:regenerate|regeneration|redesign|rewrite)",
                       '', positive, flags=re.I)
+    redesign = re.search(r'重新生成|重生成|重画|重排|重写|regenerate|redesign|rewrite', positive, re.I)
+    new_page = re.search(r'(?:新增|添加|插入|加).{0,4}页|(?:add|insert).{0,12}slide', positive, re.I)
+    local_structure = re.search(
+        r'加宽|加高|缩窄|变窄|等距排列|左对齐|右对齐|'
+        r'(?:插入|添加|新增|删除|移除|删掉|修改|更改|加).{0,8}(?:行|列|列表|表格|文本框|要点)|'
+        r'(?:insert|add|delete|remove|resize|widen).{0,20}(?:row|column|table|list|text ?box|shape)',
+        positive, re.I)
+    if local_structure and not redesign and not new_page:
+        raise ToolExecutionError(
+            'Local structure edits must use ppt_edit_pages_html or publish_pptx_edit(structure_edits). '
+            'No generation stage may run; inspect the current elements and patch only requested targets.')
+    if not re.search(r'字体|font(?:[ -]?family)?', instruction, re.I):
+        return
     if re.search(r'重新生成|重生成|重画|重排|新增|增加|删除|改写|重写|regenerate|redesign|rewrite', positive, re.I):
         return
     raise ToolExecutionError(
@@ -9302,6 +9372,82 @@ def ppt_patch_page_outline(
     })
 
 
+def ppt_edit_pages_html(deck_dir: str, edits_json: Union[str, list]) -> dict:
+    """Apply a batch of local page edits without generating any page.
+
+    edits_json is [{page,expected_sha256,ops}]. Inspect each page first using
+    ppt_read_page_html. Each page occurs once. ops accepts everything supported
+    by ppt_edit_page_html; an operation may use els:[id1,id2] for several targets.
+    Set explicit width/height/left/top with set_style; relative numeric inline
+    changes use adjust_style(deltas). Add/edit/delete lists, tables and row/columns
+    with the structured ops. Indices are 1-based in the edited state.
+    Validate the entire batch before any write. Publication failure restores
+    local pages and attempts to republish originals; rollback errors are explicit.
+    Untargeted pages retain exact bytes. No LLM redraw or pipeline restart.
+    """
+    tool = 'ppt_edit_pages_html'
+    originals, prepared = {}, {}
+    try:
+        deck = _resolve_deck_dir(deck_dir)
+        edits = json.loads(edits_json) if isinstance(edits_json, str) else edits_json
+        if not isinstance(edits, list) or not 1 <= len(edits) <= 100:
+            raise ValueError('Provide 1–100 page edits')
+        details = []
+        for edit in edits:
+            if not isinstance(edit, dict):
+                raise ValueError('Each edit must be an object')
+            page = edit.get('page')
+            if type(page) is not int or page < 1 or page in originals:
+                raise ValueError('Each page must be a unique positive integer')
+            original = _page_html_path(deck, page).read_text(encoding='utf-8')
+            if edit.get('expected_sha256') != _html_sha256(original):
+                raise ValueError(f'Page {page} changed; inspect again before editing')
+            ops = _parse_ops_payload(edit.get('ops'), _HTML_EDIT_OPS_HELP)
+            updated, applied, notes, removed = _apply_html_ops(original, ops)
+            _validate_local_html_edit(original, updated)
+            originals[page], prepared[page] = original, updated
+            details.append({'page': page, 'applied': applied, 'layout_notes': notes,
+                            'outline_stale_text': _outline_still_has(deck, page, removed),
+                            'html_sha256_after': _html_sha256(updated)})
+    except (OSError, ValueError, TypeError) as exc:
+        return _tool_error(tool, f'Batch rejected; pages unchanged: {exc}')
+    touched = []
+    try:
+        # Recheck all sources immediately before the first write.
+        for page, original in originals.items():
+            if _page_html_path(deck, page).read_text(encoding='utf-8') != original:
+                raise ValueError(f'Page {page} changed while preparing the batch')
+        for page, updated in prepared.items():
+            path = _page_html_path(deck, page)
+            temporary = path.with_name(path.name + '.batch.tmp')
+            temporary.write_text(updated, encoding='utf-8')
+            os.replace(temporary, path)
+            touched.append(page)
+        published = _publish_pages_from_disk(deck, list(prepared), with_notes=True)
+        if published.get('failed') or published.get('failed_count') or published.get('published_count') != len(prepared):
+            raise ValueError(f'Publication failed: {published.get("failed")}')
+    except Exception as exc:
+        failures = []
+        for page in touched:
+            try:
+                path = _page_html_path(deck, page)
+                temporary = path.with_name(path.name + '.rollback.tmp')
+                temporary.write_text(originals[page], encoding='utf-8')
+                os.replace(temporary, path)
+            except OSError as rollback_error:
+                failures.append(f'Page {page}: {rollback_error}')
+        if touched and not failures:
+            try:
+                restored = _publish_pages_from_disk(deck, touched, with_notes=True)
+                if restored.get('failed') or restored.get('published_count') != len(touched):
+                    failures.append(f'Preview restoration: {restored.get("failed")}')
+            except Exception as rollback_error:
+                failures.append(str(rollback_error))
+        return _tool_error(tool, f'Batch failed: {exc}; rollback errors: {failures or "none"}')
+    return _tool_success(tool, {'pages': details, 'published_count': len(prepared),
+                                'edit_mode': 'sparse_patch', 'regenerated_pages': []})
+
+
 def ppt_edit_page_html(
     deck_dir: str,
     page: int,
@@ -9316,8 +9462,8 @@ def ppt_edit_page_html(
     so nothing else can drift and no filler item can appear. The page is
     republished automatically, so the UI updates.
 
-    Prefer ppt_run_stage(stage='page-html') instead when the page genuinely needs
-    redrawing (new layout, added content, "重画好看点").
+    Added text, lists and tables use structured operations; no redraw is needed.
+    Redraw only when the user explicitly requests a new design.
 
     Call ppt_read_page_html immediately before this tool to get the element list,
     pick an `el` id, and pass its html_sha256 as expected_sha256.
@@ -9353,6 +9499,17 @@ def ppt_edit_page_html(
             the row keeps no empty cell. match/class only ever address rendered
             content, never CSS, JS or attributes. Page structure
             (html/body/.wrapper/#bg/#ct) is refused.
+
+    Structural ops: add_text(el,text,new_el?), add_list(el,values,ordered?,new_el?),
+    add_table(el,rows,new_el?) append inside an inspected container. New IDs allow
+    subsequent set_style for size/position/colors. Existing lists support set_list,
+    list_insert_item/list_set_item(index,text), list_delete_item(index). Tables
+    support table_set_cell(row,column,text), table_insert_row/table_insert_column
+    (index,values), table_delete_row/table_delete_column(index). All indices are
+    1-based; length+1 appends, delete highest indices first. delete_node removes
+    the whole object. adjust_style(el,deltas) changes numeric inline dimensions
+    by a relative amount in the existing unit; use set_style for explicit sizes.
+    For several pages use ppt_edit_pages_html, validating all pages before writing.
 
     Returns:
         applied edits, layout notes, warnings, bytes before/after, publish result.

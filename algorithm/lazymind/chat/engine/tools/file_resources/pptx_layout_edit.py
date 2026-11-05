@@ -34,6 +34,12 @@ def layout_snapshot(source: Path, pages=None) -> list[dict]:
                            'kind': str(shape.shape_type),
                            'text': shape.text[:200] if shape.has_text_frame else '',
                            'box': [round(value / 914400, 6) for value in values]})
+            if shape.has_table:
+                shapes[-1]['table'] = {'rows': [[cell.text for cell in row.cells] for row in shape.table.rows],
+                                       'merged': any(cell.is_merge_origin or cell.is_spanned
+                                                     for row in shape.table.rows for cell in row.cells)}
+            if shape.has_text_frame:
+                shapes[-1]['paragraphs'] = [paragraph.text for paragraph in shape.text_frame.paragraphs]
         result.append({'page': number, 'size': [prs.slide_width / 914400, prs.slide_height / 914400],
                        'shapes': shapes})
     return result
