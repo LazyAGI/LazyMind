@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import katex from 'katex';
 import type {PdfIRBlock, PdfIRTarget} from '@/modules/knowledge/api/pdfIR';
-import {useFormulaExplanation, type FormulaEvidence} from '@/modules/knowledge/api/formulaExplanation';
+import {useFormulaExplanation, type FormulaEvidence, type FormulaExplanation} from '@/modules/knowledge/api/formulaExplanation';
 import {InteractiveFormula} from './InteractiveFormula';
 import {FormulaMathText} from './FormulaMathText';
 import {formulaNumber} from './pdfFormulaReferences';
@@ -10,14 +10,15 @@ import {interactiveFormulaSymbols} from './interactiveFormulaSymbols';
 import './PdfFormulaStudy.css';
 interface Props {
  target:PdfIRTarget; sourceKey:string; blocks:PdfIRBlock[]; selected?:PdfIRBlock; autoExplain?:boolean; compact?:boolean;
+ initialExplanation?:FormulaExplanation;onExplanationChange?:(data:FormulaExplanation)=>void;
  onSelect:(block:PdfIRBlock)=>void; onNavigate:(evidence:FormulaEvidence)=>void;
  onReturn:()=>void; canReturn:boolean; onClose:()=>void;
 }
-export function PdfFormulaStudy({target,sourceKey,blocks,selected,autoExplain=false,compact=false,onSelect,onNavigate,onReturn,canReturn,onClose}:Props){
+export function PdfFormulaStudy({target,sourceKey,blocks,selected,autoExplain=false,compact=false,initialExplanation,onExplanationChange,onSelect,onNavigate,onReturn,canReturn,onClose}:Props){
  const {t,i18n}=useTranslation();
  const panel=useRef<HTMLElement>(null);
  useEffect(()=>{panel.current?.focus({preventScroll:true});},[]);
- const explanation=useFormulaExplanation(target,sourceKey,selected?.id,autoExplain);
+ const explanation=useFormulaExplanation(target,sourceKey,selected?.id,autoExplain,initialExplanation,onExplanationChange);
  const data=explanation.data;
  const [elapsed,setElapsed]=useState(0);
  useEffect(()=>{

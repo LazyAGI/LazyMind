@@ -124,3 +124,34 @@
  .pdf-reader-header.has-overview>.pdf-reader-view-toggle{grid-column:2;grid-row:1}
  .pdf-reader-header.has-overview .pdf-reader-header-end{grid-column:1 / -1;grid-row:2;justify-self:end}
 }
+
+/* Compact page and zoom controls, with editing only when the value is clicked. */
+.pdf-reader-workspace .pdf-reader-header{padding-inline:12px}
+.pdf-reader-header .pdf-reader-header-end{gap:3px}
+.pdf-reader-header-end>.pdf-reader-tools{display:flex;align-items:center;gap:8px;white-space:nowrap;flex-wrap:nowrap;flex-basis:auto;order:0;border:0;padding:0}
+.pdf-reader-header-end .pdf-reader-control-group{display:inline-flex;align-items:center;flex:none;gap:1px;height:32px;padding:1px;border:1px solid #e7e9ec;border-radius:999px;background:#f7f8fa;white-space:nowrap}
+.pdf-reader-modebar .pdf-reader-control-group>button{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:28px;min-width:26px;padding:0;border:0;border-radius:999px;background:transparent;color:#586575;font-size:12px;line-height:1}
+.pdf-reader-modebar .pdf-reader-control-group>button:hover:not(:disabled){background:#fff;color:var(--paper-accent,var(--color-primary,#006ae6));box-shadow:0 1px 5px #1f355012}
+.pdf-reader-modebar .pdf-reader-control-group>button:disabled{background:transparent;opacity:.32}
+.pdf-reader-modebar .pdf-reader-control-group>.pdf-reader-page-value{width:auto;min-width:43px;gap:3px;padding:0 2px;color:#27364b;font-size:13px;line-height:1}
+.pdf-reader-page-value strong{font-weight:650;font-variant-numeric:tabular-nums}
+.pdf-reader-page-total{color:#8792a0;font-size:12px;font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pdf-reader-page-editor{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:43px;height:28px;padding:0 2px;border-radius:999px;background:#fff;color:#27364b}
+.pdf-reader-page-input{width:27px;min-width:0;height:24px;min-height:0;padding:0;border:0;outline:0;background:transparent;color:inherit;text-align:right;font-size:13px;font-weight:650;font-variant-numeric:tabular-nums;appearance:textfield}
+.pdf-reader-page-input::-webkit-inner-spin-button,.pdf-reader-page-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.pdf-reader-modebar .pdf-reader-control-group>.pdf-reader-zoom-value{width:auto;min-width:40px;padding:0 1px;color:#27364b;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.pdf-reader-zoom-editor{display:inline-flex;align-items:center;gap:1px;height:28px;padding:0 5px;border-radius:999px;background:#fff;color:#27364b}
+.pdf-reader-modebar .pdf-reader-zoom-editor input{width:34px;min-width:0;height:24px;padding:0;border:0;outline:0;background:transparent;color:inherit;text-align:right;font:inherit;appearance:textfield}
+.pdf-reader-zoom-editor input::-webkit-inner-spin-button,.pdf-reader-zoom-editor input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.pdf-reader-page-editor:focus-within,.pdf-reader-zoom-editor:focus-within{box-shadow:inset 0 0 0 1px var(--paper-accent,var(--color-primary,#006ae6))}
+
+.pdf-reader-header-end>.pdf-reader-hand-trigger,.pdf-reader-header-end>.pdf-reader-pin-trigger{display:inline-flex;align-items:center;justify-content:center;flex:0 0 30px;width:30px;height:30px;padding:0;border:1px solid #e5e5e3;border-radius:8px;color:#596578;background:#fff}
+.pdf-reader-header-end>.pdf-reader-hand-trigger:hover,.pdf-reader-header-end>.pdf-reader-pin-trigger:hover,.pdf-reader-header-end>.pdf-reader-hand-trigger[aria-pressed=true],.pdf-reader-header-end>.pdf-reader-pin-trigger[aria-pressed=true]{color:var(--paper-accent,var(--color-primary,#006ae6));border-color:var(--color-primary-border,#c9def7);background:var(--color-primary-bg,#f0f7ff)}
+.pdf-reader-header-end>.pdf-reader-hand-trigger svg,.pdf-reader-header-end>.pdf-reader-pin-trigger svg{display:block;flex:none}
+.pdf-reader-hand-active,.pdf-reader-hand-active *{cursor:grab!important;user-select:none!important;touch-action:none}
+.pdf-reader-hand-active.is-dragging,.pdf-reader-hand-active.is-dragging *{cursor:grabbing!important}
+.pdf-reader-hand-active .react-pdf__Document{pointer-events:none}
+.pdf-reader-workspace{container-type:inline-size;container-name:pdf-reader}
+@container pdf-reader (max-width:850px){.pdf-reader-header-end .pdf-study-ai-button span{display:none}.pdf-reader-header-end .pdf-study-ai-button{padding-inline:8px}}
+@container pdf-reader (max-width:780px){.pdf-reader-workspace .pdf-reader-header.has-overview{grid-template-columns:auto minmax(0,1fr);row-gap:4px;padding-block:4px}.pdf-reader-header.has-overview .pdf-reader-header-start{grid-column:1;grid-row:1}.pdf-reader-header.has-overview>.pdf-reader-view-toggle{grid-column:2;grid-row:1;justify-self:end}.pdf-reader-header.has-overview .pdf-reader-header-end{grid-column:1 / -1;grid-row:2;justify-self:end}}
+@container pdf-reader (max-width:500px){.pdf-reader-header.has-overview .pdf-reader-header-end{flex-wrap:wrap;row-gap:4px}.pdf-reader-header-end>.pdf-reader-tools{margin-right:auto}}

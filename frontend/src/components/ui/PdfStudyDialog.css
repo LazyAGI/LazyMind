@@ -1,11 +1,13 @@
 .pdf-study-overlay{position:fixed;inset:0;z-index:1450;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(29,44,65,.34);backdrop-filter:blur(3px)}
 .pdf-study-dialog{position:relative;box-sizing:border-box;width:min(780px,100%);max-height:min(84vh,880px);overflow:auto;border:1px solid #d8e2ee;border-radius:18px;background:#fff;color:#26374c;box-shadow:0 22px 70px rgba(24,47,76,.2);font:14px/1.65 system-ui,sans-serif;outline:none}
-.pdf-study-dialog-actions{position:sticky;top:0;height:0;z-index:5}
-.pdf-study-dialog-close{position:absolute;right:16px;top:13px;z-index:5;display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid #dce5ef;border-radius:50%;background:#fff;color:#596b7f;font-size:22px;line-height:1;cursor:pointer}
-.pdf-study-dialog-close:hover{background:#f0f5fa;color:#244f79}
-.pdf-study-dialog-close:focus-visible,.pdf-study-dialog button:focus-visible,.pdf-study-dialog select:focus-visible{outline:2px solid #4486c8;outline-offset:2px}
+.pdf-study-dialog-actions{position:sticky;top:0;height:0;z-index:5;display:flex;justify-content:flex-end;gap:8px;padding:13px 16px 0;box-sizing:border-box;pointer-events:none}
+.pdf-study-dialog-actions button{position:relative;z-index:5;display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:1px solid #dce5ef;border-radius:50%;background:#fff;color:#596b7f;line-height:1;cursor:pointer;pointer-events:auto}
+.pdf-study-dialog-close{font-size:22px}
+.pdf-study-dialog-actions button:hover{background:#f0f5fa;color:#244f79}
+.pdf-study-dialog-pin[aria-pressed=true]{background:#eaf3ff;border-color:#acd0f7;color:#1769bd}
+.pdf-study-dialog-actions button:focus-visible,.pdf-study-dialog button:focus-visible,.pdf-study-dialog select:focus-visible{outline:2px solid #4486c8;outline-offset:2px}
 .pdf-study-dialog>.pdf-formula-study,.pdf-study-dialog>.pdf-visual-study{display:block;box-sizing:border-box;width:100%;max-width:none;height:auto;min-height:0;max-height:none;overflow:visible;flex:none;border:0;background:transparent;box-shadow:none;color:inherit;font:inherit}
-.pdf-study-dialog .pdf-formula-study>header,.pdf-study-dialog .pdf-visual-study>header{position:sticky;top:0;z-index:3;padding:17px 60px 14px 24px;border-bottom:1px solid #e7edf4;background:rgba(255,255,255,.96);color:#26374c;backdrop-filter:blur(10px)}
+.pdf-study-dialog .pdf-formula-study>header,.pdf-study-dialog .pdf-visual-study>header{position:sticky;top:0;z-index:3;padding:17px 112px 14px 24px;border-bottom:1px solid #e7edf4;background:rgba(255,255,255,.96);color:#26374c;backdrop-filter:blur(10px)}
 .pdf-study-dialog .pdf-study-eyebrow{display:none}
 .pdf-study-dialog .pdf-formula-study h2,.pdf-study-dialog .pdf-visual-study h2{margin:0;color:#24374c;font-size:18px;font-weight:650}
 .pdf-study-dialog .pdf-visual-study header span{color:#728399;font-size:12px}
@@ -34,5 +36,14 @@
 .pdf-study-dialog .pdf-visual-preview img{display:block;max-width:100%;height:auto;margin:auto}
 .pdf-study-dialog .pdf-visual-preview figcaption{padding:5px 8px;background:#f7f9fc;color:#718399;font-size:11px}
 .pdf-study-dialog .pdf-table-scroll{max-width:100%}
+.pdf-study-overlay.is-pinned{display:block;padding:0;background:transparent;backdrop-filter:none;pointer-events:none}
+.pdf-study-overlay.is-pinned>.pdf-study-dialog{position:fixed;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);min-width:min(320px,calc(100vw - 16px));min-height:min(180px,calc(100vh - 16px));resize:both;overflow:auto;pointer-events:auto;box-shadow:0 14px 48px #182f4c30}
+.pdf-study-dialog.is-pinned .pdf-formula-study>header,.pdf-study-dialog.is-pinned .pdf-visual-study>header{cursor:move;touch-action:none;user-select:none}
+.pdf-study-dialog.is-pinned .pdf-formula-study>header button,.pdf-study-dialog.is-pinned .pdf-visual-study>header button{cursor:pointer}
+.pdf-study-overlay.is-pinned>.pdf-study-resize-handle{position:fixed;z-index:2;display:block;pointer-events:auto;touch-action:none}
+.pdf-study-resize-handle.is-n,.pdf-study-resize-handle.is-s{cursor:ns-resize}
+.pdf-study-resize-handle.is-e,.pdf-study-resize-handle.is-w{cursor:ew-resize}
+.pdf-study-resize-handle.is-ne,.pdf-study-resize-handle.is-sw{cursor:nesw-resize}
+.pdf-study-resize-handle.is-nw,.pdf-study-resize-handle.is-se{cursor:nwse-resize}
 @media(max-width:600px){.pdf-study-overlay{padding:8px}.pdf-study-dialog{max-height:calc(100vh - 16px);border-radius:12px}.pdf-study-dialog .pdf-formula-study>header,.pdf-study-dialog .pdf-visual-study>header{padding-left:15px}.pdf-study-dialog .pdf-study-navigation,.pdf-study-dialog .pdf-visual-source{padding-left:15px;padding-right:15px}.pdf-study-dialog .pdf-study-body,.pdf-study-dialog .pdf-visual-body{padding-left:15px;padding-right:15px}.pdf-study-dialog .pdf-interactive-equation{padding:16px 10px;font-size:15px}}
 @media(prefers-reduced-motion:reduce){.pdf-study-dialog .pdf-interactive-symbol{transition:none}}

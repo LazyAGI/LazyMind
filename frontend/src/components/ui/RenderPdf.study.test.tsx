@@ -13,6 +13,9 @@ import {AUTH_USER_CHANGE_EVENT} from '@/components/auth';
 function render(ui:ReactNode){const view=renderView(ui);const tools=screen.queryByRole('button',{name:'阅读工具'});if(tools)fireEvent.click(tools);return view;}
 const target={dataset:'d',document:'one'};
 function document(hash='hash'):PdfIRDocument{return {version:1,projection_version:2,source_sha256:hash,parser:{name:'mineru',model:'vlm'},coordinate_space:'normalized_top_left',pages:[{index:0}],blocks:[{id:'formula',type:'formula',page:0,latex:'x',bbox:[.1,.1,.3,.2]},{id:'table',type:'table',page:0,bbox:[.1,.4,.8,.8],table:{rows:[{cells:[{text:'Value',row_span:1,col_span:1}]}],captions:[],footnotes:[],related_blocks:[]}}]};}
+function pageButton(page:number){return screen.getByRole('button',{name:`pdfReader.page ${page} / 3`});}
+function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
+
 beforeEach(()=>{state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
 
 it('keeps overview selected when geometry changes after a consumed page navigation',async()=>{
@@ -52,7 +55,7 @@ it('opens a saved note at its anchored position and offers return to the reading
  const view=render(<RenderPdf {...props}/>);
  await act(async()=>{});
  view.rerender(<RenderPdf {...props} pdfNavigateToPosition={{page:2,progress:.35,requestId:1}}/>);
- await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2));
+ await waitFor(()=>expectPage(2));
  expect(screen.getByRole('button',{name:'返回阅读位置'})).toBeInTheDocument();
 });
 
@@ -106,7 +109,7 @@ it('keeps a paper overview with the source abstract and an unavailable quick-rea
  expect(screen.getByText('论文速读暂时不可用')).toBeInTheDocument();
  expect(view.container.querySelector('.pdf-reader-with-study')).toHaveStyle({visibility:'hidden'});
  fireEvent.click(screen.getByRole('tab',{name:'pdfReader.reading'}));
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
  expect(view.container.querySelector('.pdf-reader-with-study')).toHaveStyle({visibility:'visible'});
 });
 
@@ -155,7 +158,7 @@ it('publishes only source-verified IR and returns to original for an external bl
 
  expect(screen.getByRole('tablist')).toBeInTheDocument();
  view.rerender(<RenderPdf {...props} pdfNavigateTo={{id:'table',requestId:1}}/>);
- await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toBeInTheDocument());
+ await waitFor(()=>expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument());
  expect(view.container.querySelector('.pdf-study-highlight')).toBeInTheDocument();
  view.rerender(<RenderPdf {...props} pdfSourceHash="unverified"/>);
  expect(notify).toHaveBeenLastCalledWith(undefined);
@@ -179,13 +182,13 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'580px'});
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
  expect(state.pdfFile).toBe(source);
  width.mockReturnValue(390);act(()=>callbacks.forEach(callback=>callback()));
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'370px'});
  width.mockReturnValue(1600);act(()=>callbacks.forEach(callback=>callback()));
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1152px'});
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1267px'});
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
@@ -195,18 +198,19 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
 
 it('navigates pages and changes zoom without search controls',async()=>{
  const view=render(<RenderPdf fileData="test.pdf" defaultPageWidth={600} paperMode/>);
- await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1));
+ await waitFor(()=>expectPage(1));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
+ fireEvent.click(pageButton(2));
  const pageInput=screen.getByRole('spinbutton',{name:'pdfReader.page'});
  fireEvent.change(pageInput,{target:{value:'99'}});
  fireEvent.keyDown(pageInput,{key:'Enter'});
- expect(pageInput).toHaveValue(3);
+ expectPage(3);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.previousPage'}));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0].closest('[data-pdf-page-index]')).toHaveStyle({width:'792px'});
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
  expect(screen.queryByRole('searchbox')).toBeNull();
  view.unmount();
 });
@@ -221,6 +225,9 @@ it('renders paper PDFs slightly larger than source size while the toolbar reads 
  expect(screen.getByRole('button',{name:'110%'})).toBeInTheDocument();
  expect(page).toHaveStyle({width:'792px'});
  fireEvent.click(screen.getByRole('button',{name:'110%'}));
+ const zoomInput=screen.getByRole('spinbutton',{name:'pdfReader.zoomPercent'});
+ fireEvent.change(zoomInput,{target:{value:'100'}});
+ fireEvent.keyDown(zoomInput,{key:'Enter'});
  expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
  expect(page).toHaveStyle({width:'720px'});
 });
@@ -246,9 +253,41 @@ it('fits ordinary documents to their available width at the default zoom',()=>{
 
 it('keeps page navigation in the toolbar without covering each PDF page with a page badge',()=>{
  const view=render(<RenderPdf fileData="page-badge.pdf" defaultPageWidth={600}/>);
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1);
+ expectPage(1);
  expect(view.container.querySelector('.pdf-reader-page-total')).toHaveTextContent('/ 3');
  expect(view.container.querySelector('[data-pdf-page-index="0"]')).not.toHaveTextContent('1/3');
+});
+
+it('pans the PDF viewport with the hand tool and leaves page controls available',async()=>{
+ const view=render(<RenderPdf fileData="hand-pan.pdf" defaultPageWidth={600} paperMode/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'pdfReader.panPaper'})).toBeEnabled());
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.panPaper'}));
+ expect(screen.getByRole('button',{name:'pdfReader.panPaper'})).toHaveAttribute('aria-pressed','true');
+ const pane=view.container.querySelector<HTMLElement>('.pdf-reader-with-study > div')!;
+ pane.scrollLeft=240;
+ const before=pane.scrollLeft;
+ fireEvent.pointerDown(pane,{button:0,pointerId:1,clientX:150,clientY:150});
+ fireEvent.pointerMove(pane,{pointerId:1,clientX:105,clientY:150});
+ expect(pane.scrollLeft).toBe(before+45);
+ fireEvent.pointerUp(pane,{pointerId:1});
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.panPaper'}));
+ expect(screen.getByRole('button',{name:'pdfReader.panPaper'})).toHaveAttribute('aria-pressed','false');
+ expectPage(1);
+});
+
+it('minimizes a pinned formula and restores it from the six-slot dock',async()=>{
+ localStorage.setItem('lazymind:user',JSON.stringify({userId:'pin-test',username:'pin-test',token:'pin-test-token',tenantId:'tenant'}));
+ render(<RenderPdf fileData="pinned-formula.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'pdfReader.captureRegion'})).toBeEnabled());
+ fireEvent.click(window.document.querySelector('.pdf-formula-trigger')!);
+ fireEvent.click(screen.getByRole('button',{name:'钉住研读窗口'}));
+ expect(screen.getByRole('dialog',{name:'原文解读'}).parentElement).toHaveClass('is-pinned');
+ fireEvent.click(screen.getByRole('button',{name:'最小化研读窗口'}));
+ expect(screen.queryByRole('dialog',{name:'原文解读'})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:/展开已收起内容/}));
+ fireEvent.click(screen.getByRole('button',{name:/恢复公式/}));
+ expect(screen.getByRole('dialog',{name:'原文解读'}).parentElement).toHaveClass('is-pinned');
+ localStorage.removeItem('lazymind:user');
 });
 
 it('opens formula and table reading in a floating source dialog instead of a reader sidebar',()=>{
@@ -299,7 +338,7 @@ it('opens an external page request in the original PDF without requiring parsed 
 
  view.rerender(<RenderPdf {...props} pdfNavigateToPage={{page:2,requestId:1}}/>);
  expect(screen.getByRole('tablist')).toBeInTheDocument();
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
  await act(async()=>{});
 });
 
@@ -315,7 +354,7 @@ it('keeps transferable PDF bytes for downloading and blocks navigation until the
  view.rerender(<RenderPdf fileData="pending.pdf" pdfNavigateToPage={{page:3,requestId:1}}/>);
  expect(screen.getByRole('button',{name:'pdfReader.nextPage'})).toBeDisabled();
  act(()=>state.load?.());
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3);
+ expectPage(3);
  await act(async()=>{});
 });
 
@@ -324,15 +363,15 @@ it('preserves the current page on zoom despite an unchanged controlled position'
  await act(async()=>{});
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
  view.rerender(<RenderPdf fileData="controlled.pdf" defaultPageWidth={480} viewPosition={{page:1,progress:0}}/>);
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
+ expectPage(2);
 });
 
 it('does not restore overview for a PDF without structured-reading support',async()=>{
  sessionStorage.setItem('pdf-reader:::plain',JSON.stringify({mode:'insight',zoom:1}));
  render(<RenderPdf fileData="plain.pdf" pdfSourceHash="plain"/>);
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/pdfReader.page/})).toBeInTheDocument();
  await act(async()=>{});
 });
 
@@ -395,7 +434,7 @@ it('keeps the captured quote while typing, never offers reference import, and us
 it('keeps page and zoom controls in the header without search or download',async()=>{
  const view=renderView(<RenderPdf fileData="tools.pdf" pdfIRTarget={target} pdfSourceHash="hash" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={<button>Document actions</button>}/>);
  const header=view.container.querySelector('.pdf-reader-header');
- expect(header).toContainElement(screen.getByRole('spinbutton',{name:'pdfReader.page'}));
+ expect(header).toContainElement(pageButton(1));
  expect(header).toContainElement(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  expect(screen.queryByRole('searchbox')).toBeNull();
  expect(screen.queryByRole('button',{name:'pdfReader.download'})).toBeNull();
@@ -418,11 +457,13 @@ it('preserves the reading anchor when a newly mounted page reveals a different h
  const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(800);
  const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
  const view=render(<RenderPdf fileData="mixed-pages.pdf" defaultPageWidth={600} paperMode/>);await act(async()=>{});
+ fireEvent.click(pageButton(1));
  fireEvent.change(screen.getByRole('spinbutton',{name:'pdfReader.page'}),{target:{value:'3'}});
+ fireEvent.keyDown(screen.getByRole('spinbutton',{name:'pdfReader.page'}),{key:'Enter'});
  const viewport=view.container.querySelector('.pdf-reader-with-study')!.firstElementChild as HTMLElement;
  const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
  act(()=>state.pageLoads.get(2)!(600,1000));
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3);
+ expectPage(3);
  expect(scroll).toHaveBeenLastCalledWith({top:2200,behavior:'auto'});
  view.unmount();width.mockRestore();height.mockRestore();
 });
@@ -463,7 +504,7 @@ it('follows native PDF destinations without requiring a rendered target or parse
  await act(async()=>{});
  expect(state.nativeClick).toBeTypeOf('function');
  await act(async()=>{state.nativeClick?.({pageNumber:3,dest:[2,{name:'XYZ'},0,400,null]});});
- await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3));
+ await waitFor(()=>expectPage(3));
  expect(position).toHaveBeenLastCalledWith({page:3,progress:.5});
 });
 
@@ -473,7 +514,7 @@ it('keeps native link navigation working through the callback retained by react-
  const retainedClick=state.nativeClick;
  view.rerender(<RenderPdf fileData="second.pdf" onViewPositionChange={position}/>);
  await act(async()=>{retainedClick?.({pageNumber:2,dest:[1,{name:'Fit'}]});});
- await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2));
+ await waitFor(()=>expectPage(2));
  expect(position).toHaveBeenLastCalledWith({page:2,progress:0});
 });
 
@@ -487,7 +528,7 @@ it('opens a figure from the catalog without moving the PDF viewport',async()=>{
  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,150));});
  expect(screen.getByRole('complementary',{name:'visual-study'})).toBeInTheDocument();
  expect(scroll).not.toHaveBeenCalled();
- expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(1);
+ expectPage(1);
 });
 
 it('collects vocabulary from the original PDF selection with its page and sentence',async()=>{
