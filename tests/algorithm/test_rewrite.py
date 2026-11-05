@@ -13,6 +13,7 @@ def _load_rewrite_module():
     importlib.import_module('lazyllm.tools.writer.data_models.context')
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
+    fake_lazyllm.LOG = type('Log', (), {'info': staticmethod(lambda _message: None)})()
     fake_lazyllm.enable_trace = lambda **_kwargs: lambda func: func
     fake_lazyllm.ThreadPoolExecutor = ThreadPoolExecutor
     fake_lazyllm.globals = {'config': {'dynamic_model_configs': {

@@ -2153,7 +2153,7 @@ CREATE TABLE IF NOT EXISTS vocabulary_words (id VARCHAR(36) PRIMARY KEY, owner_i
 CREATE UNIQUE INDEX IF NOT EXISTS uk_vocabulary_word_owner_provider_term ON vocabulary_words(owner_id, provider, language, normalized_term);
 CREATE TABLE IF NOT EXISTS vocabulary_examples (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(36) NOT NULL, provider_note_id VARCHAR(64) NOT NULL DEFAULT '', sentence TEXT NOT NULL, translation TEXT NOT NULL DEFAULT '', content_origin VARCHAR(32) NOT NULL DEFAULT 'user', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_examples_word ON vocabulary_examples(owner_id, word_id);
-CREATE TABLE IF NOT EXISTS vocabulary_source_refs (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(36) NOT NULL, example_id VARCHAR(36), dataset_id VARCHAR(64) NOT NULL, document_id VARCHAR(64) NOT NULL, segment_id VARCHAR(64) NOT NULL DEFAULT '', page INTEGER, bbox_json TEXT NOT NULL DEFAULT '', selected_text TEXT NOT NULL DEFAULT '', context_sentence TEXT NOT NULL DEFAULT '', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS vocabulary_source_refs (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(36) NOT NULL, example_id VARCHAR(36), dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, segment_id VARCHAR(255) NOT NULL DEFAULT '', page INTEGER, bbox_json TEXT NOT NULL DEFAULT '', selected_text TEXT NOT NULL DEFAULT '', context_sentence TEXT NOT NULL DEFAULT '', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_vocabulary_source_ref ON vocabulary_source_refs(owner_id, word_id, document_id, segment_id, context_sentence);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_source_document ON vocabulary_source_refs(owner_id, document_id);
 CREATE TABLE IF NOT EXISTS vocabulary_provider_operations (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, provider VARCHAR(16) NOT NULL, operation_type VARCHAR(32) NOT NULL, payload_json TEXT NOT NULL, idempotency_key VARCHAR(128) NOT NULL, status VARCHAR(24) NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -3504,7 +3504,7 @@ CREATE INDEX idx_library_entry_active ON paper_library_entries(dataset_id,remove
 CREATE TABLE paper_library_notes (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, paper_id VARCHAR(255) NOT NULL,
  title TEXT NOT NULL, content TEXT NOT NULL, kind VARCHAR(32) NOT NULL DEFAULT 'note',
- created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, source_json JSON NOT NULL DEFAULT '{}',
  PRIMARY KEY(dataset_id,id), FOREIGN KEY(dataset_id,paper_id) REFERENCES paper_library_entries(dataset_id,id)
 );
 CREATE INDEX idx_library_note_paper ON paper_library_notes(dataset_id,paper_id);
@@ -3754,3 +3754,58 @@ ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT 
 -- Per-model capability declarations and runtime options.
 ALTER TABLE user_model_provider_group_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE user_model_provider_group_models ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Personal AI reading preparation policy.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE user_reading_policies (
+ user_id VARCHAR(255) PRIMARY KEY,
+ policy_json TEXT NOT NULL,
+ updated_at TIMESTAMP NOT NULL
+);
+
+-- Vocabulary cloud connections and durable outbound operations; portable PostgreSQL/SQLite SQL.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS vocabulary_cloud_connections (
+    id VARCHAR(64) PRIMARY KEY,
+    owner_id VARCHAR(64) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    token_cipher TEXT NOT NULL,
+    account_key VARCHAR(64) NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    target_id TEXT NOT NULL DEFAULT '',
+    target_name TEXT NOT NULL DEFAULT '',
+    add_to_study BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(owner_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS vocabulary_cloud_operations (
+    id VARCHAR(64) PRIMARY KEY,
+    owner_id VARCHAR(64) NOT NULL,
+    connection_id VARCHAR(64) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    word_id VARCHAR(64) NOT NULL,
+    term TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    add_to_study BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    last_error TEXT NOT NULL DEFAULT '',
+    job_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(connection_id, word_id, target_id, add_to_study)
+);
+CREATE INDEX IF NOT EXISTS idx_vocabulary_cloud_operations_owner_updated
+    ON vocabulary_cloud_operations(owner_id, updated_at);
+
+-- +migrate Dialect postgres,sqlite
+-- Bounded reading status/enrollment queries; resource_id stays the user concurrency key.
+CREATE INDEX idx_reading_job_source ON async_jobs
+    (create_user_id, (payload_json ->> 'dataset_id'), (payload_json ->> 'document_id'), (payload_json ->> 'source_sha256'), created_at DESC, id DESC)
+    WHERE job_type = 'document_reading_preparation';
+CREATE INDEX idx_reading_job_enrollment ON async_jobs
+    (resource_type, create_user_id, (payload_json ->> 'dataset_id'), (payload_json ->> 'document_id'))
+    WHERE job_type = 'document_reading_preparation';
+CREATE INDEX idx_reading_job_daily ON async_jobs (job_type, resource_type, create_user_id, created_at);
+CREATE INDEX idx_reading_document_candidates ON documents (create_user_id, created_at, id) WHERE deleted_at IS NULL;

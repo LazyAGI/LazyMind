@@ -1,0 +1,17 @@
+.pdf-paper-overview{box-sizing:border-box;width:min(100%,840px);min-height:100%;margin:0 auto;padding:48px clamp(24px,5vw,68px) 80px;background:#fff;color:#262626}
+.pdf-paper-overview__header{margin-bottom:42px}
+.pdf-paper-overview__header>span{display:block;margin-bottom:12px;color:#737373;font-size:13px}
+.pdf-paper-overview h1{max-width:24ch;margin:0;font:600 clamp(29px,3vw,38px)/1.28 Georgia,'Noto Serif SC',serif;letter-spacing:-.025em;overflow-wrap:anywhere}
+.pdf-paper-overview h2{margin:0;font-size:19px;font-weight:600;line-height:1.45}
+.pdf-paper-overview__abstract{padding-bottom:36px;border-bottom:1px solid #e5e5e3}
+.pdf-paper-overview__section-heading{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:14px}
+.pdf-paper-overview__abstract p{margin:0;color:#414141;font-size:16px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere}
+.pdf-paper-overview__muted,.pdf-paper-overview__abstract .pdf-paper-overview__muted{color:#737373;font-size:14px;line-height:1.7}
+.pdf-paper-overview__quick-read{padding-top:36px}
+.pdf-paper-overview__quick-read h2{margin-bottom:15px}
+.pdf-paper-overview__unavailable{display:inline-flex;align-items:center;min-height:32px;margin:0 0 12px;padding:4px 12px;border:1px solid #e5e5e3;border-radius:999px;background:#f7f7f6;color:#616161;font-size:14px}
+.pdf-paper-overview__quick-read .pdf-paper-overview__muted{margin:0 0 18px}
+.pdf-paper-overview button{border:0;background:transparent;padding:4px 0;color:var(--paper-accent,var(--color-primary,#006ae6));font:inherit;font-size:14px;font-weight:500;line-height:1.5;cursor:pointer}
+.pdf-paper-overview button:hover{text-decoration:underline}
+.pdf-paper-overview button:focus-visible{outline:2px solid var(--paper-accent,var(--color-primary,#006ae6));outline-offset:3px}
+@media(max-width:600px){.pdf-paper-overview{padding:32px 22px 56px}.pdf-paper-overview__header{margin-bottom:30px}.pdf-paper-overview__abstract p{font-size:15px}}

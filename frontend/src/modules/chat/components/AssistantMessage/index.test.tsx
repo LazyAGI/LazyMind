@@ -1,6 +1,7 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { message } from "antd";
 
 import {
   ChatConversationsResponseFinishReasonEnum,
@@ -14,6 +15,13 @@ import zhCN from "@/i18n/locales/zh-CN";
 import { getTranslationServiceStatus, translateSelectionText } from "@/modules/knowledge/api/translation";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
 import EnvInputCard, { type EnvironmentInputResult } from "../EnvInputCard";
+
+// AntD's static messages mount outside RTL's root. Flush their destruction while
+// jsdom still exists so delayed notice timers cannot update a disposed window.
+afterEach(async () => {
+  cleanup();
+  await act(async () => { message.destroy(); });
+});
 
 describe("mail draft lifecycle", () => {
   const draft = { draft_id: "mail-one", revision: 1, status: "draft", to: ["test@example.com"],

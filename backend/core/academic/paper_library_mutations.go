@@ -12,7 +12,9 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
+	"math"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -266,6 +268,21 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 	replyLibraryChanges(w, r, dataset, []string{id}, err)
 }
 
+// A note write only needs the local paper record and its notes. Do not make
+// its response depend on document processing status or the LazyLLM database.
+func replyLibraryNoteChanges(w http.ResponseWriter, r *http.Request, dataset, paperID string, err error) {
+	if err != nil {
+		replyLibraryError(w, err)
+		return
+	}
+	view, err := paperlibrary.Load(r.Context(), store.DB(), dataset, store.UserID(r), []string{paperID}, false)
+	if err != nil {
+		replyLibraryError(w, err)
+		return
+	}
+	common.ReplyJSON(w, libraryChanges{Data: view.Data})
+}
+
 type libraryTarget struct {
 	ID       string `json:"id"`
 	Revision int64  `json:"revision"`
@@ -382,12 +399,22 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 	}
 	id := mux.Vars(r)["library_paper_id"]
 	var input struct {
-		ID      string `json:"id"`
-		Content string `json:"content"`
+		ID      string                   `json:"id"`
+		Content string                   `json:"content"`
+		Source  *paperlibrary.NoteSource `json:"source"`
 	}
-	if !parseJSON(r, &input) || !paperlibrary.ValidID(input.ID) || strings.TrimSpace(input.Content) == "" || len(input.Content) > 2<<20 {
+	if !parseJSON(r, &input) || !paperlibrary.ValidID(input.ID) || strings.TrimSpace(input.Content) == "" || len(input.Content) > 2<<20 || !validLibraryNoteSource(input.Source) {
 		replyError(w, 400, "INVALID_REQUEST", "笔记内容为空或过长")
 		return
+	}
+	sourceJSON := json.RawMessage(`{}`)
+	if input.Source != nil {
+		var err error
+		sourceJSON, err = json.Marshal(input.Source)
+		if err != nil {
+			replyError(w, 400, "INVALID_REQUEST", "笔记位置无效")
+			return
+		}
 	}
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var entry orm.PaperLibraryEntry
@@ -396,17 +423,62 @@ func AddLibraryNote(w http.ResponseWriter, r *http.Request) {
 		}
 		var prior orm.PaperLibraryNote
 		if e := tx.Where("dataset_id=? AND id=?", dataset, input.ID).Take(&prior).Error; e == nil {
-			if prior.PaperID != id || prior.Content != input.Content {
+			if prior.PaperID != id || prior.Content != input.Content || !sameLibraryNoteSource(prior.SourceJSON, sourceJSON) {
 				return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "笔记请求与原内容不同")
 			}
 			return nil
 		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
 		}
+		if input.Source != nil {
+			var attachment orm.PaperLibraryAttachment
+			if e := tx.Where("dataset_id=? AND paper_id=? AND id=? AND detached_at IS NULL AND kind=?", dataset, id, input.Source.AttachmentID, "pdf").Take(&attachment).Error; e != nil {
+				if errors.Is(e, gorm.ErrRecordNotFound) {
+					return &libraryMutationError{Status: 400, Code: "INVALID_REQUEST", Message: "笔记来源附件无效"}
+				}
+				return e
+			}
+		}
 		now := time.Now().UTC()
-		return tx.Create(&orm.PaperLibraryNote{DatasetID: dataset, ID: input.ID, PaperID: id, Title: "新笔记", Content: input.Content, Kind: "note", CreatedAt: now, UpdatedAt: now}).Error
+		return tx.Create(&orm.PaperLibraryNote{DatasetID: dataset, ID: input.ID, PaperID: id, Title: "新笔记", Content: input.Content, Kind: "note", SourceJSON: string(sourceJSON), CreatedAt: now, UpdatedAt: now}).Error
 	})
-	replyLibraryChanges(w, r, dataset, []string{id}, err)
+	replyLibraryNoteChanges(w, r, dataset, id, err)
+}
+
+func validLibraryNoteSource(source *paperlibrary.NoteSource) bool {
+	if source == nil {
+		return true
+	}
+	if !paperlibrary.ValidID(source.AttachmentID) || strings.TrimSpace(source.AttachmentID) != source.AttachmentID || source.Page < 1 || source.Page > 100000 || len(source.Quote) > 64<<10 || len(source.Rects) > 50 {
+		return false
+	}
+	switch source.Color {
+	case "", "red", "orange", "yellow", "green", "blue", "indigo", "purple", "rainbow":
+	default:
+		return false
+	}
+	validRect := func(rect [4]float64, maximum float64) bool {
+		for _, coordinate := range rect {
+			if math.IsNaN(coordinate) || math.IsInf(coordinate, 0) || coordinate < 0 || coordinate > maximum {
+				return false
+			}
+		}
+		return rect[0] < rect[2] && rect[1] < rect[3]
+	}
+	for _, rect := range source.Rects {
+		if !validRect(rect, 1) {
+			return false
+		}
+	}
+	return source.BBox == nil || validRect(*source.BBox, 100000)
+}
+
+func sameLibraryNoteSource(left string, right json.RawMessage) bool {
+	if len(left) == 0 || string(left) == "null" {
+		left = `{}`
+	}
+	var a, b any
+	return json.Unmarshal([]byte(left), &a) == nil && json.Unmarshal(right, &b) == nil && reflect.DeepEqual(a, b)
 }
 func CreateLibraryFolder(w http.ResponseWriter, r *http.Request) { saveLibraryFolder(w, r, false) }
 func RenameLibraryFolder(w http.ResponseWriter, r *http.Request) { saveLibraryFolder(w, r, true) }

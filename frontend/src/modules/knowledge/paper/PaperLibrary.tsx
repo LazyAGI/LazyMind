@@ -1,9 +1,10 @@
+import ReadingPreferencesModal from "./ReadingPreferencesModal";
 import { readLibraryViewCache, writeLibraryViewCache } from "./libraryViewCache";
 import { usePaperImports, PaperImportDialog } from './usePaperImports';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
 import { Alert, Button, Checkbox, Dropdown, Input, Modal, Popover, Pagination, Select, Spin, Tooltip, message } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
-import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, SettingOutlined, HolderOutlined, EllipsisOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperLink, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
 import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, removeLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
@@ -81,6 +82,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
     if (datasetScopeRef.current.datasetId !== datasetId)
         datasetScopeRef.current = { datasetId, active: true };
     const datasetScope = datasetScopeRef.current;
+    const [readingPreferencesOpen, setReadingPreferencesOpen] = useState(false);
     const isCurrentScope = () => datasetScopeRef.current === datasetScope && datasetScope.active && (AgentAppsAuth.getUserInfo()?.userId || '') === userId;
     const { notifications, notify, resolve } = usePaperNotifications(datasetId);
     const [dataState, setData] = useState<PaperLibraryData>(() => cachedView?.data || emptyLibrary());
@@ -637,6 +639,8 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                 }, { type: 'divider' }, { key: 'backup', label: '完整数据备份（JSON，不含 PDF 文件）', onClick: () => downloadLibraryJson(data, title, true, datasetId) }] }}>
             <Button type="text" className="paper-library-tool" icon={<ExportOutlined />} aria-label="导出" title="导出题录或包含笔记、批注与附件引用的数据备份" disabled={!snapshotReady}>导出</Button>
           </Dropdown>
+          <Tooltip title="预设 / AI 阅读准备"><Button type="text" className="paper-library-tool" icon={<SettingOutlined />} aria-label="预设 / AI 阅读准备" onClick={() => { setActiveTool(null); setReadingPreferencesOpen(true); }}>预设</Button></Tooltip>
+          <ReadingPreferencesModal open={readingPreferencesOpen} onClose={() => setReadingPreferencesOpen(false)} />
           <Popover trigger="click" placement="bottomRight" open={activeTool === 'display'} onOpenChange={(open: boolean) => setActiveTool(current => open ? 'display' : current === 'display' ? null : current)} content={<div role="dialog" aria-label="列表显示设置">
             <Checkbox checked={display.status} onChange={(event: CheckboxChangeEvent) => setDisplayOption('status', event.target.checked)}>显示阅读状态</Checkbox>
             <Checkbox checked={display.importance} onChange={(event: CheckboxChangeEvent) => setDisplayOption('importance', event.target.checked)}>显示重要标记</Checkbox>

@@ -1,0 +1,47 @@
+.pdf-selection-composer{width:380px;max-width:100%;box-sizing:border-box;background:var(--color-bg-elevated,#fff);border:1px solid var(--color-border,#dfe6ef);border-radius:15px;box-shadow:0 8px 32px #34215820;padding:16px 14px 12px;color:var(--color-text,#262626);font:13px/1.5 system-ui,sans-serif;position:relative;}
+.pdf-selection-composer.is-composing{border-color:var(--color-primary,#006ae6);box-shadow:0 8px 32px #134c9124,0 0 0 2px var(--color-primary-bg,#e9f2ff);}
+.pdf-selection-composer textarea{display:block;box-sizing:border-box;width:100%;min-height:58px;resize:none;border:0;outline:0;background:transparent;padding:2px 22px 6px 2px;color:var(--color-text,#262626);font:14px/1.6 system-ui,sans-serif;}
+.pdf-selection-composer textarea::placeholder{color:var(--color-text-description,#8d9ab2);}
+.pdf-selection-composer button{cursor:pointer;border:0;background:transparent;color:var(--color-text-secondary,#5f6b7e);line-height:1;}
+.pdf-selection-composer button:disabled{opacity:.4;cursor:default;}
+.pdf-selection-composer .pdf-selection-close{position:absolute;right:10px;top:10px;padding:5px;font-size:11px;}
+.pdf-selection-composer-footer,.pdf-selection-icons{display:flex;align-items:center;gap:6px;}
+.pdf-selection-composer-footer{justify-content:space-between;}
+.pdf-selection-modes{display:flex;padding:3px;background:var(--color-bg-layout,#f5f5f5);border-radius:20px;gap:2px;}
+.pdf-selection-modes button{min-height:30px;padding:7px 13px;border-radius:16px;font-size:13px;white-space:nowrap;}
+.pdf-selection-modes button[aria-pressed=true]{background:var(--color-bg-elevated,#fff);color:var(--color-primary,#006ae6);box-shadow:0 1px 4px #34215812;}
+.pdf-selection-icons .pdf-selection-icon,.pdf-selection-icons .pdf-selection-send{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:17px;padding:0;}
+.pdf-selection-icons .pdf-selection-icon{border:1px solid var(--color-border,#dfe6ef);background:var(--color-bg-elevated,#fff);}
+.pdf-selection-icons .pdf-selection-icon:hover{background:var(--color-primary-bg,#f0f7ff);color:var(--color-primary,#006ae6);}
+.pdf-selection-icons .pdf-selection-send{color:#fff;background:var(--color-primary,#006ae6);margin-left:3px;}
+.pdf-selection-more{position:relative;}.pdf-selection-more summary{list-style:none;cursor:pointer;font-size:22px;line-height:26px;padding:0 4px;}.pdf-selection-more summary::-webkit-details-marker{display:none;}
+.pdf-selection-more>div{position:absolute;right:0;top:100%;min-width:140px;display:flex;flex-direction:column;padding:6px;background:var(--color-bg-elevated,#fff);border:1px solid var(--color-border,#dfe6ef);border-radius:10px;box-shadow:0 8px 24px #34215820;z-index:2;}
+.pdf-selection-more>div button{text-align:left;white-space:nowrap;padding:9px;border-radius:6px;}.pdf-selection-more>div button:hover{background:var(--color-bg-layout,#f5f5f5);}
+.pdf-selection-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);}
+.pdf-selection-help{font-size:11px;color:var(--color-text-description,#8d9ab2);padding:8px 2px 0;}.pdf-selection-help a{color:var(--color-primary,#006ae6);}
+.pdf-selection-save-error{margin:0 0 8px;padding:6px 9px;border-radius:7px;background:color-mix(in srgb,#d4380d 9%,var(--color-bg-elevated,#fff));color:#a52a13;font-size:12px;line-height:1.45;}
+
+.pdf-selection-composer-footer{flex-wrap:wrap;row-gap:8px;}
+.pdf-selection-icons{flex-wrap:wrap;justify-content:flex-end;margin-left:auto;gap:5px;}
+.pdf-selection-icons .pdf-selection-primary-action{width:36px;height:36px;padding:0;border:1px solid var(--color-border,#dfe6ef);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;font-size:17px;}
+.pdf-selection-icons .pdf-selection-primary-action:hover:not(:disabled){background:var(--color-primary-bg,#f0f7ff);color:var(--color-primary,#006ae6);}
+.pdf-selection-composer button:focus-visible{outline:2px solid var(--color-primary,#006ae6);outline-offset:2px;}
+
+@media(max-width:600px){.pdf-selection-icons .pdf-selection-primary-action{width:44px;height:44px;}.pdf-selection-icons .pdf-selection-send,.pdf-selection-icons .pdf-selection-icon{width:44px;height:44px;}}
+
+/* The selected-text tool is a compact contextual surface, with note colors at the first level. */
+.pdf-selection-colors{display:flex;align-items:center;gap:5px;min-width:0}
+.pdf-selection-colors .pdf-selection-color{display:block;flex:none;width:17px;height:17px;padding:0;border:1px solid var(--color-border,#dfe6ef);border-radius:50%;box-shadow:0 1px 2px #0004}
+.pdf-selection-colors .pdf-selection-color[aria-pressed=true]{outline:2px solid var(--color-primary,#006ae6);outline-offset:2px}
+.pdf-selection-icons .pdf-selection-mark{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;margin-left:5px;padding:0;border-radius:50%;background:var(--color-primary,#006ae6);color:#fff;font-size:17px}
+.pdf-selection-icons .pdf-selection-mark:hover{background:var(--color-primary-hover,#4096ff)}
+@media(max-width:600px){.pdf-selection-icons .pdf-selection-mark{width:40px;height:40px}.pdf-selection-colors .pdf-selection-color{width:20px;height:20px}}
+
+/* Compact actions reveal their names immediately without relying on delayed browser title tooltips. */
+.pdf-selection-composer .pdf-selection-translation{display:inline-flex;position:relative}
+.pdf-selection-composer .pdf-selection-color,.pdf-selection-composer .pdf-selection-mark,.pdf-selection-composer .pdf-selection-primary-action,.pdf-selection-composer .pdf-selection-send,.pdf-selection-composer .pdf-selection-more summary{position:relative}
+.pdf-selection-composer [data-tooltip]::after{content:attr(data-tooltip);position:absolute;z-index:5;left:50%;bottom:calc(100% + 7px);width:max-content;max-width:260px;padding:5px 8px;border:1px solid var(--color-border,#dfe6ef);border-radius:6px;background:var(--color-bg-elevated,#fff);color:var(--color-text,#262626);box-shadow:0 4px 12px #0002;font:12px/1.35 system-ui,sans-serif;white-space:normal;pointer-events:none;visibility:hidden;opacity:0;transform:translate(-50%,3px);transition:opacity .12s ease,transform .12s ease,visibility .12s ease}
+.pdf-selection-composer [data-tooltip]:is(:hover,:focus-visible,:focus-within)::after{visibility:visible;opacity:1;transform:translate(-50%,0)}
+.pdf-selection-composer .pdf-selection-close[data-tooltip]::after{top:calc(100% + 5px);bottom:auto;left:auto;right:0;transform:translateY(-3px)}
+.pdf-selection-composer .pdf-selection-close[data-tooltip]:is(:hover,:focus-visible)::after{transform:translateY(0)}
+@media(prefers-reduced-motion:reduce){.pdf-selection-composer [data-tooltip]::after{transition:none}}

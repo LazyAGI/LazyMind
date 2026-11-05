@@ -372,7 +372,8 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := service.EnsureDocumentParsed(r, EnsureDocumentParsedRequest{
-		UserID: userID, DatasetID: datasetID, DocumentID: documentID,
+		ObserveOnly: r.Method == http.MethodGet,
+		UserID:      userID, DatasetID: datasetID, DocumentID: documentID,
 		Caller: caller,
 	})
 	if err != nil {
