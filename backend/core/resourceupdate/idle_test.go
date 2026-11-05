@@ -320,9 +320,64 @@ func TestIdleCleanupKeepsHistoryForNewerEvent(t *testing.T) {
 	}
 }
 
+func TestWorkflowConversationSuppressesAutomaticMaintenance(t *testing.T) {
+	for _, status := range []string{"active", "waiting", "completed", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			db := newIdleTestDB(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+			store := newFakeIdleStore()
+			// Simulate an event recorded before a workflow was selected.
+			insertIdleEvent(t, db, "conv:h1", "conv", "user", "h1", now.Add(-time.Hour), now.Add(-time.Minute))
+			store.history[conversationIdleHistoryKey("conv")] = []idleHistoryMessage{{Role: "user", Content: "workflow input"}}
+			if err := db.Create(&orm.WorkflowSession{ID: "wf", ConversationID: "conv", WorkflowID: "ppt-workflow", Status: status, Dismissed: status == "completed", CreateUserID: "user", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+				t.Fatal(err)
+			}
+			recorder := newIdleRecorderWithStore(db, store, DefaultConfig())
+			if err := recorder.RecordConversationMessage(ctx, ConversationIdleRecord{ConversationID: "conv", UserID: "user", LastHistoryID: "h2", UserContent: "next step"}); err != nil {
+				t.Fatal(err)
+			}
+			var count int64
+			if err := db.Model(&orm.ConversationIdleEvent{}).Count(&count).Error; err != nil || count != 1 {
+				t.Fatalf("workflow created another idle event: count=%d err=%v", count, err)
+			}
+			oldHook := DirectoryIdleHandler
+			t.Cleanup(func() { DirectoryIdleHandler = oldHook })
+			DirectoryIdleHandler = func(context.Context, *gorm.DB, orm.ConversationIdleEvent) error {
+				t.Fatal("workflow must not trigger document directory maintenance")
+				return nil
+			}
+			processor := newIdleProcessorWithStore(db, store, DefaultConfig(), "test")
+			if err := processor.ProcessEvent(ctx, "conv:h1"); err != nil {
+				t.Fatal(err)
+			}
+			var event orm.ConversationIdleEvent
+			if err := db.Where("event_id = ?", "conv:h1").Take(&event).Error; err != nil {
+				t.Fatal(err)
+			}
+			if event.Status != orm.ConversationIdleEventStatusSkipped || event.SkipReason != conversationIdleSkipWorkflow {
+				t.Fatalf("unexpected event: %+v", event)
+			}
+			if len(store.history) != 0 {
+				t.Fatal("workflow idle history was retained")
+			}
+			if err := db.Model(&orm.ResourceUpdateTask{}).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("workflow enqueued maintenance: count=%d err=%v", count, err)
+			}
+			// Already queued reviews must also stop before loading credentials or calling a model.
+			worker := NewWorker(db, DefaultConfig(), "test")
+			outcome := worker.handleMemoryReview(ctx, orm.ResourceUpdateTask{UserID: "user", RequestJSON: json.RawMessage(`{"conversation_id":"conv"}`)})
+			if outcome.Status != orm.ResourceUpdateTaskStatusSkipped || outcome.ErrorCode != conversationIdleSkipWorkflow {
+				t.Fatalf("queued workflow review was not skipped: %+v", outcome)
+			}
+		})
+	}
+}
+
 func newIdleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t,
+		&orm.WorkflowSession{},
 		&orm.ResourceUpdateTask{},
 		&orm.ConversationIdleEvent{},
 	).DB

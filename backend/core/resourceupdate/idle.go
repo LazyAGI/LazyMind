@@ -24,7 +24,17 @@ const (
 
 	conversationIdleSkipSuperseded    = "superseded_by_new_message"
 	conversationIdleSkipNoUserMessage = "no_non_empty_user_message"
+	conversationIdleSkipWorkflow      = "workflow_conversation"
 )
+
+// Workflow history belongs to its execution contract, not automatic learning.
+// Keep completed/dismissed sessions excluded too, just like skill review stats.
+func isWorkflowConversation(ctx context.Context, db *gorm.DB, conversationID string) (bool, error) {
+	var count int64
+	err := db.WithContext(ctx).Model(&orm.WorkflowSession{}).
+		Where("conversation_id = ?", conversationID).Count(&count).Error
+	return count > 0, err
+}
 
 type ConversationIdleRecord struct {
 	ConversationID string
@@ -172,6 +182,10 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 	if record.ConversationID == "" || record.UserID == "" || record.LastHistoryID == "" {
 		return errors.New("conversation_id, user_id, and last_history_id are required")
 	}
+	workflow, err := isWorkflowConversation(ctx, r.db, record.ConversationID)
+	if err != nil || workflow {
+		return err
+	}
 	now := r.clock().UTC()
 	lastActivityAt := record.LastActivityAt.UTC()
 	if lastActivityAt.IsZero() {
@@ -180,7 +194,7 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 	eventID := idleEventID(record.ConversationID, record.LastHistoryID)
 	dueAt := lastActivityAt.Add(r.cfg.ConversationIdleSeconds)
 
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&orm.ConversationIdleEvent{}).
 			Where("session_id = ? AND status = ? AND event_id <> ?", record.ConversationID, orm.ConversationIdleEventStatusWaiting, eventID).
 			Updates(map[string]any{
@@ -353,6 +367,26 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 			return nil
 		}
 		return err
+	}
+	// Recheck persisted events: a workflow may have started after recording, or
+	// this event may have been queued by an older runtime. Do this before either
+	// the document-directory hook or memory review can enqueue background work.
+	workflow, err := isWorkflowConversation(ctx, p.db, candidate.ConversationID)
+	if err != nil {
+		return err
+	}
+	if workflow {
+		update := p.db.WithContext(ctx).Model(&orm.ConversationIdleEvent{}).
+			Where("id = ? AND status = ?", candidate.ID, orm.ConversationIdleEventStatusWaiting).
+			Updates(map[string]any{"status": orm.ConversationIdleEventStatusSkipped,
+				"skip_reason": conversationIdleSkipWorkflow, "updated_at": p.clock().UTC()})
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected > 0 {
+			return p.cleanupIdleStateKeys(ctx, candidate.ConversationID, eventID)
+		}
+		return nil
 	}
 	if DirectoryIdleHandler != nil {
 		if err := DirectoryIdleHandler(ctx, p.db, candidate); err != nil {
