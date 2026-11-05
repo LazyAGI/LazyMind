@@ -125,10 +125,12 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
 
   useEffect(() => {
     if (!open) { initialized.current = false; return; }
-    if (!state || initialized.current || pending.current || providers.some(item => !availability.states[item.id] || availability.states[item.id] === 'checking')) return;
+    if (!state || initialized.current || pending.current) return;
+    const preferred = initialProvider ? [initialProvider] : state.preferred_providers;
+    if (providers.some(item => preferred.includes(item.id) && (!availability.states[item.id] || availability.states[item.id] === 'checking'))) return;
     initialized.current = true;
     setConnectionChoices({});
-    setSelected((initialProvider ? [initialProvider] : state.preferred_providers).filter(canSelect));
+    setSelected(preferred.filter(canSelect));
     setRetryOperations({});
     setError('');
   }, [open, state, initialProvider, providers, availability.states, canSelect]);
