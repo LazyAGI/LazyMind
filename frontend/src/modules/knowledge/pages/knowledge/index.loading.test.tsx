@@ -45,6 +45,20 @@ it('switches from the loading surface directly into the PDF workspace', async ()
   expect(screen.queryByRole('status')).toBeNull();
 });
 
+it('routes paper quick explanation to the assistant without a Local learning capability', async () => {
+  useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'academic_papers'} as Dataset);
+  axiosInstance.defaults.adapter = config => config.url?.endsWith('/documents/paper')
+    ? Promise.resolve({config,status:200,statusText:'OK',headers:{},data:{display_name:'paper.pdf'}})
+    : new Promise(()=>{});
+  const {container}=renderDocument();
+  await waitFor(()=>expect(surfaces.viewer.fileName).toBe('paper.pdf'));
+  const actions=surfaces.viewer.learningSelectionActions as Array<{key:string;disabled?:boolean}>;
+  expect(actions.find(action=>action.key==='explanation')?.disabled).not.toBe(true);
+  act(()=>{(surfaces.viewer.onLearningSelection as (key:string,selection:Record<string,unknown>)=>void)('explanation',{text:'attention',context:'Attention scores query-key pairs.',page:4,bbox:[10,20,30,40]});});
+  await waitFor(()=>expect(surfaces.chat.selection).toMatchObject({text:'attention',context:'Attention scores query-key pairs.',page:4,bbox:[10,20,30,40],quickExplain:true,question:expect.any(String)}));
+  expect(container.querySelector('.paper-chat-pane.is-collapsed')).toBeNull();
+});
+
 it('keeps an ordinary PDF in the document workspace with existing learning and chat actions',async()=>{
   surfaces.chat={};
   useDatasetPermissionStore.getState().setCurrentDataset({dataset_id:'library',scene:'general'} as Dataset);

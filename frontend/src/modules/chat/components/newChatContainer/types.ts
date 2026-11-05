@@ -20,6 +20,7 @@ export interface ChatImperativeProps {
   prepareMessage: (
     params: Partial<Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">> & {
       appendCitations?: boolean;
+      appendText?: boolean;
     },
   ) => void;
   disconnectConversationStream?: (conversationId: string) => void;

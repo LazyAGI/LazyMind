@@ -459,7 +459,7 @@ const KnowledgeDocumentContent = () => {
     refreshDocumentChatHistory();
   }, [refreshDocumentChatHistory]);
 
-  const askPdfSelection = useCallback((selection: PdfTextSelection) => {
+  const askPdfSelection = useCallback((selection: PdfTextSelection & Pick<DocumentChatSelection, "quickExplain">) => {
 
     setActivatedDocumentChatKey(documentKey);
     setPreviewSideTab("chat");
@@ -1293,8 +1293,20 @@ const KnowledgeDocumentContent = () => {
                 : undefined}
               onAddVocabularySelection={isVocabularyEnabled() ? addVocabularySelection : undefined}
               translationConfigured={translationConfigured}
-              learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
-              onLearningSelection={(family,selection)=>{const capability=chooseFamilyCapability(learningCapabilities,family as CapabilityFamily,selection.text);if(capability)setLearningSelection({capabilityKey:capability.key,selection})}}
+              learningSelectionActions={[
+                ...(isPaperDocument ? [{key:"explanation",label:t("knowledge.pdfQuickExplain")}] : []),
+                ...capabilityFamilies(learningCapabilities)
+                  .filter(family=>!isPaperDocument||family!=="explanation")
+                  .map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")})),
+              ]}
+              onLearningSelection={(family,selection)=>{
+                if(isPaperDocument&&family==="explanation"){
+                  askPdfSelection({...selection,question:t("knowledge.pdfQuickExplainPrompt"),quickExplain:true});
+                  return;
+                }
+                const capability=chooseFamilyCapability(learningCapabilities,family as CapabilityFamily,selection.text);
+                if(capability)setLearningSelection({capabilityKey:capability.key,selection});
+              }}
               paragraphSelectionMode={paragraphSelectionMode}
               onParagraphSelectionCancel={()=>setParagraphSelectionMode(false)}
               onParagraphSelectionConfirm={selections=>{setParagraphSelectionMode(false);setLearningAnalysisSelection({selections,requestId:Date.now()});setQuickReferenceOpen(true)}}

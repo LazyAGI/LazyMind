@@ -49,6 +49,44 @@ function newPreviewConversationId() {
   return `pdf-${suffix}`.slice(0, 36);
 }
 
+function documentContextForSelection(
+  datasetId: string,
+  documentId: string,
+  fileName: string,
+  selection?: DocumentChatSelection,
+) {
+  return {
+    dataset_id: datasetId,
+    document_id: documentId,
+    file_name: fileName,
+    page: selection?.page,
+    bbox: selection?.bbox,
+    segment_id: selection?.segmentId,
+    segment_number: selection?.segmentNumber,
+    segment_group: selection?.group,
+    selected_text: selection?.text,
+    paragraph_text: selection?.context,
+    ...(selection?.quickExplain ? { expand_paper_context: true } : {}),
+  };
+}
+
+function scopedDocumentContext(
+  datasetId: string,
+  documentId: string,
+  fileName: string,
+  selection: DocumentChatSelection | undefined,
+  snapshot: unknown,
+) {
+  if (
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) &&
+    (snapshot as Record<string, unknown>).dataset_id === datasetId &&
+    (snapshot as Record<string, unknown>).document_id === documentId
+  ) {
+    return { ...snapshot, dataset_id: datasetId, document_id: documentId, file_name: fileName };
+  }
+  return documentContextForSelection(datasetId, documentId, fileName, selection);
+}
+
 const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProps>(function PdfTemporaryChat({
   datasetId,
   documentId,
@@ -89,6 +127,9 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
   const preparedSelectionRef = useRef<DocumentChatSelection>();
+  const requestedQuickParseRef = useRef<DocumentChatSelection>();
+  const activeSelectionRef = useRef<DocumentChatSelection>();
+  activeSelectionRef.current = activeSelection;
   const handledTranslationRequestRef = useRef(0);
   const pendingTranslationRef = useRef<(DocumentTranslationRequest & { conversationId: string }) | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationIdRef.current);
@@ -164,6 +205,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
 
   useEffect(() => {
     if (!activeSelection) return;
+    if (activeSelection.quickExplain) return;
     if (preparedSelectionRef.current === activeSelection) return;
     let attempts = 0;
     const sendWhenReady = () => {
@@ -184,6 +226,60 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
     let timer = window.setTimeout(sendWhenReady, 50);
     return () => window.clearTimeout(timer);
   }, [restartKey, selection, activeSelection]);
+
+  useEffect(() => {
+    if (!activeSelection?.quickExplain || preparedSelectionRef.current === activeSelection) return;
+    if (parseState === "loading" || parseState === "parsing") return;
+    const request = activeSelection;
+    const question = request.question?.trim() || t("knowledge.pdfQuickExplainPrompt");
+    const prepareForRetry = () => {
+      if (activeSelectionRef.current !== request) return;
+      preparedSelectionRef.current = request;
+      chatRef.current?.prepareMessage({ text: question, citeMessage: request.text, appendCitations: true, appendText: true });
+      message.warning(t("knowledge.pdfQuickExplainSendFailed"));
+    };
+    if (parseState === "not_requested" && requestedQuickParseRef.current !== request) {
+      requestedQuickParseRef.current = request;
+      setParseState("parsing");
+      void ensureDocumentParsed(datasetId, documentId).then(result => {
+        setParseState(result.status);
+        setParseError(result.error?.message || "");
+        if (result.status === "not_requested") prepareForRetry();
+        if (result.status === "parsing") setParseAttempt(value => value + 1);
+      }).catch(error => {
+        setParseError(getLocalizedErrorMessage(error));
+        setParseState("failed");
+      });
+      return;
+    }
+    let attempts = 0;
+    let timer: number;
+    const sendWhenReady = () => {
+      if (activeSelectionRef.current !== request || preparedSelectionRef.current === request) return;
+      if (!chatRef.current) {
+        if (attempts++ < 10) timer = window.setTimeout(sendWhenReady, 50);
+        return;
+      }
+      preparedSelectionRef.current = request;
+      if (parseState !== "parsed") { prepareForRetry(); return; }
+      const conversationAtSend = conversationIdRef.current;
+      void chatRef.current.sendMessage({
+        text: question,
+        citeMessage: request.text,
+        clearInput: false,
+        fileList: [],
+        document_context: documentContextForSelection(datasetId, documentId, fileName, request),
+      })
+        .then(sent => {
+          if (activeSelectionRef.current !== request || conversationIdRef.current !== conversationAtSend) return;
+          if (!sent) { prepareForRetry(); return; }
+          setDismissedSelection(request);
+          onClearSelection?.();
+        }).catch(prepareForRetry);
+    };
+    timer = window.setTimeout(sendWhenReady, 50);
+    return () => window.clearTimeout(timer);
+  }, [activeSelection, parseState, restartKey, datasetId, documentId, fileName, onClearSelection, t]);
 
   const openSSE = (
     input: Query[],
@@ -224,18 +320,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
         source_document_id: documentId,
         source_display_name: fileName,
       },
-      document_context: {
-        dataset_id: datasetId,
-        document_id: documentId,
-        file_name: fileName,
-        page: activeSelection?.page,
-        bbox: activeSelection?.bbox,
-        segment_id: activeSelection?.segmentId,
-        segment_number: activeSelection?.segmentNumber,
-        segment_group: activeSelection?.group,
-        selected_text: activeSelection?.text,
-        paragraph_text: activeSelection?.context,
-      },
+      document_context: scopedDocumentContext(datasetId, documentId, fileName, activeSelection, extras?.document_context),
     }),
     callbacks,
   });

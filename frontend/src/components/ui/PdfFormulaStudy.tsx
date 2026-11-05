@@ -44,27 +44,24 @@ export function PdfFormulaStudy({target,sourceKey,blocks,selected,autoExplain=fa
   return <div className="pdf-study-citations">{evidence.map(e=><button key={e.id} className="pdf-study-citation" onClick={()=>onNavigate(e)} title={e.text}>{t('pdfFormula.sourcePage',{page:e.page+1})}</button>)}</div>;
  };
  const symbolList=data?.symbols?.length?<dl className="pdf-study-symbols">{data.symbols.map((symbol,index)=><div key={index}><dt><FormulaMathText text={symbol.symbol} mathOnly/></dt><dd><FormulaMathText text={symbol.meaning}/>{!compact&&sources(symbol.evidence_ids,symbol.inferred)}</dd></div>)}</dl>:null;
+ const summarySymbols=useMemo(()=>data?.symbols.map(symbol=>symbol.symbol) || [],[data?.symbols]);
  const summaryParagraphs=[
   ...(data?.summary?.trim().split(/\n\s*\n/).map(paragraph=>paragraph.trim()).filter(Boolean) || []),
   ...(data?.reading?.trim()?[data.reading.trim()]:[]),
  ];
  const catalog=<div className="pdf-study-navigation"><label>{t('pdfFormula.catalog')}<select aria-label={t('pdfFormula.catalog')} value={selected?.id || ''} onChange={event=>{const block=blocks.find(b=>b.id===event.target.value);if(block)onSelect(block);}}><option value="" disabled>{t('pdfFormula.chooseFormula')}</option>{blocks.map((block,index)=><option key={block.id} value={block.id}>{formulaNumber(block)?`(${formulaNumber(block)})`:t('pdfFormula.formulaIndex',{number:index+1})} · {t('pdfFormula.page',{page:block.page+1})}</option>)}</select></label>{canReturn&&<button onClick={onReturn}>{t('pdfFormula.returnReading')}</button>}</div>;
- const explanationDetails=data&&<><p className="pdf-study-disclaimer">{t('pdfFormula.interpretationNote')}</p>
-  {!!data.steps?.length&&<section><h3>{t('pdfFormula.steps')}</h3><ol className="pdf-study-steps">{data.steps.map((step,index)=><li key={index}><p><FormulaMathText text={step.text}/></p>{sources(step.evidence_ids,step.inferred)}</li>)}</ol></section>}
-  <section className="pdf-study-evidence"><h3>{t('pdfFormula.evidence')}</h3><p className="pdf-study-section-label">{t('pdfFormula.quoteNote')}</p>{citedEvidence.length?citedEvidence.map(e=><article key={e.id}><button className="pdf-study-citation" onClick={()=>onNavigate(e)}>{t('pdfFormula.sourcePage',{page:e.page+1})}</button><blockquote>{e.text}</blockquote>{!e.bbox&&<small>{t('pdfFormula.pageOnly')}</small>}</article>):<p>{t('pdfFormula.noEvidence')}</p>}</section>
-  {!!data.warnings?.length&&<section className="pdf-study-warnings"><h3>{t('pdfFormula.limitations')}</h3><ul>{data.warnings.map((warning,index)=><li key={index}>{warning}</li>)}</ul></section>}
-  {data.model&&<p className="pdf-study-model">{t('pdfFormula.model')}: {data.model}</p>}
- </>;
+ const sourceEvidence=data&&<section className="pdf-study-evidence"><h3>{t('pdfFormula.evidence')}</h3><p className="pdf-study-section-label">{t('pdfFormula.quoteNote')}</p>{citedEvidence.length?citedEvidence.map(e=><article key={e.id}><button className="pdf-study-citation" onClick={()=>onNavigate(e)}>{t('pdfFormula.sourcePage',{page:e.page+1})}</button><blockquote>{e.text}</blockquote>{!e.bbox&&<small>{t('pdfFormula.pageOnly')}</small>}</article>):<p>{t('pdfFormula.noEvidence')}</p>}</section>;
  return <aside ref={panel} tabIndex={-1} className="pdf-formula-study" aria-label={t('pdfFormula.study')} onMouseUp={event=>event.stopPropagation()}>
   <header><div><span className="pdf-study-eyebrow">{t('pdfFormula.studyEyebrow')}</span><h2>{t('pdfFormula.study')}</h2></div><button className="pdf-study-close" aria-label={t('pdfFormula.closeStudy')} onClick={onClose}>×</button></header>
   {!selected&&catalog}
   {!selected?<div className="pdf-study-empty"><strong>{t('pdfFormula.chooseFormula')}</strong><p>{t('pdfFormula.catalogHint')}</p></div>:<div className="pdf-study-body">
    <section className="pdf-study-selected">{repairedLatex&&<div className="pdf-study-repair" role="note"><strong>{t('pdfFormula.repairSuggested')}</strong><span>{data?.repair_note || t('pdfFormula.repairNote')}</span></div>}<InteractiveFormula key={`${sourceKey}:${selected.id}`} latex={repairedLatex || selected.latex || ""} originalLatex={selected.latex || ""} sourceKey={`${target.dataset}/${target.document}/${sourceKey}`} definitions={data?.symbols || []} evidence={data?.evidence || []} compactEvidence={compact} onNavigate={onNavigate}/></section>
-   {data&&<section className="pdf-study-summary"><h3>{t('pdfFormula.summary')}</h3>{summaryParagraphs.map((paragraph,index)=><p key={index}><FormulaMathText text={paragraph}/></p>)}</section>}
+   {data&&<section className="pdf-study-summary"><h3>{t('pdfFormula.summary')}</h3>{summaryParagraphs.map((paragraph,index)=><p key={index}><FormulaMathText text={paragraph} knownSymbols={summarySymbols}/></p>)}</section>}
    {explanation.status==='loading'?<div className="pdf-study-loading" role="status"><div className="pdf-study-generation"><div className="pdf-study-generation-label"><span>{data?((i18n.resolvedLanguage || i18n.language).startsWith('zh')?'正在更新解释…':'Updating explanation…'):t('pdfFormula.explaining')}</span><time aria-live="off">{elapsed}s</time></div><progress aria-label={t('pdfFormula.explaining')}/></div><button onClick={explanation.cancel}>{t('pdfFormula.cancel')}</button></div>:<div className="pdf-study-actions"><button className="pdf-study-primary" onClick={()=>void explanation.load(!!data)}>{explanation.status==='ready'?t('pdfFormula.regenerate'):explanation.status==='error'?t('pdfFormula.explainRetry'):t('pdfFormula.explain')}</button>{explanation.status==='error'&&<p role="alert">{explanation.error || t('pdfFormula.explainError')}</p>}{explanation.status==='cancelled'&&<p role="status">{t('pdfFormula.explainCancelled')}</p>}</div>}
 
    {data&&symbolList&&(compact?<details className="pdf-study-symbol-catalog"><summary>{t('pdfFormula.symbols')} ({data.symbols.length})</summary>{symbolList}</details>:<section><h3>{t('pdfFormula.symbols')}</h3>{symbolList}</section>)}
-   {compact?<details className="pdf-study-more"><summary>{data?t('pdfFormula.moreDetails'):t('pdfFormula.catalog')}</summary>{explanationDetails}{catalog}</details>:<>{explanationDetails}{catalog}</>}
+   {sourceEvidence}
+   {compact?<details className="pdf-study-more"><summary>{t('pdfFormula.catalog')}</summary>{catalog}</details>:catalog}
   </div>}
  </aside>;
 }

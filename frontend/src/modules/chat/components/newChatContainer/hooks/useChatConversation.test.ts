@@ -162,6 +162,14 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it('keeps the request-scoped paper selection when opening the chat stream', async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const selection = { dataset_id: 'paper-library', document_id: 'paper-1', selected_text: 'scaled attention', expand_paper_context: true };
+    await act(async () => { await result.current.sendMessage({ text: 'Explain this', document_context: selection }); });
+    expect(onOpenSSE).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ document_context: selection }));
+  });
   it('keeps terminal tool counts live and replaces them with zero on regeneration', async () => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
