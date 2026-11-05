@@ -1,14 +1,15 @@
 import { tr } from "./translations";
-import { useState, useEffect, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Alert, Button, Pagination, Popover } from "antd";
-import { CloseOutlined, DownOutlined, FileTextOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { CloseOutlined, FileTextOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { type ChatSource, type ChatSourceCollection, getCitationSources, getSourceDedupKey, getSourceEvidenceText, getSourceFaviconUrl, getSourceHref, getSourceLabel, getSourceSubtitle, isExternalSource } from "../../utils/sourceAdapter";
+import { type ChatSource, type ChatSourceCollection, getCitationSources, getSourceDedupKey, getSourceEvidenceText, getSourceFaviconUrl, getSourceOriginalHref, getSourceLabel, getSourceSubtitle, isExternalSource } from "../../utils/sourceAdapter";
 import { SourceImportActions, useSourceImports, findInspectedSource, uniquePapers } from "./index";
 import type { InspectedSource } from "./api";
 import "../AssistantMessage/index.scss";
 
 const SOURCE_ICON_TONES = 6;
+const SOURCES_PER_PAGE = 4;
 
 function groupPaperSources(sources: ChatSource[], inspections: InspectedSource[] = []) {
   const groups = new Map<string, { key: string; sources: ChatSource[]; paper?: InspectedSource }>();
@@ -76,69 +77,101 @@ function SourceFavicon({
   );
 }
 
+const paperPriority = (paper?: InspectedSource) => {
+  if (!paper?.eligible || !paper.paper_key) return 0;
+  return paper.needs_pdf_lookup ? 1 : 2;
+};
+
 export function ChatSourcePanel({ sources, onClose, embedded = false }: { sources: ChatSource[]; onClose: () => void; embedded?: boolean }) {
   const { t } = useTranslation();
   const imports = useSourceImports();
   useEffect(() => { void imports?.load(); }, [imports?.load]);
   const [selected, setSelected] = useState<ChatSource | null>(null);
+  const [versions, setVersions] = useState<ChatSource[] | null>(null);
   const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const groups = groupPaperSources(sources, imports?.inspections);
-  const priority = (paper?: InspectedSource) => paper?.eligible && paper.paper_key ? (paper.needs_pdf_lookup ? 1 : 2) : 0;
-  const orderedGroups = [...groups].sort((a, b) => priority(b.paper) - priority(a.paper));
-  const currentPage = Math.min(page, Math.max(1, Math.ceil(groups.length / 20)));
-  useEffect(() => { setPage(currentPage); }, [currentPage]);
-  const rows = orderedGroups.slice((currentPage - 1) * 20, currentPage * 20);
+  const inspections = imports?.inspections;
+  const groups = useMemo(() => groupPaperSources(sources, inspections)
+    .sort((a, b) => paperPriority(b.paper) - paperPriority(a.paper)), [sources, inspections]);
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(groups.length / SOURCES_PER_PAGE)));
+  const start = (currentPage - 1) * SOURCES_PER_PAGE;
+  const showList = !versions && !selected;
+  const showPagination = groups.length > SOURCES_PER_PAGE;
+  const backLabel = selected && versions ? tr("backToVersions") : t("chat.contextPanel.backToSources");
   const available = uniquePapers(groups.flatMap(group => group.paper || []));
+
+  useEffect(() => {
+    if (page !== currentPage) setPage(currentPage);
+  }, [page, currentPage]);
+
   return <aside className="chat-source-panel" aria-label={t("chat.references")}>
-    {(!embedded || selected) && <div className="chat-source-panel-header">
+    {(!embedded || !showList) && <div className="chat-source-panel-header">
       <div className="chat-source-panel-heading">
-        {selected && <Button type="text" icon={<LeftOutlined aria-hidden />} title={t("chat.contextPanel.backToSources")} aria-label={t("chat.contextPanel.backToSources")} onClick={() => setSelected(null)} />}
-        {!embedded && <h2 className="chat-source-panel-title">{t("chat.references")}<span className="chat-source-panel-count">{groups.length}</span></h2>}
+        {!showList && <Button type="text" icon={<LeftOutlined aria-hidden />} title={backLabel} aria-label={backLabel} onClick={() => {
+          if (selected) setSelected(null);
+          else setVersions(null);
+        }} />}
+        <h2 className="chat-source-panel-title">
+          {selected ? tr("sourceDetails") : versions ? tr("sourceVersions") : t("chat.references")}
+          {showList && groups.length > 0 && <span className="chat-source-panel-count">{groups.length}</span>}
+        </h2>
       </div>
       {!embedded && <Button type="text" icon={<CloseOutlined />} onClick={onClose} aria-label={t("common.close")} />}
     </div>}
-    {imports?.inspectError && <Alert type="warning" message={tr("inspectionUnavailable")} />}
-    {!selected && imports && <div className="source-selection-bar">
-      <span>{groups.length < sources.length ? tr("sourceCount", { v0: groups.length, v1: sources.length }) : tr("reference", { v0: sources.length })}</span>
+    {showList && imports?.inspectError && <Alert type="warning" message={tr("inspectionUnavailable")} />}
+    {showList && imports && <div className="source-selection-bar">
+      {sources.length > 0 && <span>{groups.length < sources.length ? tr("sourceCount", { v0: groups.length, v1: sources.length }) : tr("reference", { v0: sources.length })}</span>}
       {imports.items.length > 0 && <Button type="link" onClick={() => imports.setOpened(true)}>{tr("history")}</Button>}
     </div>}
-    <div className="chat-source-panel-body">
-      {selected ? <div className="chat-source-detail"><h3>{getSourceLabel(selected)}</h3><small>{getSourceSubtitle(selected)}</small><p>{getSourceEvidenceText(selected) || t("chat.contextPanel.noExcerpt")}</p><SourceImportActions source={selected} /></div> : <div className="chat-source-list">
-        {rows.map(group => {
-          const source = group.sources[0];
-          const multiple = group.sources.length > 1;
-          const isExpanded = expanded.has(group.key);
-          return <div key={group.key}>
-              <button type="button" className="chat-source-item" aria-expanded={multiple ? isExpanded : undefined} onClick={() => {
-                if (!multiple) { setSelected(source); return; }
-                setExpanded(current => {
-                  const next = new Set(current);
-                  next.has(group.key) ? next.delete(group.key) : next.add(group.key);
-                  return next;
-                });
-              }} title={getSourceLabel(source)}>
-                <SourceFavicon source={source} />
-                <span className="chat-source-item-copy">
-                  <span className="chat-source-item-heading">{getSourceSubtitle(source) || t("chat.references")}</span>
-                  <strong className="chat-source-item-title">{getSourceLabel(source)}</strong>
-                  {getSourceEvidenceText(source) && <span className="chat-source-item-content">{getSourceEvidenceText(source)}</span>}
-                  {multiple && <span className="source-group-toggle">{isExpanded ? tr("collapse") : tr("expand")} {group.sources.length}{tr("sourcesSuffix")}</span>}
-                </span>
-                {multiple && isExpanded ? <DownOutlined className="chat-source-item-arrow" aria-hidden="true" /> : <RightOutlined className="chat-source-item-arrow" aria-hidden="true" />}
-              </button>
-            {multiple && isExpanded && <ul className="source-group-links" aria-label={tr("sourceGroup", { v0: getSourceLabel(source) })}>
-              {group.sources.map((entry, index) => <li key={`${getSourceDedupKey(entry, index)}:${index}`}>
-                <button type="button" className="source-group-title" title={getSourceLabel(entry)} onClick={() => setSelected(entry)}>{getSourceLabel(entry)}</button>
-                <a href={getSourceHref(entry)} target="_blank" rel="noopener noreferrer">{entry.url}</a>
-              </li>)}
-            </ul>}
-          </div>;
+    <div className={`chat-source-panel-body${showList ? " chat-source-page-body" : ""}`}>
+      {selected ? <div className="chat-source-detail">
+        <h3>{getSourceLabel(selected)}</h3>
+        <small>{getSourceSubtitle(selected)}</small>
+        <p>{getSourceEvidenceText(selected) || t("chat.contextPanel.noExcerpt")}</p>
+        <SourceImportActions source={selected} />
+      </div> : versions ? <>
+        <div className="source-versions-summary">
+          <h3>{getSourceLabel(versions[0])}</h3>
+          <small>{versions.length}{tr("sourcesSuffix")}</small>
+        </div>
+        <ul className="source-version-list" aria-label={tr("sourceGroup", { v0: getSourceLabel(versions[0]) })}>
+          {versions.map((source, index) => <li key={`${getSourceDedupKey(source, index)}:${index}`}>
+            <button type="button" className="chat-source-item source-version-item" onClick={() => setSelected(source)}>
+              <SourceFavicon source={source} />
+              <span className="chat-source-item-copy">
+                <strong>{getSourceLabel(source)}</strong>
+                <small>{getSourceOriginalHref(source) || getSourceSubtitle(source)}</small>
+              </span>
+              <RightOutlined className="chat-source-item-arrow" aria-hidden="true" />
+            </button>
+          </li>)}
+        </ul>
+      </> : <div className="chat-source-list">
+        {groups.slice(start, start + SOURCES_PER_PAGE).map(({ key, sources: groupSources }) => {
+          const source = groupSources[0];
+          const multiple = groupSources.length > 1;
+          return <button key={key} type="button" className="chat-source-item" title={getSourceLabel(source)} onClick={() => {
+            if (multiple) setVersions(groupSources);
+            else setSelected(source);
+          }}>
+            <SourceFavicon source={source} />
+            <span className="chat-source-item-copy">
+              <span className="chat-source-item-heading">
+                <span className="chat-source-item-domain">{getSourceSubtitle(source) || t("chat.references")}</span>
+                {multiple && <span className="source-version-count">{groupSources.length}{tr("sourcesSuffix")}</span>}
+              </span>
+              <strong className="chat-source-item-title">{getSourceLabel(source)}</strong>
+              <span className="chat-source-item-content">{getSourceEvidenceText(source)}</span>
+            </span>
+            <RightOutlined className="chat-source-item-arrow" aria-hidden="true" />
+          </button>;
         })}
       </div>}
     </div>
-    {!selected && groups.length > 20 && <div className="source-selection-footer"><Pagination size="small" current={currentPage} pageSize={20} total={groups.length} showSizeChanger={false} onChange={setPage} /></div>}
-    {!selected && available.length > 0 && <div className="source-selection-footer source-import-footer"><Button type="primary" onClick={() => imports?.choose(available)}>{tr("add")}</Button></div>}
+    {showList && (showPagination || available.length > 0) && <div className="source-selection-footer">
+      {showPagination && <Pagination size="small" current={currentPage} pageSize={SOURCES_PER_PAGE}
+        total={groups.length} showLessItems showSizeChanger={false} onChange={setPage} />}
+      {available.length > 0 && <Button className="source-import-footer-action" type="primary" onClick={() => imports?.choose(available)}>{tr("add")}</Button>}
+    </div>}
   </aside>;
 }
 
@@ -154,10 +187,13 @@ export function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollec
       <Popover
         trigger="click"
         placement="topLeft"
+        autoAdjustOverflow={{ shiftY: true }}
+        align={{ offset: [0, 0] }}
+        arrow={false}
         open={sourcesOpen}
         onOpenChange={(open: boolean) => { if (!imports?.choosing) setSourcesOpen(open); }}
         destroyOnHidden
-        overlayClassName="chat-sources-popover"
+        overlayClassName="chat-sources-popover chat-reference-popover"
         content={
           <div role="dialog" aria-label={t("chat.references")} onKeyDown={event => {
             if (event.key === "Escape") { event.stopPropagation(); setSourcesOpen(false); }
@@ -171,7 +207,7 @@ export function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollec
           aria-expanded={sourcesOpen}
           aria-haspopup="dialog"
           onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => { if (event.key === "Escape") setSourcesOpen(false); }}
-          aria-label={`${t("chat.references")} (${groups.length})`}
+          aria-label={groups.length ? `${t("chat.references")} (${groups.length})` : t("chat.references")}
         >
           <span className="chat-source-button-icons" aria-hidden="true">
             {groups.slice(0, 3).map(({ sources: [source] }, sourceIndex) => (
@@ -185,9 +221,9 @@ export function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollec
           <span className="chat-source-button-label">
             {t("chat.references")}
           </span>
-          <span className="chat-source-button-count">
+          {groups.length > 0 && <span className="chat-source-button-count">
             {groups.length}
-          </span>
+          </span>}
         </Button>
       </Popover>
     );

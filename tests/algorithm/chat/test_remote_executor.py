@@ -1293,3 +1293,83 @@ async def test_argument_failure_code_reaches_the_existing_attempt_terminal_proto
     assert request_bodies[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
     assert request_bodies[0]['result'] == {'error': '参数修复次数已耗尽'}
     runtime.complete.assert_not_awaited()
+
+
+@pytest.mark.parametrize('workflow_id', ['paper-writing', 'writer-workflow', 'custom-workflow'])
+@pytest.mark.parametrize('with_display', [False, True])
+def test_optional_public_stages_reach_core_before_terminal(monkeypatch, tmp_path, workflow_id, with_display):
+    import asyncio
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    display = {'schema_version': 1, 'event_key': 'stage-1', 'process_steps': [
+        {'step_id': 'read', 'revision': 1, 'order': 0, 'title': '读取材料', 'status': 'running'}]}
+    calls = []
+
+    class Runtime(StopReceiptRuntime):
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'task-1'}, 'inputs': {}, 'prompt': 'Finish'}
+
+        async def execution_spec(self, *_):
+            return {'task': {'input_slots': [], 'output_slots': []}, 'workspace_path': str(tmp_path),
+                    'params': {'workflow_id': workflow_id, 'step_id': 'finish'},
+                    'steps': [], 'llm_config': {}}
+
+        async def task_event(self, _client, _task, _lease, event):
+            calls.append(('event', event))
+
+        async def progress(self, _client, _attempt, _lease, value):
+            calls.append(('progress', value))
+
+        async def complete(self, *_):
+            calls.append(('complete', None))
+
+        async def fail(self, *args, **kwargs):
+            pytest.fail(f'unexpected failure: {args[-1]}')
+
+    async def stream(**kwargs):
+        event = {'type': 'progress', 'progress': 15, 'current_phase': '读取材料'}
+        if with_display:
+            event['public_display'] = display
+        yield 'data: ' + json.dumps(event) + '\n\n'
+        yield 'data: ' + json.dumps({'type': 'done', 'status': 'succeeded', 'summary': '完成'}) + '\n\n'
+
+    worker.runtime = Runtime()
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    asyncio.run(worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease'}))
+    expected = {'progress': 15, 'phase': '读取材料'}
+    if with_display:
+        expected['public_display'] = display
+    assert ('progress', expected) in calls
+    assert calls.index(('complete', None)) < next(i for i, (kind, value) in enumerate(calls)
+                                                if kind == 'event' and value['type'] == 'done')
+
+
+@pytest.mark.asyncio
+async def test_clarification_persists_question_without_failure_or_completion(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': ['document']},
+        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+    }
+    worker.runtime = runtime
+    checks = AsyncMock()
+    monkeypatch.setattr(worker, '_run_post_step_checks', checks)
+    pending = {'question': '请确认修订范围', 'request_sha256': 'a' * 64}
+
+    async def stream(**kwargs):
+        yield 'data: ' + json.dumps({'type': 'done', 'status': 'interrupted',
+                                     'control': {'awaiting_input': pending}}) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    client = object()
+    await worker._run_claim(client, {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+    runtime.cancel.assert_awaited_once_with(client, 'attempt-1', 'lease-1', input_required=pending)
+    runtime.complete.assert_not_awaited()
+    runtime.fail.assert_not_awaited()
+    checks.assert_not_awaited()

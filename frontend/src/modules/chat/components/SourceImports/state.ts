@@ -38,9 +38,9 @@ class SourceState {
   };
   recordFulltext = (rows: api.InspectedSource[]) => {
     if (!rows.length) return;
-    const found = new Set(rows.map(row => row.paper_key));
+    const found = new Set(rows.map(row => row.source_id));
     this.emit({ inspections: this.snapshot.inspections.map(row =>
-      row.needs_pdf_lookup && found.has(row.paper_key) ? { ...row, needs_pdf_lookup: false } : row) });
+      row.needs_pdf_lookup && found.has(row.source_id) ? { ...row, needs_pdf_lookup: false } : row) });
   };
   refresh = (): Promise<void> => {
     if (this.query) return this.query;
@@ -57,7 +57,7 @@ class SourceState {
   schedule = () => {
     clearTimeout(this.timer);
     if (this.pollers.size && !document.hidden && this.snapshot.items.some(row =>
-      row.state_unavailable || ["pending", "running", "unknown"].includes(row.status))) {
+      row.state_unavailable || ["pending", "running", "waiting_retry", "unknown"].includes(row.status))) {
       this.timer = setTimeout(() => void this.refresh(), 3000);
     }
   };

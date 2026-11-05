@@ -92,7 +92,7 @@ func fetchUnpaywallPDFCandidates(ctx context.Context, client *http.Client, doi s
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		done()
-		return nil, paperPDFHTTPError(resp.StatusCode)
+		return nil, paperPDFHTTPError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
 	resp.Body.Close()

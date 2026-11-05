@@ -23,7 +23,7 @@ func managementCaller(c capability.InvocationContext) doc.DatasetCatalogCaller {
 	for v := range c.Principal.Permissions {
 		p = append(p, v)
 	}
-	return doc.DatasetCatalogCaller{UserID: c.Principal.UserID, TenantID: c.Principal.TenantID, Permissions: p}
+	return doc.DatasetCatalogCaller{UserID: c.Principal.UserID, UserName: c.Principal.UserName, TenantID: c.Principal.TenantID, Permissions: p}
 }
 func managementContext(c capability.InvocationContext) doc.ResourceOperationContext {
 	return doc.ResourceOperationContext{Caller: managementCaller(c), OperationKey: c.OperationKey, ExpectedSnapshot: c.ExpectedSnapshot, AllowedDatasetIDs: c.AllowedDatasetIDs}

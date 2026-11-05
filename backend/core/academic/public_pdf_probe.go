@@ -42,7 +42,9 @@ func probeOpenPDFCandidates(ctx context.Context, client *http.Client, candidates
 				candidate := candidates[i]
 				address, err := probePublicPDFCandidate(attempt, client, candidate, doi)
 				candidate.URL = address
-				if candidate.SourceType == "open_access_landing" {
+				if candidate.SourceType == "published_landing" {
+					candidate.SourceType = "published_pdf"
+				} else if candidate.SourceType == "open_access_landing" {
 					candidate.SourceType = "open_access_pdf"
 				}
 				if attempt.Err() != nil {

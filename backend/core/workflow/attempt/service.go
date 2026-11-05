@@ -411,6 +411,9 @@ func (s *Service) Terminal(ctx context.Context, attemptID, token, status, code s
 		if err := finishTransactionalOutputs(ctx, tx, current, status); err != nil {
 			return err
 		}
+		if err := finishPublicProgress(tx, current, status, now); err != nil {
+			return err
+		}
 		outboxStatus := "completed"
 		if status == "cancelled" {
 			outboxStatus = "cancelled"

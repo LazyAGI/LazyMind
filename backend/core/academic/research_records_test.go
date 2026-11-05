@@ -6,8 +6,81 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 )
+
+func TestResearchRecordsFollowPublishedPaperMaterialProgress(t *testing.T) {
+	db := paperFixture(t)
+	papers := []WorkflowPaper{{Paper: PaperRef{PaperID: "a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b"}, IsSeed: true}}
+	sources, err := seedSources(db.DB, "papers", papers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, goal := range []string{"expansion", "review"} {
+		record := orm.AcademicExpansion{
+			ID: goal, UserID: "u", DatasetID: "papers", Title: goal, Goal: goal,
+			RequestOwner: "u", RequestKey: goal, Status: "completed", Version: 1,
+			ResultJSON: marshal(ReviewWorkflowInput{Papers: papers}), SeedSnapshotJSON: marshal(sources),
+		}
+		if err := db.Create(&record).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	quality := marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"})
+	for _, source := range sources {
+		content := orm.AcademicPaperContent{
+			ID: source.Paper.PaperID, UserID: "u", PaperID: source.Paper.PaperID,
+			SourceDatasetID: source.DatasetID, SourceDocumentID: source.DocumentID, SourceHash: source.Hash,
+			SourceKind: "kb", SourceKey: source.key(), ParserVersion: orm.AcademicPaperParserVersion,
+			Status: "ready", ContentHash: source.Paper.PaperID, PagesJSON: marshal([]string{"text"}), QualityJSON: quality,
+		}
+		if content.ID == "b" {
+			content.Status = "processing"
+		}
+		if err := db.Create(&content).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Another source of the same paper must not keep this round running.
+	if err := db.Create(&orm.AcademicPaperContent{ID: "other-source", UserID: "u", PaperID: "b", SourceKind: "external",
+		SourceKey: "another-pdf", ParserVersion: orm.AcademicPaperParserVersion, Status: "processing", PagesJSON: marshal([]string{})}).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertProgress := func(processing, ready int) {
+		t.Helper()
+		req := paperRequest("")
+		req.URL.RawQuery = "dataset_id=papers&include_reviews=true"
+		w := httptest.NewRecorder()
+		ListExpansions(w, req)
+		var listed struct{ Items []academicExpansionRecord }
+		if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil || w.Code != 200 || len(listed.Items) != 2 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		for _, row := range listed.Items {
+			if row.Status != "completed" || row.MaterialProgress == nil || row.MaterialProgress.ProcessingCount != processing {
+				t.Fatalf("incorrect material progress for %s: %+v", row.Goal, row.MaterialProgress)
+			}
+			if row.Goal == "review" && (row.MaterialProgress.DistinctReadyCount == nil || *row.MaterialProgress.DistinctReadyCount != ready) {
+				t.Fatalf("incorrect distinct review material count: %+v", row.MaterialProgress)
+			}
+		}
+		w = httptest.NewRecorder()
+		GetExpansion(w, mux.SetURLVars(paperRequest(""), map[string]string{"expansion_id": "review"}))
+		var detail struct {
+			MaterialProgress academicMaterialProgress `json:"material_progress"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil || w.Code != 200 || detail.MaterialProgress.ProcessingCount != processing ||
+			detail.MaterialProgress.DistinctReadyCount == nil || *detail.MaterialProgress.DistinctReadyCount != ready {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	assertProgress(1, 1)
+	if err := db.Model(&orm.AcademicPaperContent{}).Where("id=?", "b").Update("status", "ready").Error; err != nil {
+		t.Fatal(err)
+	}
+	assertProgress(0, 2)
+}
 
 func TestResearchRecordsIncludeOwnedReviewsAndFrozenCounts(t *testing.T) {
 	db := paperFixture(t)

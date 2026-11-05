@@ -1,3 +1,4 @@
+import type { KnowledgeConfirmation } from "@/modules/chat/types/knowledgeConfirmation";
 import { ChatConversationsResponseFinishReasonEnum as Finish } from "@/api/generated/chatbot-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { splitModelOutputContent } from "./thinking";
@@ -21,6 +22,17 @@ export function assignSteeringIntent(source: any[], historyId: string, intent?: 
     if (segment === intent.steering_segment_id) update = intent;
     else if (update?.steering_segment_id === intent.steering_segment_id) update = undefined;
     return { ...message, intent_updated: update };
+  });
+}
+
+// The last row may temporarily hold cards for a boundary whose chat event
+// has not arrived yet. Splitting the row below then moves those cards forward.
+export function assignKnowledgeConfirmations(source: any[], historyId: string, cards: KnowledgeConfirmation[]) {
+  return source.map((row) => {
+    if (row.role !== RoleTypes.ASSISTANT || (row.history_id !== historyId && row.original_history_id !== historyId)) return row;
+    const index = row.knowledge_segment ?? 0;
+    return { ...row, knowledge_confirmations: cards.filter(card => row.steering_segment
+      ? card.steering_segment === index : card.steering_segment >= index) };
   });
 }
 
@@ -60,6 +72,7 @@ function steeringUserMessage(historyId: string, item: SteeringBoundary, pending 
 // Stable IDs allow both duplicate events and replay after reconnect.
 export function applySteeringTimeline(
   source: any[], historyId: string, items: SteeringBoundary[], replay = false, modelOutput?: unknown,
+  restoredCards?: KnowledgeConfirmation[],
 ) {
   let list = [...source];
   const intent = replay ? source.findLast((m) => (m.history_id === historyId || m.original_history_id === historyId) && m.intent_updated)?.intent_updated : undefined;
@@ -67,11 +80,14 @@ export function applySteeringTimeline(
     const belongs = (m: any) => m.history_id === historyId || m.original_history_id === historyId;
     const first = list.findIndex((m) => belongs(m) && (m.role === RoleTypes.ASSISTANT || m.steering_message));
     const template = list.find((m) => belongs(m) && m.role === RoleTypes.ASSISTANT) || {};
+    const cards = restoredCards ?? list.filter(m => belongs(m) && m.role === RoleTypes.ASSISTANT)
+      .flatMap(m => m.knowledge_confirmations ?? []);
     list = list.filter((m) => !belongs(m) || (m.role === RoleTypes.USER && !m.steering_message));
     list.splice(first < 0 ? list.length : first, 0, {
       ...template, id: undefined, history_id: historyId, original_history_id: undefined,
       model_output: modelOutput || template.model_output,
       steering_segment: undefined, steering_follow_up_id: undefined,
+      knowledge_segment: 0, knowledge_confirmations: cards,
       role: RoleTypes.ASSISTANT, delta: "", raw_delta: "", reasoning_content: "",
     });
   }
@@ -95,14 +111,18 @@ export function applySteeringTimeline(
     //
     // Deliberately key this to steering boundaries only. Ordinary chat turns
     // keep their existing loading, reasoning and cancellation presentation.
+    const segment = previous.knowledge_segment ?? 0;
+    const cards: KnowledgeConfirmation[] = previous.knowledge_confirmations ?? [];
+    const previousCards = cards.filter(card => card.steering_segment === segment);
     const visible = String(previous.display_delta || previous.delta || "").trim()
-      || previous.ask_pending
+      || previous.ask_pending || previousCards.length
       || previous.answers?.length || previous.images?.length || previous.files?.length;
     const additions: any[] = [];
     if (visible) additions.push({
       ...previous, id: `steering-segment:${item.id}`,
       history_id: `steering-segment:${historyId}:${item.id}`, original_history_id: historyId,
       steering_segment: true, steering_follow_up_id: item.id,
+      knowledge_segment: segment, knowledge_confirmations: previousCards,
       run_status: undefined, run_terminal: undefined, model_retry: undefined,
       finish_reason: Finish.FinishReasonStop,
     });
@@ -111,6 +131,8 @@ export function applySteeringTimeline(
       finish_reason: Finish.FinishReasonUnspecified, answers: [], sources: [],
       steering_continuation: true, steering_follow_up_id: item.id, model_route: previous.model_route,
       model_output: previous.model_output,
+      knowledge_segment: segment + 1,
+      knowledge_confirmations: cards.filter(card => card.steering_segment > segment),
     });
     list.splice(index, 1, ...additions);
   }

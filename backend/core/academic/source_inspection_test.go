@@ -154,7 +154,7 @@ func TestSourcePDFLookupMakesAgentCitationImportable(t *testing.T) {
 		t.Fatalf("inspect: %+v %v", row, err)
 	}
 	items := []SourceInspection{row}
-	if err = lookupSourcePDFs(ctx, db, items); err != nil || items[0].NeedsPDFLookup {
+	if err = lookupSourcePDFs(ctx, db, "alice", SourceContext{}, items); err != nil || items[0].NeedsPDFLookup {
 		t.Fatalf("lookup: %+v %v", items, err)
 	}
 	if metadataCalls.Load() != 2 || pdfCalls.Load() != 2 || items[0].PDFLookupFailed {
@@ -191,13 +191,50 @@ func TestSourcePDFLookupDistinguishesUnavailableAndFailed(t *testing.T) {
 				return tc.status, tc.body
 			}))
 			items := []SourceInspection{{SourceID: "1", Eligible: true, NeedsPDFLookup: true, Work: WorkInput{DOI: "10.1234/test"}}}
-			if err := lookupSourcePDFs(ctx, db, items); err != nil {
+			if err := lookupSourcePDFs(ctx, db, "alice", SourceContext{}, items); err != nil {
 				t.Fatal(err)
 			}
 			if !items[0].NeedsPDFLookup || items[0].PDFLookupFailed != tc.failed || calls.Load() != tc.calls {
 				t.Fatalf("items=%+v calls=%d", items, calls.Load())
 			}
 		})
+	}
+}
+
+func TestSourcePickerIgnoresSavedRecommendationsAndChecksReferencePDFs(t *testing.T) {
+	db := paperFixture(t).DB
+	source := SourceContext{ConversationID: "chat", HistoryID: "answer"}
+	for _, record := range []any{
+		&orm.Conversation{ID: source.ConversationID, BaseModel: orm.BaseModel{CreateUserID: "u"}},
+		&orm.ChatHistory{ID: source.HistoryID, ConversationID: source.ConversationID, RetrievalResult: json.RawMessage(`{
+			"sources":[{"source_id":"html","url":"https://arxiv.org/abs/2405.12981"},
+			           {"source_id":"pdf","url":"https://arxiv.org/abs/2210.03629","title":"ReAct"}],
+			"recommended_papers":[{"title":"Toolformer","arxiv_id":"2302.04761"}]
+		}`)},
+	} {
+		if err := db.Create(record).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("LAZYMIND_AGENTIC_WORKSPACE", "")
+	items, err := inspectSourcePDFs(t.Context(), db, "u", source, nil)
+	if err != nil || len(items) != 2 || items[0].SourceID != "html" || items[1].SourceID != "pdf" ||
+		!items[0].NeedsPDFLookup || !items[1].NeedsPDFLookup {
+		t.Fatalf("unverified sources: %+v, %v", items, err)
+	}
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.String() == "https://arxiv.org/pdf/2210.03629" {
+			return 206, "%PDF-1.7 verified"
+		}
+		return 200, "<html>no PDF</html>"
+	})
+	ctx := context.WithValue(t.Context(), paperPDFClientKey{}, client)
+	if err := lookupSourcePDFs(ctx, db, "u", source, items); err != nil || !items[0].NeedsPDFLookup || items[1].NeedsPDFLookup {
+		t.Fatalf("PDF probe results: %+v, %v", items, err)
+	}
+	items, err = inspectSourcePDFs(t.Context(), db, "u", source, nil)
+	if err != nil || !items[0].NeedsPDFLookup || items[1].NeedsPDFLookup {
+		t.Fatalf("reopened picker: %+v, %v", items, err)
 	}
 }
 
@@ -263,17 +300,17 @@ func TestSourcePresenceIgnoresOtherLibrariesAndDeletedDocuments(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	d, e := sourcePresentDocument(db, "second", "paper", "")
+	d, e := sourcePresentDocument(db, "second", "paper", "", false)
 	if e != nil || d.ID != "b" {
 		t.Fatalf("wrong library: %+v %v", d, e)
 	}
-	if _, e = sourcePresentDocument(db, "third", "paper", ""); !errors.Is(e, gorm.ErrRecordNotFound) {
+	if _, e = sourcePresentDocument(db, "third", "paper", "", false); !errors.Is(e, gorm.ErrRecordNotFound) {
 		t.Fatal(e)
 	}
 	if e = db.Model(&orm.Document{}).Where("id = ?", "b").Update("deleted_at", time.Now()).Error; e != nil {
 		t.Fatal(e)
 	}
-	if _, e = sourcePresentDocument(db, "second", "paper", ""); !errors.Is(e, gorm.ErrRecordNotFound) {
+	if _, e = sourcePresentDocument(db, "second", "paper", "", false); !errors.Is(e, gorm.ErrRecordNotFound) {
 		t.Fatal("deleted document suppressed import", e)
 	}
 }

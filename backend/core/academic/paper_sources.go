@@ -241,6 +241,19 @@ func findSourceContent(db *gorm.DB, user string, source paperSource) (orm.Academ
 			}
 		}
 		if row.SourceKind == "external" || (row.SourceDatasetID == source.DatasetID && row.SourceDocumentID == source.DocumentID && (source.Hash == "" || row.SourceHash == source.Hash)) {
+			if paperContentProcessing(row) {
+				// A worker can lose its last lease before persisting the content outcome.
+				var stopped orm.AsyncJob
+				result := db.Select("id").Where("job_type=? AND idempotency_key=? AND status IN ?", "academic.paper_content", row.ID,
+					[]string{"failed", "canceled"}).Limit(1).Find(&stopped)
+				if result.Error != nil {
+					return row, result.Error
+				}
+				if result.RowsAffected > 0 {
+					row.Status = "failed"
+					row.Error = "全文处理任务已终止，请重试"
+				}
+			}
 			return row, nil
 		}
 	}

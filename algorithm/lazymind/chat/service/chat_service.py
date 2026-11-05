@@ -727,9 +727,9 @@ def _workflow_startup_clarification_available(
     *,
     discovery_mode: bool = False,
 ) -> bool:
-    """Allow a declaratively interactive Workflow to clarify before Session creation."""
+    """Keep declared clarification available during an interactive Workflow too."""
     context = workflow_context if isinstance(workflow_context, dict) else {}
-    if str(context.get('session_id') or '').strip():
+    if str(context.get('session_id') or '').strip() and context.get('workflow_mode') == 'auto':
         return False
 
     def has_fields(policy: Any) -> bool:
@@ -745,6 +745,8 @@ def _workflow_startup_clarification_available(
 
     if has_fields(runtime_policy):
         return True
+    if str(context.get('session_id') or '').strip():
+        return False
     if not discovery_mode:
         return False
     return any(
@@ -2217,13 +2219,16 @@ async def _handle_chat_impl(
                 (['KBToolkit'] if (agentic_config.get('filters') or {}).get('kb_id') else [])
                 + (['MailToolkit'] if confirm_id or mailbox_confirm else [])
             ),
-            required_tool_names=tuple(getattr(tool, '__name__', '') for tool in (
-                [] if sidechat_readonly else [
-                    *workflow_tools, *attachment_tools,
+            required_tool_names=() if sidechat_readonly else (
+                *workflow_contribution.required_tool_names,
+                *(getattr(tool, '__name__', '') for tool in [
+                    *attachment_tools,
                     *([directory_runtime.list_document_directories, directory_runtime.open_document_directory,
                        directory_runtime.folders.inspect_document_folder,
                        directory_runtime.folders.submit_document_directory_organization]
-                      if directory_runtime else [])])),
+                      if directory_runtime else []),
+                ]),
+            ),
             tool_state_scope='sidechat' if sidechat_readonly else 'chat',
             context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
             configuration_runtime=configuration_runtime,
@@ -2474,6 +2479,8 @@ async def _handle_chat_impl(
                     # for this run and must be available to the same tool.
                     append_intentwrite_guidance(intentwriter, [item.content for item in late_guidance])
                     current_query = current_plan.prompt.current_input
+                    if knowledge_management is not None:
+                        knowledge_management.steering_segment += len(late_guidance)
                     for frame in translator.begin_steering_segment():
                         yield log_and_emit_frame(
                             frame, round(time.time() - start_time, 3), query,

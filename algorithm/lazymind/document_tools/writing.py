@@ -389,6 +389,7 @@ class DraftMarkdownStreamEventEmitter:
         self._stream_id = uuid.uuid4().hex
         self._chunk_index = 0
         self._closed = False
+        self._aborted = False
         self._lock = RLock()
         with self._lock:
             self._publish_locked('start')
@@ -416,6 +417,15 @@ class DraftMarkdownStreamEventEmitter:
     def end(self) -> None:
         self._finish('end')
 
+    def feed_complete(self, text: str) -> None:
+        """Display an already generated result without replaying tiny deltas."""
+        with self._lock:
+            if self._closed:
+                return
+            if text:
+                self._publish_locked('delta', delta=text)
+            self.end()
+
     def abort(self, message: str = '') -> None:
         self._finish('abort', message=message)
 
@@ -430,6 +440,7 @@ class DraftMarkdownStreamEventEmitter:
             self._stream_id = uuid.uuid4().hex
             self._chunk_index = 0
             self._closed = False
+            self._aborted = False
             self._publish_locked('start')
             if prefix:
                 self.feed(prefix)
@@ -439,10 +450,13 @@ class DraftMarkdownStreamEventEmitter:
 
     def _finish(self, event: str, *, message: str = '') -> None:
         with self._lock:
-            if self._closed:
+            # Ending generation flushes the preview, not publication. A later
+            # validation failure must still be able to withdraw that preview.
+            if self._aborted or (self._closed and event != 'abort'):
                 return
             self._publish_locked(event, message=message)
             self._closed = True
+            self._aborted = event == 'abort'
 
     def _publish_locked(
         self, event: str, *, delta: str = '', message: str = ''

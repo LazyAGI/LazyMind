@@ -1,0 +1,20 @@
+{
+  "conversation_id": "a72ece9f-dc4e-49a5-bd01-4b09928ee309",
+  "items": [
+    {
+      "source": "/static-files/paper-charts/b54c3271c488d9a5548c88b122f98c96e7cfd7655f9555dcd42af3458f7ba828.svg",
+      "sha256": "b54c3271c488d9a5548c88b122f98c96e7cfd7655f9555dcd42af3458f7ba828",
+      "alt": "Evidence consistency and revision reliability across workflo"
+    },
+    {
+      "source": "/static-files/paper-charts/2c1dbb67bc591a0c1e0c4cee0c1e3691168d2cbbaa66d1deefef038cbb97f85a.svg",
+      "sha256": "2c1dbb67bc591a0c1e0c4cee0c1e3691168d2cbbaa66d1deefef038cbb97f85a",
+      "alt": "Workflow stages add quality but also raise model and retriev"
+    },
+    {
+      "source": "/static-files/paper-charts/1c781d4a29b0cfaa326710dae027bc459192c55073d28779a521eed82b918f98.svg",
+      "sha256": "1c781d4a29b0cfaa326710dae027bc459192c55073d28779a521eed82b918f98",
+      "alt": "Quality–cost trade-off across workflow conditions"
+    }
+  ]
+}

@@ -111,6 +111,9 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const archiveKind: RecoveryKind = searchParams.get("kind") === "task" ? "task" : "dialog";
   const setArchiveKind = (kind: RecoveryKind) => {
     const nextSearchParams = new URLSearchParams(searchParams);
+    setFolderFilter("all");
+    setFolders([]);
+    setArchiveItems([]);
     nextSearchParams.set("kind", kind);
     setSearchParams(nextSearchParams, { replace: true });
   };
@@ -183,16 +186,17 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     const controller = new AbortController();
     setFoldersLoading(true);
     setFolderError(false);
-    void listArchiveFolders(controller.signal).then((result) => {
+    void listArchiveFolders(controller.signal, archiveKind).then((result) => {
+      if (controller.signal.aborted) return;
       setFolders(result.folders);
-      setUnfiledTotalCount(result.unfiledTotalCount);
+      setUnfiledTotalCount(archiveKind === "task" ? result.unfiledTaskCount : result.unfiledDialogCount);
     }).catch((error) => {
-      if (error?.name !== "CanceledError" && error?.name !== "AbortError") setFolderError(true);
+      if (!controller.signal.aborted && error?.name !== "CanceledError" && error?.name !== "AbortError") setFolderError(true);
     }).finally(() => {
       if (!controller.signal.aborted) setFoldersLoading(false);
     });
     return () => controller.abort();
-  }, [folderRevision]);
+  }, [archiveKind, folderRevision]);
 
   useEffect(() => {
     if (!moveItem || foldersLoading || moveFolderId === "unfiled") return;
@@ -211,6 +215,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       pageSize: 20,
       signal: controller.signal,
     }).then((result) => {
+      if (controller.signal.aborted) return;
       if (archivePage > 1 && result.items.length === 0 && result.total > 0) {
         setArchivePage(Math.max(1, Math.ceil(result.total / 20)));
         return;
@@ -218,7 +223,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       setArchiveItems(result.items);
       setArchiveTotal(result.total);
     }).catch((error) => {
-      if (error?.name !== "CanceledError" && error?.name !== "AbortError") setArchiveError(true);
+      if (!controller.signal.aborted && error?.name !== "CanceledError" && error?.name !== "AbortError") setArchiveError(true);
     }).finally(() => {
       if (!controller.signal.aborted) setArchiveLoading(false);
     });
@@ -353,7 +358,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     }
     setFolderSaving(true);
     try {
-      const folder = await createArchiveFolder(name);
+      const folder = await createArchiveFolder(name, archiveKind);
       setFolderModalOpen(false);
       setFolderName("");
       setFolderRevision((value) => value + 1);
@@ -499,7 +504,9 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
 
   const groupedArchiveItems = useMemo(() => {
     if (folderFilter !== "all") return [{ id: folderFilter, name: "", items: archiveItems }];
-    const groups = new Map<string, ConversationRecoveryItem[]>();
+    const groups = new Map<string, ConversationRecoveryItem[]>(
+      archiveKeyword.trim() ? [] : folders.map((folder) => [folder.id, []]),
+    );
     archiveItems.forEach((item) => {
       const key = item.folder_id || "unfiled";
       groups.set(key, [...(groups.get(key) || []), item]);
@@ -509,7 +516,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       name: id === "unfiled" ? t("settingsPage.recovery.unfiled") : folders.find((folder) => folder.id === id)?.name || t("settingsPage.recovery.unknownFolder"),
       items,
     }));
-  }, [archiveItems, folderFilter, folders, t]);
+  }, [archiveItems, archiveKeyword, folderFilter, folders, t]);
 
   const archivedRow = (item: ConversationRecoveryItem) => {
     const busy = busyKey.endsWith(`:${item.conversation_id}`);
@@ -620,10 +627,10 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       </div>
     </div>
     {folderError ? <Alert type="warning" showIcon message={t("settingsPage.recovery.folderLoadFailed")} action={<Button size="small" onClick={() => setFolderRevision((value) => value + 1)}>{t("common.retry")}</Button>} /> : null}
-    {archiveLoading ? <div className="recovery-loading"><Skeleton active paragraph={{ rows: 5 }} /></div> : archiveError ? <Alert className="recovery-load-error" type="error" showIcon message={t("settingsPage.recovery.loadFailed")} action={<Button onClick={() => setArchiveRevision((value) => value + 1)}>{t("common.retry")}</Button>} /> : archiveItems.length === 0 ? <Empty description={archiveKeyword.trim() ? t("settingsPage.recovery.noResults") : t("settingsPage.recovery.archiveEmpty")} /> : <div className="recovery-groups">
+    {archiveLoading ? <div className="recovery-loading"><Skeleton active paragraph={{ rows: 5 }} /></div> : archiveError ? <Alert className="recovery-load-error" type="error" showIcon message={t("settingsPage.recovery.loadFailed")} action={<Button onClick={() => setArchiveRevision((value) => value + 1)}>{t("common.retry")}</Button>} /> : archiveItems.length === 0 && groupedArchiveItems.length === 0 ? <Empty description={archiveKeyword.trim() ? t("settingsPage.recovery.noResults") : t("settingsPage.recovery.archiveEmpty")} /> : <div className="recovery-groups">
       {groupedArchiveItems.map((group) => <section className="recovery-group" key={group.id} aria-label={group.name || undefined}>
         {folderFilter === "all" ? <header><span><FolderOutlined /> {group.name}</span><em>{t("settingsPage.recovery.itemCount", { count: group.items.length })}</em></header> : null}
-        <div className="recovery-table"><div className="recovery-table-head"><span>{t("settingsPage.recovery.name")}</span><span>{t("settingsPage.recovery.archivedAt")}</span><span>{t("settingsPage.recovery.actions")}</span></div>{group.items.map(archivedRow)}</div>
+        {group.items.length === 0 ? <Empty description={t("settingsPage.recovery.archiveEmpty")} /> : <div className="recovery-table"><div className="recovery-table-head"><span>{t("settingsPage.recovery.name")}</span><span>{t("settingsPage.recovery.archivedAt")}</span><span>{t("settingsPage.recovery.actions")}</span></div>{group.items.map(archivedRow)}</div>}
       </section>)}
     </div>}
     {archiveTotal > 20 ? <Pagination current={archivePage} pageSize={20} total={archiveTotal} showSizeChanger={false} onChange={setArchivePage} /> : null}
@@ -706,7 +713,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       foldersLoading={foldersLoading}
       folderLoadError={folderError}
       submitting={movePending}
-      createFolder={createArchiveFolder}
+      createFolder={(name) => createArchiveFolder(name, archiveKind)}
       onFolderCreated={handleMoveFolderCreated}
       onSelectFolder={setMoveFolderId}
       onRetry={() => setFolderRevision((value) => value + 1)}

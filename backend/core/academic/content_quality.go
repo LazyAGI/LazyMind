@@ -2,9 +2,11 @@ package academic
 
 import (
 	"encoding/json"
-	"lazymind/core/common/orm"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
+	"lazymind/core/common/orm"
 )
 
 type contentQuality struct {
@@ -80,8 +82,9 @@ func checkPaperQuality(paper PaperRef, pages []ContentPage, kind, hash string) c
 		return q
 	}
 	// Match the document opening, not identifiers found in its bibliography.
-	title := NormalizeTitle(paper.Title)
-	normalized := NormalizeTitle(string(front))
+	// PDF extraction can represent letters as a single typographic ligature.
+	title := NormalizeTitle(norm.NFKC.String(paper.Title))
+	normalized := NormalizeTitle(norm.NFKC.String(string(front)))
 	// Keep title order: a bag of common topic words in an unrelated abstract
 	// cannot verify paper identity. Joining whitespace tolerates PDF line wraps.
 	matched := len([]rune(title)) >= 8 && strings.Contains(strings.ReplaceAll(normalized, " ", ""), strings.ReplaceAll(title, " ", ""))

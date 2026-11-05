@@ -4,7 +4,7 @@ import { useWorkflowStore, type WorkflowSession } from './workflowPanel';
 import { reconcileWorkflowTasks } from '../utils/workflowTaskStatus';
 import { isCurrentCapabilityFailure } from '../utils/mediaCapabilityDependency';
 
-const api = vi.hoisted(() => ({ getLatestSession: vi.fn(), getProjection: vi.fn(), getDismissedSessions: vi.fn() }));
+const api = vi.hoisted(() => ({ getLatestSession: vi.fn(), getProjection: vi.fn(), getDismissedSessions: vi.fn(), getSlots: vi.fn() }));
 vi.mock('@/modules/chat/utils/request', () => ({
   WorkflowSessionApi: () => api, WorkflowInfoApi: () => ({}), TempUploadServiceApi: () => ({}),
 }));
@@ -45,6 +45,26 @@ describe('versioned workflow synchronization', () => {
       payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'review' } } });
     expect(old.projection.display).toEqual({ status: 'paused', reason: 'user_stopped', approval_step_id: '' });
   });
+
+  it('keeps 100% progress running until the authoritative completion snapshot arrives', () => {
+    const store = useWorkflowStore.getState();
+    store.setSession('c', { ...session(), status: 'active' });
+    store.setAutoRunning('c', true);
+    store.applyWorkflowEvent('c', 's', snapshot(42, 22773, 'active'));
+    store.applyWorkflowEvent('c', 's', { type: 'attempt.progress', state_version: 42, cursor: 22774,
+      entity_id: 'a', payload: { progress: 100, phase: '文档已保存' } });
+    expect(useWorkflowStore.getState().sessionByConversation.c?.status).toBe('active');
+    store.applyWorkflowEvent('c', 's', { type: 'workflow.snapshot', state_version: 44, cursor: 22776,
+      payload: { status: 'waiting', projection: { completed: false, current: null,
+        nodes: { edit: { execution: 'succeeded' } } }, attempt_history: { edit: [
+        { attempt: 1, attempt_id: 'a', task_id: 't', status: 'succeeded', validity: 'effective', started_at: '' },
+      ] } } });
+    const updated = useWorkflowStore.getState();
+    expect(updated.sessionByConversation.c?.status).toBe('waiting');
+    expect(updated.sessionByConversation.c?.steps?.[0].status).toBe('succeeded');
+    expect(updated.autoRunningByConversation.c).toBe(false);
+  });
+
   it('clears automatic execution when a chat stop arrives as a waiting snapshot', () => {
     const store = useWorkflowStore.getState();
     store.setSession('c', { ...session(), status: 'active' });
@@ -140,4 +160,17 @@ it('renders workflow task status from the same attempt snapshot as the main pane
   const steps = [{ id: 'a', session_id: 's', step_id: 'edit', attempt: 1, task_id: 'a',
     status: 'succeeded', validity: 'effective' as const, created_at: '', updated_at: '' }];
   expect(reconcileWorkflowTasks(tasks, steps).map((task) => task.status)).toEqual(['succeeded', 'running']);
+});
+
+
+it('loads the committed slots when completion races the session read', async () => {
+  api.getLatestSession.mockResolvedValueOnce({ data: { data: { session: session(8) } } });
+  api.getProjection.mockResolvedValueOnce({ data: { data: { state_version: 9, status: 'waiting',
+    attempt_history: { experiment: [{ attempt: 1, attempt_id: 'a', task_id: 't', status: 'succeeded' }] }, projection: {} } } });
+  const document = { slot_id: 'experiment_document', revision: 2, selected: true, producer_attempt_id: 'a' };
+  api.getSlots.mockResolvedValueOnce({ data: { data: { slots: [document] } } });
+  useWorkflowStore.getState().setSession('c', session(8));
+  await useWorkflowStore.getState().loadActiveSession('c');
+  expect(useWorkflowStore.getState().sessionByConversation.c?.slots).toEqual([document]);
+  expect(useWorkflowStore.getState().sessionByConversation.c?.steps?.[0].status).toBe('succeeded');
 });

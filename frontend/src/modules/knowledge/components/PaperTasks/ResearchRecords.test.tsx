@@ -9,7 +9,12 @@ import ResearchRecords from './ResearchRecords';
 import ReviewRecordDrawer from './ReviewRecordDrawer';
 
 vi.mock('../../api/paperWorkflows', () => ({ getExpansion: vi.fn(), getReviewRecordContext: vi.fn() }));
-vi.mock('@/modules/chat/store/conversationRunning', () => ({ useConversationRunningStore: Object.assign(() => undefined, { getState: () => ({ watch: vi.fn(), unwatch: vi.fn() }) }) }));
+const running = vi.hoisted(() => ({ entries: {} as Record<string, { status: 'running' }> }));
+vi.mock('@/modules/chat/store/conversationRunning', () => ({
+    useConversationRunningStore: Object.assign((select: (state: typeof running) => unknown) => select(running), {
+        getState: () => ({ watch: vi.fn(), unwatch: vi.fn() }),
+    }),
+}));
 const i18n = createInstance();
 void i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN } }, initImmediate: false });
 const papers = ['A', 'B', 'C'].map(id => ({ paper: { paper_id: id, title: id, abstract: null }, is_seed: false, is_important: false }));
@@ -21,6 +26,7 @@ function mount(ui: React.ReactNode) {
 }
 beforeEach(() => {
     vi.resetAllMocks();
+    running.entries = {};
     vi.mocked(getReviewRecordContext).mockResolvedValue({ kind: 'review', expansion_id: 'source', source_available: true, input: { ...expansion.result, user_instruction: '综述主题：工具学习\n\n补充要求：比较方法', papers: papers.slice(0, 2) } });
     vi.mocked(getExpansion).mockResolvedValue({ record: expansion, rounds: [], chat_status: 'available', paper_importance: {}, handoffs: [], contents: papers.map(item => ({ id: item.paper.paper_id, paper_id: item.paper.paper_id, status: 'ready', content_hash: item.paper.paper_id, quality: { eligible: true, downloaded: true, parsed: true, identity: 'matched', text: 'usable', material: 'main' } })) });
 });
@@ -48,11 +54,15 @@ it('shows independent reviews with expansions and filters without changing the r
 
 it('keeps the frozen list separate from current source counts and opens its source or conversation', async () => {
     const onSource = vi.fn(), onChat = vi.fn();
+    running.entries[review.conversation_id] = { status: 'running' };
     mount(<ReviewRecordDrawer record={review} onClose={vi.fn()} onSource={onSource} onChat={onChat} />);
     await screen.findByText('本次纳入 2 篇');
     await screen.findByText('扩展结果 3 篇 · 扩展当前全文可用 3 篇');
+    expect(screen.getByText('综述会话 · 运行中')).toBeVisible();
+    const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
+    expect(flow.getAllByText('已完成')).toHaveLength(2);
     fireEvent.click(screen.getByText('查看本次论文清单'));
-    const list = screen.getByRole('list');
+    const list = within(screen.getByText('查看本次论文清单').closest('details')!).getByRole('list');
     expect(within(list).getAllByRole('listitem')).toHaveLength(2);
     expect(within(list).queryByText(/C/)).not.toBeInTheDocument();
     expect(screen.getByText(/补充要求：比较方法/)).toBeVisible();

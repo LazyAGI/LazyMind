@@ -146,3 +146,125 @@ func TestPublicDisplayHTTPRejectionHasServerRequestID(t *testing.T) {
 		t.Fatalf("request correlation: %q", body.RequestID)
 	}
 }
+
+func TestTerminalSettlesPublicStageAndProgressWithPublication(t *testing.T) {
+	for _, status := range []string{"succeeded", "failed", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			service, db := publicTestService(t)
+			queue(t, service, "a1", "s1", "experiment")
+			claim, err := service.Claim(t.Context(), "executor")
+			if err != nil {
+				t.Fatal(err)
+			}
+			progress := json.RawMessage(`{"progress":95,"phase":"正在保存","public_display":{"schema_version":1,"event_key":"saving","process_steps":[{"step_id":"save","revision":1,"order":0,"title":"保存文档","status":"running"}]}}`)
+			if err := service.Progress(t.Context(), "a1", claim.LeaseToken, progress); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.Terminal(t.Context(), "a1", claim.LeaseToken, status, "", json.RawMessage(`{}`)); err != nil {
+				t.Fatal(err)
+			}
+			row, err := service.Attempt(t.Context(), "a1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value struct {
+				Progress int           `json:"progress"`
+				Display  PublicDisplay `json:"public_display"`
+			}
+			if err := json.Unmarshal([]byte(row.ProgressJSON), &value); err != nil {
+				t.Fatal(err)
+			}
+			expected := status
+			if status == "cancelled" {
+				expected = "canceled"
+			}
+			if len(value.Display.ProcessSteps) != 1 || value.Display.ProcessSteps[0].Status != expected || value.Display.ProcessSteps[0].FinishedAt == nil {
+				t.Fatalf("terminal public stage = %+v", value)
+			}
+			if (status == "succeeded" && value.Progress != 100) || (status != "succeeded" && value.Progress != 95) {
+				t.Fatalf("terminal progress = %d for %s", value.Progress, status)
+			}
+			var count int64
+			db.Model(&orm.WorkflowEvent{}).Where("event_type = ?", "attempt.public_display").Count(&count)
+			if count != 2 {
+				t.Fatalf("public events = %d", count)
+			}
+		})
+	}
+}
+
+func TestTerminalSettlesIncrementalStagesEvenWhenLatestProgressOmitsDisplay(t *testing.T) {
+	service, db := publicTestService(t)
+	queue(t, service, "a1", "s1", "custom-step")
+	claim, err := service.Claim(t.Context(), "executor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		`{"public_display":{"schema_version":1,"event_key":"first","process_steps":[{"step_id":"read","revision":1,"order":0,"title":"Read","status":"running"}]}}`,
+		`{"public_display":{"schema_version":1,"event_key":"second","process_steps":[{"step_id":"write","revision":1,"order":1,"title":"Write","status":"running"}]}}`,
+		`{"progress":99,"phase":"Publishing","custom_field":"preserved"}`,
+	} {
+		if err := service.Progress(t.Context(), "a1", claim.LeaseToken, json.RawMessage(raw)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.Complete(t.Context(), "a1", claim.LeaseToken, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	row, err := service.Attempt(t.Context(), "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var progress struct {
+		Display PublicDisplay `json:"public_display"`
+		Custom  string        `json:"custom_field"`
+	}
+	if err := json.Unmarshal([]byte(row.ProgressJSON), &progress); err != nil {
+		t.Fatal(err)
+	}
+	if progress.Custom != "preserved" || len(progress.Display.ProcessSteps) != 2 {
+		t.Fatalf("terminal progress = %+v", progress)
+	}
+	for _, step := range progress.Display.ProcessSteps {
+		if step.Status != "succeeded" || step.Revision != 2 || step.FinishedAt == nil {
+			t.Fatalf("unfinished public stage = %+v", step)
+		}
+	}
+	var events int64
+	db.Model(&orm.WorkflowEvent{}).Where("event_type = ?", "attempt.public_display").Count(&events)
+	if events != 3 {
+		t.Fatalf("public events = %d", events)
+	}
+}
+
+func TestTerminalWithoutPublicDisplayDoesNotInventPublicStages(t *testing.T) {
+	service, db := publicTestService(t)
+	queue(t, service, "a1", "s1", "custom-step")
+	claim, err := service.Claim(t.Context(), "executor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Progress(t.Context(), "a1", claim.LeaseToken, json.RawMessage(`{"progress":90,"custom_field":"preserved"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Complete(t.Context(), "a1", claim.LeaseToken, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	row, err := service.Attempt(t.Context(), "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var progress map[string]any
+	if err := json.Unmarshal([]byte(row.ProgressJSON), &progress); err != nil {
+		t.Fatal(err)
+	}
+	if progress["public_display"] != nil || progress["custom_field"] != "preserved" || progress["progress"] != float64(100) {
+		t.Fatalf("terminal progress = %+v", progress)
+	}
+	var events int64
+	db.Model(&orm.WorkflowEvent{}).Where("event_type = ?", "attempt.public_display").Count(&events)
+	if events != 0 {
+		t.Fatalf("invented public events = %d", events)
+	}
+}

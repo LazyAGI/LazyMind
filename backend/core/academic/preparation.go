@@ -66,10 +66,9 @@ func depthFor(mode string) (expansionDepth, bool) {
 	}, true
 }
 
-// Standalone expansion and assisted review have separate delivery contracts.
 func depthForExpansion(record orm.AcademicExpansion) (expansionDepth, bool) {
 	depth, ok := depthFor(record.BudgetMode)
-	if !ok || record.Goal != "expansion" {
+	if !ok {
 		return depth, ok
 	}
 	if record.BudgetMode == "fast" {
@@ -87,6 +86,11 @@ func depthForExpansion(record orm.AcademicExpansion) (expansionDepth, bool) {
 	}
 	return depth, ok
 }
+
+const (
+	legacyAcademicExpansionHost = "academic-paper-chat-v1"
+	academicExpansionHost       = "academic-paper-chat-v2"
+)
 
 type preparationDirection struct {
 	Name       string     `json:"name"`
@@ -616,7 +620,8 @@ func initializeAcademicSession(ctx context.Context, db *gorm.DB, session orm.Wor
 		return err
 	}
 	// Older pinned packages determine these conditions from stage outputs.
-	if !slices.Contains(graph.Runtime.HostExtensions, "academic-paper-chat-v1") ||
+	unified := slices.Contains(graph.Runtime.HostExtensions, academicExpansionHost)
+	if (!unified && !slices.Contains(graph.Runtime.HostExtensions, legacyAcademicExpansionHost)) ||
 		graph.MaterialProducers["analysis_not_required"].Kind != "external" {
 		return nil
 	}
@@ -628,10 +633,11 @@ func initializeAcademicSession(ctx context.Context, db *gorm.DB, session orm.Wor
 		return errors.New("invalid research depth")
 	}
 	markers := []string{}
-	if record.Goal != "expansion" || record.BudgetMode == "fast" {
+	legacyReview := !unified && record.Goal != "expansion"
+	if legacyReview || record.BudgetMode == "fast" {
 		markers = append(markers, "screening_not_required")
 	}
-	if record.Goal == "expansion" && record.BudgetMode != "deep" {
+	if !legacyReview && record.BudgetMode != "deep" {
 		markers = append(markers, "analysis_not_required")
 	}
 	for _, slot := range markers {
@@ -648,13 +654,8 @@ func initializeAcademicSession(ctx context.Context, db *gorm.DB, session orm.Wor
 }
 
 func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation string, params *workflow.WorkflowStepParams) error {
-	enabled := false
-	for _, name := range params.Runtime.HostExtensions {
-		if name == "academic-paper-chat-v1" {
-			enabled = true
-		}
-	}
-	if !enabled || !db.Migrator().HasTable(&orm.AcademicExpansion{}) {
+	unified := slices.Contains(params.Runtime.HostExtensions, academicExpansionHost)
+	if (!unified && !slices.Contains(params.Runtime.HostExtensions, legacyAcademicExpansionHost)) || !db.Migrator().HasTable(&orm.AcademicExpansion{}) {
 		return nil
 	}
 	var record orm.AcademicExpansion
@@ -668,6 +669,11 @@ func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation 
 	if err := json.Unmarshal(record.PreparationJSON, &preparation); err != nil {
 		return err
 	}
+	_, splitWorkflow := params.Runtime.ExecutionLimits["screen_and_supplement"]
+	// Released sessions scoped their research inside the pinned workflow.
+	if !unified && !splitWorkflow && record.PreparationRevision == 0 && len(preparation.Selected) == 0 {
+		return nil
+	}
 	if len(preparation.Selected) == 0 {
 		return errors.New("研究范围尚未确认")
 	}
@@ -676,12 +682,14 @@ func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation 
 		preparation.ExecutionStartedAt = &now
 	}
 	depth, ok := depthForExpansion(record)
+	if !unified && record.Goal != "expansion" {
+		depth, ok = depthFor(record.BudgetMode)
+	}
 	if !ok {
 		return errors.New("invalid research depth")
 	}
 	limit, ok := depth.Steps[params.StepID]
-	_, splitWorkflow := params.Runtime.ExecutionLimits["screen_and_supplement"]
-	if splitWorkflow && record.Goal == "expansion" && record.BudgetMode != "fast" && params.StepID == "expand_and_screen" {
+	if splitWorkflow && (unified || record.Goal == "expansion") && record.BudgetMode != "fast" && params.StepID == "expand_and_screen" {
 		limit = graphengine.ExecutionLimit{Rounds: 20, ToolCalls: map[string]int{"academic_search_papers": 16}}
 	}
 	if !ok {

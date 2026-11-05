@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import FileViewer from '@/modules/knowledge/components/FileViewer';
 import HtmlBlock from '../MarkdownViewer/HtmlBlock';
 import MarkdownViewer from '../MarkdownViewer';
-import { ExecutionResults, SourceImportProvider } from '../SourceImports';
+import { SourceImportProvider } from '../SourceImports';
 import { ReferenceSourcesButton } from '../SourceImports/ReferenceSources';
 import { downloadStream } from '../../utils/download';
 import { previewFilename, previewKind, readPreviewFile, urlPreviewTarget, type ArtifactPreviewTarget } from './target';
@@ -82,7 +82,7 @@ export function PreviewContent({ target, close, onVersions }: { target: Artifact
   } else content = <FileViewer data={data} fileName={previewFilename(target)} renderMarkdown={renderMarkdown} onPreviewError={() => setError('failed')} />;
   if (sourceContext) content = <SourceImportProvider context={sourceContext.context} sources={sourceContext.sources}>
     {content}
-    <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sourceContext.sources} /><ExecutionResults operations={sourceContext.operations} /></div>
+    <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sourceContext.sources} /></div>
   </SourceImportProvider>;
   return <section className="artifact-preview" aria-label={t('chat.previewNamedFile', { name: target.filename })}>
     <header className="artifact-preview__header">

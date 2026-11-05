@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { reconcileWorkflowSessionStatus } from './workflowStatus';
+import { reconcileWorkflowSessionStatus, workflowDisplayLabel } from './workflowStatus';
+
+it('distinguishes waiting for the next step from a real approval checkpoint', () => {
+  expect(workflowDisplayLabel('waiting', 'next_step_required')).toBe('chat.workflowStatusNextStep');
+  expect(workflowDisplayLabel('waiting', 'approval_required')).toBe('chat.workflowStatusWaiting');
+  expect(workflowDisplayLabel('failed', 'no_advance')).toBe('chat.workflowStatusFailed');
+});
 
 describe('reconcileWorkflowSessionStatus', () => {
   it('does not infer a completed pause from an interrupted attempt', () => {

@@ -1,0 +1,140 @@
+{
+  "input": {
+    "topic": "检索增强生成的证据可追溯性",
+    "request": "比较两组指标",
+    "data": {
+      "columns": [
+        "method",
+        "score"
+      ],
+      "rows": [
+        [
+          "baseline",
+          60
+        ],
+        [
+          "evidence",
+          75
+        ]
+      ],
+      "column_types": [
+        "string",
+        "number"
+      ],
+      "units": [
+        null,
+        "point"
+      ]
+    },
+    "experiment": null
+  },
+  "output": {
+    "analysis": {
+      "data_sha256": "a3a649f4c157e357f4cbc29a484a599e3e1a3ef6f23a701af269892bdc40807f",
+      "summary": "新方法单次得分比基线高 15 分。",
+      "row_count": 2,
+      "methods": [
+        "按 method 比较 score，计算差值。"
+      ],
+      "findings": [
+        {
+          "statement": "新方法得分比基线高 15 分。",
+          "columns": [
+            {
+              "table_id": "data",
+              "column": "method"
+            },
+            {
+              "table_id": "data",
+              "column": "score"
+            }
+          ],
+          "calculation": "75 - 60",
+          "value": 15,
+          "unit": "point",
+          "sample_size": {
+            "source_rows": [
+              {
+                "table_id": "data",
+                "count": 2
+              }
+            ],
+            "n": 2,
+            "unit": "方法单次记录",
+            "excluded_n": 0
+          },
+          "id": "finding-1",
+          "target_id": "comparison",
+          "kind": "effect",
+          "interval": null,
+          "test": null,
+          "probability": null,
+          "model_id": null
+        }
+      ],
+      "limitations": [
+        "每种方法只有一次记录，不能推断统计显著性。"
+      ],
+      "input_sha256": "201a507b529026ba1b1b7df4feb78c516d3afe684a2afb95f530bfad44723a93",
+      "data_sources": [
+        {
+          "id": "data",
+          "columns": [
+            "method",
+            "score"
+          ],
+          "row_count": 2,
+          "data_sha256": "1a45c5812ca1485d493735da3d48115f4368011246cefb6ecf6b89a25a9fd67b"
+        }
+      ],
+      "targets": [
+        {
+          "id": "comparison",
+          "question": "两种方法的单次得分差异如何？",
+          "estimand": "单次观测得分差",
+          "scope": "仅当前记录，不推断总体差异",
+          "columns": [
+            {
+              "table_id": "data",
+              "column": "method"
+            },
+            {
+              "table_id": "data",
+              "column": "score"
+            }
+          ]
+        }
+      ],
+      "models": [],
+      "diagnostics": [
+        {
+          "id": "replication",
+          "model_id": null,
+          "name": "重复测量",
+          "outcome": "not_checked",
+          "value": null,
+          "threshold": null,
+          "details": "每组仅一次记录，不能进行推断。"
+        }
+      ]
+    },
+    "charts": [
+      {
+        "id": "Fig_score_A",
+        "title": "方法得分比较",
+        "columns": [
+          {
+            "table_id": "data",
+            "column": "score"
+          }
+        ],
+        "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\"><rect x=\"10\" y=\"20\" width=\"20\" height=\"60\"/><rect x=\"50\" y=\"5\" width=\"20\" height=\"75\"/></svg>",
+        "caption": "横轴表示方法，纵轴表示单次得分（分）；不含误差线。",
+        "finding_ids": [
+          "finding-1"
+        ]
+      }
+    ],
+    "is_demo": true
+  }
+}

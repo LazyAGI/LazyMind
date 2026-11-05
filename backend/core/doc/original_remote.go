@@ -16,6 +16,15 @@ import (
 	"time"
 )
 
+type RemoteOriginalHTTPError struct {
+	StatusCode int
+	RetryAfter string
+}
+
+func (e *RemoteOriginalHTTPError) Error() string {
+	return fmt.Sprintf("original download returned HTTP %d", e.StatusCode)
+}
+
 func publicOriginalIP(ip net.IP) bool {
 	addr, ok := netip.AddrFromSlice(ip)
 	if !ok {
@@ -120,7 +129,7 @@ func (s *OriginalService) AcquireRemoteOriginal(ctx context.Context, caller Data
 }
 func (s *OriginalService) acquireResponse(ctx context.Context, caller DatasetCatalogCaller, req AcquireRemoteOriginalRequest, resp *http.Response) (OriginalRef, error) {
 	if resp.StatusCode != http.StatusOK {
-		return OriginalRef{}, fmt.Errorf("original download returned HTTP %d", resp.StatusCode)
+		return OriginalRef{}, &RemoteOriginalHTTPError{StatusCode: resp.StatusCode, RetryAfter: resp.Header.Get("Retry-After")}
 	}
 	limit := originalMaxBytes
 	if req.MaxBytes > 0 && req.MaxBytes < limit {

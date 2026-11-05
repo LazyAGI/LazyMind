@@ -19,6 +19,35 @@ import pytest
 import lazymind.chat.engine.subagent.runner as runner_mod
 
 
+def test_terminal_tool_failure_keeps_structured_error_message():
+    payload = {'ok': False, 'value': '论文已收到，但模型摘录在正文中找不到'}
+    for result in (payload, json.dumps(payload, ensure_ascii=False)):
+        event = {'tag': 'tool_results', 'tool_results': [{'name': 'run_paper_step', 'result': result}]}
+        assert '模型摘录在正文中找不到' in runner_mod._terminal_tool_failure(event, {'run_paper_step'})
+        assert runner_mod._terminal_tool_failure(event, {'unrelated_tool'}) == ''
+    event['tool_results'][0]['result'] = {'ok': True, 'value': {'status': 'completed'}}
+    assert runner_mod._terminal_tool_failure(event, {'run_paper_step'}) == ''
+
+
+def test_terminal_failure_stops_in_producer_before_another_model_round():
+    import lazyllm
+    original = lazyllm.locals['_lazyllm_agent']
+    try:
+        lazyllm.locals['_lazyllm_agent'] = {'workspace': {'tool_call_trace': [{
+            'function': {'name': 'publish_result'},
+            'tool_call_result': {'ok': False, 'msg': 'invalid result schema'},
+        }]}}
+        with pytest.raises(RuntimeError, match='invalid result schema'):
+            runner_mod._workflow_stop_condition({'publish_result'})({'tool_calls': []})
+        assert runner_mod._workflow_stop_condition({'different_terminal'})({}) is False
+        assert runner_mod._workflow_stop_condition(set())({}) is False
+        lazyllm.locals['_lazyllm_agent']['workspace']['tool_call_trace'][0]['tool_call_result'] = {
+            'ok': True, 'value': {'status': 'completed'}}
+        assert runner_mod._workflow_stop_condition({'publish_result'})({}) is False
+    finally:
+        lazyllm.locals['_lazyllm_agent'] = original
+
+
 def test_workflow_script_tool_is_loaded_from_pinned_revision():
     source = 'def create_list_fixtures():\n    return ["one", "two"]\n'
     response = MagicMock()
@@ -559,6 +588,39 @@ def _terminal(events):
     terminal = [event for event in events if event['type'] in {'done', 'error'}]
     assert len(terminal) == 1
     return terminal[0]
+
+
+@pytest.mark.parametrize('declared', [True, False])
+def test_workflow_clarification_pauses_without_fabricating_required_outputs(completion_case, declared):
+    pending = {'question': '请确认采用哪些意见。', 'request_sha256': 'a' * 64}
+    events, model, _ = completion_case(
+        agent_type='workflow_step', output_slots=['document'],
+        params={'legacy_tools': ['run_paper_step'] if declared else [],
+                'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'file'}},
+        events=[{'tag': 'tool_results', 'tool_results': [{'name': 'run_paper_step',
+                 'result': {'ok': True, 'value': {'status': 'needs_input',
+                            'control': {'awaiting_input': pending}}}}]}],
+    )
+    terminal = _terminal(events)
+    assert not any(event['type'] == 'artifact' for event in events)
+    if declared:
+        assert terminal['type'] == 'done' and terminal['status'] == 'interrupted'
+        assert terminal['current_phase'] == 'awaiting_input'
+        assert terminal['control'] == {'awaiting_input': pending}
+        model.share.assert_not_called()
+    else:
+        assert terminal['status'] == 'failed'
+        assert 'control' not in terminal
+
+
+def test_workflow_rejects_conflicting_pause_and_route_controls():
+    event = {'tag': 'tool_results', 'tool_results': [
+        {'name': 'run_paper_step', 'result': {'control': {'awaiting_input': {
+            'question': '请选择意见', 'request_sha256': 'a' * 64}}}},
+        {'name': 'run_paper_step', 'result': {'control': {'next_step': 'finish'}}},
+    ]}
+    with pytest.raises(ValueError, match='conflicting'):
+        runner_mod._workflow_control_from_tool_results(event, {'run_paper_step'})
 
 
 async def _run_completion_review_scenario(
@@ -1878,12 +1940,20 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
 
     monkeypatch.setattr(runner_mod, 'set_context', capture_context)
 
+    artifact_delivered = asyncio.Event()
+
     class ProgressiveArtifactExecutor:
         async def stream(self, llm, plan):
             yield 'event', {
                 'tag': 'tool_calls',
                 'tool_calls': [{'id': 'ppt-1', 'name': 'ppt_generate_pages', 'args': {}}],
             }
+            context_holder['ctx'].emit({
+                'type': 'text', 'text': 'Generating a result',
+            })
+            context_holder['ctx'].emit({
+                'type': 'think', 'think': 'Checking the provided inputs',
+            })
             context_holder['ctx'].emit({
                 'type': 'artifact',
                 'slot': 'result',
@@ -1893,7 +1963,7 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
             })
             # Model a publisher that keeps generating more pages after page one
             # has already been made available to the UI.
-            await asyncio.sleep(0.01)
+            await asyncio.wait_for(artifact_delivered.wait(), timeout=5)
             yield 'event', {
                 'tag': 'tool_results',
                 'tool_results': [{'id': 'ppt-1', 'name': 'ppt_generate_pages', 'result': 'ok'}],
@@ -1902,16 +1972,22 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
 
     monkeypatch.setattr(runner_mod, 'AgentExecutor', ProgressiveArtifactExecutor)
 
+    def delivered(chunk):
+        if any(item.get('type') == 'artifact' for item in _sse_to_events(chunk)):
+            artifact_delivered.set()
+
     async def run():
         return await _collect(runner_mod.run_subagent_stream(
             _DEFAULT_TASK_ID, task_spec=workflow_task,
-        ))
+        ), on_chunk=delivered)
 
     events_out = _sse_to_events(asyncio.run(run()))
     event_types = [event.get('type') for event in events_out]
 
     assert event_types.count('artifact') == 1
     assert event_types.index('artifact') < event_types.index('tool_results')
+    assert event_types.index('text') < event_types.index('tool_results')
+    assert event_types.index('think') < event_types.index('tool_results')
 
 
 def test_run_subagent_stream_emits_task_scoped_source_snapshot(monkeypatch):

@@ -1,64 +1,58 @@
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { BudgetMode, DirectionSelection } from '../../api/paperWorkflows';
+import { paperFlowSteps } from './paperFlowModel';
 
-const researchDepthOptions: Array<{ value: BudgetMode; label: string; description: string[] }> = [
-  { value: 'fast', label: '快速', description: ['聚焦核心问题', '代表论文与关键结论'] },
-  { value: 'balanced', label: '标准', description: ['覆盖主要研究路线', '比较方法与关键证据'] },
-  { value: 'deep', label: '深入', description: ['拓展关联与分歧', '追踪证据与适用边界'] },
-];
 export const researchDepthLabels = { fast: '快速', balanced: '标准', deep: '深入' };
 
-const sharedExpansionSteps = ['search', 'screen'] as const;
-const expansionSteps = {
-  fast: ['search'],
-  balanced: sharedExpansionSteps,
-  deep: [...sharedExpansionSteps, 'analyze'],
-} as const;
+const reviewModes = ['fast', 'balanced'] as const;
+const expansionModes = [...reviewModes, 'deep'] as const;
 
-export default function ResearchDepth({ value, onChange, expansion = false, directionSelection, onDirectionSelectionChange, disabled = false }: {
+export default function ResearchDepth({ value, onChange, forReview = false, directionSelection, onDirectionSelectionChange, disabled = false }: {
   value: BudgetMode;
   onChange: (value: BudgetMode) => void;
-  expansion?: boolean;
+  forReview?: boolean;
   directionSelection: DirectionSelection;
   onDirectionSelectionChange: (value: DirectionSelection) => void;
   disabled?: boolean;
 }) {
   const name = useId();
   const { t } = useTranslation();
-  const title = t(expansion ? 'paperTasks.expansionDepth.title' : 'paperTasks.reviewFlow.depthTitle');
-  const options = expansion ? researchDepthOptions.map(({ value: mode }) => ({
-    value: mode,
-    label: t(`paperTasks.expansionDepth.${mode}.label`),
-    description: [t(`paperTasks.expansionDepth.${mode}.summary`)],
-  })) : researchDepthOptions;
+  const title = t('paperTasks.expansionDepth.title');
+  const directionTitle = t('paperTasks.expansionDepth.directionSelection');
+  const modes = forReview ? reviewModes : expansionModes;
   return <section className="paper-research-depth">
     <h3>{title}</h3>
-    <div className={expansion ? 'paper-research-depth-options has-flow' : 'paper-research-depth-options'} role="radiogroup" aria-label={title}>
-      {options.map(option => <div key={option.value} className={`paper-research-depth-option${value === option.value ? ' is-selected' : ''}`} onClick={() => { if (!disabled) onChange(option.value); }}>
-        <label className="paper-research-depth-name"><input type="radio" name={name} value={option.value} checked={value === option.value} disabled={disabled} onChange={() => onChange(option.value)} />{option.label}</label>
-        <span className="paper-research-depth-description">{option.description.map(line => <span key={line}>{line}</span>)}</span>
-        {expansion && <span className="paper-expansion-mode-flow" role="list">
-          {option.value !== 'fast' && ['research', 'chooseDirection'].map(step => <span key={step} role="listitem"
-            className={`paper-expansion-mode-step step-${step}`}>
-            <span>{t(`paperTasks.expansionDepth.steps.${step}`)}</span>
-            {step === 'chooseDirection' && <span className="paper-expansion-direction-options" role="radiogroup"
-              aria-label={`${option.label} · ${t('paperTasks.expansionDepth.directionSelection')}`}>
-              {(['all', 'manual'] as const).map(selection => <label key={selection}>
-                <input type="radio" name={`${name}-${option.value}-directions`} value={selection}
-                  checked={directionSelection === selection} disabled={disabled}
-                  onChange={() => onDirectionSelectionChange(selection)} />
-                {t(`paperTasks.expansionDepth.${selection === 'all' ? 'allDirections' : 'yourChoice'}`)}
-              </label>)}
-            </span>}
-          </span>)}
-          {expansionSteps[option.value].map(step => <span key={step} role="listitem"
-            className={`paper-expansion-mode-step step-${step}`}>
-            {t(`paperTasks.expansionDepth.steps.${step}`)}
-          </span>)}
-        </span>}
-        {expansion && <span className="paper-expansion-mode-output">{t(`paperTasks.expansionDepth.outputs.${option.value}`)}</span>}
-      </div>)}
+    <div className={`paper-research-depth-options ${forReview ? 'is-review' : 'has-flow'}`} role="radiogroup" aria-label={title}>
+      {modes.map(mode => {
+        const label = t(`paperTasks.expansionDepth.${mode}.label`);
+        const directionOptions = <span className="paper-expansion-direction-options" role="radiogroup"
+          aria-label={`${label} · ${directionTitle}`} onClick={forReview ? event => event.stopPropagation() : undefined}>
+          {(['all', 'manual'] as const).map(selection => <label key={selection}>
+            <input type="radio" name={`${name}-${mode}-directions`} value={selection}
+              checked={directionSelection === selection} disabled={disabled || (forReview && value !== mode)}
+              onChange={() => onDirectionSelectionChange(selection)} />
+            {t(`paperTasks.expansionDepth.${selection === 'all' ? 'allDirections' : 'yourChoice'}`)}
+          </label>)}
+        </span>;
+        return <div key={mode} className={`paper-research-depth-option${value === mode ? ' is-selected' : ''}`} onClick={() => { if (!disabled) onChange(mode); }}>
+          <label className="paper-research-depth-name"><input type="radio" name={name} value={mode} checked={value === mode} disabled={disabled} onChange={() => onChange(mode)} />{label}</label>
+          <span className="paper-research-depth-description"><span>{forReview && mode === 'fast' ? t('paperTasks.reviewFlow.entry.targetedSearch') : t(`paperTasks.expansionDepth.${mode}.summary`)}</span></span>
+          {forReview ? mode === 'balanced' && <div className="paper-review-card-directions">
+            <span>{directionTitle}</span>
+            {directionOptions}
+          </div> : <>
+            <span className="paper-expansion-mode-flow" role="list">
+              {paperFlowSteps('expansion', mode).map(step => <span key={step.id} role="listitem"
+                className={`paper-expansion-mode-step step-${step.id}`}>
+                <span>{t(step.labelKey!)}</span>
+                {step.id === 'chooseDirection' && directionOptions}
+              </span>)}
+            </span>
+            <span className="paper-expansion-mode-output">{t(`paperTasks.expansionDepth.outputs.${mode}`)}</span>
+          </>}
+        </div>;
+      })}
     </div>
   </section>;
 }

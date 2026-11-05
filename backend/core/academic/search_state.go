@@ -14,6 +14,7 @@ import (
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -123,6 +124,14 @@ func classifySearchFailure(err error) *searchFailure {
 	var arxiv *arxivsource.LookupError
 	if errors.As(err, &arxiv) {
 		return scholarlyHTTPFailure(arxiv.StatusCode, http.Header{"Retry-After": []string{arxiv.RetryAfter}}, strings.NewReader(""))
+	}
+	var original *doc.RemoteOriginalHTTPError
+	if errors.As(err, &original) {
+		return scholarlyHTTPFailure(original.StatusCode, http.Header{"Retry-After": []string{original.RetryAfter}}, strings.NewReader(""))
+	}
+	var probe paperPDFHTTPError
+	if errors.As(err, &probe) {
+		return scholarlyHTTPFailure(probe.status, http.Header{"Retry-After": []string{probe.retryAfter}}, strings.NewReader(""))
 	}
 	return &searchFailure{Status: "failed"}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"lazymind/core/capability"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ type importPreviewReceipt struct {
 // This field exists only in persisted job input. The public candidate type
 // deliberately cannot accept a client-supplied verification snapshot.
 type savedImportCandidate struct {
+	Requested            *capability.PaperSelection `json:"requested,omitempty"`
+	ConversationOriginal *conversationPaperOriginal `json:"conversation_original,omitempty"`
 	FulltextCandidate
 	VerifiedPaper *PaperRef `json:"verified_paper,omitempty"`
 	ExpectedHash  string    `json:"expected_hash,omitempty"`

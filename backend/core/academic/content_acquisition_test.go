@@ -90,20 +90,24 @@ func TestCompletedExpansionQueuesAllRetainedPapersOnce(t *testing.T) {
 		{Paper: PaperRef{PaperID: "a", Title: "Already read", SourceProvider: "openalex", SourceVersion: "publishedVersion"}},
 		{Paper: PaperRef{PaperID: "b", Title: "Never read", PDFURL: "https://example.org/b.pdf"}},
 	}
-	record := orm.AcademicExpansion{ID: "completed-expansion", UserID: "u", DatasetID: "papers", Goal: "expansion", Status: "completed",
-		Version: 1, ConversationID: conversation, SeedSnapshotJSON: marshal([]paperSource{}),
+	directions := []string{"method"}
+	input := ReviewWorkflowInput{UserInstruction: "research", CandidateDirections: directions, SelectedDirections: directions, Papers: papers}
+	record := orm.AcademicExpansion{ID: "completed-expansion", UserID: "u", DatasetID: "papers", Goal: "expansion", BudgetMode: "deep", Status: "running",
+		Title: "research", ConversationID: conversation, SeedSnapshotJSON: marshal([]paperSource{}),
 		DiscoveryJSON: marshal([]paperDiscovery{{Papers: []PaperRef{papers[0].Paper, papers[1].Paper}}}),
-		ResultJSON:    marshal(ReviewWorkflowInput{UserInstruction: "research", Papers: papers})}
+		ResultJSON:    marshal(input)}
 	source := paperSource{Paper: papers[0].Paper, DatasetID: "papers"}
 	ready := orm.AcademicPaperContent{ID: "already-ready", UserID: "u", PaperID: "a", SourceKey: source.key(),
 		SourceKind: "external", SourceProvider: source.Paper.SourceProvider, SourceVersion: source.Paper.SourceVersion,
 		ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash", PagesJSON: marshal([]ContentPage{{Page: 1, Text: "body"}})}
 	session := orm.WorkflowSession{ID: "completed-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
-	for _, row := range []any{&record, &ready, &session} {
+	step := orm.WorkflowSessionStep{ID: "completed-analysis", SessionID: session.ID, StepID: "analyze_relations", Status: "succeeded", Validity: "effective", Attempt: 1}
+	for _, row := range []any{&record, &ready, &session, &step} {
 		if err = db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
+	saveResultArtifact(t, db, session, step, "completed-result", "expansion_result", input)
 	job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID})}
 	for i := 0; i < 2; i++ {
 		if _, err = projectAcademicResult(t.Context(), job, nil); err != nil {
@@ -117,6 +121,9 @@ func TestCompletedExpansionQueuesAllRetainedPapersOnce(t *testing.T) {
 	var jobs int64
 	if err = db.Model(&orm.AsyncJob{}).Where("job_type=? AND resource_id=?", "academic.paper_content", content.ID).Count(&jobs).Error; err != nil || jobs != 1 {
 		t.Fatalf("projection did not deduplicate acquisition: %d %v", jobs, err)
+	}
+	if err = db.Model(&orm.AsyncJob{}).Where("job_type=? AND resource_id=?", "academic.paper_content", ready.ID).Count(&jobs).Error; err != nil || jobs != 0 {
+		t.Fatalf("projection requeued already available content: %d %v", jobs, err)
 	}
 	var handoffs int64
 	db.Model(&orm.AcademicHandoff{}).Count(&handoffs)
@@ -208,6 +215,20 @@ func TestPreprintTemplateDOIDoesNotConflictWithPublishedIdentity(t *testing.T) {
 	conflicting := strings.ReplaceAll(body, "sxxxxx-yyy-zzzz-1", "s11704-024-40000-0")
 	if q := checkPaperQuality(paper, []ContentPage{{Page: 1, Text: conflicting}}, "external", "hash"); q.Eligible || q.Identity != "mismatch" {
 		t.Fatalf("a real conflicting DOI was accepted: %+v", q)
+	}
+}
+
+func TestPaperQualityMatchesPDFTitleLigatures(t *testing.T) {
+	paper := PaperRef{Title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness", ArxivID: "2205.14135"}
+	body := "FlashAttention: Fast and Memory-Eﬃcient Exact Attention\nwith IO-Awareness\n\nAbstract\n" +
+		strings.Repeat("This paper presents an exact attention algorithm and measures its memory and runtime costs. ", 4)
+	if q := checkPaperQuality(paper, []ContentPage{{Page: 1, Text: body}}, "external", "hash"); !q.Eligible {
+		t.Fatalf("matching paper title with a PDF ligature was rejected: %+v", q)
+	}
+
+	body = "arXiv:2307.08691\n" + body
+	if q := checkPaperQuality(paper, []ContentPage{{Page: 1, Text: body}}, "external", "hash"); q.Eligible || q.Identity != "mismatch" {
+		t.Fatalf("conflicting arXiv identifier was accepted despite the matching title: %+v", q)
 	}
 }
 
