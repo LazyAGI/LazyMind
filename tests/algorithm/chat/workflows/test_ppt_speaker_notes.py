@@ -265,6 +265,7 @@ def test_native_fill_reads_notes_artifact_before_composing(tmp_path, monkeypatch
     monkeypatch.setattr(tools, '_native_image_assets', lambda _: {})
     monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
     monkeypatch.setattr(tools, '_save_artifact', lambda **_: {'ok': True})
+    monkeypatch.setattr(tools, '_review_native_pptx', lambda *_: {'status': 'unavailable'})
     received = []
 
     def fake_compose(source, output, digest, pages, assets):

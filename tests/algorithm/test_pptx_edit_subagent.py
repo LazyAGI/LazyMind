@@ -135,6 +135,19 @@ def test_chart_inspection_and_targeted_palette_publication(context, monkeypatch)
     assert len(context.local_artifacts()) == 1
 
 
+def test_layout_edit_delegates_exact_inspected_shape(context, monkeypatch):
+    layout = {'page': 2, 'shapes': [{'shape_id': 7, 'box': [1, 1, 3, 2]}]}
+    edit = MagicMock(return_value={'sha256': 'hash', 'slide_count': 2,
+                                   'pages': [{'page': 2, 'slots': [], 'speaker_notes': '', 'layout': layout}]})
+    monkeypatch.setattr(pptx_edit.tools, 'edit_presentation', edit)
+    assert pptx_edit.inspect_current_pptx(2)['pages'][0]['layout'] == layout
+    edit.return_value = {'status': 'ok', 'workflow_artifact': {'id': 'revision-2'}}
+    moves = [{'page': 2, 'shape_id': 7, 'expected_box': [1, 1, 3, 2], 'box': [1, 2, 3, 2]}]
+    pptx_edit.publish_pptx_edit('hash', layout_edits=moves)
+    assert edit.call_args.kwargs['layout_edits'] == moves
+    assert len(context.local_artifacts()) == 1
+
+
 def test_editor_plan_uses_publisher_contract_without_generic_save_instructions(context):
     from lazymind.chat.engine.subagent import runner
 

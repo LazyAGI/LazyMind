@@ -92,7 +92,8 @@ def test_single_generation_route_and_source_inputs():
     assert state['transitions']['__start__'] == [{'to': 'analyze_requirements'}]
     assert state['transitions']['build_outline'] == [{'to': 'plan_page_prompts'}]
     planner = state['steps']['plan_page_prompts']
-    assert {'material': 'academic_brief', 'required': False} in planner['inputs']
+    assert {'material': 'material_summary', 'required': False} in planner['inputs']
+    assert all(item['material'] != 'academic_brief' for item in planner['inputs'])
     assert all(step['mode'] == 'auto' for step in state['steps'].values())
     workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())
     fields = {field['id']: field for field in workflow['runtime']['clarification_fields']}
@@ -101,9 +102,8 @@ def test_single_generation_route_and_source_inputs():
     slots = {slot['id']: slot for slot in workflow['slots']}
     assert slots['uploaded_materials']['cardinality'] == 'list'
     tabs = workflow['ui']['tabs']
-    assert all(tab.get('presentation_hide_when_material') == 'compact_presentation'
-               for tab in tabs if tab['id'] != 'composite_preview')
-    assert 'presentation_hide_when_material' not in tabs[-1]
+    assert all('presentation_hide_when_material' not in tab for tab in tabs)
+    assert 'compact_presentation' not in slots
 
 
 @pytest.fixture
@@ -145,6 +145,34 @@ def test_library_fulltext_pages_feed_shared_academic_reader(tools, library):
     chunk = tools.ppt_read_academic_source(source['source_id'], 2)
     assert chunk['reader_result']['pages'] == [{'page': 6, 'text': 'A final batch'}]
     assert chunk['next_chunk'] is None
+
+
+@pytest.mark.parametrize('name', ['ppt_paper_handoff_context', 'ppt_cache_library_papers'])
+@pytest.mark.parametrize('arguments', [{}, {'action': 'read'}])
+def test_library_tools_accept_explicit_read_without_loosening_selection(tools, library, monkeypatch, name, arguments):
+    from lazyllm.tools.agent.toolsManager import ModuleTool, ToolManager
+
+    service, frozen = library
+    frozen['input']['papers'] = frozen['input']['papers'][:1]
+    service.academic_read_paper = mock.Mock(return_value=library_page())
+    monkeypatch.setattr(tools, '_resolve_artifact_text', mock.Mock(side_effect=ValueError('No saved reflection')))
+    # Build the actual schema/validator; do not accept invented fields as a workaround.
+    function = getattr(tools, name)
+    tool = ModuleTool(apply_func=function, schema_func=function)
+    manager = ToolManager([tool])
+    schema = manager.tools_description[0]['function']['parameters']
+    assert schema['properties']['action']['const'] == 'read'
+    assert schema['additionalProperties'] is False
+    validated = tool._validate_input(arguments)
+    result = tool.apply(**validated)
+    if name == 'ppt_cache_library_papers':
+        assert result['complete'] and result['success_count'] == 1
+        service.academic_read_paper.assert_called_once_with(paper_id='a')
+    else:
+        assert result['input'] == frozen['input']
+        service.academic_read_paper.assert_not_called()
+    for invalid in ({'force_refresh': 'false'}, {'paper_id': 'unselected'}, {'action': 'replace'}):
+        assert not tool.validate_parameters(invalid)
 
 
 @pytest.mark.parametrize('status', ['processing', 'failed', 'unavailable'])
@@ -203,7 +231,8 @@ def test_library_launch_binds_authoritative_input_and_satisfies_upload_question(
                                                                    requests.append((a, kw)) or response))
     bindings, satisfied = module.resolve_paper_handoff(client, 'owned-chat', policy)
     assert json.loads(bindings['task_context']) == frozen
-    assert satisfied == ['academic_materials']
+    # A paper-library launch uses the approved research-style/no-background defaults.
+    assert satisfied == ['academic_materials', 'visual_style', 'generate_background_images']
     assert requests[0][1]['params'] == {'conversation_id': 'owned-chat'}
     assert requests[0][1]['headers'] == {'Authorization': 'bound-user'}
     response.status_code = 404

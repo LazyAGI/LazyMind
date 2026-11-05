@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import httpx
 import lazyllm
@@ -19,7 +19,9 @@ from lazyllm.tools import fc_register
 from lazyllm.tools.agent.tool_runtime import HostFileAccess, _get_tool_runtime_metadata
 
 from lazymind.chat.workflow.completed_actions import load_completed_actions
-from lazymind.chat.workflow.input_checkpoint import InputCheckpoint, CHECKPOINT_GUIDANCE
+from lazymind.chat.workflow.input_checkpoint import (
+    InputCheckpoint, CHECKPOINT_GUIDANCE, AUTO_CHECKPOINT_GUIDANCE,
+)
 from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scopes
 from lazymind.chat.engine.tools.artifact_output import artifact_output
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
@@ -30,6 +32,26 @@ from lazymind.workflow_toolkit import (
 )
 
 LOG = logging.getLogger(__name__)
+
+
+_WORKFLOW_CHAT_RESPONSIBILITIES = (
+    'For a task that matches a Workflow, main Chat owns requirement analysis and launch: '
+    'understand the goal, scope, constraints and delivery format from the user request, '
+    'prior answers and attachment/source references already provided. Clarify only missing '
+    'startup requirements, preserve the complete request and bind supplied resources, then '
+    'call the matching trigger promptly. Do not perform the Workflow work as launch preparation. '
+    'Document body reads (doc read), knowledge-base or web searches, source inventories, '
+    'local file discovery, evidence comparison, contribution ranking, detailed content analysis '
+    'and generation belong inside the owning Workflow steps. For example, selecting the four '
+    'largest contributions is a collection-step instruction, not a prerequisite to launching. '
+    'Pass source names and selection criteria through even if their contents have not been read. '
+    'Once started, main Chat coordinates the returned ready_steps, relays progress and required '
+    'questions, and handles user feedback through Workflow controls; it does not execute those '
+    'steps with generic Chat tools or a separate generic SubAgent. Read Workflow state/artifacts '
+    'only as needed to explain progress or route feedback. Declared scoped completed-output '
+    'actions remain available. This boundary applies to Workflow tasks; ordinary questions '
+    'and requests outside a matching Workflow keep their normal Chat behavior.\n'
+)
 
 
 async def resolve_workflow_injection_async(*args, **kwargs):
@@ -577,11 +599,12 @@ def _safe_session_tools(
         ))
 
     @_register_host_file(capability)
-    def answer_workflow_questions() -> Dict[str, Any]:
+    def answer_workflow_questions(action: Literal['save'] = 'save') -> Dict[str, Any]:
         """Save this turn's user answer to the prior Workflow question card, then resume Ready steps.
 
         Call only for an actual answer, including unknown/omit. Do not call for
-        status questions or cancellations. Host supplies the verbatim user reply.
+        status questions or cancellations. Pass action="save"; Host supplies the
+        verbatim user reply, so never pass answer text or checkpoint identifiers.
         """
         selected_session_id = session_id()
         answer = checkpoint.answer(selected_session_id)
@@ -1254,7 +1277,6 @@ def _is_explicit_merged_request_context(value: Any) -> bool:
 
 def _startup_clarification_guidance(runtime_policy: Any) -> str:
     policy = runtime_policy if isinstance(runtime_policy, dict) else {}
-    attachment_policy = _attachment_clarification_policy(policy)
     fields = [field for field in _runtime_clarification_fields(policy)
               if field['id'] not in set(policy.get('_host_satisfied_fields') or [])]
     if not fields:
@@ -1263,7 +1285,9 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
     if managed(runtime_policy):
         return (
             'Startup fields are checked by the Host, without another model call. Call the trigger with '
-            'only values explicitly supplied or unambiguously grounded in the current task and attachments. '
+            'only values explicitly supplied or unambiguously grounded in the current request, '
+            'prior answers and attachment metadata. Bind attachments without reading their bodies; '
+            'the owning Workflow step performs template inspection and source collection. '
             'The trigger sends all missing required questions and stops automatically. Do not '
             'ask optional preferences or invent missing values. Reuse submitted answers; later batches '
             'ask only unresolved fields. Defaults and conditional applicability are package-owned. '
@@ -1271,25 +1295,12 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
             'Preserve the original request and exact URLs and attachment names. Declared fields: '
             + json.dumps(fields, ensure_ascii=False, default=str)
         )
-    answer_guidance = (
-        'Apply the attachment_clarification contract BEFORE the FIRST ask_user call whenever '
-        'the selected attachment is already available: read the entire attachment first, '
-        'then combine missing basic fields and attachment-specific facts in ONE card. '
-        'Never ask only basic fields first while deferring inspection of an available attachment. '
-        'Only when the first card itself requests the attachment upload may you inspect the '
-        'new file on its answer turn and show ONE additional consolidated card for missing facts. '
-        'Use the question_id_prefix for attachment-specific questions, including in a combined '
-        'first card. After a combined or supplemental card is answered, NEVER ask again: '
-        'merge the original request and every question and answer, then trigger. '
-        'Do not repeat basic fields. If no missing facts remain, skip the card. '
-        'Attachment clarification contract: ' + json.dumps(attachment_policy, ensure_ascii=False) + '. '
-        if attachment_policy else
-        'On the answer turn, NEVER call ask_user again or reassess fields as missing. '
-    )
     return (
         'This Workflow declares startup_clarification_fields. '
-        + answer_guidance
-        + 'Before calling its trigger, '
+        'On the answer turn, preserve all supplied answers and do not reassess resolved fields as missing. '
+        'Attachment content inspection and evidence-gap questions belong inside the Workflow, '
+        'not before its trigger, even when a legacy attachment_clarification contract is present. '
+        'Before calling its trigger, '
         'inspect the current request, relevant attachment names/content already available, '
         'and prior conversation turns. Treat a field as present only when it is explicit or '
         'unambiguously inferable. Do not ask for fields that are already present. If one or '
@@ -1326,7 +1337,7 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'can require another batch. Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
         'the trigger; an answer-only current_query must never replace the original request. '
-        'When clarification and any declared attachment inspection are complete, trigger immediately. '
+        'When startup requirements are clear, trigger immediately without reading source documents. '
         'Never ask for an upload unless the '
         'Workflow declares it as a required input or as the selected conditional attachment '
         'on a clarification field. Declared fields: '
@@ -1409,7 +1420,8 @@ def build_workflow_discovery_context(
         return WorkflowDiscoveryContext([], '')
     prompt = (
         '## Available Workflow Catalog [AUTHORITATIVE]\n'
-        'These are executable Workflows available in this conversation. Use this catalog the '
+        + _WORKFLOW_CHAT_RESPONSIBILITIES
+        + 'These are executable Workflows available in this conversation. Use this catalog the '
         'same way Skill descriptions are used: compare the current user request with each '
         'description and when_to_use before deciding. Call a trigger tool only when the '
         'Workflow is clearly appropriate, or when the user explicitly asks to run/open/start '
@@ -2003,9 +2015,10 @@ def resolve_workflow_injection(
     )
     checkpoint = InputCheckpoint(
         toolkit, lambda: session_holder.get('runtime_policy'), conversation_history, current_query,
-    ) if runtime_policy.get('input_checkpoint') or (not session_id and any(
+    ) if mode == 'dynamic' and (runtime_policy.get('input_checkpoint') or (not session_id and any(
         (item.get('runtime') or {}).get('input_checkpoint') for item in catalog if isinstance(item, dict)
-    )) else None
+    ))) else None
+    checkpoint_guidance = AUTO_CHECKPOINT_GUIDANCE if mode == 'auto' else CHECKPOINT_GUIDANCE
     candidate_tools = [
         *trigger_tools,
         *toolkit.tools(),
@@ -2094,7 +2107,9 @@ def resolve_workflow_injection(
         else:
             tools = [authoring_group]
     if session_id:
-        tools = _safe_session_tools(toolkit, selected_session_id, checkpoint=checkpoint)
+        tools = _safe_session_tools(
+            toolkit, selected_session_id, user_input=current_query, checkpoint=checkpoint,
+        )
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,
@@ -2104,7 +2119,7 @@ def resolve_workflow_injection(
             'focused_tab': context.get('focused_tab') or '',
             'focused_sort_order': context.get('focused_sort_order'),
         })
-        tools.append(_handoff_tool(selected_session_id, checkpoint=checkpoint))
+        tools.append(_handoff_tool(selected_session_id, user_input=current_query, checkpoint=checkpoint))
         session_projection = (
             projection.get('projection')
             if isinstance(projection.get('projection'), dict) else {}
@@ -2169,7 +2184,8 @@ def resolve_workflow_injection(
             )
         runtime_context = (
             '## Workflow Runtime [AUTHORITATIVE]\n'
-            + CHECKPOINT_GUIDANCE
+            + _WORKFLOW_CHAT_RESPONSIBILITIES
+            + checkpoint_guidance
             + 'The Host owns session/version concurrency fields. Never ask the user for '
             + 'state_version or expected_state_version. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
@@ -2247,6 +2263,7 @@ def resolve_workflow_injection(
         )
         selection_context = (
             '## Explicit Workflow Selection [AUTHORITATIVE]\n'
+            + _WORKFLOW_CHAT_RESPONSIBILITIES
             + '\n'.join(activation_prompts) + '\n'
             + 'A Workflow is an executable, versioned procedure, not a document to search, '
             + 'summarize, or merely describe. The @workflow mention means the user explicitly '
@@ -2254,7 +2271,7 @@ def resolve_workflow_injection(
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
             + _WORKFLOW_EDIT_SCOPE_POLICY
             + entry_instruction
-            + CHECKPOINT_GUIDANCE
+            + checkpoint_guidance
             + 'Conversation attachments are optional unless the selected Workflow Runtime '
             + 'explicitly returns a required-input result. Never infer that an upload is '
             + 'required merely because the Workflow supports uploaded materials. A non-empty '
@@ -2282,7 +2299,7 @@ def resolve_workflow_injection(
             }, ensure_ascii=False, default=str)
         )
     elif discovery_context.prompt:
-        selection_context = discovery_context.prompt
+        selection_context = discovery_context.prompt + '\n' + checkpoint_guidance
     return WorkflowAgentContribution(
         tools, [], patch, selection_context, runtime_policy,
         pending_ask=session_holder.get('pending_ask'),

@@ -32,8 +32,11 @@ export async function localFontFaces() {
 }
 
 export async function localFontCss(html) {
+  const packaged = new Set([...html.matchAll(/\/\*lazymind-font:([A-Za-z0-9+/=]+)\*\//g)].flatMap(([, token]) => {
+    try { return [JSON.parse(Buffer.from(token, 'base64').toString('utf8')).sha256]; } catch { return []; }
+  }));
   const faces = await localFontFaces();
-  return faces.filter(face => html.toLowerCase().includes(face.family.toLowerCase())).map(face =>
+  return faces.filter(face => !packaged.has(face.id) && html.toLowerCase().includes(face.family.toLowerCase())).map(face =>
     `@font-face{font-family:${JSON.stringify(face.family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
   ).join('\n');
 }

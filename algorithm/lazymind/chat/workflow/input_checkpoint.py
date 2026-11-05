@@ -97,6 +97,7 @@ class InputCheckpoint:
             'checkpoint_token': token, 'checkpoint_slot': config['slot'],
             'questions': questions,
             'next_action': {'tool': 'answer_workflow_questions',
+                            'arguments': {'action': 'save'},
                             'instruction': 'Wait for the user answer in a new turn, then save it and continue.'},
             '_agent_control': {'stop': True, 'reason': 'workflow_input_checkpoint',
                                'final_text': '素材已搜集完成，请补充卡片中的缺失信息，回答后继续生成。'},
@@ -145,10 +146,19 @@ class InputCheckpoint:
 
 
 CHECKPOINT_GUIDANCE = (
-    'A declared input_checkpoint is an additional post-collection clarification, independent of startup Ask limits. '
+    'In Human Approval chat mode, a declared input_checkpoint is an additional post-collection clarification, '
+    'independent of startup Ask limits. '
     'Execution tools automatically show its question card and stop when facts remain missing. '
     'On the NEXT user turn, if the user answers that card (including unknown/omit), call '
-    'answer_workflow_questions() to save the actual user reply, then get_ready_steps and continue. '
+    'answer_workflow_questions(action="save") to save the actual user reply, then get_ready_steps and continue. '
     'Do not call it for a status question, cancellation or unrelated request. Do not invent answers, '
     'patch the checkpoint yourself, rerun collection to bypass questions, or create a new session. '
+)
+
+AUTO_CHECKPOINT_GUIDANCE = (
+    'In automatic Workflow mode, post-collection input checkpoints are disabled. '
+    'Do not ask the user to answer a missing-information checklist or pause after a successful step for it. '
+    'Continue from the returned ready_steps using available evidence. If a checklist has unanswered questions, '
+    'mark unknown facts as pending confirmation or omit optional fields; never invent facts or user answers. '
+    'This does not bypass execution failures, required configuration, or an explicit user stop. '
 )

@@ -561,12 +561,14 @@ def _build_partial_sort_order_hints(
 def _build_intent_context_section(params: Dict[str, Any]) -> List[str]:
     """Render immutable instructions already present in public Attempt Context."""
     request = str(params.get('launch_user_input') or params.get('user_input') or '').strip()
+    current = str(params.get('current_user_input') or '').strip()
     instruction = str(params.get('runtime_instruction') or '').strip()
-    if not request and not instruction:
+    retry_hint = str(params.get('retry_hint') or '').strip()
+    if not request and not current and not instruction and not retry_hint:
         return []
     lines = [
         '', '## Effective Execution Intent',
-        'Apply the user\'s explicit runtime content requirements (including length, language, '
+        "Apply the user's explicit runtime content requirements (including length, language, "
         'audience and style) instead of conflicting defaults or examples in the step prompt. '
         'Later explicit runtime amendments supersede the original request only where they change it. '
         'A continuation or approval does not reset these requirements. '
@@ -579,6 +581,10 @@ def _build_intent_context_section(params: Dict[str, Any]) -> List[str]:
         lines += ['', 'Original run request:', request]
     if instruction:
         lines += ['', 'Runtime amendments for this attempt:', instruction]
+    if retry_hint and retry_hint != instruction:
+        lines += ['', 'Execution scope and recovery context:', retry_hint]
+    if current and current != request:
+        lines += ['', 'Current user request (overrides conflicting original requirements):', current]
     return lines
 
 

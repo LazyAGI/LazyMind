@@ -17,7 +17,7 @@ SPEC.loader.exec_module(TOOLS)
 
 def test_clicked_font_edit_is_local_and_preserves_nested_text():
     html = '<main><div data-el="title"><span style="font-family:Old">标题</span><b>重点</b></div><p data-el="body">不修改</p></main>'
-    with mock.patch.object(TOOLS, 'available_font_families', return_value={'宋体'}):
+    with mock.patch.object(TOOLS, 'available_font_families', return_value={'宋体', 'Arial'}):
         tree = TOOLS._HtmlTree(html)
         ops, old, new = TOOLS._single_selection_edit_ops('字体换成宋体', {'el': 'title'}, tree)
         assert old == new
@@ -30,7 +30,7 @@ def test_clicked_font_edit_is_local_and_preserves_nested_text():
         assert '标题' in updated and '重点' in updated
         replaced = TOOLS._upsert_font_override(updated, 'Arial', 'all')
         assert '宋体' not in replaced
-        assert 'font-family: "Arial" !important' in replaced
+        assert 'font-family: &quot;Arial&quot; !important' in replaced
 
 
 def test_clicked_unknown_font_does_not_fall_through_to_llm():
@@ -1438,7 +1438,8 @@ class PartialEditTests(unittest.TestCase):
 
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(result['published_count'], 2)
-            self.assertEqual(published, [2, 1, 2, 1, 2])
+            # A new Attempt republishes the cached success before waiting on page 1.
+            self.assertEqual(published, [2, 2, 1, 1, 2])
             self.assertEqual(attempts, {1: 2, 2: 1})
             self.assertEqual(result['retry_count'], 0)
             self.assertEqual(len(list(deck.glob('.page_retry_*.json'))), 2)

@@ -147,3 +147,30 @@ def test_explicit_template_output_does_not_ask_again(text, expected):
     values, missing = resolve_fields(policy, '主题：研究报告，8页，' + text,
                                      supplied={'template_pptx': 'template.pptx'})
     assert values['presentation_output_format'] == expected and missing == []
+
+
+@pytest.mark.parametrize('brief,output_format', [
+    ('转正答辩，生成12 页pptx，十五分钟演讲、五分钟问答', 'native_pptx'),
+    ('请按模板制作十二页可编辑的 PowerPoint 文件', 'native_pptx'),
+    ('沿用模板风格做12页网页幻灯片', 'html'),
+])
+def test_template_output_accepts_model_extraction_from_user_request(brief, output_format):
+    from lazymind.chat.workflow.clarification import resolve_fields
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    values, missing = resolve_fields(policy, brief, supplied={
+        'topic': '转正答辩', 'template_pptx': 'template.pptx',
+        'presentation_output_format': output_format,
+    })
+    assert missing == []
+    assert values['presentation_output_format'] == output_format
+
+
+@pytest.mark.parametrize('previous', [None, {'presentation_output_format': 'HTML｜参考模板样式生成'}])
+def test_user_output_choice_takes_precedence_over_model_binding(previous):
+    from lazymind.chat.workflow.clarification import resolve_fields
+    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
+    values, missing = resolve_fields(policy, '主题：研究报告，8页，输出 HTML', supplied={
+        'template_pptx': 'template.pptx', 'presentation_output_format': 'native_pptx',
+    }, previous=previous)
+    assert missing == []
+    assert values['presentation_output_format'] == 'html'

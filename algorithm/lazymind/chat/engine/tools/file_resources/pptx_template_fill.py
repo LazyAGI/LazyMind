@@ -126,7 +126,7 @@ def _inspect_page(source: Path, page: int = 1, loaded=None) -> dict:
                        'geometry': etree.tostring(transforms[0], encoding='unicode') if transforms else None})
     return {
         'composition': {'supports_repeated_source_pages': True, 'supports_remove_shape_ids': True,
-                        'supports_shape_boxes': True, 'supports_text_boxes': True,
+                        'supports_shape_boxes': True, 'supports_text_boxes': True, 'supports_tables': True,
                         'supports_registered_images': True,
                         'editable_chart_types': ['column', 'bar', 'line', 'pie', 'doughnut'],
                         'chart_box_units': 'inches',
@@ -233,8 +233,6 @@ def fill_template(source: Path, output: Path, source_sha256: str, edits: list[di
     if hashlib.sha256(source.read_bytes()).hexdigest() != source_sha256:
         raise ValueError('Template changed; inspect it again before editing')
     infos, data, slides = _load(source)
-    before = {(p, r['shape_id']): r for p, (name, root) in enumerate(slides, 1)
-              for r in inspect_layout(data, name, root, p)}
     slots = {slot['id']: (name, node, slot) for page, (name, root) in enumerate(slides, 1)
              for node, slot in _slots(root, page)}
     if not isinstance(edits, list) or any(not isinstance(e, dict) for e in edits):
@@ -279,7 +277,7 @@ def fill_template(source: Path, output: Path, source_sha256: str, edits: list[di
                 _set_run_text(node, text)
             changed.add(name)
             if len(text) > max(20, len(slot['text']) * 1.5):
-                warnings.append({'id': edit['id'], 'warning': 'Text expanded; checked against template capacity'})
+                warnings.append({'id': edit['id'], 'warning': 'Text expanded; review the rendered layout'})
     fonts = set()
     for paragraph, (name, whole) in edited_paragraphs.items():
         shape = next((a for a in paragraph.iterancestors() if a.tag in
@@ -289,29 +287,6 @@ def fill_template(source: Path, output: Path, source_sha256: str, edits: list[di
         fonts.update(materialize_paragraph(data, name, shape, paragraph))
         if whole:
             split_paragraph(paragraph)
-    checks = []
-    for page, (name, root) in enumerate(slides, 1):
-        for report in inspect_layout(data, name, root, page):
-            original = before[(page, report['shape_id'])]
-            if report['text'] == original['text']:
-                continue
-            checks.append(report)
-    # A template may already have decorative/outside-slide text or intentional
-    # tight line spacing. Preserve non-expanding edits; never worsen that baseline.
-    failures = [r for r in checks if r['status'] == 'overflow' and (
-        before[(r['page'], r['shape_id'])]['status'] != 'overflow'
-        or r['estimated_height_pt'] > before[(r['page'], r['shape_id'])]['estimated_height_pt']
-        or len(r['text']) > len(before[(r['page'], r['shape_id'])]['text']))]
-    if failures:
-        import json
-        diagnostics = [{k: v for k, v in r.items() if k != 'text'} for r in failures]
-        raise ValueError('Template text does not fit; shorten content in these boxes and retry '
-                         'against the original template. No file was published. '
-                         + json.dumps(diagnostics, ensure_ascii=False))
-    for r in checks:
-        if r['status'] == 'unknown':
-            warnings.append({'page': r['page'], 'shape_id': r['shape_id'],
-                            'warning': 'Layout could not be estimated; no visual verification claimed'})
     for name, root in slides:
         if name in changed:
             data[name] = etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
@@ -327,6 +302,6 @@ def fill_template(source: Path, output: Path, source_sha256: str, edits: list[di
     return {'slide_count': len(slides), 'changed_pages': len(changed), 'warnings': warnings,
             'fonts': sorted(fonts), 'font_embedding': 'template_unchanged',
             'font_availability': font_report,
-            'layout_validation': 'conservative_estimate_only',
+            'layout_validation': 'not_performed',
             'template_mode': 'in_place_text', 'visual_validation': 'not_performed',
             'generation_status': 'completed', 'post_generation_tools_required': False}

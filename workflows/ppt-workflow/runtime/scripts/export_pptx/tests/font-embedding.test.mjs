@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { localFontFaces, localFontCss } from '../lib/local_fonts.mjs';
 
 import JSZip from 'jszip';
+import { buildPptx } from '../lib/pptx_builder.mjs';
 
 import {
   createEot,
@@ -14,7 +15,73 @@ import {
   googleStylesheetUrls,
   parseGoogleFontsCss,
   parseSfntMetadata,
+  portableFontFaces,
+  embedGoogleFontsFromPages,
+  verifyEmbeddedFaces,
 } from '../lib/font_embedding.mjs';
+
+function portableHtml(data = makeTestTtf(), sha256 = createHash('sha256').update(data).digest('hex')) {
+  const token = Buffer.from(JSON.stringify({ family: 'Test Web Font', weight: 400, style: 'normal', sha256 })).toString('base64');
+  return `<html><head><style data-lazymind-font-required="true">/*lazymind-font:${token}*/@font-face{font-family:"Test Web Font";font-weight:400;font-style:normal;src:url(data:font/ttf;base64,${data.toString('base64')})}</style></head><body>Keep content</body></html>`;
+}
+
+test('portable font package rejects corruption and preview-only embedding', () => {
+  assert.equal(portableFontFaces(portableHtml()).length, 1);
+  assert.throws(() => portableFontFaces(portableHtml(makeTestTtf(), 'wrong')), /corrupted/);
+  const data = makeTestTtf();
+  data.writeUInt16BE(4, data.readUInt32BE(20) + 8);
+  assert.throws(() => portableFontFaces(portableHtml(data)), /editable embedding/);
+  assert.throws(() => portableFontFaces('<style data-lazymind-font-required="true"></style>'), /empty or invalid/);
+  assert.throws(() => portableFontFaces(portableHtml().replace('</style>',
+    '/*lazymind-font:broken*/@font-face{src:url(missing.ttf)}</style>')), /empty or invalid/);
+});
+
+test('HTML exports its own fonts offline and verifies actual PPTX parts', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'portable-export-'));
+  try {
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    await writeFile(source, portableHtml());
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types></Types>');
+    zip.file('ppt/_rels/presentation.xml.rels', '<Relationships></Relationships>');
+    zip.file('ppt/presentation.xml', '<p:presentation><p:defaultTextStyle/></p:presentation>');
+    zip.file('ppt/slides/slide1.xml', '<slide>Original content</slide>');
+    await writeFile(output, await zip.generateAsync({ type: 'nodebuffer' }));
+    const fonts = await embedGoogleFontsFromPages(output, [{ path: source }], {
+      fetchImpl: () => { throw new Error('offline export must not access network'); },
+    });
+    assert.deepEqual(fonts, ['Test Web Font:regular']);
+    const faces = portableFontFaces(await readFile(source, 'utf8'));
+    await verifyEmbeddedFaces(output, faces);
+    const result = await JSZip.loadAsync(await readFile(output));
+    assert.equal(await result.file('ppt/slides/slide1.xml').async('string'), '<slide>Original content</slide>');
+    result.remove('ppt/fonts/font1.fntdata');
+    await writeFile(output, await result.generateAsync({ type: 'nodebuffer' }));
+    await assert.rejects(verifyEmbeddedFaces(output, faces), /not embedded/);
+    await writeFile(source, portableHtml(makeTestTtf(), 'wrong'));
+    await assert.rejects(embedGoogleFontsFromPages(output, [{ path: source }]), error => error.fontPortability === true);
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('required font failure preserves the previous exported file', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'font-export-atomic-'));
+  try {
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    await writeFile(source, portableHtml(makeTestTtf(), 'corrupt'));
+    await writeFile(output, 'previous export');
+    await assert.rejects(buildPptx([{ path: source, ir: { ct: {
+      tag: 'P', text: 'Keep content', children: [],
+      bounds: { x: 0, y: 0, w: 300, h: 80 }, styles: { fontFamily: 'Test Web Font' },
+    } } }], folder, output), /corrupted/);
+    assert.equal(await readFile(output, 'utf8'), 'previous export');
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 function writeUInt16BE(buffer, value, offset) {
   buffer.writeUInt16BE(value, offset);

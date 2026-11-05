@@ -86,20 +86,25 @@ describe('hydrateWorkflowUI', () => {
 });
 
 describe('filterWorkflowTabs', () => {
-  it('quick PPT hides executed intermediate tabs without removing their artifacts or final output', () => {
+  it.each([false, true])('keeps PPT intermediate results visible with legacy compact settings: %s', (legacy) => {
     const spec = load(readFileSync(resolve(process.cwd(), '../workflows/ppt-workflow/workflow.yaml'), 'utf8'));
     const ui = hydrateWorkflowUI(spec);
+    const tabs = ui.tabs?.map(tab => ({
+      ...tab,
+      ...(legacy && tab.id !== 'composite_preview'
+        ? { presentation_hide_when_material: 'compact_presentation' } : {}),
+    }));
     const slots = [
       { slot: 'compact_presentation', selected: true },
       { slot: 'ppt_capability_requirements', selected: true },
+      { slot: 'skip_background_images', selected: true },
       { slot: 'deck_outline', selected: true },
     ] as SlotRevision[];
     const runtime = { projection: { past: ['analyze_requirements', 'collect_materials', 'build_outline', 'plan_page_prompts'] } };
-    expect(filterWorkflowTabs(ui.tabs, slots, ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
-      .toEqual(['composite_preview']);
-    expect(filterWorkflowTabs(ui.tabs, slots.slice(1), ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
-      .toContain('page_prompts');
-    expect(slots.some(slot => slot.slot === 'deck_outline')).toBe(true);
+    expect(filterWorkflowTabs(tabs, slots, ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
+      .toEqual(['analysis', 'materials', 'outline', 'page_prompts', 'composite_preview']);
+    expect(filterWorkflowTabs(tabs, slots.slice(0, 2), ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
+      .toEqual(['analysis', 'materials', 'background_prompts', 'background_images', 'outline', 'page_prompts', 'composite_preview']);
   });
 
   it.each([

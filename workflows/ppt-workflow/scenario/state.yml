@@ -91,18 +91,24 @@ steps:
       Startup clarification contract:
       - Academic defaults: for research_report, paper_review, thesis_defense,
         reading_notes or a paper-library handoff/academic group meeting, use
-        科研风格 and generate_background_images=disabled when those preferences
+        科研风格（白底 #FFFFFF、黑字 #111111，图表使用少量可区分的强调色）
+        and generate_background_images=disabled when those preferences
         were not explicitly supplied. These defaults satisfy startup visual
         questions; do not pause or ask for them. Preserve explicit user style
         instructions and explicit AI-background enablement. Uploaded templates
         still determine their own style and always disable AI backgrounds.
+        Carry the full white-background/black-text default into style_hint and
+        every page prompt, including charts, tables, formulas and diagram labels.
+        Use white or very pale surfaces, subtle gray rules and readable dark text;
+        avoid dark dashboard panels, neon, HUD and decorative background gradients.
       - Uploaded PPTX templates take precedence over visual-style and AI
         background answers. When template_mode=upload, use style_flow=auto,
         generate_background_images=disabled, and capability marker
         AI_BACKGROUND_IMAGES: disabled. Save skip_background_images. This also applies to full generation: keep
         generation_mode=full for content collection, but skip style candidates,
-        background prompts and background generation. The template is analyzed
-        in generate_ppt as before. Do not require an image model for this path.
+        background prompts and background generation. Inspect the template here;
+        generate_ppt performs its layout analysis before composition.
+        Do not require an image model for this path.
       - The Chat host collects presentation topic, exact slide count, target
         customer/audience, visual style and whether per-slide AI background generation
         is enabled before
@@ -110,9 +116,11 @@ steps:
         omitted visual preferences. Extract supplied values and defaults
         faithfully from {{user_input}}; clarification
         answers may have been merged into the original request.
-        For uploaded templates the Chat host also inspects ALL template pages
-        before launch. Direct uploads are inspected before a combined first Ask;
-        uploads supplied through the first Ask are inspected before one supplemental Ask.
+        The Chat host only analyzes the request and binds supplied references.
+        This analyze_requirements step owns inspection of ALL template pages;
+        no template or source-body read is required before Workflow launch.
+        Leave document-body retrieval, contribution comparison and ranking to
+        collect_materials, which asks unresolved material facts through input_checkpoint.
         Extract and retain ALL rounds of questions and answers, including names,
         roles, presentation date, reporting period, milestones and metric definitions.
         User answers override template samples. Unknown/omit/not applicable is a
@@ -143,7 +151,7 @@ steps:
 
       Paper-library handoff (when task_context or the server Chat context provides one):
       {{task_context}}
-      Call ppt_paper_handoff_context before interpreting its papers. Its authorized
+      Call ppt_paper_handoff_context(action="read") before interpreting its papers. Its authorized
       server response is authoritative; preserve all selected PaperRef identities
       and user_instruction. These are supplied sources, not missing attachments.
       Set presentation_scenario=research_report (or the explicitly requested
@@ -175,11 +183,14 @@ steps:
       - For academic tasks, record source filenames and user-provided notes here;
         defer paper parsing to collect_materials and its cached reader tool.
         Do not parse the same papers during requirement analysis.
-      - You CAN read user-uploaded PPT/PPTX files with the attachment reader.
-        When the request asks you to base the new deck on an uploaded PPT/PPTX,
+      - Read user-uploaded PPT/PPTX templates with the attachment reader.
+        When the request uses an uploaded PPT/PPTX as a style/template reference,
         call read_user_attachment(filename=<uploaded filename>) before writing
-        the requirement brief, then use the extracted slide text as source material.
-      - Use the same reader for uploaded PDF/DOC/DOCX source documents.
+        the requirement brief to identify its structure and content placeholders.
+        A deck supplied only as historical evidence is read in collect_materials.
+      - Defer other source-body reads, knowledge-base document inventories,
+        local source discovery and contribution ranking to collect_materials.
+        Record their references and the user's selection criteria in the brief.
       - Do not use read_file, Python, shell commands, URL fetching, or workspace
         file tools to open conversation uploads. Do not claim that PPTX is
         unreadable before trying read_user_attachment.
@@ -236,12 +247,13 @@ steps:
         recreates its typography, palette, spacing and layout with HTML components.
         PPTX composes the requested number of pages from reusable source layouts.
         Both template routes skip style questions and AI/background-image stages.
-        Never use template page screenshots as slide backgrounds; reproduce design
-        elements and use evidence images only as foreground material.
+        Never use template page screenshots as slide backgrounds. Original background
+        media extracted from the PPTX is allowed and must be preserved; it is not an
+        AI background or evidence image. Reproduce editable text/layout separately.
 
-      If the user already attached a PDF/PPTX/report or pasted key facts, fold the
-      usable numbers and claims into the brief. collect_materials will reuse
-      these facts and may complete without any network search.
+      Fold facts already pasted by the user into the brief without fetching source bodies.
+      For attached reports and referenced knowledge bases, preserve source references;
+      collect_materials reads and verifies their evidence inside this Workflow.
 
       Save the result:
         save_artifact(key='presentation_scenario', content_type='text', value=<scenario>)
@@ -349,8 +361,6 @@ steps:
       - material: requirement_analysis
       - material: ppt_capability_requirements
       - material: style_flow
-      - material: compact_presentation
-        required: false
       - material: generation_mode
       - material: presentation_output_format
       - material: template_mode
@@ -386,7 +396,7 @@ steps:
       registration also inspects KB/web images and reuses successful PDF inspections.
       Read each visual_inspection.description, match it against the paper text and
       intended explanation, and select only relevant complete figures. Keep the
-      description, source, page and material_index in material_summary/academic_brief
+      description, source, page and material_index in material_summary
       for downstream planning. Model descriptions are fallible evidence, not verified
       paper conclusions; do not use them alone to assert exact values or findings.
       If no visual model is available, use image_topk=0,
@@ -414,7 +424,8 @@ steps:
       For research_report, paper_review, thesis_defense and reading_notes, perform
       the academic analysis below during this same collection step. Reuse evidence
       as it is read; do not reread entire papers or start a separate analysis step.
-      General presentations do not require an academic_brief.
+      Include academic analysis inside the single material_summary artifact;
+      general presentations do not require its academic sections.
       Continue to plan_background_prompts when AI backgrounds are enabled,
       otherwise build_outline.
 
@@ -454,14 +465,17 @@ steps:
       Uploaded-template visual gate (takes precedence over image instructions below):
       When template_mode=upload, reuse the template's existing graphics, backgrounds
       and layout. Do not plan/generate AI backgrounds, style candidates or decorative
-      images. Default to zero material_images and text/evidence-only collection.
+      images. A template disables AI backgrounds, not evidence screenshots,
+      technical figures, editable charts or architecture diagrams. Select a few
+      relevant figures/screenshots from uploaded/KB evidence when they explain
+      a mechanism or show the delivered product; keep their citations. Avoid
+      unrelated stock photos and decorative image searches.
       Do not search/register/generate images just because a KB is absent, a slide
       looks sparse, or the user asks for a polished deck. Use image_topk=0 for KB
       evidence searches unless a necessary visual requirement is identified.
-      Only collect a new image when the user explicitly requests that image or
-      it is indispensable factual evidence (for example a specified experiment
-      figure or product screenshot). State the exact requirement and affected
-      section first; reuse supplied assets before searching. PDF figures and KB
+      Collect a source-backed image when explicitly requested or when a figure
+      or product screenshot materially explains the work. Identify its affected
+      section and purpose first; reuse supplied assets before searching. PDF figures and KB
       image evidence can be inserted in both native PPTX and HTML outputs.
       For an uploaded PDF, use ppt_extract_pdf_images on relevant pages; select
       useful candidates and register them with ppt_register_material_images.
@@ -546,13 +560,17 @@ steps:
 
       Paper-library sources (task_context):
       {{task_context}}
-      If a paper-library handoff exists, call ppt_cache_library_papers once. It
+      If a paper-library handoff exists, call ppt_cache_library_papers(action="read") once. It
       reads every selected paper through the authorized fulltext API and follows
       all next_cursor pages. Keep each PaperRef, source_id, content_hash and
       source_version in material_summary. Read cached chunks with
       ppt_read_academic_source as needed. Never treat abstracts as full text or
       search for replacement papers. No attachment upload is needed.
-      If complete=false, report each processing/failed/unavailable/error source
+      The only tool parameter is action="read". Do not add force_refresh, IDs,
+      pagination or dummy parameters. After an argument error, correct the call
+      to exactly {"action":"read"} once. If it still fails, report the tool error
+      and stop; never keep trying invented parameters.
+      If the tool cannot run or complete=false, report each processing/failed/unavailable/error source
       and STOP without publishing material_summary or advancing. Processing may
       be retried later; authorization/version failures require refreshed context.
       Never concatenate different versions or generate a reduced paper selection.
@@ -650,6 +668,14 @@ steps:
          Use wikipedia only as a thin fallback under the same gate.
       3. Images for slides (optional unless the user explicitly requires
          specific photos/diagrams/产品图):
+         For workflow nodes, methods, exports and capability diagrams, search the
+         offline named library with ppt_search_assets (Chinese meaning or English
+         name). Prefer one consistent family: fluent-color for color SVG,
+         fluent-3d for transparent 3D PNG, lucide/tabler for outline diagrams.
+         Record selected exact names and their intended role in material_summary;
+         use ppt_get_asset only for selected assets. These are illustrative icons,
+         never factual evidence, and do not consume material_images slots. Do not
+         call web search for an icon already present in this local catalog.
          A deck may complete with zero material_images. CSS, SVG, and ECharts
          are valid visual alternatives. Do not treat a generic desire for a
          polished or visual deck as a hard image requirement.
@@ -746,7 +772,7 @@ steps:
       If no dependency can be established, use an explicitly labelled thematic
       teaching order, without claiming a historical or causal dependency.
       Save the returned paper_order, dependency evidence, uncertain relationships,
-      and a short rationale in academic_brief. Do not drop a paper or add an
+      and a short rationale in material_summary. Do not drop a paper or add an
       unselected prerequisite paper; explain any needed external background briefly.
       For EACH paper capture its input/problem, assumptions, key modules, ordered
       algorithm/training/inference steps, outputs, and why the mechanism addresses
@@ -762,14 +788,17 @@ steps:
       Templates use the existing optional template_pptx upload and final-step
       template analysis. Do not create a second template-selection process.
       Complete this analysis while collecting the sources, without repeating
-      completed reading. Save it as academic_brief using save_artifact. Then save
-      material_summary as the concise source/evidence inventory, referring to the
-      detailed academic_brief instead of duplicating it. Do not generate a separate
+      completed reading. Save ONE Markdown material_summary containing both the
+      source/evidence inventory and the detailed per-paper analysis. Use sections
+      for sources and provenance, each paper's technical findings, paper_order
+      and dependencies, figures/data, and gaps. Keep the technical detail needed
+      for methods, experiments and defense questions; merging is not compression.
+      Do not publish a second academic analysis artifact or a separate
       reading reflection. Preserve supplied notes as attributed source material.
 
       Technical evidence collection (engineering defenses AND research decks):
       For each major contribution, collect a source-backed evidence record inside
-      material_summary (or academic_brief for papers):
+      material_summary:
       - concrete failure/workload and old pipeline; root cause rather than symptoms;
       - new module responsibilities, interfaces, data/state flow and ordered steps;
       - implementation decisions: cache identity/invalidation, concurrency, retries,
@@ -817,9 +846,11 @@ steps:
       "type":"text"}],"checked_fields":[...]}), replacing the example questions with
       the actual missing fields. Use questions=[] when nothing needs clarification.
       Never include answer_text or checkpoint_token; the Chat host owns answers.
-      This output is required even when there are no missing facts. The host will
-      show Ask and pause before the next step if questions are non-empty; you must
-      not ask in prose, run the next step or silently defer the gaps to generation.
+      This output is required even when there are no missing facts. In Human Approval
+      mode the host shows Ask and pauses before the next step for non-empty questions.
+      In automatic mode the host continues without asking; record unknown facts as
+      pending confirmation or omit optional fields, never invent facts or user answers.
+      Do not ask in prose or run the next step yourself; the host owns continuation.
 
       Stop after saving.
     tools:
@@ -836,6 +867,8 @@ steps:
       - web_search
       - wikipedia
       - ppt_search_web_images
+      - ppt_search_assets
+      - ppt_get_asset
       - ppt_register_material_images
       - ppt_collect_kb_images
       - ppt_extract_pdf_images
@@ -862,12 +895,12 @@ steps:
         required: true
       - material: material_images
         required: false
-      - material: academic_brief
-        required: false
     acceptance_criteria: |
-      Academic scenarios must also save academic_brief with per-source findings,
+      Save one material_summary. For academic scenarios it must include per-source findings,
       experimental conditions, data, limitations and available formula/figure references.
-      General scenarios do not require academic_brief.
+      All selected paper-library full texts must have been successfully read;
+      metadata/abstract-only summaries do not satisfy collection. A tool failure
+      must be reported as incomplete, without publishing a completed summary.
       material_summary must be saved and must identify uploaded-file findings
       when files are present, references, useful evidence, gaps, and assumptions.
       material_images is optional. Its absence must never fail or retry this
@@ -911,22 +944,23 @@ steps:
       Post-collection questions and verbatim user answers: {{material_clarification}}
       Apply answer_text to the corresponding questions; these user answers override
       missing/sample facts in earlier artifacts. Preserve all original requirements.
+      When answer_text is absent, continue with available evidence, mark unknown facts
+      as 待确认 or omit optional fields. Do not require another Ask or invent answers.
       Unknown/omit is final: use 待确认 or omit optional fields, never ask again.
       Carry these confirmed facts into the outline and every downstream page/notes.
 
       Output format: {{presentation_output_format}}
       Uploaded template structure (optional): {{template_content_brief}}
       For HTML, carry the inspected visual_style into style_hint and page briefs;
-      rebuild layouts as HTML components, never as full-slide background images.
+      rebuild editable layouts as HTML components, never as screenshots of complete
+      slides. Preserve original background-only media separately. Include the chosen
+      template_source_page for each output page and keep that binding in its prompt.
       When present, map evidence into template sections and choose source_page
       layouts for each output page. Reuse content layouts for extra evidence or
       comparisons instead of cramming text; honor an explicit requested page count.
       Identify disposable sample placeholders, chart regions and chart data sources.
       For probation defense connect responsibilities, personal contributions,
       measured results, lessons and next steps, using only collected evidence.
-
-      Academic analysis (optional):
-      {{academic_brief}}
 
       Saved reading reflection (when requested):
       {{reflection_markdown}}
@@ -939,7 +973,7 @@ steps:
       an algorithm walkthrough, formula/example and experimental analysis. Explain
       the mechanism thoroughly rather than mechanically giving every paper three pages.
       If the user chose fewer pages, compress every paper within that exact total.
-      For multi-paper decks, use academic_brief.paper_order BEFORE authoring the
+      For multi-paper decks, use material_summary.paper_order BEFORE authoring the
       first slide heading. Keep each prerequisite's method explanation before the
       dependent paper's method (B before A if A builds on B), even when template
       layouts are reused. Do not revert to upload order or sort by results alone.
@@ -1101,8 +1135,6 @@ steps:
         required: false
       - material: material_clarification
         required: false
-      - material: academic_brief
-        required: false
       - material: template_content_brief
         required: false
       - material: material_images
@@ -1159,6 +1191,8 @@ steps:
 
       Post-collection confirmed questions and user answers: {{material_clarification}}
       Apply answer_text to its questions in all page content and speaker notes.
+      When answer_text is absent, use available evidence and mark unknown facts as
+      待确认 or omit optional fields; never request another Ask or invent answers.
       These answers override earlier missing/sample facts; unknown/omit is final.
 
       Durable template mode: {{template_mode}}
@@ -1175,9 +1209,12 @@ steps:
       Do not request HTML documents, CSS layout or HTML speaker-note tags.
       Call ppt_publish_outline(output_format="native_pptx", page_prompts=[...]).
       For html, call it with output_format="html" and apply the HTML-only rules below.
-      If a template is uploaded, recreate its inspected style using HTML/CSS
-      components; preserve typography, colors and layout rhythm while replacing
-      sample content. Do not rasterize template pages into backgrounds.
+      If a template is uploaded, preserve its inspected positions, typography,
+      colors, table structure and original background media while replacing sample
+      content. Do not rasterize template pages into backgrounds. Include an explicit
+      TEMPLATE_SOURCE_PAGE: N line in every HTML page prompt, selecting an actual
+      source page from template_content_brief. Repeat a matching content layout when
+      expanding the deck; do not assume output page number equals source page number.
 
       You are a PPT per-page prompt planner. The readable content outline exists.
       Publish exactly one editable generation prompt per page for human review.
@@ -1191,9 +1228,6 @@ steps:
 
       Material summary (optional):
       {{material_summary}}
-
-      Academic analysis (optional):
-      {{academic_brief}}
 
       Saved reading reflection (when requested):
       {{reflection_markdown}}
@@ -1272,7 +1306,7 @@ steps:
       do not impose a 1280x720 HTML canvas or replace native logos with CSS.
 
       HTML ONLY (presentation_output_format=html, including uploaded templates): prompts must be self-contained, with a
-      1280x720 canvas, explicit fonts/colors, asset placements and an instruction
+      1600x900 canvas, explicit fonts/colors, asset placements and an instruction
       to return one complete HTML document without explanations. Inline required
       context; never refer to unseen style files or preceding slides.
       Make the design specific to that slide. For example, a children's festive
@@ -1315,8 +1349,6 @@ steps:
       - material: material_clarification
         required: false
       - material: reflection_markdown
-        required: false
-      - material: academic_brief
         required: false
       - material: deck_outline
         required: true
@@ -1540,6 +1572,8 @@ steps:
 
       Post-collection confirmed questions and user answers: {{material_clarification}}
       Apply answer_text to its questions in all page content and speaker notes.
+      When answer_text is absent, use available evidence and mark unknown facts as
+      待确认 or omit optional fields; never request another Ask or invent answers.
       These answers override earlier missing/sample facts; unknown/omit is final.
 
       You are a PPT HTML generator. You do NOT rewrite the outline. You MUST
@@ -1631,7 +1665,21 @@ steps:
       every surviving shape: it must contain approved content or serve a retained
       design/brand purpose. Do not use keep merely to bypass placeholder cleanup.
       Call ppt_fill_template with source_sha256 and pages in output order. Each page
-      contains source_page, remove_shape_ids, edits and optional charts/images.
+      contains source_page, remove_shape_ids, edits and optional charts/images/tables.
+      Aligned lists, key/value records and data comparisons MUST use native
+      tables=[{headers:["指标","基线","优化后"],rows:[["耗时（秒）","24","0.013"]],
+      box:[x,y,w,h],font_size:18}]. Omit headers for a key/value list. Use the same
+      number of cells in every row. Do not use pipes, spaces or independent text
+      boxes to simulate cells; native tables do not consume the text-box limit.
+      Put each value in its named column; units belong in headers or cells,
+      qualifications remain attached to the correct metric. Never put both
+      baseline and result into one baseline cell. Automatic legacy conversion
+      preserves text and cannot correct semantic column mistakes.
+      Table widths and row heights fit the supplied box automatically. Optional
+      column_widths must sum to its width. Set min_font_size explicitly only when
+      bounded fitting is acceptable; otherwise font_size is preserved. On a table
+      size/column error, correct the reported page and table, increase space or
+      split within the agreed page budget, never drop rows or revert to fake tables.
       Use shape_boxes=[{shape_id,box:[x,y,w,h]}] to reposition/resize surviving
       top-level text shapes, or remove obsolete body placeholders and add
       text_boxes=[{text,box:[x,y,w,h],font_size:22,color:"1F2937",bold:false}].
@@ -1643,6 +1691,25 @@ steps:
       clipping or shrinking. Edits
       use ORIGINAL inspected slot IDs and expected_text, including repeated pages;
       include keep/replace for every surviving slot, omit slots of removed shapes.
+      Make visual plans executable: use diagrams=[{nodes:[{id,text,box}],
+      edges:[{from,to}]}] for flow/architecture pages. Do not replace the planned
+      diagram with long text or an arrow-delimited sentence. Give the diagram
+      most of the content area, with short labels and a concise explanatory line.
+      Plan visual coverage before filling the template. For a typical 12-slide
+      work review, aim for 4-6 substantive pages led by a mechanism diagram,
+      native evidence chart or genuine product screenshot, including 1-2 source
+      screenshots when available. This is a quality target, never a minimum gate;
+      do not invent figures or use decorative photos to meet a quota. Material
+      collection must identify the actual file/material_index for each screenshot,
+      and planning must name each visual plus its intended page and placement.
+      Spread sourced quantitative evidence across the relevant outcome pages;
+      do not pack all measurements into one dense dashboard. Show before/after,
+      unit and a correctly calculated change alongside a readable native chart.
+      Put detailed methodology in saved notes and keep a brief scope caveat visible.
+      Design parameters, illustrative test values and independent stage times
+      must never be presented as measured improvement. A typical outcome page
+      needs one main comparison and at most one supporting comparison. Missing
+      figures or sparse data are advisory gaps, never a reason to block delivery.
       Replace sample personal facts with supported evidence. Preserve short run styling.
       Technical/research generation must preserve approved substantive copy and
       evidenced mechanisms; do not replace them with short labels or giant numbers.
@@ -1661,29 +1728,40 @@ steps:
       only for an ordered variable and bars for before/after comparisons. Place
       the key interpretation, unit and comparison scope on the page, and fuller
       provenance/conditions in notes. Do not substitute KPI text for a planned chart.
-      If capacity checks fail, remove repetition/decor, rebalance the boxes or split
-      within the approved page budget across repeated content layouts
-      and retry against the ORIGINAL template hash, at most twice. Never shrink fonts
-      to bypass validation. Insert registered PDF/KB pictures using images:
+      Completion and delivery take precedence over visual quality. The tool
+      publishes a usable PPTX first, then renders screenshots and asks a declared
+      vision model for findings when available. It may adjust content geometry
+      internally for at most two rounds, preserving all text, data and notes.
+      Any review/repair failure retains the last delivered file and succeeds.
+      Never turn visual feedback into a failed step, rewind upstream planning,
+      or start another generation task just to satisfy quality checks.
+      Do not shrink readable type or remove substantive content just to fit.
+      Insert registered PDF/KB pictures using images:
       [{material_index: 1, box: [x, y, width, height]}], with inch coordinates.
       Remove sample shapes occupying the box; images retain aspect ratio and
       complete labels. Sources/pages are retained in notes. Repeat a layout for
       more room instead of shrinking a figure until unreadable. Report unsupported
       new icon generation/formula requirements precisely.
-      Do not collect additional images or generate backgrounds in this template path.
-      This produces the COMPLETE new PPTX. Stop after publication; internal validation
-      happens before publication. Do not create a parallel HTML copy or run additional
-      post-generation inspection. Disclose estimated layout and lack of native visual
-      verification accurately; visual_validation=not_performed is not a pending task.
+      Reuse registered evidence screenshots/figures when relevant. Do not start
+      new research or generate decorative backgrounds in this template path.
+      Stop after publication. Do not create a parallel HTML copy or repeat the
+      tool's screenshot review. Report visual_review accurately: passed means
+      screenshots were reviewed; unavailable means rendering or vision was missing;
+      repair_limit_reached means visible issues remain in the delivered candidate.
 
       ### HTML output (default; also available with uploaded templates)
       For presentation_output_format=html, use ppt_generate_pages and the HTML
       branches below, even with template_mode=upload. After ppt_analyze_template,
-      recreate the inspected typography, palette, shapes and layout rhythm in
-      editable HTML components with the requested page count. Replace all sample
+      preserve the measured per-page typography, geometry, shapes, paragraph styles,
+      table proportions and original background media using the returned html_template
+      contract. Every page prompt must bind TEMPLATE_SOURCE_PAGE: N to the correct
+      source layout. The HTML renderer injects that page's complete measured contract
+      and restores its original background; do not replace it with a generic theme.
+      Build editable HTML components with the requested page count. Replace all sample
       text with approved evidence. Do not call ppt_fill_template or publish native
-      output on this branch. Do not use screenshots/full-slide images from the
-      template as background layers, and do not generate AI backgrounds.
+      output on this branch. Do not use screenshots of entire template slides as
+      background layers, and do not generate AI backgrounds. Original background-only
+      media extracted from slide/layout/master relationships is allowed and required.
       Without a template, generate HTML by default. A request for a PPT or charts
       does not imply native generation; the user can export HTML from the UI.
       Existing native PPTX edits keep their existing representation.
@@ -1706,6 +1784,13 @@ steps:
       ### C) Single-page content edit
       Visual-only requests such as "第3页留白少一点", "页面紧凑些", "整体改成
       米白和橄榄绿，不要蓝色" MUST use ppt_find_deck then ppt_restyle_pages.
+      Simple palette-only changes such as 白底黑字 or 黑底白字 MUST instead call
+      ppt_find_deck then ppt_recolor_pages(theme="light"/"dark", pages=<only if specified>).
+      This tool edits existing HTML with a deterministic script, republishes previews,
+      and makes zero model calls. Do not redraw pages or invoke ppt_generate_pages
+      for palette-only changes. Keep text, geometry, chart data, images and notes.
+      ppt_restyle_pages automatically uses this fast path for recognized palette-only
+      instructions; reserve model rendering for actual layout/design changes.
       Pass the full current request as instruction, retaining all qualifiers and
       prohibitions; pass pages=[N] for selected pages, omit pages for deck-wide
       changes. This passes existing HTML and the current request directly to the
@@ -1854,14 +1939,30 @@ steps:
       reference_images/use_image and retain the filename/page citation from captions.
       Use object-fit:contain for figures so axes/legends are not clipped. Reuse the
       current visual layout for added pages and remove demo placeholders. Performance
-      comparisons use evidence-backed ECharts with units and source attribution;
+      comparisons in research/technical slides prefer self-contained inline SVG with
+      evidence-backed values, explicit visual attributes, units and source attribution;
+      use ECharts when native chart-data editing is explicitly requested;
       extracted charts remain pictures unless verified numeric data is available.
       HTML images and charts must survive the existing editable PPTX export path.
+      For named visual assets, use ppt_search_assets with Chinese meanings or English
+      names. Prefer one consistent collection per diagram: fluent-color/fluent-3d
+      for colorful dimensional references, ph for duotone, lucide/tabler for line art.
+      Use exact names as HTML img data-ppt-asset attributes or native pages[].icons
+      [{name,box}]; do not fabricate file paths. These icons are separate from the
+      single evidence image and never replace factual diagrams, screenshots or charts.
+      For a user-approved rich reference, reproduce its visual hierarchy, balanced
+      icon sizes, soft shadows and restrained depth with assets plus readable text.
+      Preserve natural glyph widths and image aspect ratios. Never use scaleX/scaleY,
+      unequal scale, SVG textLength or preserveAspectRatio=none to fill a wide box.
+      Reflow content and labels instead. Apply the same standard to HTML and PDF.
       For the HTML branch, stop after preview_html pages are published.
     tools:
+      - ppt_search_assets
+      - ppt_get_asset
       - ppt_analyze_template
       - ppt_generate_native_pptx
       - ppt_restyle_pages
+      - ppt_recolor_pages
       - pptx_analyzer
       - ppt_fill_template
       - ppt_generate_pages
@@ -1926,6 +2027,9 @@ steps:
       when needed; preserve the original count only if requested. HTML pages and notes slots are
       not required for this branch. A successful native publication completes
       the step; do not invoke HTML generation afterward.
+      Visual findings, missing screenshot/vision support, and unsuccessful
+      optional layout repairs are advisory. They must never fail a step that
+      already delivered a usable native_pptx; keep the last published version.
       For a full HTML run: the exact requested number of preview_html HTML pages must
       be saved (DOCTYPE/html documents), with matching preview_notes sort_order.
       Generate pages sequentially; a two-page request still requires both pages.

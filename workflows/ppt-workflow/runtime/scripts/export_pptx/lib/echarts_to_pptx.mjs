@@ -26,6 +26,9 @@
  *   C12 radar axis name labels            → mapRadar passes them through
  */
 
+import { pxToInch } from './style_parser.mjs';
+const chartFontPoints = px => pxToInch(px) * 72;
+
 // ---------------------------------------------------------------------------
 // Type detection
 // ---------------------------------------------------------------------------
@@ -34,6 +37,24 @@ function allSeries(option) {
   const series = option.series;
   if (!series) return [];
   return Array.isArray(series) ? series : [series];
+}
+
+/** Keep the rendered visual for features the native mapper cannot preserve. */
+export function nativeChartFallbackReasons(option) {
+  const reasons = [];
+  const axes = ['xAxis', 'yAxis'].flatMap(key => {
+    const value = option?.[key];
+    return value ? (Array.isArray(value) ? value : [value]) : [];
+  });
+  if (axes.some(axis => axis.type === 'log')) reasons.push('log-axis');
+  const graphics = option?.graphic ? (Array.isArray(option.graphic) ? option.graphic : [option.graphic]) : [];
+  if (graphics.some(graphic => graphic.type || graphic.elements?.length || graphic.children?.length)) {
+    reasons.push('custom-graphics');
+  }
+  if (allSeries(option || {}).some(series => ['markLine', 'markPoint', 'markArea'].some(
+    key => series[key]?.data?.length,
+  ))) reasons.push('custom-annotations');
+  return reasons;
 }
 
 /**
@@ -186,8 +207,11 @@ function extractDataLabelColor(series) {
  * pptxgenjs 默认 Office 主题（黑字白底），需要把这些显式颜色透传。
  */
 function applyChartTheme(options, option, series) {
-  const xAx = extractAxisStyle(option, 'xAxis');
-  const yAx = extractAxisStyle(option, 'yAxis');
+  const horizontal = detectBarOrientation(option) === 'horizontal';
+  const category = horizontal ? 'yAxis' : 'xAxis';
+  const value = horizontal ? 'xAxis' : 'yAxis';
+  const xAx = extractAxisStyle(option, category);
+  const yAx = extractAxisStyle(option, value);
   if (xAx.labelColor) options.catAxisLabelColor = xAx.labelColor;
   if (yAx.labelColor) options.valAxisLabelColor = yAx.labelColor;
   if (xAx.lineColor) options.catAxisLineColor = xAx.lineColor;
@@ -198,6 +222,23 @@ function applyChartTheme(options, option, series) {
   if (legColor) options.legendColor = legColor;
   const dlColor = extractDataLabelColor(series);
   if (dlColor) options.dataLabelColor = dlColor;
+  for (const [name, prefix] of [[category, 'cat'], [value, 'val']]) {
+    const axis = Array.isArray(option[name]) ? option[name][0] : option[name];
+    if (!axis) continue;
+    if (axis.show === false) options[`${prefix}AxisHidden`] = true;
+    if (axis.axisLine?.show === false) options[`${prefix}AxisLineShow`] = false;
+    if (axis.splitLine?.show === false) options[`${prefix}GridLine`] = { style: 'none' };
+    if (Number.isFinite(axis.axisLabel?.fontSize)) options[`${prefix}AxisLabelFontSize`] = chartFontPoints(axis.axisLabel.fontSize);
+    if (prefix === 'val') {
+      if (Number.isFinite(axis.min)) options.valAxisMinVal = axis.min;
+      if (Number.isFinite(axis.max)) options.valAxisMaxVal = axis.max;
+      if (Number.isFinite(axis.interval)) options.valAxisMajorUnit = axis.interval;
+    }
+  }
+  const legend = Array.isArray(option.legend) ? option.legend[0] : option.legend;
+  if (Number.isFinite(legend?.textStyle?.fontSize)) options.legendFontSize = chartFontPoints(legend.textStyle.fontSize);
+  const label = series.find(item => Number.isFinite(item.label?.fontSize))?.label;
+  if (label) options.dataLabelFontSize = chartFontPoints(label.fontSize);
   return options;
 }
 
@@ -287,17 +328,16 @@ function extractDataLabelOptions(series) {
  * Legend options.
  */
 function extractLegendOptions(option, seriesCount) {
-  const showLegend = !!option.legend && (option.legend.show !== false) && seriesCount > 0;
-  if (!showLegend) return { showLegend: false };
   const leg = Array.isArray(option.legend) ? option.legend[0] : option.legend;
+  const showLegend = !!leg && leg.show !== false && seriesCount > 0;
+  if (!showLegend) return { showLegend: false };
   // Position
   let legendPos = 'b';
   if (leg) {
-    if (leg.bottom != null && leg.right == null && leg.left == null) legendPos = 'b';
-    else if (leg.top != null && leg.right == null && leg.left == null) legendPos = 't';
-    else if (leg.left != null) legendPos = 'l';
-    else if (leg.right != null) legendPos = 'r';
-    else if (leg.orient === 'vertical') legendPos = 'r';
+    const specified = value => value != null && value !== 'auto';
+    if (leg.orient === 'vertical') legendPos = specified(leg.left) && leg.left !== 'center' ? 'l' : 'r';
+    else if (specified(leg.top)) legendPos = 't';
+    else if (specified(leg.bottom)) legendPos = 'b';
   }
   return { showLegend: true, legendPos };
 }
@@ -767,6 +807,7 @@ function mapCombo(option, ChartType) {
  */
 export function echartsOptionToPptx(option, ChartType) {
   if (!option || !ChartType) return null;
+  if (nativeChartFallbackReasons(option).length) return null;
   let type;
   try {
     type = detectType(option);

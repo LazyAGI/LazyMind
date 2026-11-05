@@ -129,8 +129,9 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(state['steps']['generate_ppt']['mode'], 'auto')
         self.assertNotIn('analyze_academic_sources', state['steps'])
         self.assertNotIn('prepare_paper_reflection', state['steps'])
-        self.assertIn('academic_brief', state['steps']['collect_materials']['prompt'])
-        self.assertIn('academic_brief', {item['material'] for item in state['steps']['collect_materials']['outputs']})
+        self.assertIn('detailed per-paper analysis', state['steps']['collect_materials']['prompt'])
+        self.assertIn('material_summary', {item['material'] for item in state['steps']['collect_materials']['outputs']})
+        self.assertNotIn('academic_brief', {item['material'] for item in state['steps']['collect_materials']['outputs']})
         collection_inputs = {item['material']: item for item in state['steps']['collect_materials']['inputs']}
         self.assertTrue(collection_inputs['presentation_scenario']['required'])
 
@@ -159,7 +160,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(materials['hide_when_material'], 'skip_material_collection')
         self.assertEqual(materials['status_step_ids'],
                          ['collect_materials'])
-        self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary', 'academic_brief'])
+        self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary'])
         self.assertNotIn('choose_style', {step['id'] for step in workflow['steps']})
         self.assertEqual(slots['background_prompts']['cardinality'], 'list')
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
@@ -360,7 +361,9 @@ class PagePromptModeTest(unittest.TestCase):
                  patch.object(run_stage, '_build_brief_page_query') as rewrite, \
                  patch.object(run_stage, '_load_deck_style') as style:
                 self.assertEqual(run_stage.cmd_page_html_from_brief(deck, 1, prompt), 0)
-            self.assertEqual(model.call_args.args[1], prompt)
+            sent_query = model.call_args.args[1]
+            self.assertEqual(sent_query.split('\nNAMED PRESENTATION ASSETS', 1)[0], prompt)
+            self.assertIn('NAMED PRESENTATION ASSETS', sent_query)
             # Both workflow modes now use this complete-prompt boundary. The
             # common system contract retains charts, formulas and icons even
             # when the user-authored prompt is passed through verbatim.
@@ -371,7 +374,7 @@ class PagePromptModeTest(unittest.TestCase):
             self.assertEqual(model.call_count, 1)
             rewrite.assert_not_called()
             style.assert_not_called()
-            self.assertEqual((deck / 'pages/page_001.query.txt').read_text(), prompt)
+            self.assertEqual((deck / 'pages/page_001.query.txt').read_text(), sent_query)
 
     def test_editable_brief_retains_internal_page_design_without_restoring_old_copy(self) -> None:
         html = ("<!DOCTYPE html><html><body><div class='wrapper'><div id='bg'></div>"
@@ -433,9 +436,11 @@ class PagePromptModeTest(unittest.TestCase):
                 calls.append(user)
                 return '<html><head></head><body><div id="ct" style="color:#556B2F">Old</div></body></html>'
             self.assertEqual(run_stage.cmd_page_html_from_brief(
-                deck, 1, '旧蓝色风格', llm_call=model, edit_instruction='改为橄榄绿'), 0)
-            self.assertIn('改为橄榄绿', calls[0])
+                deck, 1, '旧蓝色风格', llm_call=model, edit_instruction='换成白底黑字，保留图表颜色'), 0)
+            self.assertIn('换成白底黑字，保留图表颜色', calls[0])
             self.assertIn('current_html', calls[0])
+            self.assertIn('chart axes/legends', calls[0])
+            self.assertIn('Preserve source image pixels', calls[0])
 
     def test_explicit_palette_survives_catalog_repair(self):
         style = {'design_style': {'id': 1}, 'color_tone': {'id': 1},

@@ -118,17 +118,140 @@ def test_no_chart_composition_discards_unused_sample_pages(template):
                        for n in archive.namelist() if n.endswith('.xml'))
 
 
+def test_native_tables_preserve_cells_notes_branding_and_explicit_font(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['tables'] = [{'headers': ['指标', '基线（秒）', '优化后（秒）'],
+                       'rows': [['重复解析', '24', '0.013'], ['工具调用', '178.2', '28.8']],
+                       'box': [1, 2, 8, 3], 'column_widths': [3, 2.5, 2.5], 'font_size': 18}]
+    original = deepcopy(page)
+    result = compose_template(source, output, digest, [page])
+    slide = Presentation(output).slides[0]
+    shape = next(s for s in slide.shapes if s.has_table)
+    table = shape.table
+    assert [[c.text for c in row.cells] for row in table.rows] == [
+        page['tables'][0]['headers'], *page['tables'][0]['rows']]
+    assert [c.width for c in table.columns] == [Inches(3), Inches(2.5), Inches(2.5)]
+    assert abs(sum(r.height for r in table.rows) - Inches(3)) < 5
+    assert all(p.font.size.pt == 18 for row in table.rows for c in row.cells for p in c.text_frame.paragraphs)
+    assert any(s.name == 'Brand mark' for s in slide.shapes)
+    assert page['notes'] in slide.notes_slide.notes_text_frame.text
+    assert page == original
+    assert result['editable_table_count'] == 1
+    assert result['table_layouts'][0]['recovered'] is False
+
+
+@pytest.mark.parametrize('change, error', [
+    (lambda t: t['rows'].append(['missing']), 'TABLE_COLUMNS_MISMATCH'),
+    (lambda t: t.update(column_widths=[2, 2]), 'TABLE_WIDTHS_INVALID'),
+    (lambda t: t.update(box=[1, 2, .5, .2]), 'TABLE_LAYOUT_OVERFLOW'),
+    (lambda t: t.update(box=[9, 2, 8, 3]), 'TABLE_BOX_INVALID'),
+    (lambda t: t.update(font_size=float('nan')), 'TABLE_FONT_INVALID'),
+])
+def test_invalid_table_never_publishes_partial_or_truncated_cells(template, change, error):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['tables'] = [{'headers': ['Metric', 'Result'], 'rows': [['Latency', '0.013 seconds']],
+                       'box': [1, 2, 8, 3], 'font_size': 18}]
+    change(page['tables'][0])
+    output.write_bytes(b'previous published version')
+    with pytest.raises(ValueError, match=f'Page 1: {error}'):
+        compose_template(source, output, digest, [page])
+    assert output.read_bytes() == b'previous published version'
+
+
+def test_complete_legacy_grid_is_recovered_before_twenty_box_limit(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['text_boxes'] = [{'text': f'R{r}C{c}', 'box': [.5 + c * 1.5, 2 + r * .65, 1.4, .6],
+                           'bold': r == 0, 'font_size': 18} for r in range(5) for c in range(6)]
+    result = compose_template(source, output, digest, [page])
+    table = next(s.table for s in Presentation(output).slides[0].shapes if s.has_table)
+    assert [[c.text for c in row.cells] for row in table.rows] == [
+        [f'R{r}C{c}' for c in range(6)] for r in range(5)]
+    assert result['table_layouts'][0]['recovered'] is True
+
+
+@pytest.mark.parametrize('style', ['separate', 'markdown'])
+def test_legacy_pipe_table_recovers_rows_without_losing_qualifiers(template, style):
+    source, output, digest, page = template
+    page['charts'] = []
+    rows = ['Metric｜Before｜After', 'Parse｜24 秒｜0.013 秒（仅解析阶段）', 'Tool｜178.2 秒｜28.8 秒']
+    page['text_boxes'] = ([{'text': text, 'box': [1, 2 + i * .9, 8, .85], 'bold': i == 0}
+                           for i, text in enumerate(rows)] if style == 'separate' else
+                          [{'text': '\n'.join([rows[0], '---|---|---', *rows[1:]]), 'box': [1, 2, 8, 3]}])
+    compose_template(source, output, digest, [page])
+    table = next(s.table for s in Presentation(output).slides[0].shapes if s.has_table)
+    assert len(table.rows) == 3
+    assert table.cell(1, 2).text == '0.013 秒（仅解析阶段）'
+    assert not any('｜' in s.text for s in Presentation(output).slides[0].shapes if s.has_text_frame)
+
+
+def test_recovery_does_not_guess_semantic_columns_or_incomplete_grids():
+    from lazymind.chat.engine.tools.file_resources.pptx_tables import recover_text_tables
+    boxes = [{'text': 'Metric | Before | After', 'box': [0, 0, 8, .5], 'bold': True},
+             {'text': 'Latency | 24 → 0.013 | parse only', 'box': [0, .6, 8, .5]}]
+    _, tables = recover_text_tables(boxes)
+    assert tables[0]['rows'] == [['Latency', '24 → 0.013', 'parse only']]
+    prose = [{'text': 'A | B', 'box': [0, 0, 8, .5]},
+             {'text': '普通说明，不是表格', 'box': [0, 1, 8, .5]}]
+    assert recover_text_tables(prose) == (prose, [])
+    grid = [{'text': f'{r},{c}', 'box': [c * 3, r * .6, 2.9, .5], 'bold': r == 0}
+            for r, count in enumerate([3, 2, 3]) for c in range(count)]
+    assert recover_text_tables(grid) == (grid, [])
+
+
+def test_table_fitting_preserves_font_unless_a_lower_bound_was_explicitly_allowed():
+    from lazymind.chat.engine.tools.file_resources.pptx_tables import _layout
+    rows = [['Alpha', 'Beta'], ['One', 'Two'], ['Three', 'Four']]
+    spec = {'box': [0, 0, 8, 1.35], 'font_size': 20}
+    with pytest.raises(ValueError, match='TABLE_LAYOUT_OVERFLOW'):
+        _layout(spec, rows)
+    widths, heights, size = _layout({**spec, 'min_font_size': 16}, rows)
+    assert 16 <= size < 20
+    assert sum(widths) == pytest.approx(8)
+    assert sum(heights) == pytest.approx(1.35)
+
+
+def test_compact_legacy_comparison_keeps_wide_label_column(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    rows = [['场景', '解析阶段耗时', '相对变化'],
+            ['首次解析（外部解析服务）', '24 秒', '基线'],
+            ['缓存命中（同一文件再次解析）', '0.013 秒', '约 −99.95%']]
+    page['text_boxes'] = [
+        {'text': text, 'box': [x, 2 + r * .6, width, .56], 'font_size': 18, 'bold': r == 0}
+        for r, row in enumerate(rows) for text, x, width in zip(row, [1, 4.1, 5.8], [3, 1.6, 1.63])]
+    result = compose_template(source, output, digest, [page])
+    table = next(s.table for s in Presentation(output).slides[0].shapes if s.has_table)
+    assert [[c.text for c in row.cells] for row in table.rows] == rows
+    assert table.columns[0].width > table.columns[1].width
+    assert result['table_layouts'][0]['font_size'] >= 16
+    paragraph = table.cell(0, 0).text_frame.paragraphs[0]
+    tags = [node.tag.rsplit('}', 1)[-1] for node in paragraph._p.pPr]
+    assert tags.index('buNone') < tags.index('defRPr')
+    cell_tags = [node.tag.rsplit('}', 1)[-1] for node in table.cell(0, 0)._tc.tcPr]
+    assert cell_tags.index('lnB') < cell_tags.index('solidFill')
+
+
+def test_ragged_legacy_rows_report_location_without_overwriting_previous_output(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['text_boxes'] = [{'text': '指标 | 基线 | 优化后\n耗时 | 24', 'box': [1, 2, 8, 3]}]
+    output.write_bytes(b'previous published version')
+    with pytest.raises(ValueError, match='Page 1: TABLE_COLUMNS_MISMATCH: row 2 needs 3 cells'):
+        compose_template(source, output, digest, [page])
+    assert output.read_bytes() == b'previous published version'
+
+
 @pytest.mark.parametrize('change, message', [
     (lambda p: p.update(source_page=99), 'source_page'),
     (lambda p: p.update(remove_shape_ids=['999']), 'remove_shape_ids'),
     (lambda p: p.update(edits=[]), 'surviving ORIGINAL'),
     (lambda p: p['edits'][0].update(expected_text='Stale'), 'Stale text'),
-    (lambda p: p['charts'][0].update(box=[0, 0, 100, 5]), 'inside the slide'),
-    (lambda p: p['charts'][0].update(box=[1, .5, 8, 4]), 'overlaps'),
     (lambda p: p['charts'][0].update(source=''), 'source citation'),
     (lambda p: p['charts'][0]['series'][0].update(values=[float('nan'), 60]), 'finite'),
     (lambda p: p['charts'][0]['series'][0].update(values=[60]), 'matching categories'),
-    (lambda p: p['edits'][0].update(text='Too long ' * 500), 'does not fit'),
 ])
 def test_invalid_composition_never_replaces_output(template, change, message):
     source, output, digest, page = template
@@ -235,6 +358,7 @@ def test_workflow_publishes_composed_native_deck_and_rejects_ambiguous_requests(
     spec.loader.exec_module(tools)
     monkeypatch.setattr(tools, '_resolve_template_file', lambda _: (source, source.name))
     monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, '_review_native_pptx', lambda *_: {'status': 'unavailable'})
     published = []
     monkeypatch.setattr(tools, '_save_artifact', lambda **kw: published.append(kw) or {'ok': True})
     result = tools.ppt_fill_template(source.name, digest, pages=[page, deepcopy(page)])
@@ -286,16 +410,64 @@ def test_balanced_native_text_blocks_replace_left_placeholder(template):
     assert all(s.text_frame.paragraphs[0].font.size.pt == 22 for s in blocks)
 
 
-def test_new_native_text_rejects_overflow_and_overlap(template):
+def test_new_native_text_keeps_delivery_despite_density_and_overlap(template):
     source, output, digest, page = template
     page['charts'] = []
     page['text_boxes'] = [{'text': 'Dense content ' * 50, 'box': [1, 2, 2, 1]}]
-    with pytest.raises(ValueError, match='does not fit'):
-        compose_template(source, output, digest, [page])
+    compose_template(source, output, digest, [page])
+    assert any(s.has_text_frame and s.text == 'Dense content ' * 50
+               for s in Presentation(output).slides[0].shapes)
     page['text_boxes'] = [{'text': 'One', 'box': [1, 2, 3, 2]},
                           {'text': 'Two', 'box': [2, 2, 3, 2]}]
-    with pytest.raises(ValueError, match='overlaps'):
-        compose_template(source, output, digest, [page])
+    compose_template(source, output, digest, [page])
+    assert {'One', 'Two'} <= {s.text for s in Presentation(output).slides[0].shapes if s.has_text_frame}
+
+
+def test_half_inch_native_heading_is_published_without_capacity_gate(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['text_boxes'] = [{'text': '关键参数与边界', 'box': [1, 2, 5.9, .5], 'font_size': 20}]
+    compose_template(source, output, digest, [page])
+    heading = next(s for s in Presentation(output).slides[0].shapes if s.text == '关键参数与边界')
+    assert heading.height == Inches(.5)
+    assert heading.text_frame.paragraphs[0].font.size.pt == 20
+    page['text_boxes'][0]['text'] = '关键参数\n与边界'
+    compose_template(source, output, digest, [page])
+    assert any(s.has_text_frame and s.text == '关键参数\n与边界'
+               for s in Presentation(output).slides[0].shapes)
+
+
+def test_quality_placement_errors_are_normalized_without_blocking_delivery(template):
+    source, output, digest, page = template
+    page['charts'][0]['box'] = [-1, -1, 100, 100]
+    page['text_boxes'] = [{'text': 'Preserve this text', 'box': [1, 2, 3, 1], 'font_size': 100}]
+    compose_template(source, output, digest, [page])
+    prs = Presentation(output)
+    chart = next(s for s in prs.slides[0].shapes if s.has_chart)
+    assert chart.left >= 0 and chart.top >= 0
+    assert chart.left + chart.width <= prs.slide_width
+    assert chart.top + chart.height <= prs.slide_height
+    text = next(s for s in prs.slides[0].shapes if s.has_text_frame and s.text == 'Preserve this text')
+    assert text.text_frame.paragraphs[0].font.size.pt == 44
+
+
+def test_native_mechanism_diagram_contains_editable_nodes_and_attached_arrows(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['diagrams'] = [{'nodes': [
+        {'id': 'request', 'text': '请求配置', 'box': [1, 2, 3, 1]},
+        {'id': 'reader', 'text': '动态解析器', 'box': [5, 2, 3, 1]},
+    ], 'edges': [{'from': 'request', 'to': 'reader'}]}]
+    result = compose_template(source, output, digest, [page])
+    assert result['editable_diagram_count'] == 1
+    slide = Presentation(output).slides[0]
+    assert {'请求配置', '动态解析器'} <= {s.text for s in slide.shapes if s.has_text_frame}
+    connector = slide.element.xpath('.//p:cxnSp')[0]
+    assert connector.xpath('.//a:stCxn') and connector.xpath('.//a:endCxn')
+    assert connector.xpath('.//a:tailEnd[@type="triangle"]')
+    page['diagrams'] = [{'nodes': [{'id': 'bad', 'text': '不完整节点'}]}]
+    result = compose_template(source, output, digest, [page])
+    assert output.is_file() and result['diagram_warnings']
 
 
 def test_resize_existing_body_box_without_moving_brand(template):

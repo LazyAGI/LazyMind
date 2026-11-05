@@ -1,12 +1,17 @@
 ---
 name: pptx-template-quality
-description: Fill an existing PPTX template with evidence-backed content while preserving its layout and checking text capacity before publication.
+description: Fill an existing PPTX template with evidence-backed content while preserving its layout and reviewing rendered screenshots when vision is available.
 ---
 
 # Template filling quality
 
 Read every page with pptx_analyzer. Its quality_contract is this skill and its
-layout_checks describe whole text boxes, not independent run budgets.
+layout_checks are rough hints, never a publication gate or proof of overflow.
+Delivery takes precedence over visual quality. The fill tool publishes a usable
+PPTX first, then reviews screenshots and attempts at most two geometry-only repairs.
+Missing rendering/vision, review errors and unsuccessful repairs keep the last
+delivered version and do not fail the step. Do not rewind upstream planning or
+retry generation to satisfy a quality gate. Disclose unresolved issues accurately.
 
 In generate_ppt, consume the saved requirement_analysis, material_summary,
 deck_outline and slide_outline. Do not search the web, knowledge base, PRs or
@@ -20,10 +25,19 @@ not a new research step. Cache hits still require reading the returned content.
   Remove unused placeholders, sample charts/pictures/text boxes with explicit
   remove_shape_ids from inspection; never infer that all artwork is disposable.
   Resolve content against each box's effective layout, including inherited
-  placeholder geometry and fonts. Unknown capacity is not permission to fill freely.
+  placeholder geometry and fonts. Judge the rendered result rather than guessed capacity.
 - Allocate content by whole text box before assigning text slots. A short styled
   run is not a container for an entire paragraph. Preserve bullet paragraphs and
   paragraph levels; avoid manual bullet characters and repeated blank lines.
+- Use pages.tables for aligned lists, work records and comparisons. Supply an
+  optional headers array, rectangular rows of plain-text cells and a box in
+  inches. Never simulate a table with pipes, spacing or separate cell text boxes.
+  Keep baseline/result values in their named columns; recovery never guesses or
+  moves facts between columns. Tables have their own capacity calculation and
+  do not consume the text-box count limit. Font reduction requires an explicit
+  min_font_size. Correct TABLE_COLUMNS_MISMATCH or TABLE_LAYOUT_OVERFLOW by
+  fixing the reported table, allocating space or splitting within the requested
+  page count, not by dropping cells or falling back to unaligned text.
 - Prefer concise sentences and a few supported contributions over a PR inventory.
   Keep qualifiers, units and source attribution: an isolated 84% outline timing
   reduction is not an 84% end-to-end improvement. Separate merged and open work.
@@ -71,7 +85,7 @@ not a new research step. Cache hits still require reading the returned content.
   expand these; do not hide all implementation detail there. Rebalance text and
   visual regions before deleting core technical copy. Keep evidence images and
   chart labels readable, preserve aspect ratio, and remove repeated/decorative
-  content first when space is tight. Do not shrink text to bypass capacity checks.
+  content first when space is tight. Do not shrink text until it becomes unreadable.
 - Native charts coexist with template artwork, icons and backgrounds. New icon
   artwork and formulas are not supported by this composition API; report those
   gaps precisely without discarding supported charts and registered pictures.

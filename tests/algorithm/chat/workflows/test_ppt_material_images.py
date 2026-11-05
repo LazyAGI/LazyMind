@@ -38,7 +38,8 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
 
     materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
     assert materials_tab['layout'] == 'list'
-    assert materials_tab['slots'] == [{'id': 'material_summary'}, {'id': 'academic_brief'}]
+    assert materials_tab['slots'] == [{'id': 'material_summary'}]
+    assert all(slot['id'] != 'academic_brief' for slot in ppt['slots'])
 
 
 def test_ppt_analysis_and_material_summary_share_markdown_widget():
@@ -86,7 +87,6 @@ def test_ppt_material_images_are_optional_and_search_failure_can_continue():
         'material_summary': True,
         'material_images': False,
         'material_clarification': True,
-        'academic_brief': False,
     }
 
 

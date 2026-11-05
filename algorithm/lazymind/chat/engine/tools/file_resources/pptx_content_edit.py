@@ -33,17 +33,21 @@ def _charts(data, slide_name, root):
 
 
 def inspect_content(source, pages=None):
+    from .pptx_layout_edit import layout_snapshot
+
     source = Path(source)
     loaded = _load(source)
     selected = pages if pages is not None else list(range(1, len(loaded[2]) + 1))
     if not isinstance(selected, list) or any(type(p) is not int or not 1 <= p <= len(loaded[2]) for p in selected):
         raise ValueError('pages must be a list of 1-based slide numbers')
+    layouts = {p['page']: p for p in layout_snapshot(source, selected)}
     results = []
     for page in selected:
         info = _inspect_page(source, page, loaded)
         _, notes = _related(loaded[1], loaded[2][page - 1][0], 'notesSlide')
         body = _notes_body(notes) if notes is not None else None
         info.pop('quality_contract', None)
+        info['layout'] = layouts[page]
         info['speaker_notes'] = '\n'.join(''.join(p.itertext())
                                           for p in body.findall('a:p', NS)) if body is not None else ''
         from .pptx_chart_style import C
@@ -56,6 +60,7 @@ def inspect_content(source, pages=None):
     return {'sha256': hashlib.sha256(source.read_bytes()).hexdigest(), 'slide_count': len(loaded[2]),
             'pages': results, 'instruction': 'Edit this generated deck, not the original template. '
             'Supply sparse text_edits with id/expected_text/text and speaker_notes with page/text. '
+            'For geometry use layout_edits with page/shape_id/expected_box/box from layout, in inches. '
             'Detailed notes belong in speaker notes, not visible slide text. No generation workflow required.'}
 
 

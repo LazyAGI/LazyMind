@@ -8,7 +8,8 @@ import {
 import { echartsOptionToPptx } from './echarts_to_pptx.mjs';
 import { createGradientHandler } from './postprocess_pptx.mjs';
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
+import { mkdtemp, rename, rm } from 'node:fs/promises';
 
 // Module-level: chart options captured from the current IR. Set by
 // buildSlideFromIR before flattening, read by flattenIRToElements when it
@@ -1872,8 +1873,18 @@ function flattenNode(node, deckDir, parentBorderRadius = 0, parentBgColor = null
         }
         return elements;  // don't recurse into chart internals (svg children)
       }
-      // unsupported chart type: fall through, the inner <svg> will be
-      // rasterized by buildSvgElement like before.
+      if (entry.renderedImageDataUri) {
+        let data = entry.renderedImageDataUri;
+        if (/^data:image\/svg\+xml[^,]*,/.test(data) && !/^data:[^,]*;base64,/.test(data)) {
+          data = 'data:image/svg+xml;base64,' + Buffer.from(decodeURIComponent(data.slice(data.indexOf(',') + 1))).toString('base64');
+        }
+        const b = node.bounds;
+        elements.push({ type: 'image', data: {
+          data, x: pxToInch(b.x), y: pxToInch(b.y), w: pxToInch(b.w), h: pxToInch(b.h),
+        } });
+        return elements;
+      }
+      // Older IR has no captured image: keep its styled inner SVG.
     }
   }
 
@@ -2227,6 +2238,18 @@ export function buildSlideFromIR(pptx, ir, deckDir) {
  * @param {string} outputPath - PPTX 输出路径
  */
 export async function buildPptx(pages, deckDir, outputPath) {
+  const temporary = await mkdtemp(join(dirname(resolve(outputPath)), '.pptx-export-'));
+  try {
+    const candidate = join(temporary, 'presentation.pptx');
+    const result = await buildPptxCandidate(pages, deckDir, candidate);
+    await rename(candidate, outputPath);
+    return result;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+async function buildPptxCandidate(pages, deckDir, outputPath) {
   const pptx = new PptxGenJS();
 
   // 设置 16:9 画布（10" × 5.625"）
@@ -2325,6 +2348,9 @@ export async function buildPptx(pages, deckDir, outputPath) {
     const { embedGoogleFontsFromPages } = await import('./font_embedding.mjs');
     embeddedFonts = await embedGoogleFontsFromPages(outputPath, pages);
   } catch (error) {
+    if (error.fontPortability) {
+      throw error;
+    }
     // Font download/embedding is visual fidelity enhancement. Keep the
     // editable PPTX usable during network outages or for restricted fonts.
     process.stderr.write(`[fonts] Web font embedding skipped: ${error.message}\n`);

@@ -1,11 +1,12 @@
 import copy
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import lazyllm
 import pytest
 
 from lazymind.chat.workflow.input_checkpoint import InputCheckpoint
-from lazymind.chat.workflow.workflow_manager import _safe_session_tools, _handoff_tool
+from lazymind.chat.workflow.workflow_manager import _safe_session_tools, _handoff_tool, resolve_workflow_injection
 from lazymind.workflow_sdk import WorkflowClientError
 
 
@@ -50,6 +51,70 @@ def fixture(monkeypatch):
 
 def tools_for(toolkit, checkpoint):
     return {tool.__name__: tool for tool in _safe_session_tools(toolkit, 'session-1', checkpoint=checkpoint)}
+
+
+@pytest.mark.parametrize('mode', ['auto', 'dynamic'])
+@pytest.mark.parametrize('entry', ['active', 'selected', 'discovery'])
+def test_mid_workflow_questions_only_enabled_in_approval_mode(fixture, mode, entry):
+    toolkit, record, events = fixture
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {'enable_workflow': True}
+    catalog = [{
+        'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+        'name': 'PPT', 'runtime': POLICY,
+    }]
+    context = {'workflow_mode': mode}
+    if entry == 'active':
+        context.update(session_id='session-1', workflow_id='ppt-workflow', runtime=POLICY)
+    toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['collect_materials']}
+    try:
+        with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
+            'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+        ):
+            factory.return_value.get_state.return_value = {
+                'session_id': 'session-1', 'status': 'active', 'state_version': 3,
+            }
+            factory.return_value.get_workflow.return_value.result = {
+                'workflow_id': 'ppt-workflow', 'runtime': POLICY,
+            }
+            contribution = resolve_workflow_injection(
+                context, current_query='生成 PPT', workflow_catalog=catalog,
+                allowed_workflow_refs=['builtin:ppt-workflow'] if entry == 'selected' else [],
+                workflow_activations=[{
+                    'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                    'tool_name': 'trigger_ppt_workflow',
+                }],
+            )
+            lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
+            tools = {tool.__name__: tool for tool in contribution.tools if callable(tool)}
+            assert ('answer_workflow_questions' in tools) is (mode == 'dynamic')
+            if entry != 'active':
+                tools['trigger_ppt_workflow']()
+            result = tools['advance_step'](['collect_materials'])
+            if mode == 'auto':
+                assert result['outcome'] == 'step_succeeded'
+                assert not result.get('_agent_control', {}).get('stop')
+                assert 'post-collection input checkpoints are disabled' in contribution.runtime_context
+                tools['advance_step'](['build_outline'])
+                toolkit.advance_step.return_value = {'status': 'completed', 'outcome': 'workflow_completed'}
+                completed = tools['advance_step'](['generate_ppt'])
+                assert completed['_agent_control']['reason'] == 'workflow_completed'
+                assert toolkit.advance_step.call_count == 3
+                toolkit.patch_artifact.assert_not_called()
+                assert 'answer_text' not in record['value']
+                assert events == []
+            else:
+                assert result['status'] == 'waiting_for_input'
+                assert result['_agent_control']['stop'] is True
+                tools['advance_step'](['build_outline'])
+                assert toolkit.advance_step.call_count == 1
+                assert len(events) == 1
+                assert events[0][0] == 'ask_pending'
+    finally:
+        if previous is None:
+            lazyllm.globals.pop('agentic_config', None)
+        else:
+            lazyllm.globals['agentic_config'] = previous
 
 
 def test_collection_emits_real_ask_and_stops_without_executing_outline(fixture):
@@ -98,6 +163,27 @@ def test_empty_checklist_does_not_pause(fixture):
     assert result['outcome'] == 'step_succeeded'
     assert events == []
     toolkit.patch_artifact.assert_not_called()
+
+
+def test_answer_has_explicit_model_argument_and_preserves_host_reply(fixture):
+    from lazyllm.tools.agent.toolsManager import ModuleTool
+
+    toolkit, record, _ = fixture
+    receipt = tools_for(toolkit, InputCheckpoint(toolkit, lambda: POLICY, [], '生成'))[
+        'advance_step'](['collect_materials'])
+    history = [{'role': 'tool', 'content': json.dumps({'ok': True, 'value': receipt})}]
+    answer = '都写入职时间到至今；目前的已经都合并了；不考虑KPI'
+    function = tools_for(toolkit, InputCheckpoint(toolkit, lambda: POLICY, history, answer))[
+        'answer_workflow_questions']
+    tool = ModuleTool(apply_func=function, schema_func=function)
+    arguments = tool._validate_input(receipt['next_action']['arguments'])
+    assert arguments == {'action': 'save'}
+    assert function(**arguments)['status'] == 'answered'
+    assert record['value']['answer_text'] == answer
+    with pytest.raises(ValueError):
+        tool._validate_input({'answer': '模型改写的回答'})
+    with pytest.raises(ValueError):
+        tool._validate_input({'action': 'delete'})
 
 
 @pytest.mark.parametrize('approval', [False, True])

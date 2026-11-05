@@ -1,0 +1,5409 @@
+{
+  "version": 1,
+  "sources": {
+    "lucide": {
+      "name": "Lucide",
+      "style": "outline",
+      "homepage": "https://github.com/lucide-icons/lucide",
+      "license": "ISC",
+      "license_url": "https://github.com/lucide-icons/lucide/blob/main/LICENSE",
+      "license_file": "licenses/lucide.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/lucide.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "tabler": {
+      "name": "Tabler Icons",
+      "style": "outline",
+      "homepage": "https://github.com/tabler/tabler-icons",
+      "license": "MIT",
+      "license_url": "https://github.com/tabler/tabler-icons/blob/master/LICENSE",
+      "license_file": "licenses/tabler.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/tabler.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "ph": {
+      "name": "Phosphor",
+      "style": "duotone",
+      "homepage": "https://github.com/phosphor-icons/core",
+      "license": "MIT",
+      "license_url": "https://github.com/phosphor-icons/core/blob/main/LICENSE",
+      "license_file": "licenses/ph.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/ph.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "fluent": {
+      "name": "Fluent UI System Icons",
+      "style": "outline",
+      "homepage": "https://github.com/microsoft/fluentui-system-icons",
+      "license": "MIT",
+      "license_url": "https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE",
+      "license_file": "licenses/fluent.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/fluent.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "fluent-color": {
+      "name": "Fluent UI System Color Icons",
+      "style": "color",
+      "homepage": "https://github.com/microsoft/fluentui-system-icons",
+      "license": "MIT",
+      "license_url": "https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE",
+      "license_file": "licenses/fluent-color.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/fluent-color.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "material-symbols": {
+      "name": "Material Symbols",
+      "style": "outline",
+      "homepage": "https://github.com/google/material-design-icons",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/google/material-design-icons/blob/master/LICENSE",
+      "license_file": "licenses/material-symbols.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/material-symbols.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "carbon": {
+      "name": "Carbon",
+      "style": "outline",
+      "homepage": "https://github.com/carbon-design-system/carbon/tree/main/packages/icons",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/carbon-design-system/carbon/blob/main/LICENSE",
+      "license_file": "licenses/carbon.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/carbon.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "bi": {
+      "name": "Bootstrap Icons",
+      "style": "outline",
+      "homepage": "https://github.com/twbs/icons",
+      "license": "MIT",
+      "license_url": "https://github.com/twbs/icons/blob/main/LICENSE",
+      "license_file": "licenses/bi.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/bi.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "heroicons": {
+      "name": "HeroIcons",
+      "style": "outline",
+      "homepage": "https://github.com/tailwindlabs/heroicons",
+      "license": "MIT",
+      "license_url": "https://github.com/tailwindlabs/heroicons/blob/master/LICENSE",
+      "license_file": "licenses/heroicons.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/heroicons.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "iconoir": {
+      "name": "Iconoir",
+      "style": "outline",
+      "homepage": "https://github.com/iconoir-icons/iconoir",
+      "license": "MIT",
+      "license_url": "https://github.com/iconoir-icons/iconoir/blob/main/LICENSE",
+      "license_file": "licenses/iconoir.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/iconoir.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "fluent-emoji-flat": {
+      "name": "Fluent Emoji Flat",
+      "style": "color",
+      "homepage": "https://github.com/microsoft/fluentui-emoji",
+      "license": "MIT",
+      "license_url": "https://github.com/microsoft/fluentui-emoji/blob/main/LICENSE",
+      "license_file": "licenses/fluent-emoji-flat.txt",
+      "source_url": "https://github.com/iconify/icon-sets/blob/96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7/json/fluent-emoji-flat.json",
+      "revision": "96c48bfd49dc5c42c4e8cf43c7bf0b0834dc60f7"
+    },
+    "fluent-3d": {
+      "name": "Microsoft Fluent Emoji 3D",
+      "style": "3d",
+      "homepage": "https://github.com/microsoft/fluentui-emoji",
+      "license": "MIT",
+      "license_url": "https://github.com/microsoft/fluentui-emoji/blob/main/LICENSE",
+      "license_file": "licenses/fluent-emoji-flat.txt",
+      "source_url": "https://github.com/microsoft/fluentui-emoji/tree/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets",
+      "revision": "1ffb34c752ecf5d402f04cfb4b392c77f57c54bc"
+    }
+  },
+  "assets": [
+    {
+      "name": "lucide:clipboard",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--clipboard.svg",
+      "svg_sha256": "d377a9143e05ac7fcd47c3adc9eb1b617b035ab212b89d8b41fc9979663f75f3",
+      "png": "files/lucide--clipboard.png",
+      "png_sha256": "67fc8d79e8cd1adabca3bab1caaf6eb0002212485d6f023967b61e122839301d"
+    },
+    {
+      "name": "lucide:folder",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--folder.svg",
+      "svg_sha256": "83788bb156e0619afcb10fdb9441f142f6a51ef540fc6c6386e09592399c2bf6",
+      "png": "files/lucide--folder.png",
+      "png_sha256": "038a2499b49509d750a633ce0d89a2e1d04c741a892504ab4489e2cb214ae8c1"
+    },
+    {
+      "name": "lucide:layers",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--layers.svg",
+      "svg_sha256": "3529cad890fe7f6810849dc7c5d98a7c2d0772772ba24a86091c4679d3cd3962",
+      "png": "files/lucide--layers.png",
+      "png_sha256": "a432af1c52f279100f45966a6a9f20fe25fb7e9ca933426f4ce23ceac848c1b7"
+    },
+    {
+      "name": "lucide:presentation",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--presentation.svg",
+      "svg_sha256": "9809d2f69101f7f2d284184daf6190ae325e8fb71dfe4f8915ff538aeaf91df2",
+      "png": "files/lucide--presentation.png",
+      "png_sha256": "c9a4d594443c8fcc80acdc878ead84d0d5374043c3df6b2ac874f611d7004b96"
+    },
+    {
+      "name": "lucide:image",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--image.svg",
+      "svg_sha256": "ad6061ea3c605357912836faf61ae5c89be623f5a69d2d252b25eff638acfe1f",
+      "png": "files/lucide--image.png",
+      "png_sha256": "b0237949a462e2b233c8e6506989a5caf4dde690031a3bf9639ed0740ef2399c"
+    },
+    {
+      "name": "lucide:file-text",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--file-text.svg",
+      "svg_sha256": "215f1ceed9132e3c2ff19b49172dc1490bc1792b1f0fb206d6ad8d62322b1898",
+      "png": "files/lucide--file-text.png",
+      "png_sha256": "cb9e6e2f11de3e84dcbc66097d9e7fd6690f7377817360a37ef076cbec7e3e96"
+    },
+    {
+      "name": "lucide:pencil",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--pencil.svg",
+      "svg_sha256": "c0a27290ab1287144001069a30ff45c0d9884b1d1b1ae1e04c71e2931c35444e",
+      "png": "files/lucide--pencil.png",
+      "png_sha256": "f43dd70026331f29540ad5fb179bd9dc1994b9631256a56d981a089a2638a440"
+    },
+    {
+      "name": "lucide:workflow",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "workflow",
+        "工作流",
+        "流程",
+        "编排"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--workflow.svg",
+      "svg_sha256": "407b7d14967bb7d481ef30538d8b0d5673ea78b6f4d3a7399bd78e9a2f0260ba",
+      "png": "files/lucide--workflow.png",
+      "png_sha256": "9e3ae3e23dee40122f28cb282a7ad304b4bb3c1400a40b5bc5d72ac30e37a0cf"
+    },
+    {
+      "name": "lucide:database",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--database.svg",
+      "svg_sha256": "df2e8dce7beaafce9ce233f4d54d8d1044b2e3e69b34635e423e2c700f86f1da",
+      "png": "files/lucide--database.png",
+      "png_sha256": "38edff49742c30e21035c13bd18cd933d4688108e4b79f205b9c02b5936b9a4c"
+    },
+    {
+      "name": "lucide:server",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--server.svg",
+      "svg_sha256": "98e960fa36dd1ef301c2136f2aad9482649646d98c2dd6f652d3889faee7bc53",
+      "png": "files/lucide--server.png",
+      "png_sha256": "a2f9d0b8ccf00d2d25b545ebcffe4e38abe7c35c1bdc8751e75a24db65d03d97"
+    },
+    {
+      "name": "lucide:cloud",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--cloud.svg",
+      "svg_sha256": "e0b54de9a52d6876b24a149b48a03f9c938a81d96e9466bc4106764ac192ecd2",
+      "png": "files/lucide--cloud.png",
+      "png_sha256": "7a3435f772e126b330e7b4f0726fb25711d30d6ecabf07f073fa991355288209"
+    },
+    {
+      "name": "lucide:shield",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--shield.svg",
+      "svg_sha256": "b6cf518f01a452134b6448f4c7e175b046825e4564464444a7a5424799bd5e51",
+      "png": "files/lucide--shield.png",
+      "png_sha256": "c06f0fc5c2b06a7f761f2d223bedd31f642a81fb5f8e8621383d27b79b6af9ae"
+    },
+    {
+      "name": "lucide:cpu",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--cpu.svg",
+      "svg_sha256": "2e497e4921f651bea478585482ecf11739c8c379ea3c5a14f97c5c6b3cd209bb",
+      "png": "files/lucide--cpu.png",
+      "png_sha256": "2ba4411f4c233ef42295eaecba80c6da629c0a250938a2d078a671acd1cf033c"
+    },
+    {
+      "name": "lucide:chart-bar",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--chart-bar.svg",
+      "svg_sha256": "b18603d8cbed5f93ebde39788bea1f1a3d6e6efd477d3e5b06544b2e2eafd419",
+      "png": "files/lucide--chart-bar.png",
+      "png_sha256": "f2885b2654fb1a389c69695049e4692f377d71b5d2c907b8a435b89e6ba7f7e3"
+    },
+    {
+      "name": "lucide:code",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--code.svg",
+      "svg_sha256": "d121bb44d1c0be8ed391f1412bb6c74d2d522a16b93c66f9499e3e53e8b61540",
+      "png": "files/lucide--code.png",
+      "png_sha256": "382a7b7100b0f7caf014a20123cc57a52d20b5c5905efccef93a8155ddadbc77"
+    },
+    {
+      "name": "lucide:clock",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--clock.svg",
+      "svg_sha256": "1c1f190dc6d5b26912740ba5a6a6384d8e1a40f4b509dc3c8c02bf428142430b",
+      "png": "files/lucide--clock.png",
+      "png_sha256": "27b6383c0e00d02315141fbcda6858b5228bd5f94cb099562116371b5e3a4423"
+    },
+    {
+      "name": "lucide:users",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--users.svg",
+      "svg_sha256": "87e2a7ebb94a7906ebe4938d74f2a4dbe9d8f72463287ac54592efa38883e92d",
+      "png": "files/lucide--users.png",
+      "png_sha256": "be58bf799ca85e9d4021d0e975ff494685738333c3f7c0b661e01cb859580c86"
+    },
+    {
+      "name": "lucide:link",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--link.svg",
+      "svg_sha256": "731d51f91a7291eb1ff6902eb4199c5cf5d7f67008b7d7a3cf942d9490ab66c3",
+      "png": "files/lucide--link.png",
+      "png_sha256": "6bc57c96fbc20eccec0e69af0afa10b8abd1b1aa70bcc0760e4ab4ea2ae7ecad"
+    },
+    {
+      "name": "lucide:target",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--target.svg",
+      "svg_sha256": "46a369d3c77769cbff03b38571f4c273f4b171b0cdcdde7d1e495fb0af11aa6a",
+      "png": "files/lucide--target.png",
+      "png_sha256": "f4bb7367abdb8ae3afef74aa45f2ce6039c69f9cbcfd57a7e5a71f966359d476"
+    },
+    {
+      "name": "lucide:settings",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--settings.svg",
+      "svg_sha256": "e81c58448f464c52609bdb89223b5ee95fdf2cfbcd900179853e95de4dcd834d",
+      "png": "files/lucide--settings.png",
+      "png_sha256": "8d07741995d0726233a36be08cacf17bf1367de47f3f951d795fa59f8dd61fd8"
+    },
+    {
+      "name": "lucide:download",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--download.svg",
+      "svg_sha256": "e46f6b002258f19abeabedb42dafb8fad1a05d08fb76379c32ccc18f6f2b503f",
+      "png": "files/lucide--download.png",
+      "png_sha256": "a6025148665108adf372766ce80e4e417ec28e0c9ff894255afd5c6e7a8d5b1b"
+    },
+    {
+      "name": "lucide:search",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--search.svg",
+      "svg_sha256": "9cb0dc2d83d8e361a3b32e90b550003ee83d7ebb0209f5d80d4fb711be2f0baf",
+      "png": "files/lucide--search.png",
+      "png_sha256": "54061ffaa2806976afd56e1d60514f1790086a25806ac6914646d8d14a80bdcb"
+    },
+    {
+      "name": "lucide:lightbulb",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--lightbulb.svg",
+      "svg_sha256": "fb30244539e14a8b82c0c6d0f294e6e4ff4ad5cddfbcfbbff1df6a86237d605d",
+      "png": "files/lucide--lightbulb.png",
+      "png_sha256": "c83d8e8404ea55e216d3fb383077c693b6507fe2cdc45ba2ac61210b3ecabf49"
+    },
+    {
+      "name": "lucide:check",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--check.svg",
+      "svg_sha256": "e97f25a6a1bad3841c923ae64fe56c7d46b3c6df4ad3c634d63d931fa1b63f76",
+      "png": "files/lucide--check.png",
+      "png_sha256": "797723872eecac869fb557d8f731ef0d39bd61e0ab9644ca5ed471999fef6640"
+    },
+    {
+      "name": "lucide:git-branch",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--git-branch.svg",
+      "svg_sha256": "76a15199a1421421e3372ef859c58323f5cf655aec87760d2cfe621af87bd8d7",
+      "png": "files/lucide--git-branch.png",
+      "png_sha256": "7c109f512a3c2180f26d34420d6ccbe4163886f178efc00207097d22f10cfb15"
+    },
+    {
+      "name": "lucide:network",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--network.svg",
+      "svg_sha256": "19f75922de35021dd2cf7bfef9e86a8ff5e6dd461a35c0a0510a7ada5abaf173",
+      "png": "files/lucide--network.png",
+      "png_sha256": "ecd3e65fdde50687e7905368ce2db1bdd03ec952d29321815adc0a753f901b62"
+    },
+    {
+      "name": "lucide:book",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--book.svg",
+      "svg_sha256": "94743ff44e9c5efaa9e68e1571c82cb17cf997e6b165e8fed258325934ed72a4",
+      "png": "files/lucide--book.png",
+      "png_sha256": "ee8a36a9cb0baaf769b9fb4d8508c6d5ebe6c4c32f0b81c3f9b6f1a8535bc97a"
+    },
+    {
+      "name": "lucide:rocket",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--rocket.svg",
+      "svg_sha256": "4cd651eea125336a10299b584e04567db6639e1ec4458705adaa10c03e137264",
+      "png": "files/lucide--rocket.png",
+      "png_sha256": "e2edeb12051b719a3564427dcb400cffc23a619327a2e937deae8dc8ad9d4bdd"
+    },
+    {
+      "name": "lucide:trophy",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--trophy.svg",
+      "svg_sha256": "509df476eae278d1431813bc6cac3a60b5bb67239933fa72993a1d365bbbbd09",
+      "png": "files/lucide--trophy.png",
+      "png_sha256": "92903c3d8571ea185797e8d50e05fb4d79fd48bc1dbb63ba6b40e8954cad1069"
+    },
+    {
+      "name": "lucide:puzzle",
+      "collection": "lucide",
+      "style": "outline",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/lucide--puzzle.svg",
+      "svg_sha256": "0a2109571725ca22210f7398cab89f2f7f6d41dc5e6e7210a6fcde2a89cd7d53",
+      "png": "files/lucide--puzzle.png",
+      "png_sha256": "8a2c7f21a40d835109ca8378a32b8a1bf36d6aaed55ae0282aa54e9292f78ca5"
+    },
+    {
+      "name": "tabler:clipboard",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--clipboard.svg",
+      "svg_sha256": "e5662e55e2a5bcbed139580e3a7a589d043853bd8378d013e03df5678c715cee",
+      "png": "files/tabler--clipboard.png",
+      "png_sha256": "b96371e978c7ca91bf1fe992a9e2477d4d6c5e813090e99acdf8743dd5c0bdcf"
+    },
+    {
+      "name": "tabler:folder",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--folder.svg",
+      "svg_sha256": "5e7d33a060adbc125d629bb367ab2dad3c3b0c5d3e14c991bf5cc53545ac7f22",
+      "png": "files/tabler--folder.png",
+      "png_sha256": "109743d25316b3ac56a36b6b1e26ce913a43854103d54a0101383770e8fd2324"
+    },
+    {
+      "name": "tabler:stack",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--stack.svg",
+      "svg_sha256": "43117003f5a7532bf5ac7dd2abb0ea5a2e83b0413c16059ec5d4d1d3eebd80f2",
+      "png": "files/tabler--stack.png",
+      "png_sha256": "1ed0aa9fb648d113f8c88763f2df8d9f8c7679b7904004de9a3704d15a75f69b"
+    },
+    {
+      "name": "tabler:presentation",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--presentation.svg",
+      "svg_sha256": "63a822638f0336b4868247621a03189e3e7150775c79b6b2bbea69b07e56f03b",
+      "png": "files/tabler--presentation.png",
+      "png_sha256": "96640c07de04e4efa1b134998a345b031eacbeacb59d30eb490bd1bdcbbb3541"
+    },
+    {
+      "name": "tabler:image-generation",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--image-generation.svg",
+      "svg_sha256": "ae822da8bbba484301145d3bf6bcfa067ee0440e9705883ed1f81219817db6f2",
+      "png": "files/tabler--image-generation.png",
+      "png_sha256": "357699b555a24089a97bed6409e3404527870522c56ad90090fd50818d264508"
+    },
+    {
+      "name": "tabler:file-text",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--file-text.svg",
+      "svg_sha256": "4615df92a32db60124d2ca54ff6cae068d4d8fb1e67b82575c15ccb45c17c3e7",
+      "png": "files/tabler--file-text.png",
+      "png_sha256": "6f6c05d80fd0686adb703df99168717ade16cd1d8134fb74616b6d29d6026938"
+    },
+    {
+      "name": "tabler:edit",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--edit.svg",
+      "svg_sha256": "c6ddf47bcb380684f723dd604ca9e4e818af126b281171917ad4873eb1c115f0",
+      "png": "files/tabler--edit.png",
+      "png_sha256": "9c395038c16d3f53d8996fd85f014c9fc5304803c51eebf064e9301ea3203e9e"
+    },
+    {
+      "name": "tabler:database",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--database.svg",
+      "svg_sha256": "75860f17c6530278cbf41598b888f3ba18d20fe2e093487f76b5d16e9d814d92",
+      "png": "files/tabler--database.png",
+      "png_sha256": "31161fd9d7ee9e45446a0f901fa923d82d50be52c9153fa33665cccd0439f375"
+    },
+    {
+      "name": "tabler:server",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--server.svg",
+      "svg_sha256": "7697723cec6f99921633b30f68f84d0a034a64bc3ba59d78d1dff3ea84ace2e4",
+      "png": "files/tabler--server.png",
+      "png_sha256": "535c6f5446beb8c743cf107a3c8286ae5c99cc6a136c66b9be0c8168551923cd"
+    },
+    {
+      "name": "tabler:cloud",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--cloud.svg",
+      "svg_sha256": "0ba035d9fca9b4efd3984d1fad0657f76c51343f9e574e87665a257f17224ac4",
+      "png": "files/tabler--cloud.png",
+      "png_sha256": "f9e348c64dca50bcbd62fd30cc66d848b73eb556799677ac1b78731ab0cf5181"
+    },
+    {
+      "name": "tabler:shield",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--shield.svg",
+      "svg_sha256": "2032ca45d7480b6b5bf2a4ed99bfef9878606adda14ce655c17f54fc371ba782",
+      "png": "files/tabler--shield.png",
+      "png_sha256": "f84cc8636bdafef483dce68e66672ba71c1d26376a7e5bc0b1055d148bd14631"
+    },
+    {
+      "name": "tabler:cpu",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--cpu.svg",
+      "svg_sha256": "3b3b2be8b858d0908b98fffe0135a37da771f83bc768a8ef1834f14ac54671e7",
+      "png": "files/tabler--cpu.png",
+      "png_sha256": "0f9e501bc5392d7607815a7b78f086d88d92e150af64814d5bba5d4e3eaeb9ff"
+    },
+    {
+      "name": "tabler:chart-bar",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--chart-bar.svg",
+      "svg_sha256": "c4230612d56646cb98b1cc4b3a5aeaf68405f22e65b84c26441072118c6863d9",
+      "png": "files/tabler--chart-bar.png",
+      "png_sha256": "093806f4ba93af1f12a55f4bb389d49940354eeab181a80e7922e8bbfa369c40"
+    },
+    {
+      "name": "tabler:code",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--code.svg",
+      "svg_sha256": "80c52316b9efc6165c793fac6c98b94f70de108cfad2b9307987e45937af4f5f",
+      "png": "files/tabler--code.png",
+      "png_sha256": "ab99c827337c7ca9c935ea6742e83bab6a624d3973174171daca5fc436fbbce4"
+    },
+    {
+      "name": "tabler:clock",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--clock.svg",
+      "svg_sha256": "0f9f40e9bb7de24df1549f5237543da68ca7d9a31a8af9f70643f2101e96fddc",
+      "png": "files/tabler--clock.png",
+      "png_sha256": "9eb0456af1436415a4a1c29cb3987e11fb9825a1c4c61b5be9c6b9f44d8e39b8"
+    },
+    {
+      "name": "tabler:users",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--users.svg",
+      "svg_sha256": "d573301dd8120c79adde7a43de2f4f7524e992ab8c81048c6aa1176e6d3a89fb",
+      "png": "files/tabler--users.png",
+      "png_sha256": "514558f648419a137eeeb95ddd2af0f22f7f89eb724d18a92c3e59d280fe7e45"
+    },
+    {
+      "name": "tabler:link",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--link.svg",
+      "svg_sha256": "1dd9769a5922db6721203a14ad8b88790a2436b31d660bb566d79741196ae598",
+      "png": "files/tabler--link.png",
+      "png_sha256": "800db7e91fba8f02be4f0a98fef772b9a3b6d604589001519864b66c0d5327ee"
+    },
+    {
+      "name": "tabler:target",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--target.svg",
+      "svg_sha256": "50a3eaef2f21f1f2aafd55ec6924d324e4f74373f8b9d4dc59cb24d6e9213dda",
+      "png": "files/tabler--target.png",
+      "png_sha256": "2150310baa714b8d402e9d956f9b19e2b2bbc337d7313484a4dfe2d3571717d6"
+    },
+    {
+      "name": "tabler:settings",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--settings.svg",
+      "svg_sha256": "cfcacae8b0770119a82ebbfa1fad29b2cac91f49537208af8ae7dd900f244c25",
+      "png": "files/tabler--settings.png",
+      "png_sha256": "3f272716ad5a6afa190c322e0506eecdd185d21d975fe7e1478c23ba185437f6"
+    },
+    {
+      "name": "tabler:download",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--download.svg",
+      "svg_sha256": "b4895731448f2979694d79c6e31868851570e60de1cffa40cb3435ac6c55fc97",
+      "png": "files/tabler--download.png",
+      "png_sha256": "6f72897e2438132ab059022747e62c15195f5499d54562b7d193d8771c067e80"
+    },
+    {
+      "name": "tabler:search",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--search.svg",
+      "svg_sha256": "9b4f011545d9f8a137357c76846052f7122ad46bbdd71f78e3914aaa964c6eda",
+      "png": "files/tabler--search.png",
+      "png_sha256": "e8cf4e3f6e855621f552d0c4ad40bdab9079143f119ecef5dd3c5b7ceb2d80a7"
+    },
+    {
+      "name": "tabler:bulb",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--bulb.svg",
+      "svg_sha256": "896dc2dcfa5f8845378d6e2a7b117ef1c45be332859ae3a22b929680f383a99c",
+      "png": "files/tabler--bulb.png",
+      "png_sha256": "3af3e40689277d0fd64f1dab94ca03cabef09338ed59759b64958a72d19df26b"
+    },
+    {
+      "name": "tabler:check",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--check.svg",
+      "svg_sha256": "8f51c8d6c3343cda8ffde12bf5c949784211f879e3b51c95d329205cf693657a",
+      "png": "files/tabler--check.png",
+      "png_sha256": "f4fa4ac30740eaa88fdcfefcade217bde5dfb53f8fd039f6e17c4cbea61f6f2c"
+    },
+    {
+      "name": "tabler:git-branch",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--git-branch.svg",
+      "svg_sha256": "6004ddf974ca064ec7be63689b5a578d32850d53c93433f9e471fe89b93eaae8",
+      "png": "files/tabler--git-branch.png",
+      "png_sha256": "7e5805ba83027348615950714a4abcec8c308891aa88249432c5068df4cc04c4"
+    },
+    {
+      "name": "tabler:network",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--network.svg",
+      "svg_sha256": "9e1659b163965764b953ceb9a5a07650a8509b20acf1885f99044fc042c129e7",
+      "png": "files/tabler--network.png",
+      "png_sha256": "33ac130991455c8b9c437f4fe7c6476e231c04ad908d3ee110029dffc5de7e97"
+    },
+    {
+      "name": "tabler:book",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--book.svg",
+      "svg_sha256": "14b5015cddcf2c7343de30a101ddc649b01228151c7040553b961d03c4cb3be6",
+      "png": "files/tabler--book.png",
+      "png_sha256": "c222dcfa3394b29a38487135f199347a36ca7f32c560762cd20b0883849cf15f"
+    },
+    {
+      "name": "tabler:rocket",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--rocket.svg",
+      "svg_sha256": "e85442eb259311c814ee3b76c2840275cc5289771a87fc3b5b3ebdf5e8ce5d8b",
+      "png": "files/tabler--rocket.png",
+      "png_sha256": "35cc016e89490119fddf61c314857ec8e19c0b28d861b14c92163d2741cb3aad"
+    },
+    {
+      "name": "tabler:trophy",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--trophy.svg",
+      "svg_sha256": "411bbcdffe259884a1cf7697ec312ab49037eb787829e9a153c024c03a0aa1db",
+      "png": "files/tabler--trophy.png",
+      "png_sha256": "f22e9d45d79083b16b43efd29bb2a2614b4bd08e80ce6806d75d3de10958656d"
+    },
+    {
+      "name": "tabler:puzzle",
+      "collection": "tabler",
+      "style": "outline",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/tabler--puzzle.svg",
+      "svg_sha256": "7b41409f0563143dc67070fa2a37a103bcbf9a3a9029804367e8fd2a28d5c7bf",
+      "png": "files/tabler--puzzle.png",
+      "png_sha256": "547e6b01713d8d3d20a5227e17253dd024fb0bf4343c5ae82239c222227578ca"
+    },
+    {
+      "name": "ph:clipboard-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--clipboard-duotone.svg",
+      "svg_sha256": "3c416d76b09cf5665c8c7dd6998103ca385ea634ea50d904dad7a211778427b0",
+      "png": "files/ph--clipboard-duotone.png",
+      "png_sha256": "438ff8de5669b0bffe1e90f672ef4c789adcbbe505f291195d9e652af6cc2fb1"
+    },
+    {
+      "name": "ph:folder-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--folder-duotone.svg",
+      "svg_sha256": "061dd268bbf584875af0bc26363e88d113d75fa6a56d539e585e7cb29f31e165",
+      "png": "files/ph--folder-duotone.png",
+      "png_sha256": "018b4a329464948e3703f031e6f6740660c9c9ebb2e60143d588acd548ae664a"
+    },
+    {
+      "name": "ph:stack-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--stack-duotone.svg",
+      "svg_sha256": "3b56e2b33fe5c72b3755f44705ad3a1e47b437c74dc87c7067ddfb815172f1b6",
+      "png": "files/ph--stack-duotone.png",
+      "png_sha256": "b9b01bb6f92be2c43360abfa4710da8487d7cc02aaafb5e0517fc1ab87fb23c0"
+    },
+    {
+      "name": "ph:presentation-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--presentation-duotone.svg",
+      "svg_sha256": "f7b609783f50819ef34816f0fff9e349a27ba39b9d11a3d685c30b0901632f8a",
+      "png": "files/ph--presentation-duotone.png",
+      "png_sha256": "66d6044929580c0cc405a0696156295acfd5f8f85a29c5994db19972dd93bc92"
+    },
+    {
+      "name": "ph:image-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--image-duotone.svg",
+      "svg_sha256": "afe8b483e0b3281eb37764ba6821bf753de9e1d07f3f03849cb32bd53e1cb906",
+      "png": "files/ph--image-duotone.png",
+      "png_sha256": "25f6cf5a3effba3b6e6729634fd94fdf1c3c56b814b35d31f1f9fb812a79f89a"
+    },
+    {
+      "name": "ph:file-pdf-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--file-pdf-duotone.svg",
+      "svg_sha256": "e4a912c16a2283e29a3ce3be4be80e401079df9d81eadca6036451c6e0217d24",
+      "png": "files/ph--file-pdf-duotone.png",
+      "png_sha256": "b405d6ef72d2c93c01c0fb3a8fe50693bbd17c831fe5cd4e61a822e6487e34a4"
+    },
+    {
+      "name": "ph:pencil-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--pencil-duotone.svg",
+      "svg_sha256": "94c4e46cb6dacd84d619df0320660e10aec2953505443e99de0240c072d36dd2",
+      "png": "files/ph--pencil-duotone.png",
+      "png_sha256": "bdd920cd11125c3d1efd68a1f083a52fb8c6c5bc1c2686ca6f8ea0ef58eacd98"
+    },
+    {
+      "name": "ph:flow-arrow-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "workflow",
+        "工作流",
+        "流程",
+        "编排"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--flow-arrow-duotone.svg",
+      "svg_sha256": "08b5cc322cd675a08dcf103f3f9d830b7197b9560343549bb522780d7b524c6e",
+      "png": "files/ph--flow-arrow-duotone.png",
+      "png_sha256": "7eccb4489377ff3c7de45a5bfdca33e28fcfde6122aa3f8c7b90ba88dfcd638b"
+    },
+    {
+      "name": "ph:database-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--database-duotone.svg",
+      "svg_sha256": "50ff588574b2a670c8eb0cb630a45c63ab9993383aea5d1ff92606d03b7bae88",
+      "png": "files/ph--database-duotone.png",
+      "png_sha256": "30a8e8479b59c1d931ef013bc31c28ccb318f763dc7b679153398c315fa65dff"
+    },
+    {
+      "name": "ph:cloud-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--cloud-duotone.svg",
+      "svg_sha256": "b99841217d57ea20d15bf4c77cb030a1b86c0d8279733008fa815fc1375849d2",
+      "png": "files/ph--cloud-duotone.png",
+      "png_sha256": "c0d2541e566d2a8db16aea53f96e702857b0a3bd7ed60be6219811894fc2416d"
+    },
+    {
+      "name": "ph:shield-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--shield-duotone.svg",
+      "svg_sha256": "696e92133dcc6ad9f1459faa5d9466ae607a7cb2e2c29bab43c80dfdba2da3cc",
+      "png": "files/ph--shield-duotone.png",
+      "png_sha256": "e1ba92298f612eda6439f98334b904f442a67d17d49ea0f0d6d005ca015726ad"
+    },
+    {
+      "name": "ph:cpu-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--cpu-duotone.svg",
+      "svg_sha256": "f19727c1770ecf6554c49d5d6713badc716b14ce6c0d1bcf7843aaacc2c667d1",
+      "png": "files/ph--cpu-duotone.png",
+      "png_sha256": "4a08a7d43c9c81b9ba18fd4b7741a60f087d4dd9d5c006bd9c6bf01b618e5f44"
+    },
+    {
+      "name": "ph:chart-bar-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--chart-bar-duotone.svg",
+      "svg_sha256": "a7ebe5bc0a7ddca331551d4b63a60cb84ea71f838943af40f0bb1f76b6957840",
+      "png": "files/ph--chart-bar-duotone.png",
+      "png_sha256": "edc4db6063704ac1b9f74dbeeeea2164600ff12272f11dbd2c3faaf9aa7127b4"
+    },
+    {
+      "name": "ph:code-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--code-duotone.svg",
+      "svg_sha256": "bdae9ddca0854f6d2efc0f30a2359a5a5f4cdb56b89d5dac5d489eb3a7044f1b",
+      "png": "files/ph--code-duotone.png",
+      "png_sha256": "13073174dab2ff9bb142255a2cd4fef0365cba5722683be8725c24a169a18516"
+    },
+    {
+      "name": "ph:clock-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--clock-duotone.svg",
+      "svg_sha256": "a9cf28c56802f8c4e3d276a39cdf88e46e6fa24c827c06a6eca869c2f26962b6",
+      "png": "files/ph--clock-duotone.png",
+      "png_sha256": "d9021e8bc11233038a33fe8bc9375df90a4c0694efa3f9a01c8d41985c025989"
+    },
+    {
+      "name": "ph:users-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--users-duotone.svg",
+      "svg_sha256": "8f58c43050a78e5a04c47fb34141598abac42f4397fbf5d96129c25f62f7f900",
+      "png": "files/ph--users-duotone.png",
+      "png_sha256": "46b27f3e56f1229a379be957628d54878656133c63e8b340969b865f998a0c8b"
+    },
+    {
+      "name": "ph:link-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--link-duotone.svg",
+      "svg_sha256": "2446bfcc40abf93d3f8a3ad736e33a045eccbd02428ad3f8591e34324891adda",
+      "png": "files/ph--link-duotone.png",
+      "png_sha256": "daeba7ad827cf173d687c3876e5801bfb6620bfad3c268fcbd9f8fe4948d7fef"
+    },
+    {
+      "name": "ph:target-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--target-duotone.svg",
+      "svg_sha256": "28f7db0377488e912b0a47b94bcce777afcb8e8d77ffe5ed7e63570f82a4f85c",
+      "png": "files/ph--target-duotone.png",
+      "png_sha256": "d9bcec6400a757132e4df5005b30458c169b1bb3e71a0a4db08f67536f38e85f"
+    },
+    {
+      "name": "ph:gear-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--gear-duotone.svg",
+      "svg_sha256": "353d1bb830858c6c35c3156b1e56228ef55a37da4c2c00c4bd9ab0782cd4f9f5",
+      "png": "files/ph--gear-duotone.png",
+      "png_sha256": "503af6ec274e4853ca3a0af98fb20dcaf81875a92e40226fe805299f70927c19"
+    },
+    {
+      "name": "ph:download-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--download-duotone.svg",
+      "svg_sha256": "9a1ec7105d6dd65d0d5b6dd007ba11e994e13e23f4b95893f19e258aae690dcc",
+      "png": "files/ph--download-duotone.png",
+      "png_sha256": "30db1988fbaa57390933fa01e5989b97c1cbb70dd6d09d4b49f97ce7fbcba254"
+    },
+    {
+      "name": "ph:file-search-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--file-search-duotone.svg",
+      "svg_sha256": "0520c1e2fbbe2cb54389e70954e3e20a7947c5b64bc78f30bb88989854aff978",
+      "png": "files/ph--file-search-duotone.png",
+      "png_sha256": "75237e5e38dcd4cf56e74e88beba0f0e99f2bcc2976d9a6390b734a913bb30a8"
+    },
+    {
+      "name": "ph:lightbulb-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--lightbulb-duotone.svg",
+      "svg_sha256": "0afaa5db286246f3ebb8dbdd908ee21ebd0a028da300125be2c5446ebe979000",
+      "png": "files/ph--lightbulb-duotone.png",
+      "png_sha256": "a50304bbbc922b6fce16656f7cfb43eddf44d0c2e0d23fe6acd7f270ec25bd74"
+    },
+    {
+      "name": "ph:check-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--check-duotone.svg",
+      "svg_sha256": "4c6d7c4439232170a47012ac727b52d1ec43f871358600a3c68e0dca1fe4746f",
+      "png": "files/ph--check-duotone.png",
+      "png_sha256": "9b91f7c5b3617ddbfe84f2e3b0971b2ec7ce6435dcdac86bdb8f21f0afc6ba8b"
+    },
+    {
+      "name": "ph:fork-knife-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--fork-knife-duotone.svg",
+      "svg_sha256": "3db4ffa3c423c8551f16cc2bd5bfaac2ff435b6f46aa354989fed0e3dccc011d",
+      "png": "files/ph--fork-knife-duotone.png",
+      "png_sha256": "97f07b6a1ef5c902a8721a7f37af676d6b7499cd83004491990e3f4250b85e8a"
+    },
+    {
+      "name": "ph:network-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--network-duotone.svg",
+      "svg_sha256": "2a7e0fda743cd6f9b62854d62a9f31b404528cd70783208d145df76e0a39bf4c",
+      "png": "files/ph--network-duotone.png",
+      "png_sha256": "2528eb0c88bbadb2353239446570fea57a66a3d42b9d18d4404971e23e0b7f91"
+    },
+    {
+      "name": "ph:book-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--book-duotone.svg",
+      "svg_sha256": "2aa6a31ee29c02c2c03367ec239661d0bba2cbe62f4f7e713dbf0aa1e0509e6b",
+      "png": "files/ph--book-duotone.png",
+      "png_sha256": "553c93ad20f94c767fad2e5351c24f8a2036f7746f0a697665b3e218a69767f6"
+    },
+    {
+      "name": "ph:rocket-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--rocket-duotone.svg",
+      "svg_sha256": "1fbc416e87db1255feadd0bbf5cfb6f863cff704c0ce99aba0ada29d81b0173a",
+      "png": "files/ph--rocket-duotone.png",
+      "png_sha256": "599ad71e29cc10a8ce128a331a2fd23acd9369feea1794db0f22c1279c70a9fa"
+    },
+    {
+      "name": "ph:trophy-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--trophy-duotone.svg",
+      "svg_sha256": "846863bdac9ec3d2da43c7b4c7afca8a729c403cb7c37697044e6345a273497c",
+      "png": "files/ph--trophy-duotone.png",
+      "png_sha256": "292c176aa69b063c45e555a3927107a4993a25876d300f2fdb0ec474335ad238"
+    },
+    {
+      "name": "ph:puzzle-piece-duotone",
+      "collection": "ph",
+      "style": "duotone",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 256,
+      "height": 256,
+      "svg": "files/ph--puzzle-piece-duotone.svg",
+      "svg_sha256": "6ea7882ada4b7472878e8865a37535eaa57b050139b531ad69a5906b99869ce2",
+      "png": "files/ph--puzzle-piece-duotone.png",
+      "png_sha256": "ece8b669cd15409226510598e4d7518249c407fa620ce97e4faa9e8c49a90d6a"
+    },
+    {
+      "name": "fluent:clipboard-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--clipboard-24-regular.svg",
+      "svg_sha256": "f79c85df9dfab3b994dce6f8323aefea84c0bd9e106e91e54057e41cc6a68f6d",
+      "png": "files/fluent--clipboard-24-regular.png",
+      "png_sha256": "f4f69ebcfddc12009e305ec73a5e22bd9fe4ac68f74634bc86b2337e9810726c"
+    },
+    {
+      "name": "fluent:folder-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--folder-24-regular.svg",
+      "svg_sha256": "3bbf5c4bdddb68c12ab809cf32653875bd39a5caa357fc1859f8ea10723c1d2e",
+      "png": "files/fluent--folder-24-regular.png",
+      "png_sha256": "ce77f9512e6827bd13eb753e2da53b53f4b396a72fcfb65dda0db756da423dea"
+    },
+    {
+      "name": "fluent:stack-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--stack-24-regular.svg",
+      "svg_sha256": "16c20051de25da26e51bec84a029ddf2816c09a4ca8ba128d9bd7e89f84636bc",
+      "png": "files/fluent--stack-24-regular.png",
+      "png_sha256": "3c32f3063a339fe7a381354f87f8331528bb648158ebd5ad6a6654aa75b577d1"
+    },
+    {
+      "name": "fluent:slide-add-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--slide-add-24-regular.svg",
+      "svg_sha256": "b47adcbe4bbe24fcfcb3ef5fed11f29cfb50aa8ad578b196a8dafe97d00c821d",
+      "png": "files/fluent--slide-add-24-regular.png",
+      "png_sha256": "3af94c9a410d662d29570f907c54071dafcc3dda954843fa194e3b667b05229e"
+    },
+    {
+      "name": "fluent:image-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--image-24-regular.svg",
+      "svg_sha256": "eb69a290c37e11b83c24858c7abbcd96cce145d527b95682274fc00e456ab7fc",
+      "png": "files/fluent--image-24-regular.png",
+      "png_sha256": "92e2045ec895386520bc8aeb6efc3e97efb28dafe17ba076109a53322b3e78be"
+    },
+    {
+      "name": "fluent:document-pdf-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--document-pdf-24-regular.svg",
+      "svg_sha256": "c703abed357ee79debd849f59629ebcda05ab75a757841112abc18edb05875eb",
+      "png": "files/fluent--document-pdf-24-regular.png",
+      "png_sha256": "2d74de602e0133140d15480ab9ec669c504660c4cf91778a4050fff825f1703f"
+    },
+    {
+      "name": "fluent:edit-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--edit-24-regular.svg",
+      "svg_sha256": "5cb07cb4ddae7fa44b1a7e048cb6c64f1f26ec02cea242ec1485b73997a3cc53",
+      "png": "files/fluent--edit-24-regular.png",
+      "png_sha256": "e91257da1fca695cf1ac007c7cecb9529b978d08ffa2da22d4cf2aaf72f5ebdd"
+    },
+    {
+      "name": "fluent:flow-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "workflow",
+        "工作流",
+        "流程",
+        "编排"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--flow-24-regular.svg",
+      "svg_sha256": "a7894dbe1eeeb2cfbc387a6b929e2896a043e2758e789cb7d6f1e663a011e131",
+      "png": "files/fluent--flow-24-regular.png",
+      "png_sha256": "64bcbb95f079a02c60ce67fba9d007a24143b771045c4cb9150ef564a09286b9"
+    },
+    {
+      "name": "fluent:database-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--database-24-regular.svg",
+      "svg_sha256": "887fdf3c1f5bf4df34235f4b64030c11a97d64a9ad088496a5baf143dd81e53f",
+      "png": "files/fluent--database-24-regular.png",
+      "png_sha256": "55b38f073fdc00e0df737a806ec73167934917e11ffadc2fcc65ef5afec49d06"
+    },
+    {
+      "name": "fluent:server-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--server-24-regular.svg",
+      "svg_sha256": "a95580debabac8dd97d8263951049abe9dc4d8f60fed2a09c40c260c72555ffb",
+      "png": "files/fluent--server-24-regular.png",
+      "png_sha256": "a2cc80e32760f01e7b284ffbf123705f992dfac954fe087119558c20c602cf99"
+    },
+    {
+      "name": "fluent:cloud-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--cloud-24-regular.svg",
+      "svg_sha256": "1875eda560593fa178786edf98cfb2bff0d407f935d80b84a09d8328e24933ef",
+      "png": "files/fluent--cloud-24-regular.png",
+      "png_sha256": "fff051bbe89fc4d42b231c971b87286eac987090c4cab915713d7bec3818945f"
+    },
+    {
+      "name": "fluent:shield-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--shield-24-regular.svg",
+      "svg_sha256": "2d64ea7b351e2818d6a1c7c70e85376624737f795ac77b709556dd0b9071d1c4",
+      "png": "files/fluent--shield-24-regular.png",
+      "png_sha256": "a6903ffe615102d36cfe9afe7be655b129c4cc44cc6e0bb005a6fe471a07f1a9"
+    },
+    {
+      "name": "fluent:chart-person-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--chart-person-24-regular.svg",
+      "svg_sha256": "5789374eedb3339c8ac495d5fa25ab1377f303820b195fd5ad52a82b8847783e",
+      "png": "files/fluent--chart-person-24-regular.png",
+      "png_sha256": "991d268017e7d3e095fcf2039bdd87490b55b741bb95965e36dab984dd7ab8c1"
+    },
+    {
+      "name": "fluent:code-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--code-24-regular.svg",
+      "svg_sha256": "9937b298b3a0f054d341f7342d77edb4e7808d9accb11d6a0386abd985ec70b5",
+      "png": "files/fluent--code-24-regular.png",
+      "png_sha256": "3782586a2d72c4b6c386189357234c1dfd10e51cb161c925b6ea83c728508cbe"
+    },
+    {
+      "name": "fluent:clock-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--clock-24-regular.svg",
+      "svg_sha256": "ae364bca5fc6a8571ceb9ee82c9df7582f008eb8e7ad262a8090b4903322375a",
+      "png": "files/fluent--clock-24-regular.png",
+      "png_sha256": "209ee752721ea9c183af96a27332c95ee37fe5dd49d930fdb7ce6384b40bdd33"
+    },
+    {
+      "name": "fluent:people-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--people-24-regular.svg",
+      "svg_sha256": "4794bcd7fcc0f52721b99b362954f98e3778ed29efb1ec40ec0ba21149f3ae91",
+      "png": "files/fluent--people-24-regular.png",
+      "png_sha256": "58b8d7ef636e74c05cd03a53f02c8b527a23d0b25eb008414b72fc6add8679d6"
+    },
+    {
+      "name": "fluent:link-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--link-24-regular.svg",
+      "svg_sha256": "b119c25a18dddab8626536cdd32f5ff4f17c682e10573da3514d59ca6350c796",
+      "png": "files/fluent--link-24-regular.png",
+      "png_sha256": "44accf7e7a6846772185aa3cb1285ccb365caba48923c4be149e1300452679a0"
+    },
+    {
+      "name": "fluent:target-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--target-24-regular.svg",
+      "svg_sha256": "377dd5368c1943b68b7dcb897470c2187a9710ad025e67a5ee3dd35acb409d2a",
+      "png": "files/fluent--target-24-regular.png",
+      "png_sha256": "12935084ff91ef339bcfa77eaac240738018668bba6439d658fe1df9628ed5f0"
+    },
+    {
+      "name": "fluent:settings-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--settings-24-regular.svg",
+      "svg_sha256": "48f7f75c6c5bc4c3a8ab8ec22a469051fbcb4ffcff2e7f49947b3f151601862b",
+      "png": "files/fluent--settings-24-regular.png",
+      "png_sha256": "063cfd0a213834809f9fcb3a002270cac3e5661df768639609212e1aaddcb0ad"
+    },
+    {
+      "name": "fluent:arrow-download-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--arrow-download-24-regular.svg",
+      "svg_sha256": "35db6d6f311e90bc14383ce3e3f07cda16a18356fc520897a39b97b231dd702d",
+      "png": "files/fluent--arrow-download-24-regular.png",
+      "png_sha256": "a98da67e0d5762fdea686e56d5c96cd571b53bd1068a83b1ce926966f1853d4e"
+    },
+    {
+      "name": "fluent:search-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--search-24-regular.svg",
+      "svg_sha256": "0503c7c996003553e041efbee191478eca8837e881da067cd8e82607c4d87519",
+      "png": "files/fluent--search-24-regular.png",
+      "png_sha256": "56e146e083ff04f99af755aaede38edabdf8ba0806e81da60f476db6ce91b613"
+    },
+    {
+      "name": "fluent:lightbulb-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--lightbulb-24-regular.svg",
+      "svg_sha256": "72387e13733ca82ba9bbdd5d8ad1e6cfabba1c9b7e2513831a0196a9040783dc",
+      "png": "files/fluent--lightbulb-24-regular.png",
+      "png_sha256": "346f9110d189e432542451b364c2e5d64b146c1e04af86e60a5fc6dd23146131"
+    },
+    {
+      "name": "fluent:check-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--check-24-regular.svg",
+      "svg_sha256": "0ef6ea04d42bc1dc2271c4b0f2fbbf7ac880de517fbb7eb5fbf5c89452bdd07b",
+      "png": "files/fluent--check-24-regular.png",
+      "png_sha256": "6a7c55fd2cadaf348e0d779d74b99e1ec8461f747ef43cdbabdb93c0bd72ef81"
+    },
+    {
+      "name": "fluent:branch-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--branch-24-regular.svg",
+      "svg_sha256": "2954711f3b8548f7d1e8e9b724dd43e9346672ceb36c4fd5c171d0d55eef4123",
+      "png": "files/fluent--branch-24-regular.png",
+      "png_sha256": "7e07e2b3951d8c5236b58c0d5c94e1e6d15dfe27aca37d881a354bb7be86e258"
+    },
+    {
+      "name": "fluent:network-check-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--network-check-24-regular.svg",
+      "svg_sha256": "e133e67af4599b77a264a5aa6b9a87ef48f422ad623be9bf749ad426d3c7ab9a",
+      "png": "files/fluent--network-check-24-regular.png",
+      "png_sha256": "825f6a59146e23ad5145eb1fea47f490dc11536898ba01164e8e1843c197b7cf"
+    },
+    {
+      "name": "fluent:book-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--book-24-regular.svg",
+      "svg_sha256": "30328de9386eedd5db5d4b4d927f2eef7ce21b4c7c998cbf114e37f0a267d98b",
+      "png": "files/fluent--book-24-regular.png",
+      "png_sha256": "df3f698f98f39007cb594e860bcd28ec7ef603c7b79849b232a679fbe6f2de17"
+    },
+    {
+      "name": "fluent:rocket-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--rocket-24-regular.svg",
+      "svg_sha256": "5f0fb87171f208cf2475f170dcd03c0ee17c27502020b5ef631cc880a38044c6",
+      "png": "files/fluent--rocket-24-regular.png",
+      "png_sha256": "79fcd6089990d75d58ecc3ac76bbb6bca7b388da513c20ee8ca168011862bb5e"
+    },
+    {
+      "name": "fluent:trophy-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--trophy-24-regular.svg",
+      "svg_sha256": "07594b3280b61e99c9f7133f0cb1c84f110ce213dc6e2c7d52f7342f67f84c0a",
+      "png": "files/fluent--trophy-24-regular.png",
+      "png_sha256": "7ee6f5b01e054831379046ec0018e003fe393fd523bfcd91b869ca94d4210c63"
+    },
+    {
+      "name": "fluent:puzzle-cube-24-regular",
+      "collection": "fluent",
+      "style": "outline",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent--puzzle-cube-24-regular.svg",
+      "svg_sha256": "833e9c0c31f69b0dc374716d887c563928357fe0e879647e4638a2cec201f954",
+      "png": "files/fluent--puzzle-cube-24-regular.png",
+      "png_sha256": "91744cf58802fecddeff6adcf556b34c1903bc55e9b310926c685e5f85f4e821"
+    },
+    {
+      "name": "fluent-color:clipboard-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--clipboard-24.svg",
+      "svg_sha256": "3e542fe62e904f3fb2527058c45ba4fecb3fc303e97481ae56ece4e0d15e1fbe",
+      "png": "files/fluent-color--clipboard-24.png",
+      "png_sha256": "0ec2fef11ab69c0e3e2eb3888a35ce5a60609c2bb7f8ef684980968de4083fbf"
+    },
+    {
+      "name": "fluent-color:document-folder-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--document-folder-24.svg",
+      "svg_sha256": "35ebe46ef935e6902ecc2b2584d84acb45e11b7a7699b923e9351af91415140a",
+      "png": "files/fluent-color--document-folder-24.png",
+      "png_sha256": "febe67d3528d3327e78c61c8521ebb1527849902d4c5536e123c99c133a0f503"
+    },
+    {
+      "name": "fluent-color:layer-diagonal-person-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--layer-diagonal-person-24.svg",
+      "svg_sha256": "d3bc7b83173d9ebda5f30eaef7142fbde472a23cab9c8c3c570680c4b3b22fb1",
+      "png": "files/fluent-color--layer-diagonal-person-24.png",
+      "png_sha256": "96f2922b96a077bba313e701d8adcedd6da3582e801cbdf75eda89cf917d5a23"
+    },
+    {
+      "name": "fluent-color:slide-text-sparkle-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--slide-text-sparkle-24.svg",
+      "svg_sha256": "2985368f4ebb0707d3cc8a9a1967c808a90a64d2a4567b4c4f50398ab781dcc2",
+      "png": "files/fluent-color--slide-text-sparkle-24.png",
+      "png_sha256": "66d9afd0cf51aa2910268f83f7e59bb5b5e2b2ff2a59d2f539f3ba9cdc9ea6dd"
+    },
+    {
+      "name": "fluent-color:image-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--image-24.svg",
+      "svg_sha256": "e2996c04e8e1da16a733ad30ac03108a7a590a7bd4b144249273111bce405dca",
+      "png": "files/fluent-color--image-24.png",
+      "png_sha256": "629b735c7b75ef0d856a468fe43446356ef35f92c779db722bb4133d445b057e"
+    },
+    {
+      "name": "fluent-color:document-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--document-24.svg",
+      "svg_sha256": "08027650717d5d9049fa4574e3470de175172e57e2dbbfddc3bd60d5a4b348e8",
+      "png": "files/fluent-color--document-24.png",
+      "png_sha256": "a7676c18db5556bae1f48d40971ac6e198f47630a789e0d4e6d3715107072ed3"
+    },
+    {
+      "name": "fluent-color:edit-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--edit-24.svg",
+      "svg_sha256": "32c84c0fdebe5cc4fb640b55b8b20eed88c1c99ff877029a32b449edb48ee9ae",
+      "png": "files/fluent-color--edit-24.png",
+      "png_sha256": "1c51df26867641dee0f7637e7e250c2b7e4bbbcab9d7f7d2e81bb8a948d359fc"
+    },
+    {
+      "name": "fluent-color:database-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--database-24.svg",
+      "svg_sha256": "6e65cf878a39a75ef3d0b56982e1d81015168948fb23de0ccbde58858be3c792",
+      "png": "files/fluent-color--database-24.png",
+      "png_sha256": "8a03485e1db26cc6915e4176d970f4b91c0ba428b860c8c703e79c4a41267653"
+    },
+    {
+      "name": "fluent-color:cloud-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--cloud-24.svg",
+      "svg_sha256": "5450557b6df04ff600152c2042d4b51d6eca23bf2e5290cf99439412385cfa4b",
+      "png": "files/fluent-color--cloud-24.png",
+      "png_sha256": "fc94a7116864bac3f4993c832c75d974e514f6d0105db9d79a9e513d34bc4317"
+    },
+    {
+      "name": "fluent-color:shield-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--shield-24.svg",
+      "svg_sha256": "26d7ea3628b87647e9c3d3c9c31e74586b5c29054ffd73be79e9d51563a0de21",
+      "png": "files/fluent-color--shield-24.png",
+      "png_sha256": "8e880e4c028f9712617a63264606ff15c87f5c339a3ce0877c22e276e9241f5b"
+    },
+    {
+      "name": "fluent-color:chart-multiple-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--chart-multiple-24.svg",
+      "svg_sha256": "a516c3cf3ff2ba229d9c0151a1c52c94007188f18f008a9a0bc7252ef96538b6",
+      "png": "files/fluent-color--chart-multiple-24.png",
+      "png_sha256": "d524f83b581db4bbd892d7584949647acfcb887166e8a859d9e13c8558a6ae24"
+    },
+    {
+      "name": "fluent-color:code-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--code-24.svg",
+      "svg_sha256": "e27c0ddcbecb1b2beb6ee6babb9117fdaf23a0fdd409a3e849bc5ddc9a3d4318",
+      "png": "files/fluent-color--code-24.png",
+      "png_sha256": "0e4b0c753253764167d9ddcc6426646f4f7bb24c315d34eedcfeb08b37996832"
+    },
+    {
+      "name": "fluent-color:clock-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--clock-24.svg",
+      "svg_sha256": "2bb630e6f52718b713b31ab3d90fc0fc4c06390e975dede34834267d055af054",
+      "png": "files/fluent-color--clock-24.png",
+      "png_sha256": "5e788f67bfe07a6ebef39802816375911f3624daba932f8d1eff1e67d0f94ec2"
+    },
+    {
+      "name": "fluent-color:people-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--people-24.svg",
+      "svg_sha256": "70736c9407fddcbf7572a3b40724317987ded6a522341ea4370901af8b3fd120",
+      "png": "files/fluent-color--people-24.png",
+      "png_sha256": "3f8cdd0ec30f8ccee74a5508560d96b1eff37e7b27b6a26b43d902b3b5e55d1b"
+    },
+    {
+      "name": "fluent-color:link-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--link-24.svg",
+      "svg_sha256": "64931c5cddefe05fa1ee8902623800e6270a2ae682a217de7a7c4a82e3e42280",
+      "png": "files/fluent-color--link-24.png",
+      "png_sha256": "1c693f396225ebfe59996bab909c6ffc7f6ce0b5c5624e06b08d16d97a5787ef"
+    },
+    {
+      "name": "fluent-color:settings-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--settings-24.svg",
+      "svg_sha256": "5da502923b27a103b15cf447b35e9ac19e8532c10e451e7daf0f66ba58496c4a",
+      "png": "files/fluent-color--settings-24.png",
+      "png_sha256": "93ed0d3646ecd317580b533a06b5ee3f2b8fdc9b0dea959c07f20675ceda5046"
+    },
+    {
+      "name": "fluent-color:search-visual-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--search-visual-24.svg",
+      "svg_sha256": "0d46e15ee7d3eb6f85bc902bb3eaf02fc50433d168f8f17eae3649d246970a01",
+      "png": "files/fluent-color--search-visual-24.png",
+      "png_sha256": "b3fd3e0de3475c857ddc46a9713a3da27b300f5eb70c6ce0217bfbf25ceaaa1d"
+    },
+    {
+      "name": "fluent-color:lightbulb-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--lightbulb-24.svg",
+      "svg_sha256": "a7262cab7f4ca1c8ee871f085487664218aacd301c3ddabbae622cdaa1bd0a73",
+      "png": "files/fluent-color--lightbulb-24.png",
+      "png_sha256": "de01e608da5bf28968e209c8da22eb3c6cc9ada10b01d7d75ab0841df6c7ce94"
+    },
+    {
+      "name": "fluent-color:checkmark-circle-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--checkmark-circle-24.svg",
+      "svg_sha256": "1bfa253575cb1698f439663797511490b7be7ef5a74a813a1241d96cf7376b39",
+      "png": "files/fluent-color--checkmark-circle-24.png",
+      "png_sha256": "8475c4593f9fe1e9d6d27fd2251828afc0da18f7afa2f488dc59fd055445d156"
+    },
+    {
+      "name": "fluent-color:share-ios-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--share-ios-24.svg",
+      "svg_sha256": "057a8099d0a88b75543b3dd729bcf51c0bbc6d2516a6049720aeca26e2c017d1",
+      "png": "files/fluent-color--share-ios-24.png",
+      "png_sha256": "9cf061f46cc7716e51ec5dff73a4c0fc3ccb2e0b5e58529c9571b919e79db3a6"
+    },
+    {
+      "name": "fluent-color:book-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--book-24.svg",
+      "svg_sha256": "353d62ff43bbbdab9a181e61cc40dda2672dbd47a278991f1a011979e61c04d0",
+      "png": "files/fluent-color--book-24.png",
+      "png_sha256": "9eeab180530f582062a6ee6109da213c1a1749a585db5ec4449a6ba29fb5e3c9"
+    },
+    {
+      "name": "fluent-color:trophy-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--trophy-24.svg",
+      "svg_sha256": "77bbe2e337468188eb2fd691c2e6b93914f4fb0276b40cd523ee86c3a2385e1a",
+      "png": "files/fluent-color--trophy-24.png",
+      "png_sha256": "c26bcf431075468f6a11cd6c313ea78ad2bdb2f13157a7d5088b6cefcedc1fb9"
+    },
+    {
+      "name": "fluent-color:puzzle-piece-24",
+      "collection": "fluent-color",
+      "style": "color",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/fluent-color--puzzle-piece-24.svg",
+      "svg_sha256": "734f12bbe462482217d4f8ed7b721b26fad8869f11d748e8680142630eaa89a2",
+      "png": "files/fluent-color--puzzle-piece-24.png",
+      "png_sha256": "04f95afa9339984500042918b4c164e1fe7879eaf113adc5c03b5e70dc3c6ac4"
+    },
+    {
+      "name": "material-symbols:folder",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--folder.svg",
+      "svg_sha256": "8aebcc9b053960201b9963e5df75bb151a7d667412e30e9104460e39a3b97f09",
+      "png": "files/material-symbols--folder.png",
+      "png_sha256": "2b59677c9682764e666fa09f25f1f9f310958f95774ab84f8fa10ffb0147d5e8"
+    },
+    {
+      "name": "material-symbols:layers",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--layers.svg",
+      "svg_sha256": "136523cd83cb1551ec23b7ec6f56dfeaaa74f99ec9bc544afab71950aa278eb6",
+      "png": "files/material-symbols--layers.png",
+      "png_sha256": "0d985994ade6fa432a9a7dfe5a329398a5e0f020827040110b2683d5287a9dc2"
+    },
+    {
+      "name": "material-symbols:slideshow",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--slideshow.svg",
+      "svg_sha256": "2e6e65b230c54578627d89ce47f1cfc54a9e108957ab644f1c1cb59a1915c75b",
+      "png": "files/material-symbols--slideshow.png",
+      "png_sha256": "c528a4e79d51d2bbb1205431181758c7209ea24081d71f53952bf682c04e86b3"
+    },
+    {
+      "name": "material-symbols:image",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--image.svg",
+      "svg_sha256": "bfae06dd9ec7bc20426ca02d308663ae21c9bb2c4cd9cf4e18d92188b70b9088",
+      "png": "files/material-symbols--image.png",
+      "png_sha256": "8312813db57d6b0eabde0ab2e3c2d9eb866f0ae8a3b25f6a5f1596e374e2ac99"
+    },
+    {
+      "name": "material-symbols:document-share-outline-rounded",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--document-share-outline-rounded.svg",
+      "svg_sha256": "248d12ad9755e3a070152063380c18e6965073eba1a977850bd2a77e891aff60",
+      "png": "files/material-symbols--document-share-outline-rounded.png",
+      "png_sha256": "a1bea0694e00e0721d0b7d7a04db04c8c74bdc86faab1ceb811bbd361bf4b1d7"
+    },
+    {
+      "name": "material-symbols:edit",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--edit.svg",
+      "svg_sha256": "c21d169e3fc434830ff6662537a66bdb6ec194caada8d2ec4f242071b1e9cf39",
+      "png": "files/material-symbols--edit.png",
+      "png_sha256": "a26c31e308736dbad8a419db655e9b939ddf53a44fb324ac0ad4d1c77ffff422"
+    },
+    {
+      "name": "material-symbols:database",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--database.svg",
+      "svg_sha256": "c8952cc09dfbe70cae1f18221a9194e8a075ce1eca71f1e9d457ecb5939e6693",
+      "png": "files/material-symbols--database.png",
+      "png_sha256": "8e1fbac23f25df8fe9e29c43370ee289065276edefe4c6b47ccef03fb4470d52"
+    },
+    {
+      "name": "material-symbols:server-person-outline-rounded",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--server-person-outline-rounded.svg",
+      "svg_sha256": "df28795f5c2100b91e72f5b18baae482a0d0b75e581a5e2680b7b87adf657320",
+      "png": "files/material-symbols--server-person-outline-rounded.png",
+      "png_sha256": "9d79c0cbe6b31276ca3998a69bd4d1c462cea37cc252fdb18f241a054c03808a"
+    },
+    {
+      "name": "material-symbols:cloud",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--cloud.svg",
+      "svg_sha256": "b432f80421c66e5efa8baf0cbd6aecebd467c01964bea33b0b76b31fbb8e5297",
+      "png": "files/material-symbols--cloud.png",
+      "png_sha256": "94ea1e70c55d30e2df921b0da4687623224f61012ec5b0aa7605b13d769ef9a5"
+    },
+    {
+      "name": "material-symbols:shield",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--shield.svg",
+      "svg_sha256": "e999f2c0e517a20eaeec7c1401cb0e83007a0fb065a474d336cae59953a23104",
+      "png": "files/material-symbols--shield.png",
+      "png_sha256": "d5bff42863302f7ee1f70aa698272d9ba2d5fff92bd6998bdcb2de934c152cb4"
+    },
+    {
+      "name": "material-symbols:chip-extraction",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--chip-extraction.svg",
+      "svg_sha256": "b2ebb1845467ea19683644a42dfefaa9356316891ddbb81fff56eb6e0df488fb",
+      "png": "files/material-symbols--chip-extraction.png",
+      "png_sha256": "74c29ee315a456a3746c94b13796655b3de414139e99abc525f63f607b2b05bc"
+    },
+    {
+      "name": "material-symbols:bar-chart",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--bar-chart.svg",
+      "svg_sha256": "91e555cb5fafaa5d90896fbb66726096ebc2784e818914fbfb453a4e1974c6ca",
+      "png": "files/material-symbols--bar-chart.png",
+      "png_sha256": "d51c178a37b111045489fea7c662cc20e61cc5c83328f8b233626eac49444373"
+    },
+    {
+      "name": "material-symbols:code",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--code.svg",
+      "svg_sha256": "e1e2bcbcfac56487570d231f786ea401d652e5f15825fb05e01b7b1ed4ae88c9",
+      "png": "files/material-symbols--code.png",
+      "png_sha256": "340caae8b7432d4ca54265a4f3840ad2fb6aa8fa42275d47126fa59589de267f"
+    },
+    {
+      "name": "material-symbols:clock-arrow-up-outline-rounded",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--clock-arrow-up-outline-rounded.svg",
+      "svg_sha256": "4b9115e75f993f67015b5d66c1ea8e40047a07ba32f5cd3c93e405356f45393b",
+      "png": "files/material-symbols--clock-arrow-up-outline-rounded.png",
+      "png_sha256": "f545c666a1ef4a9b55779a62b4e5db5dc61fa699fe341de20316df1c39d0ae7f"
+    },
+    {
+      "name": "material-symbols:people-size-decrease",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--people-size-decrease.svg",
+      "svg_sha256": "67f6eb4ea6c813abcb910400ee4ebcaa3a618ffa91c66ce8dd24341c068e215b",
+      "png": "files/material-symbols--people-size-decrease.png",
+      "png_sha256": "08e206d5a2358a0d12496a4b93f0e9a3752a6162f75ca12f255ad124426b1fb9"
+    },
+    {
+      "name": "material-symbols:link",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--link.svg",
+      "svg_sha256": "f1a6227aaeea38d39b7207dd5364931f1bb37cd5bf054e34389b3aa10c35db38",
+      "png": "files/material-symbols--link.png",
+      "png_sha256": "fe2d2d319855fc921dba8530e1f8f7754a8ff3a26ffcfa50f36ee4db3fc403e7"
+    },
+    {
+      "name": "material-symbols:target",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--target.svg",
+      "svg_sha256": "05b320cec505ef084f6933058e44cb4ca6b1032322adcd34a8856a955b7d1760",
+      "png": "files/material-symbols--target.png",
+      "png_sha256": "4c2fafa924a2a04f72a6f9b8aba2381f94d05ad9c30fb92b8ca4f1197b8693e2"
+    },
+    {
+      "name": "material-symbols:settings",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--settings.svg",
+      "svg_sha256": "5b62b85e62526e1c9fba23e17f493953ce9e05a4bf6b9f152223c868c9e4d855",
+      "png": "files/material-symbols--settings.png",
+      "png_sha256": "194ff9e5164d3be29508c2dcbbc8ee2e4c6e4652f16f213147b16d8c7901bc5a"
+    },
+    {
+      "name": "material-symbols:download",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--download.svg",
+      "svg_sha256": "4d7fc7a8d231a4d7286d74e9e1529169f7bdbaacd97f59509f79395170ea2f1a",
+      "png": "files/material-symbols--download.png",
+      "png_sha256": "307500935faf12fde46108ebb28ab1efc1d2a83ddeebade097051c369f0cdc39"
+    },
+    {
+      "name": "material-symbols:search",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--search.svg",
+      "svg_sha256": "9c257360af13a6e594324b2cd1b257a367a6f68d00aaf379e8582abc710f26a0",
+      "png": "files/material-symbols--search.png",
+      "png_sha256": "79304c92a3d17268bfb25f457671731553630dc795b6f4cf8404f16273f3facf"
+    },
+    {
+      "name": "material-symbols:lightbulb",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--lightbulb.svg",
+      "svg_sha256": "8c39fd63a58a22ea114f65cff2fa3e2effb0093b1c05c2cdbfde18dc73bbe78d",
+      "png": "files/material-symbols--lightbulb.png",
+      "png_sha256": "461217cd0d3a2315bcdca17ac7951b3eac0e3bfed40e54feb2806c61024ad7fd"
+    },
+    {
+      "name": "material-symbols:check",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--check.svg",
+      "svg_sha256": "c9283c07e5e552de2a1765dd9dcca983b65ea1ff51986510947762e1a4846e8d",
+      "png": "files/material-symbols--check.png",
+      "png_sha256": "578b57bdeb0b39c6b770a47cf667f47b19549d1a0858fcf3c0181d7d0cf304b6"
+    },
+    {
+      "name": "material-symbols:fork-left",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--fork-left.svg",
+      "svg_sha256": "8efafd994fa72a9dbb15a5b49afc80ca0e647d5ef59d8fc884ee660d32036a0a",
+      "png": "files/material-symbols--fork-left.png",
+      "png_sha256": "e7347df258f3bb26dd186ef6df4418885b5f8d0b37fe11cdae602eb5fd31e1f0"
+    },
+    {
+      "name": "material-symbols:share",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--share.svg",
+      "svg_sha256": "c53a4729de27bc6bbea02e172c1862bd27e2e6ac342c5a7a70a584f181aa8dd1",
+      "png": "files/material-symbols--share.png",
+      "png_sha256": "736e2e9dfd6037fae97a215e0f65eed78b1128fcf2b1c2468dbdc0cfe39b9760"
+    },
+    {
+      "name": "material-symbols:book",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--book.svg",
+      "svg_sha256": "1511b2238031a5763636546632e56b8f02cfbe779d1301affe43776cf9dc3f3e",
+      "png": "files/material-symbols--book.png",
+      "png_sha256": "18c8f60a8eae82577cfa444341e23eaaaae443a2465cb36df38f42476bc6ba95"
+    },
+    {
+      "name": "material-symbols:rocket",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--rocket.svg",
+      "svg_sha256": "6e0ec4b4d7b7f9fd20c941910fe356e7117a7fa6a46d1628bb5dc9785ea3a92b",
+      "png": "files/material-symbols--rocket.png",
+      "png_sha256": "df43ba6636f9edf57be4eb637de3870b11a01c52039d4320cbf1876b9d745ea7"
+    },
+    {
+      "name": "material-symbols:trophy",
+      "collection": "material-symbols",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/material-symbols--trophy.svg",
+      "svg_sha256": "5a299206dea133d02de9ddb4140f580051cfb2b3f5569ef95539857b3ead9e30",
+      "png": "files/material-symbols--trophy.png",
+      "png_sha256": "5c8701886b01e8a98e4fd0b781a075197fe846bb07512660831cf20bc4450418"
+    },
+    {
+      "name": "carbon:copy-to-clipboard",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--copy-to-clipboard.svg",
+      "svg_sha256": "bd7e788f4236de1f913b434ec32e7416f6b286f1b408823d2863a89e3fefcf0f",
+      "png": "files/carbon--copy-to-clipboard.png",
+      "png_sha256": "ba6e219d69f15cad41f21a4e90e4c730636090d7955d4b04e3ed04b1f8fad21b"
+    },
+    {
+      "name": "carbon:folder",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--folder.svg",
+      "svg_sha256": "6db39c66b6d972f00497123057dad7e5a2b3d758799f11e2fb264ad41f5604e9",
+      "png": "files/carbon--folder.png",
+      "png_sha256": "e92606d735a0404092ffa8520772d5ad33625279d30b422ae0a65d8a0a7a0673"
+    },
+    {
+      "name": "carbon:layers",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--layers.svg",
+      "svg_sha256": "72a9eb23faede6977316eeae86be5ca6e0433a0de5c53ad00e5c5776cb9090d5",
+      "png": "files/carbon--layers.png",
+      "png_sha256": "b3880d1b41dd5fb2db1eaee9f0dc654df5e6a7614b85af2a4550eb9254ed4c47"
+    },
+    {
+      "name": "carbon:presentation-file",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--presentation-file.svg",
+      "svg_sha256": "a348ab2601da8cacb36af073e21908036bda3c17ddd5efaa30a7657c3495f85c",
+      "png": "files/carbon--presentation-file.png",
+      "png_sha256": "4ed3c9ae24fc298a6a466f01b54c7569402f8b8c7bafbe5f6b1cb03835fff832"
+    },
+    {
+      "name": "carbon:image",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--image.svg",
+      "svg_sha256": "b19063693155762f6197379e2956ebc04596b1d6d7ecb0370c7f9c787ab71da2",
+      "png": "files/carbon--image.png",
+      "png_sha256": "85f34df92eccac3f06b2473fac1f9771e5d9ab338d0b2070932009ca2a0c6d54"
+    },
+    {
+      "name": "carbon:document-pdf",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--document-pdf.svg",
+      "svg_sha256": "8c20cd607c8744ab8ab5c395a09990b0afe9a708bd26c1c66e59cc7dcb6ad99a",
+      "png": "files/carbon--document-pdf.png",
+      "png_sha256": "31edea1054ef003686a637e27aeb6ef2266a91202951364be372a65a45fe084e"
+    },
+    {
+      "name": "carbon:edit",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--edit.svg",
+      "svg_sha256": "11cd96588b63c618253884e1131267598a629983dc53a23e36a4a2c7e959db41",
+      "png": "files/carbon--edit.png",
+      "png_sha256": "a287e46b2ca80639bdcc9f4be0dab637f9efc5f89903f66c2a95409a70918a45"
+    },
+    {
+      "name": "carbon:flow",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "workflow",
+        "工作流",
+        "流程",
+        "编排"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--flow.svg",
+      "svg_sha256": "6c73292d853c42c68d87b64ce7b95eb8c0a0a423e257a77761d00c7966be4fa0",
+      "png": "files/carbon--flow.png",
+      "png_sha256": "ea30265f724b4a0eddc78a75a8fcf583eae123793f7224560873c0cdfdac7863"
+    },
+    {
+      "name": "carbon:database-etcd",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--database-etcd.svg",
+      "svg_sha256": "840b08444fe5fe93b3dee61ed32c7c08dec0fe849e4e4352b0d333931ad6a39b",
+      "png": "files/carbon--database-etcd.png",
+      "png_sha256": "26df3c3d3d99fa6a24d78cb464a70a6868d823b701758134f35209c004393e06"
+    },
+    {
+      "name": "carbon:server-dns",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--server-dns.svg",
+      "svg_sha256": "7b86f7f370d04c036093eecf8c0c0a53407bb17ebcb7db5872221309a3f4bde4",
+      "png": "files/carbon--server-dns.png",
+      "png_sha256": "9fba978f17820c499d2dc5a157a5e0756ada5b6f0c9808f242d111c0c470d7f6"
+    },
+    {
+      "name": "carbon:cloud",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--cloud.svg",
+      "svg_sha256": "94b46d87cccf75666b2d13d57927c93083c47057e22847b0b7c93e3205a568de",
+      "png": "files/carbon--cloud.png",
+      "png_sha256": "6ea2d0ef6d47122614411998817af6713c98137d2f9570c6aa899617a43de588"
+    },
+    {
+      "name": "carbon:shield-alert",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--shield-alert.svg",
+      "svg_sha256": "6beb807820677a0694ae3effbbaaaa2bfd4ce977463db9929ec0b5095e16f6eb",
+      "png": "files/carbon--shield-alert.png",
+      "png_sha256": "63e8170872e497211848749b931e884031e5bb6700211637473744291800a3e9"
+    },
+    {
+      "name": "carbon:chip",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--chip.svg",
+      "svg_sha256": "bb9dc732bf3e8c7ceb145e1c47d624544d8b0689493171dc6d885702b9945e14",
+      "png": "files/carbon--chip.png",
+      "png_sha256": "ded80dd637034143d87ec86903da7e74b639497cd89d22047c055c9bbf223310"
+    },
+    {
+      "name": "carbon:chart-bar",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--chart-bar.svg",
+      "svg_sha256": "baf720f951f3b81fcc145419484be9bc05adde07206526e51c9f109fd31178ec",
+      "png": "files/carbon--chart-bar.png",
+      "png_sha256": "e4f0e5ad6bdc5fe9e34874e5c1716f3c1021f83ac9a7271b9da5618ef22bc72e"
+    },
+    {
+      "name": "carbon:code",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--code.svg",
+      "svg_sha256": "452f7079791d65a8415a17ff411bd05e1b573b1ef2b364e3c978b2952be0ba64",
+      "png": "files/carbon--code.png",
+      "png_sha256": "d0b5b81dba89a044921a2d5ce61a0f2f055f770a2ca386d6b3aa929112d2a8c1"
+    },
+    {
+      "name": "carbon:person",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--person.svg",
+      "svg_sha256": "653805979739a5dba1d5d414d4c6a2cc685c384ff3c5eb753346160be5aa93f3",
+      "png": "files/carbon--person.png",
+      "png_sha256": "799232f385b205e788a33537d6e39b4b18bb946ab85f7a0c9e7d6c78e027fa78"
+    },
+    {
+      "name": "carbon:link",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--link.svg",
+      "svg_sha256": "8342efcb743cdf7114babb9477ce3d8cd6b75595eaaec7ca74b3913cc2d93b7a",
+      "png": "files/carbon--link.png",
+      "png_sha256": "ac2ab211dad208a79fbfd969e0e375742af809f927fd2415267752049ec83729"
+    },
+    {
+      "name": "carbon:target",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--target.svg",
+      "svg_sha256": "399ca4c7db65a4251a845e07917cdec4187dc3f7dc09fe71b82b3d975ee9ad57",
+      "png": "files/carbon--target.png",
+      "png_sha256": "8807ea71f91aa1228b16c1b4e4a83ae228ae7bdfbcf846777860dc6da825e291"
+    },
+    {
+      "name": "carbon:settings",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--settings.svg",
+      "svg_sha256": "1a71d3088eb48851d8a7f48ad761db5ebbed08ddbbb03b4ab7635b1e60069689",
+      "png": "files/carbon--settings.png",
+      "png_sha256": "16bc4956b91a6a5818403594bd5764b213626207d4b0b73f59e6f451bb23effe"
+    },
+    {
+      "name": "carbon:download",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--download.svg",
+      "svg_sha256": "25f3178633718eb379fe0f5eafe0c1712e0c728a1d4b82a51bc0cc19ccbe130a",
+      "png": "files/carbon--download.png",
+      "png_sha256": "e834bcef5fb231f7c093bb4355f6f198e44fadc6308f7d82d1d9f9303ec32066"
+    },
+    {
+      "name": "carbon:search",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--search.svg",
+      "svg_sha256": "3f04c2918bdf1a46862bd7b7f6b41aaeed8a0b308ab02811053644dd2c77c258",
+      "png": "files/carbon--search.png",
+      "png_sha256": "65f9cab9fc62fab9e8c213abcdc7244058802df04c5287e08ad9d1c9e57af05a"
+    },
+    {
+      "name": "carbon:checkmark",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--checkmark.svg",
+      "svg_sha256": "614150d1f0f7d861eccd8914c5eb71fae28dcd4baf19e5539845ef46fd4801ab",
+      "png": "files/carbon--checkmark.png",
+      "png_sha256": "5508e0b7b93cd19fdc0147454a656beefdbbd94da09065ce3cc9a44afe9e95bb"
+    },
+    {
+      "name": "carbon:branch",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--branch.svg",
+      "svg_sha256": "717f3cf9332d6c20a9463a1dca4bd67a07db0e8f54819e19bee6133339557c8f",
+      "png": "files/carbon--branch.png",
+      "png_sha256": "89f245f1c001da25c05303d59a4fc8a1c5c351c994e3f95dd8333ca080056daa"
+    },
+    {
+      "name": "carbon:share",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--share.svg",
+      "svg_sha256": "51aa25e0cf38c408ba9a915c2cafded742d8ebcdd40a3893c4648965b5cbfc0b",
+      "png": "files/carbon--share.png",
+      "png_sha256": "d523f321d1f59fba6b4548a219bb18fe7f28889452f06eb070207013283bf77c"
+    },
+    {
+      "name": "carbon:book",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--book.svg",
+      "svg_sha256": "a108b70764c79d33ea4def4b68f782e382648a6a0d19e356657561ff75c54c7e",
+      "png": "files/carbon--book.png",
+      "png_sha256": "7fae2f854431e04f6e2c21d8b3e7bfae11c9728c1cc0ad234195a4637aff2611"
+    },
+    {
+      "name": "carbon:rocket",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--rocket.svg",
+      "svg_sha256": "9985cdf0fb657812c74d4e08ba127b690ff0d5db88613306fd79b6e7759eccc2",
+      "png": "files/carbon--rocket.png",
+      "png_sha256": "140d5b75065a8cc87bbf0fb4ac89d4019fa123b7407945c0142216949246b18a"
+    },
+    {
+      "name": "carbon:trophy",
+      "collection": "carbon",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/carbon--trophy.svg",
+      "svg_sha256": "90746b20c28b5a9685437831b5153795d16f82346c00acf9e7f4c942a9a60500",
+      "png": "files/carbon--trophy.png",
+      "png_sha256": "4ee1980286b70f4c99af3ab1011a10ba47b61d25e3b63f102485627b04937663"
+    },
+    {
+      "name": "bi:clipboard",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--clipboard.svg",
+      "svg_sha256": "6e404817e881a0a97a7498b7ad69d39a0eaa7f07b21dca5a2f4784cf7631daa5",
+      "png": "files/bi--clipboard.png",
+      "png_sha256": "aef3f3b1a23de62fce9047ab420add52c1401e81f2b93c688d163bbec1f4209d"
+    },
+    {
+      "name": "bi:folder",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--folder.svg",
+      "svg_sha256": "4ee68613a867f72b90a561d8191cf843843b80e1061211191bd35299c484dcab",
+      "png": "files/bi--folder.png",
+      "png_sha256": "fe207d018748df726527d7156527102b68b8320247c6c1953e93d306c7dfe26e"
+    },
+    {
+      "name": "bi:layers",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--layers.svg",
+      "svg_sha256": "fcd8eb7df2e8beb720044d06a464061adaeae05220dba408c2af79f560465889",
+      "png": "files/bi--layers.png",
+      "png_sha256": "cf90e8934dda07a373071dcbb5db58538747a9593709d94bddfdd92db402396d"
+    },
+    {
+      "name": "bi:easel",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--easel.svg",
+      "svg_sha256": "9e2023effbc0ff77b6b632468dfcf530bf1a4cd3dbc3c0e68113de5454f1c9be",
+      "png": "files/bi--easel.png",
+      "png_sha256": "150fa0de5039420025823d0b47dfa9b6580221a518f6cb2ba77935323d0b5ad0"
+    },
+    {
+      "name": "bi:image",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--image.svg",
+      "svg_sha256": "40fa695eac797993309dcbd4e857fbae8baa8630b42be0b8b39c1f2b71ce5494",
+      "png": "files/bi--image.png",
+      "png_sha256": "e33bad271332624ec67a67629c8376b0dfb85d627a32f60227289cb9e9e66beb"
+    },
+    {
+      "name": "bi:file-pdf",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--file-pdf.svg",
+      "svg_sha256": "349272c3a8f0ca592503fb6b4dda1d1f549020faa0f5c80b6a117ece6ffede6a",
+      "png": "files/bi--file-pdf.png",
+      "png_sha256": "454a2dd0a40232725224b80b2761b3b9adfb3d05ba3f8b5f79fca2876a4d0182"
+    },
+    {
+      "name": "bi:pencil",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--pencil.svg",
+      "svg_sha256": "e937b452df6fd12ebe10f047be0812d922a8ace54bb142de9ae92ad7e6afc1cc",
+      "png": "files/bi--pencil.png",
+      "png_sha256": "d0f0439eb36ca596a9227123f1587970c4f5dcacb8cf2036333bb748ccbe5d09"
+    },
+    {
+      "name": "bi:diagram-2",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "workflow",
+        "工作流",
+        "流程",
+        "编排"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--diagram-2.svg",
+      "svg_sha256": "f3493a4740ca3f4a387ca1ced27dcd232dcd8f93babe8e1f084244d50a5062d3",
+      "png": "files/bi--diagram-2.png",
+      "png_sha256": "0119ff27ee44362fea208b7bd072f458f341326b44c1990b87f2e9447630a468"
+    },
+    {
+      "name": "bi:database",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--database.svg",
+      "svg_sha256": "a3a66f0a8648c0f573e9f17980ee79ba54c09ce4b087d17f33026e7091e8d39f",
+      "png": "files/bi--database.png",
+      "png_sha256": "bcd4f852ed8f9f6e354687399dcf4cd51f38d24e57ae95f743269c96f4c78554"
+    },
+    {
+      "name": "bi:server",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--server.svg",
+      "svg_sha256": "9be5747ff31e8975b04f8c81c106e49bec823b9d9632dbe4eb91fd9a1dcd6839",
+      "png": "files/bi--server.png",
+      "png_sha256": "91a5870cd4c1ee3808802f2e3c36e6104a67a42d03569301f6237dbba82a31b0"
+    },
+    {
+      "name": "bi:cloud",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--cloud.svg",
+      "svg_sha256": "3c26c201845b8fed373a6e62f8977815f6ab1d1cdd602159c46b189f4c2dec71",
+      "png": "files/bi--cloud.png",
+      "png_sha256": "8c185819f8353e09f018dc0d561f0e70c32ff4f6569b25e8ca01df540384133c"
+    },
+    {
+      "name": "bi:shield",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--shield.svg",
+      "svg_sha256": "40041bc54d15319f98bf9e2ea2f28ae2c09370248de05ebe41e7534513d9fcd1",
+      "png": "files/bi--shield.png",
+      "png_sha256": "a1d3a9f5e46a8cd150b1c2537e7786afb1234f39a5afef20a843dc7087029202"
+    },
+    {
+      "name": "bi:cpu",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--cpu.svg",
+      "svg_sha256": "034612d097e31b26307b0312a406f88b08f129047a2ec118b113e4d6c33f6d0c",
+      "png": "files/bi--cpu.png",
+      "png_sha256": "6ea83f3373c37cc7618c1f6353136d79c63a1c3c6564971a256d35d9aceee48a"
+    },
+    {
+      "name": "bi:bar-chart",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--bar-chart.svg",
+      "svg_sha256": "da16135893fc28057bf659ba19d8cfcc9e37853611f5fdbdc616fbd1d2d8257b",
+      "png": "files/bi--bar-chart.png",
+      "png_sha256": "ff91fbb1e31313357c55c4dc602f461a0a34d1b83e6fed79bf21229e112e1cec"
+    },
+    {
+      "name": "bi:code",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--code.svg",
+      "svg_sha256": "a84e8d0f5eacbbccfbb3225d73ca3a5a7808b3f9edd579a8a33248dc711ecddd",
+      "png": "files/bi--code.png",
+      "png_sha256": "fc6af0cbd22f9044092345566e4eb885b1a72d574a9f06692ea53e812b52ab72"
+    },
+    {
+      "name": "bi:clock",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--clock.svg",
+      "svg_sha256": "9d2e683599588cdde4e7e89c10a8c59708965a6951321cd496c8f37e6c052c94",
+      "png": "files/bi--clock.png",
+      "png_sha256": "f005f00bd29987384569c095469d1338209bd21d0c99cf96edd6d1a711e63b53"
+    },
+    {
+      "name": "bi:people",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--people.svg",
+      "svg_sha256": "93d82df22fb7fa2dcfe0dd292f8bfbfe4025091d1b74d690c0e5d1d4bc6da12c",
+      "png": "files/bi--people.png",
+      "png_sha256": "d2c0a8d7d3145aa9f0c0a7eb5bcdd4007d355db99de4ef2758c3ad300359cf78"
+    },
+    {
+      "name": "bi:link",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--link.svg",
+      "svg_sha256": "68362e385dfdd6c4877fff585abfd170e6f4bef4fffca9efd0cd52dc00ff1253",
+      "png": "files/bi--link.png",
+      "png_sha256": "e1ded6547461b3a033e8ca44aa2c594dabdb087ce1d1de226202a2da969ce13a"
+    },
+    {
+      "name": "bi:bullseye",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--bullseye.svg",
+      "svg_sha256": "3c2dc6bdb5b7ccc195d5c3e0fa84e88f500ec5faa23cba8955b9f0ad654d7137",
+      "png": "files/bi--bullseye.png",
+      "png_sha256": "78c30dcc0d732fc9922f57abc41ba0f950a42246b808736e849f596cbf9cf95d"
+    },
+    {
+      "name": "bi:gear",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--gear.svg",
+      "svg_sha256": "fb61335c81a271efe1f6445a144667e6d6b1b0dbbed0f39b1299ca383397bf69",
+      "png": "files/bi--gear.png",
+      "png_sha256": "e7699a8a133cecd27f4112b943d93f85c47ce974f63c65ad7e6ff760e738c6d8"
+    },
+    {
+      "name": "bi:download",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--download.svg",
+      "svg_sha256": "0cf3c8d0cd8eb9320c3ca1ea0d72eb911be4d0a5a6381b6cd26e99e6c43c8a6c",
+      "png": "files/bi--download.png",
+      "png_sha256": "22bcb7b28f5049a3cc39261952026f1f220be1b911ad405bc2d11b3b6d5f9a40"
+    },
+    {
+      "name": "bi:search",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--search.svg",
+      "svg_sha256": "e926f79374859eed69a0dcc34674207b6c36d19faf42dbaaf0796e5a4c9dac2b",
+      "png": "files/bi--search.png",
+      "png_sha256": "b31c59856620f23f3603a507cbe4fe75c5aef5c92b677173c3bc474b847ba5ab"
+    },
+    {
+      "name": "bi:lightbulb",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--lightbulb.svg",
+      "svg_sha256": "05a0389d14d4669508c83f35d4c298e367fa4a8986ee0d26c9bdba236184e149",
+      "png": "files/bi--lightbulb.png",
+      "png_sha256": "bee61e632401be856e7f4b433186e6b764e26a266bec6a8ba95a1a16a77f19e1"
+    },
+    {
+      "name": "bi:check",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--check.svg",
+      "svg_sha256": "97d5dd1e58541f8f32bf42657cc8d6fe431a5218e9040ecb2e7441e0485bc214",
+      "png": "files/bi--check.png",
+      "png_sha256": "55be969a2bf14435c7e34df160dc98eb5a10ba49f6c66b636acc828e220842ff"
+    },
+    {
+      "name": "bi:fork-knife",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--fork-knife.svg",
+      "svg_sha256": "5c00fbffc16a4d411bffe43d8bb834b579085ce5e70b768f67248d927f42df68",
+      "png": "files/bi--fork-knife.png",
+      "png_sha256": "def71704354473c4c23a8b1616f1e3a7b2031479965552af9243e1321e01d317"
+    },
+    {
+      "name": "bi:share",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--share.svg",
+      "svg_sha256": "cca57d35da15ffd46115410b9f994fd63ab01d71d616b904fdec63fed4284877",
+      "png": "files/bi--share.png",
+      "png_sha256": "1563be690e5c6bb13e31948abee4f0e558201b8f3121eb3628c69bc0fdd03990"
+    },
+    {
+      "name": "bi:book",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--book.svg",
+      "svg_sha256": "4605455ddf9044c0b1905b02f28111a802e1fdeaf81a6e2f8d1c87a97b984dd2",
+      "png": "files/bi--book.png",
+      "png_sha256": "dd305c83b1940993e48a619522fbf189d43ea7c565f9f4f381edf6c09f604df2"
+    },
+    {
+      "name": "bi:rocket",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--rocket.svg",
+      "svg_sha256": "c4f3bee6c39573792532a77309688410cf94e1efb5abb1ec33b603bcfae007b7",
+      "png": "files/bi--rocket.png",
+      "png_sha256": "e10268cb3442a8141962005d75afd6ec94d735fb87cbec0c813c323e851ef86e"
+    },
+    {
+      "name": "bi:trophy",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--trophy.svg",
+      "svg_sha256": "7b2b5b3868ada3bdfd65a33473b252e61d97f51a217103f98b864acb2f725cf9",
+      "png": "files/bi--trophy.png",
+      "png_sha256": "2dd4bd84c2c7165370edcff59ce339ee5a6caa959c712508e202d36ecb096ddc"
+    },
+    {
+      "name": "bi:puzzle",
+      "collection": "bi",
+      "style": "outline",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/bi--puzzle.svg",
+      "svg_sha256": "50df347c65121e08a29ba35cca84a16265952639ccee0275598798410b9ec462",
+      "png": "files/bi--puzzle.png",
+      "png_sha256": "0b846a0430448062b29d372e4b0c795ee5680e00385e02b30a58e94946a534ca"
+    },
+    {
+      "name": "heroicons:clipboard",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--clipboard.svg",
+      "svg_sha256": "88fe8c60f3d5b5ab550f1619efbf3fc14477a0b6f4b09d747dcc026b94034ace",
+      "png": "files/heroicons--clipboard.png",
+      "png_sha256": "cd6086ea0166407135aab21b49f1b3e1b065102546d567de99d972bd46bb64d9"
+    },
+    {
+      "name": "heroicons:folder",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--folder.svg",
+      "svg_sha256": "3f986b16fd40528e5fcb5e7ee6b9292426dde7b17cdd94f930fa186eb3e19ad7",
+      "png": "files/heroicons--folder.png",
+      "png_sha256": "8b46c1561322709aa65823d69d7e36ff0f0505ca04327969f148455dbfdd7d4c"
+    },
+    {
+      "name": "heroicons:inbox-stack",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--inbox-stack.svg",
+      "svg_sha256": "b5cb6f7df1b6394383ab08b8566542a7f52c14dc4baf2577c53976a89a69f988",
+      "png": "files/heroicons--inbox-stack.png",
+      "png_sha256": "9c2ff261027e7a3ea07ad37f4cd66a5b3e52c966baf9d5af02d3c94a47fd999c"
+    },
+    {
+      "name": "heroicons:presentation-chart-bar",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--presentation-chart-bar.svg",
+      "svg_sha256": "4b64df8ff75336858e9159eadc502afaccbc01c899b451d1b20f426310d4646c",
+      "png": "files/heroicons--presentation-chart-bar.png",
+      "png_sha256": "174ec2dc3f1702bc85214e88b05958130badf0fa4c60935146c9215850042943"
+    },
+    {
+      "name": "heroicons:document",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--document.svg",
+      "svg_sha256": "f4fe7145cc7759a64c41dade1a9e88d98b5d6eddc5e95f76931be69dd4259a3a",
+      "png": "files/heroicons--document.png",
+      "png_sha256": "7f9711dca2f9ab1e815d2aefdb02f1a4bb489a76db2efd33a679ce389c73a58a"
+    },
+    {
+      "name": "heroicons:pencil",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--pencil.svg",
+      "svg_sha256": "f5047d257fe5070ec6d93180d818ae8ca19992f253f02864db06cbfa81d99291",
+      "png": "files/heroicons--pencil.png",
+      "png_sha256": "9927484b27d1d4e48b175bd89c154bd5d725fccb4b9b5c769654528616ec6069"
+    },
+    {
+      "name": "heroicons:server",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--server.svg",
+      "svg_sha256": "44e32a2501bfe112cfaf354a38e048a7b21e53a5beb0e45cfd7a7a6b49288ba3",
+      "png": "files/heroicons--server.png",
+      "png_sha256": "ba3246ddf29c66aeaa07cb3f932e4bd98e1dcd9cc49626fbd5fda130a72b6eb1"
+    },
+    {
+      "name": "heroicons:cloud",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--cloud.svg",
+      "svg_sha256": "a6d2bdf8c0548d0af5e7a2d75902b06e3364c7c99a1f274a3c2bc3a6e4b1f68f",
+      "png": "files/heroicons--cloud.png",
+      "png_sha256": "5ca1572af510a36223332a13a4b61ab573a73d0b76cf646efc6ea873ab772a80"
+    },
+    {
+      "name": "heroicons:shield-check",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--shield-check.svg",
+      "svg_sha256": "e4fcdf271638cc6ae0302858c7b47dc41b5a161a61b15e2b72f33a421f47805b",
+      "png": "files/heroicons--shield-check.png",
+      "png_sha256": "b63695dce6e15200b27ac37a1923a3dea4fab6de87a7b12d578c76f11c1be323"
+    },
+    {
+      "name": "heroicons:cpu-chip",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--cpu-chip.svg",
+      "svg_sha256": "ead6707fb36ec507b2c6b74dfe5cdb7cf0845470f78c8ea048d592f3ab53d51c",
+      "png": "files/heroicons--cpu-chip.png",
+      "png_sha256": "f2827336fafa15dc0dec50e0c2b9ceb459453dfe2aa8c41140009e34be12e05b"
+    },
+    {
+      "name": "heroicons:chart-bar",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--chart-bar.svg",
+      "svg_sha256": "a53e7e56936c2ee62d0eec9c8b9d89efc5c6871db7c94f9021bc0d63e781ac1a",
+      "png": "files/heroicons--chart-bar.png",
+      "png_sha256": "ff6f1e2d124a90ede32725bf9954a75a4a30c4af43aa3ead3b147574671ee0fc"
+    },
+    {
+      "name": "heroicons:code-bracket",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--code-bracket.svg",
+      "svg_sha256": "1eec60d979f41232c7db3a57d198a3b393f946d79d94149626161c27d74a48be",
+      "png": "files/heroicons--code-bracket.png",
+      "png_sha256": "b3341b4412f8caa223dcfd01d74618c8c5d9b57aa2ee21980e5b52d7a57891a4"
+    },
+    {
+      "name": "heroicons:clock",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--clock.svg",
+      "svg_sha256": "7ab163c26a1240f564244c8b80b0c13446a9f0a3d22f12798e7e7eb698b5f2cf",
+      "png": "files/heroicons--clock.png",
+      "png_sha256": "856847f7e5b4bf6de9105291bca0b0a31ff0287a3ff4966f3fcdaa8068480211"
+    },
+    {
+      "name": "heroicons:users",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--users.svg",
+      "svg_sha256": "6828e58bbc847f2b86d99e00f1864af4d0e587eb6ca552029db1df34cec5fd2d",
+      "png": "files/heroicons--users.png",
+      "png_sha256": "65ae93dc84181d5d4e971ca1ab408a6ac6b512291b950b53c901895c63269fa1"
+    },
+    {
+      "name": "heroicons:link",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--link.svg",
+      "svg_sha256": "660fdef4662cb35e6abc44eaac0dbca04be0ffaeac51ade07ec4ec628c4e9cd2",
+      "png": "files/heroicons--link.png",
+      "png_sha256": "7e428480a12b271d054dac434f7f3ecbf95c9a5a24f0f7f53bfdb8752bfb6eaf"
+    },
+    {
+      "name": "heroicons:cog",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--cog.svg",
+      "svg_sha256": "97a1f18a9d3d5734d69f79e42ec77daca04aa29fdd751957c984c91446d60447",
+      "png": "files/heroicons--cog.png",
+      "png_sha256": "84eb780db87548b766f620d198c0bbe2164c0130a31f1a891dfcf8208cc2f6db"
+    },
+    {
+      "name": "heroicons:light-bulb",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--light-bulb.svg",
+      "svg_sha256": "8182aa0ccfbaffbbd97417e6c9853b6e2d25665050943243b6c0839afa677aa7",
+      "png": "files/heroicons--light-bulb.png",
+      "png_sha256": "4cd673df83aaf56ee3828a0801c2db8eb1f1fb754d81394266ee3ad909d6ac4f"
+    },
+    {
+      "name": "heroicons:check",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--check.svg",
+      "svg_sha256": "50f7fd1b9cc35fd1d392206af2e7abe5b3a8bea9865d98a6388cb4d7dde97dd8",
+      "png": "files/heroicons--check.png",
+      "png_sha256": "40725d63e25d20e79207df9df9e558c8ffed9a642b01e69322271cfc3ce02451"
+    },
+    {
+      "name": "heroicons:share",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--share.svg",
+      "svg_sha256": "af47603ec17aca2619fe58e8dd89cdbd99687c027f5158ab2486a4217dac4b2b",
+      "png": "files/heroicons--share.png",
+      "png_sha256": "199c3d8e43a2d0a60e41ca88d4d24152e142339bbdc136f65a596e634c7a0509"
+    },
+    {
+      "name": "heroicons:book-open",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--book-open.svg",
+      "svg_sha256": "b16de7303986c3bb4c8d7c27d852caa17bb70900f51b59db463030ad724391e9",
+      "png": "files/heroicons--book-open.png",
+      "png_sha256": "11d4b818190c7eb3ab0c24ee0acf2ba3f473ac9a5de7665d8ec53a50836c2d82"
+    },
+    {
+      "name": "heroicons:rocket-launch",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--rocket-launch.svg",
+      "svg_sha256": "1c6778f6ff932f46bfa0eeaa2ec66785c4afa1bbc00ca0ab208138cb5a98ba29",
+      "png": "files/heroicons--rocket-launch.png",
+      "png_sha256": "4500d71d1d13727f4fcce978d5242d4f699ec91f61c9d4b1313eef06cdca4cc5"
+    },
+    {
+      "name": "heroicons:trophy",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--trophy.svg",
+      "svg_sha256": "0550101c1783f841804454ab9c329f2b2b2859f6df07066b3ec94a9e468eca37",
+      "png": "files/heroicons--trophy.png",
+      "png_sha256": "74f59b18804a65675d46d0cd28883eb6a1f417913394f99ba7d4ed1be7cc3444"
+    },
+    {
+      "name": "heroicons:puzzle-piece",
+      "collection": "heroicons",
+      "style": "outline",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/heroicons--puzzle-piece.svg",
+      "svg_sha256": "74b6c4d18788080e6f7383c62fb6877a2ad64839b5767735e5f2548386962394",
+      "png": "files/heroicons--puzzle-piece.png",
+      "png_sha256": "9181f6e908f0aa200abb2ab311fde734d46ccef642d3f7ce0dee3e75c0ad92b2"
+    },
+    {
+      "name": "iconoir:clipboard-check",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--clipboard-check.svg",
+      "svg_sha256": "e55e2342378e4fb5be9f4a138e716ac24b5df02fdb3a1049183cecf334db30f7",
+      "png": "files/iconoir--clipboard-check.png",
+      "png_sha256": "07a1d4c6dcb070a40bb58dfbe725522d53670025f8166dc9edccdc1cb223f062"
+    },
+    {
+      "name": "iconoir:folder",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--folder.svg",
+      "svg_sha256": "4d3e19ee1724455ab759b19faf0ddb067414f33261e4e6430233eb7aa5d9c758",
+      "png": "files/iconoir--folder.png",
+      "png_sha256": "045a498d56b906cf3d2c8f163e19a1cc0e87e0d1c9abb9080d8c01f2cf76fc8f"
+    },
+    {
+      "name": "iconoir:book-stack",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "layers",
+        "大纲生成",
+        "层级",
+        "架构"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--book-stack.svg",
+      "svg_sha256": "693613be4a58e97cc3aa62cbad0d7bd710c81e7737e46602f9e456c7c91d654b",
+      "png": "files/iconoir--book-stack.png",
+      "png_sha256": "a61e9c26a435871e83f2bae25df836378b1d7032140002f7b45bf613b6842034"
+    },
+    {
+      "name": "iconoir:presentation",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--presentation.svg",
+      "svg_sha256": "0911a2cb77c0f608d608b62cf489b1eaf218e65d529ad1ff5956fb2abe47f5ab",
+      "png": "files/iconoir--presentation.png",
+      "png_sha256": "94c183084c09370d9918dd00695759d65fe4a9091ab12b0218f60a529929436e"
+    },
+    {
+      "name": "iconoir:media-image",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "image",
+        "图像",
+        "图片",
+        "图片版"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--media-image.svg",
+      "svg_sha256": "2feb9dbda8f7840737ef6aac64f94976c01b14ddfe2acedde36a5e04f005eb2d",
+      "png": "files/iconoir--media-image.png",
+      "png_sha256": "5d148945820d828280ef5ccc771dabfa0baeb9412e3f236819b0fb85136df447"
+    },
+    {
+      "name": "iconoir:submit-document",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "PDF",
+        "file-pdf",
+        "导出",
+        "文档"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--submit-document.svg",
+      "svg_sha256": "f215ae7f69181d9cc86afbecc70ec13aa7b07d33923ecd61622e016d31f91b61",
+      "png": "files/iconoir--submit-document.png",
+      "png_sha256": "7cf92408e624e216cef065c9df9c2767cc8d0e96bfa5f9c21c5673207179db84"
+    },
+    {
+      "name": "iconoir:edit",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--edit.svg",
+      "svg_sha256": "85f3aec778d62993afeaabe8b1dcfd0550dc82b321e87719f97e15710c2cfab1",
+      "png": "files/iconoir--edit.png",
+      "png_sha256": "e29a276a5dc637c8580896198557b65641792072713dc1e4427e4cdc154d8d15"
+    },
+    {
+      "name": "iconoir:database",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "database",
+        "数据",
+        "数据库",
+        "缓存"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--database.svg",
+      "svg_sha256": "247c6901ed037ca7c092c892d836332ed63d47baa3c55919da6fafc172aa5570",
+      "png": "files/iconoir--database.png",
+      "png_sha256": "da5cba5785a8bae42a022cd507b0394990c9600f492cb1c443d055962cfe0d6d"
+    },
+    {
+      "name": "iconoir:server",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "server",
+        "后端",
+        "服务",
+        "服务器"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--server.svg",
+      "svg_sha256": "1c2408055d34597a68251071e085f047b2380a7cde2892c8dbcc15cf065369be",
+      "png": "files/iconoir--server.png",
+      "png_sha256": "70f26e186614f153f6fb481a249d044004a0dabf0678fa7cb0cf50842695d436"
+    },
+    {
+      "name": "iconoir:cloud",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--cloud.svg",
+      "svg_sha256": "cda0f1387102053e682622ef60d9151271a986c0b3f7cf097d1df06ffc7f9667",
+      "png": "files/iconoir--cloud.png",
+      "png_sha256": "ede41c8619ac5b4f85c140cf7b52a60deb33a4c3303de28c013cac0d30f62d2d"
+    },
+    {
+      "name": "iconoir:shield",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--shield.svg",
+      "svg_sha256": "1aa819930836e400a99e773f376ee700085b6ebfb72a3be2c97dac43359294d8",
+      "png": "files/iconoir--shield.png",
+      "png_sha256": "51131a861c3526cd7df13ca27ef6c580064790e74781f5f0bd1da4ec842a7d84"
+    },
+    {
+      "name": "iconoir:cpu",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "cpu",
+        "模型",
+        "芯片",
+        "计算"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--cpu.svg",
+      "svg_sha256": "e9c49b8fc52ce870159944328ccf92e1aac884e6f5ce11bdec48ad1bcf2c78a0",
+      "png": "files/iconoir--cpu.png",
+      "png_sha256": "b3f19f1c60ad31381413b23030579397abf7042dd13233578eb4b7eb6073e7d5"
+    },
+    {
+      "name": "iconoir:candlestick-chart",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--candlestick-chart.svg",
+      "svg_sha256": "97d98a26d64fe226be310361a824db02ca0ed0803b57db77f3c14a694205263e",
+      "png": "files/iconoir--candlestick-chart.png",
+      "png_sha256": "1df1086d3b41e06c13e9a4f8db5438751dbab9844750bcb320460072e6e8e84e"
+    },
+    {
+      "name": "iconoir:code",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "code",
+        "代码",
+        "实现",
+        "开发"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--code.svg",
+      "svg_sha256": "8db673913bb1d6d7c7dfc1722c57c72535a5ee7973a35a70429b284aca280527",
+      "png": "files/iconoir--code.png",
+      "png_sha256": "d30d3fbe3750f0b14e0da4983074010167bd2af2a3356faf0903f4da9edb138c"
+    },
+    {
+      "name": "iconoir:clock",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--clock.svg",
+      "svg_sha256": "9f56d3ab79e682cca38a9f8ef0f485e4c23548d605f49619c929bb639d727f08",
+      "png": "files/iconoir--clock.png",
+      "png_sha256": "d01a4c1403e679a80825c06021b1f815bf68feaa2e0663fe16c2a33bdce05d2b"
+    },
+    {
+      "name": "iconoir:people-tag",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--people-tag.svg",
+      "svg_sha256": "f63ee1af67d276944087effc5dbbb451dc2324f19d4c289a0a75bbcf03ab77ac",
+      "png": "files/iconoir--people-tag.png",
+      "png_sha256": "540492000b14f706b1fd810a6d73ab7681fd20f13f96c2930c0661a49fd330d6"
+    },
+    {
+      "name": "iconoir:link",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--link.svg",
+      "svg_sha256": "914495ae9c046bf7bdf2d9aaaedc30012e4864bd8f29a1d297ea51db1a8f19e3",
+      "png": "files/iconoir--link.png",
+      "png_sha256": "a87e1cbaae9cd9abeb573da8fc05f5e31d27d5dbb5f669eb9f58d42e575bb8be"
+    },
+    {
+      "name": "iconoir:settings",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--settings.svg",
+      "svg_sha256": "aabb3b26b7d252ebc90419c028545e166708fdd068180a9dbc06e80f5adce29b",
+      "png": "files/iconoir--settings.png",
+      "png_sha256": "9ffd08795b1bd8c5340545620e1cafd404433b8d043f74a386e5536588d79009"
+    },
+    {
+      "name": "iconoir:download",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "download",
+        "下载",
+        "导出"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--download.svg",
+      "svg_sha256": "328faacb7ea5056cceea1cad09118f221298bd96780b424d390dd8e648440242",
+      "png": "files/iconoir--download.png",
+      "png_sha256": "ec6c76275618df2d4d1704227b0022f25151ff041bf833565b6d101d6df40cd5"
+    },
+    {
+      "name": "iconoir:search",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "search",
+        "分析",
+        "搜索",
+        "检索"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--search.svg",
+      "svg_sha256": "a9e8ad504504e18952cc9066f5aa98a26946979d43a3efb1222c0f2e6e512a01",
+      "png": "files/iconoir--search.png",
+      "png_sha256": "0d83013ccd303ebb0b4425ff0c3b61e380dc08ca82991766e6c0bdbb4a225809"
+    },
+    {
+      "name": "iconoir:light-bulb",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--light-bulb.svg",
+      "svg_sha256": "9968a9d7900905c52d6b76295757f8ff3a3b656a0f00f26d6b660686e112df97",
+      "png": "files/iconoir--light-bulb.png",
+      "png_sha256": "e4f0c23a28995aebdac820a7d05893482a15311b6c00a64f029a9bf3cd1241a7"
+    },
+    {
+      "name": "iconoir:check",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--check.svg",
+      "svg_sha256": "88f6dafc056c433eda2dec60bab2cde906a21eeb781d9cbb0db7ae3977652875",
+      "png": "files/iconoir--check.png",
+      "png_sha256": "b3304409af503f007682dc9bd0b697b8eb89344a6bd3a46e951c3c5a30ad5ee1"
+    },
+    {
+      "name": "iconoir:git-branch",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--git-branch.svg",
+      "svg_sha256": "2fea1e315b29ec491cb82fde3bbaafed7215dcd47ad3edc46c966224752cf3de",
+      "png": "files/iconoir--git-branch.png",
+      "png_sha256": "b303da411257d597ac181585a1a0c0ebcac75f4e43f67f9bb7949b7a4358159a"
+    },
+    {
+      "name": "iconoir:network",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "network",
+        "架构",
+        "网络"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--network.svg",
+      "svg_sha256": "20e7b634c30e1dd06b3507c1754e8b516c6c15f09edc160e4f5175f133f0064a",
+      "png": "files/iconoir--network.png",
+      "png_sha256": "343014f3c532158c3a9cc90ba40abd939a74e658a56a11ac8bebd921f7333fa7"
+    },
+    {
+      "name": "iconoir:book",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--book.svg",
+      "svg_sha256": "06d91defaf1108d155be1ff5f01850b530eca5b060c1a4435626ec2bf8a13dc6",
+      "png": "files/iconoir--book.png",
+      "png_sha256": "7491f85baca46543815567db50132ff0101d5198d751d59a4d90c53d852f7477"
+    },
+    {
+      "name": "iconoir:rocket",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--rocket.svg",
+      "svg_sha256": "7c44aae6d608f3d838b8164c8f17c90ddbb635bf3dba44999df28866f5b9b355",
+      "png": "files/iconoir--rocket.png",
+      "png_sha256": "381a65ad40c065c765ec52070e40b4efab2890b8f1af6aad8f2cc0a67e7b24ab"
+    },
+    {
+      "name": "iconoir:trophy",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--trophy.svg",
+      "svg_sha256": "51b8e1349e5fa7a8a59131972d15fa33742fac28e95c870433335830e80cb77c",
+      "png": "files/iconoir--trophy.png",
+      "png_sha256": "0665a71d33a258d59e128b5ff116ff035b571f1e55299c910823ff38ce2ce343"
+    },
+    {
+      "name": "iconoir:puzzle",
+      "collection": "iconoir",
+      "style": "outline",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 24,
+      "height": 24,
+      "svg": "files/iconoir--puzzle.svg",
+      "svg_sha256": "580a9b749808593ac74dde46c1a9a9a6b4c61548806871db65b8dbc8ff8535c2",
+      "png": "files/iconoir--puzzle.png",
+      "png_sha256": "f19c576febb972da8a2fc13f382e3185d69ffcddb5c7ec71f8a2702e0d26b033"
+    },
+    {
+      "name": "fluent-emoji-flat:clipboard",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "clipboard",
+        "任务",
+        "检查",
+        "清单",
+        "需求分析"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--clipboard.svg",
+      "svg_sha256": "810c559f3cc87c460652415fc6ced60499430e3f4c56e3c64594c67afdb4c5b8",
+      "png": "files/fluent-emoji-flat--clipboard.png",
+      "png_sha256": "564fcd90b4f2b47506e55713ce63824a93512791c8a31d515ccc9256eefadac9"
+    },
+    {
+      "name": "fluent-emoji-flat:file-folder",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "folder",
+        "文件夹",
+        "素材收集",
+        "资料"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--file-folder.svg",
+      "svg_sha256": "1d9633db3d534c1433d84344ae34bdfd1e92cf5939c771195419f899386e7399",
+      "png": "files/fluent-emoji-flat--file-folder.png",
+      "png_sha256": "6db33f2573d6adb9ebd8e20c881744200c8a2ce9e899164011c3f38cd1efdbc1"
+    },
+    {
+      "name": "fluent-emoji-flat:playground-slide",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "presentation",
+        "幻灯片生成",
+        "汇报",
+        "演示"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--playground-slide.svg",
+      "svg_sha256": "b338aed9d8089f62a8905910e4de4495842a1e748b16a6295d3b26878f822b98",
+      "png": "files/fluent-emoji-flat--playground-slide.png",
+      "png_sha256": "541e7956ac6e01843e002b98a33e8279109b7af30d23f59745784f80e52ce495"
+    },
+    {
+      "name": "fluent-emoji-flat:pencil",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "edit",
+        "修改",
+        "可编辑版",
+        "编辑"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--pencil.svg",
+      "svg_sha256": "8f940b485c1e995252f66c7a009eb57ca52b3c96c7a7e885bef3d64303c13c44",
+      "png": "files/fluent-emoji-flat--pencil.png",
+      "png_sha256": "ccaec97cf74e6594ca2e3996a651e87e8539c6ed3422ec525b4297e709a9f889"
+    },
+    {
+      "name": "fluent-emoji-flat:cloud",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "cloud",
+        "云",
+        "部署"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--cloud.svg",
+      "svg_sha256": "f12698cc4a3ef50bf05ffcd0cd9303ef83994836e93b8d73dfa162e5dbe50a3d",
+      "png": "files/fluent-emoji-flat--cloud.png",
+      "png_sha256": "fdd91bcfa42a8c4fe9e185d02e2633f8d561aa7794cab51db2c69e745918cc8d"
+    },
+    {
+      "name": "fluent-emoji-flat:shield",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "shield",
+        "安全",
+        "权限",
+        "鉴权"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--shield.svg",
+      "svg_sha256": "eb56ebf6fc285810fe86ea9acb19620ad588f402531a8ab28ebc2e76d0a79205",
+      "png": "files/fluent-emoji-flat--shield.png",
+      "png_sha256": "14dccea7798fc765a94af7e04fd81b06f7809144c31e29937d6654c1cc145c92"
+    },
+    {
+      "name": "fluent-emoji-flat:bar-chart",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "chart",
+        "图表",
+        "指标",
+        "结果",
+        "统计"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--bar-chart.svg",
+      "svg_sha256": "e66b073886fe22cb90de6f8dde8f787a5a08082accae70e8af818e5bec01f967",
+      "png": "files/fluent-emoji-flat--bar-chart.png",
+      "png_sha256": "a357f25bb3ddceb6850eb46fdf1496c40c6124b06f78fa410d81e0a729017890"
+    },
+    {
+      "name": "fluent-emoji-flat:alarm-clock",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "clock",
+        "延迟",
+        "性能",
+        "时间"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--alarm-clock.svg",
+      "svg_sha256": "bbd05d05fef2e676cd6d30c7b4cb62c3b12506f27ac8b6081dbe1468ea667d11",
+      "png": "files/fluent-emoji-flat--alarm-clock.png",
+      "png_sha256": "be4a9d5e3a7d064ff827af37a4d2f7225deba79cce76629e42200732ec6902d9"
+    },
+    {
+      "name": "fluent-emoji-flat:people-hugging",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "users",
+        "协作",
+        "团队",
+        "用户"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--people-hugging.svg",
+      "svg_sha256": "e4bfea18c26399849e33fbe24032f5f3e41b53180bcf56bce68da335df0e3f25",
+      "png": "files/fluent-emoji-flat--people-hugging.png",
+      "png_sha256": "939276c9228ce783b91bd552a382b6d8fd25f85d3a7a12d76319117b537d24f9"
+    },
+    {
+      "name": "fluent-emoji-flat:link",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "link",
+        "导出链路",
+        "连接",
+        "链接"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--link.svg",
+      "svg_sha256": "2a11577818bcffd605e764e02c4ea32e56a8a1efdaf60de1c96511d62c282d2e",
+      "png": "files/fluent-emoji-flat--link.png",
+      "png_sha256": "48a9768536b2e87f44a74c0e5709266fc12d84532f28880c7d849065864a749d"
+    },
+    {
+      "name": "fluent-emoji-flat:bullseye",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "target",
+        "目标",
+        "问题"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--bullseye.svg",
+      "svg_sha256": "dbeaada48274eabb45dfb7786e934367aeecff8b9c90b6e3d4cdb1ec842d706c",
+      "png": "files/fluent-emoji-flat--bullseye.png",
+      "png_sha256": "38f8e5d403e34741dc262d4fbd9341f7c8716f26956335fdbae0c9b30ab75eb0"
+    },
+    {
+      "name": "fluent-emoji-flat:gear",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "settings",
+        "方法",
+        "设置",
+        "配置"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--gear.svg",
+      "svg_sha256": "3ebc7081e7a1b2a061037a7f201c735f92b08536f510929c3ea9d072ea983377",
+      "png": "files/fluent-emoji-flat--gear.png",
+      "png_sha256": "c4fc4461dba1cb0b7bf77f1c86fbae3bf0707473be31c44a704ebeb4512baed4"
+    },
+    {
+      "name": "fluent-emoji-flat:light-bulb",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "lightbulb",
+        "创意",
+        "思路"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--light-bulb.svg",
+      "svg_sha256": "4bb733408ec420d83d5e0df2cbbc63c1e64bc09091692875a894efc160a2ed00",
+      "png": "files/fluent-emoji-flat--light-bulb.png",
+      "png_sha256": "c373b989da067e98f2dc1c60238b847d82564c442369f6e33dc77077407cad51"
+    },
+    {
+      "name": "fluent-emoji-flat:check-mark",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "check",
+        "完成",
+        "验证"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--check-mark.svg",
+      "svg_sha256": "7a84767fa71179e31827d2c88470b2f1373cd5fd5c7458248b878d2d1a2667eb",
+      "png": "files/fluent-emoji-flat--check-mark.png",
+      "png_sha256": "a2c42b408e5df6802fe6a252b80ad49607c6cd959261be542ac09c14cfb1ab45"
+    },
+    {
+      "name": "fluent-emoji-flat:fork-and-knife",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "branch",
+        "分支",
+        "路由"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--fork-and-knife.svg",
+      "svg_sha256": "e3c1e6e7cb22ac1def6f74fb3d11ee80d26ddf79902976a3878338ae346a5faf",
+      "png": "files/fluent-emoji-flat--fork-and-knife.png",
+      "png_sha256": "8098adf9cb12c5f4132472215105839bc1a40b616d393ce93d9a7076ae44fc21"
+    },
+    {
+      "name": "fluent-emoji-flat:blue-book",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "book",
+        "学习",
+        "文档",
+        "知识"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--blue-book.svg",
+      "svg_sha256": "8860ad9480ded8014241e53f6faa7056d2de66f707aaa7e071cd34ed13259ff4",
+      "png": "files/fluent-emoji-flat--blue-book.png",
+      "png_sha256": "dc7d212127e2a5c010f511e55972571aa0ef83605852c127127339d05f75f9bd"
+    },
+    {
+      "name": "fluent-emoji-flat:rocket",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "rocket",
+        "发布",
+        "效率"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--rocket.svg",
+      "svg_sha256": "c60ccfbac2e9fa439ec3e67e9ad66b48fe64450d81f102c9d6cea00f898cfa08",
+      "png": "files/fluent-emoji-flat--rocket.png",
+      "png_sha256": "4f389768439c4155de9e8e987050e2b3f460bda938e1b601c1d72bca5a4a29a1"
+    },
+    {
+      "name": "fluent-emoji-flat:trophy",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "trophy",
+        "奖励",
+        "成果"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--trophy.svg",
+      "svg_sha256": "89e8ffea1c0086fb0ea685ee569ff26e107e7e0224c21c647f480862055c9715",
+      "png": "files/fluent-emoji-flat--trophy.png",
+      "png_sha256": "b2975843e3a5f6efba638ada23d8958a2c8392c679de5c6aaf90520dc64c78cf"
+    },
+    {
+      "name": "fluent-emoji-flat:puzzle-piece",
+      "collection": "fluent-emoji-flat",
+      "style": "color",
+      "tags": [
+        "puzzle",
+        "模块",
+        "集成"
+      ],
+      "width": 32,
+      "height": 32,
+      "svg": "files/fluent-emoji-flat--puzzle-piece.svg",
+      "svg_sha256": "1470d273023c8c743340a598ba6e744deb262a4649e1783c5b1eb3d66c8f10dd",
+      "png": "files/fluent-emoji-flat--puzzle-piece.png",
+      "png_sha256": "d27fa90ce62a27458242239157280b8a08a6c7d987355a9bf0c30dcc273b813a"
+    },
+    {
+      "name": "fluent-3d:clipboard",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "需求分析",
+        "清单",
+        "clipboard"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--clipboard.png",
+      "png_sha256": "cbe87f41d539362944c6a37aeb67387f118740eb1414377619dd8ed368a069a2",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Clipboard/3D/clipboard_3d.png"
+    },
+    {
+      "name": "fluent-3d:file-folder",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "素材收集",
+        "文件夹",
+        "file_folder"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--file-folder.png",
+      "png_sha256": "d07ff91df2a4ad9f08e281e9b99ad66924b6db0c0afd2a938feca4dd6b7a9039",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/File%20folder/3D/file_folder_3d.png"
+    },
+    {
+      "name": "fluent-3d:card-index-dividers",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "大纲生成",
+        "分类",
+        "card_index_dividers"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--card-index-dividers.png",
+      "png_sha256": "a995ccc3acb244234587675ffab838abc50fab89b5b2170922dc47e8eed91433",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Card%20index%20dividers/3D/card_index_dividers_3d.png"
+    },
+    {
+      "name": "fluent-3d:framed-picture",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "幻灯片生成",
+        "图片",
+        "framed_picture"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--framed-picture.png",
+      "png_sha256": "e70eeb3cd3b5c8bd6633a9ddf0c5f0bb7e0c4be45c89b9b2aad689276aad35bc",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Framed%20picture/3D/framed_picture_3d.png"
+    },
+    {
+      "name": "fluent-3d:memo",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "编辑",
+        "文档",
+        "memo"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--memo.png",
+      "png_sha256": "bddf602ea6a0988a77ef51187a3ac8b526791a614a8bb7123705359319a81dcd",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Memo/3D/memo_3d.png"
+    },
+    {
+      "name": "fluent-3d:gear",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "方法",
+        "配置",
+        "gear"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--gear.png",
+      "png_sha256": "415296d4fadabc2e0f6593143ea632948fef20a1cd73fbbc3dbda571f0421988",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Gear/3D/gear_3d.png"
+    },
+    {
+      "name": "fluent-3d:link",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "导出链路",
+        "连接",
+        "link"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--link.png",
+      "png_sha256": "5183597c8e1b092dadb3c88607c9b1405c1bea3b82219edc50caa4a8590fd8a8",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Link/3D/link_3d.png"
+    },
+    {
+      "name": "fluent-3d:books",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "知识",
+        "素材",
+        "books"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--books.png",
+      "png_sha256": "36f75eaa1e1a849fc950f43962b447c206d96244858468240a6a81beaa97f7be",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Books/3D/books_3d.png"
+    },
+    {
+      "name": "fluent-3d:rocket",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "发布",
+        "效率",
+        "rocket"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--rocket.png",
+      "png_sha256": "4636925a1dfc76a45dc83c08b983699d39143a0978f794a4e2dfb6cbffdcd7ab",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Rocket/3D/rocket_3d.png"
+    },
+    {
+      "name": "fluent-3d:light-bulb",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "创意",
+        "思路",
+        "light_bulb"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--light-bulb.png",
+      "png_sha256": "df7b09aa18301507e6fb8c279df66d9afa465b6fed3e63d2efa84dacebdbbf79",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Light%20bulb/3D/light_bulb_3d.png"
+    },
+    {
+      "name": "fluent-3d:bullseye",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "问题",
+        "目标",
+        "bullseye"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--bullseye.png",
+      "png_sha256": "2b2a2d9eec76c5649b8207b050f9135ce666c9d94694e5577aade50c53768437",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Bullseye/3D/bullseye_3d.png"
+    },
+    {
+      "name": "fluent-3d:trophy",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "结果",
+        "成果",
+        "trophy"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--trophy.png",
+      "png_sha256": "7c4a9805f354eb2aec35063a95a4043306efc726324c0d128883f24497857bbc",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Trophy/3D/trophy_3d.png"
+    },
+    {
+      "name": "fluent-3d:bar-chart",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "图表",
+        "指标",
+        "bar_chart"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--bar-chart.png",
+      "png_sha256": "0d83833e992b128aa00b85220fc2f777516bbdeb92e9e1e019a7b715ecc6ef97",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Bar%20chart/3D/bar_chart_3d.png"
+    },
+    {
+      "name": "fluent-3d:magnifying-glass-tilted-left",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "检索",
+        "搜索",
+        "magnifying_glass_tilted_left"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--magnifying-glass-tilted-left.png",
+      "png_sha256": "e8fea91e4652a36486aa9392a67873c987a13389afdae06bbcdae78ab30b4f4f",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Magnifying%20glass%20tilted%20left/3D/magnifying_glass_tilted_left_3d.png"
+    },
+    {
+      "name": "fluent-3d:locked",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "权限",
+        "安全",
+        "locked"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--locked.png",
+      "png_sha256": "8c8e9209b8420ac7caf8c94fde6586044d9b91e85728aaaf4b98c2482761ea16",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Locked/3D/locked_3d.png"
+    },
+    {
+      "name": "fluent-3d:laptop",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "电脑",
+        "开发",
+        "laptop"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--laptop.png",
+      "png_sha256": "3b8a267f6c3d2721af925782bdbc11c4e1bc9ae806c5c875557b100393665aab",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Laptop/3D/laptop_3d.png"
+    },
+    {
+      "name": "fluent-3d:cloud",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "云",
+        "部署",
+        "cloud"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--cloud.png",
+      "png_sha256": "a4d4629711661a80f6b6b0081c0f84e65352518b2bf23f4c1bec55e297a9fafc",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Cloud/3D/cloud_3d.png"
+    },
+    {
+      "name": "fluent-3d:package",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "构建",
+        "安装包",
+        "package"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--package.png",
+      "png_sha256": "9c7c74bb551e7f0a3a088791ac715c4ece8c45b2d1910915bc34159f148dee0e",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Package/3D/package_3d.png"
+    },
+    {
+      "name": "fluent-3d:inbox-tray",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "导入",
+        "下载",
+        "inbox_tray"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--inbox-tray.png",
+      "png_sha256": "a2b6a259ec8cc69aba97b26bbe1c82ee6e96f43ecec27811972b0e0a4215d55c",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Inbox%20tray/3D/inbox_tray_3d.png"
+    },
+    {
+      "name": "fluent-3d:outbox-tray",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "导出",
+        "上传",
+        "outbox_tray"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--outbox-tray.png",
+      "png_sha256": "db74a311c7059ddad64a9680ead1b69ac3a9a77ca00448cd0445b67470bd849d",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Outbox%20tray/3D/outbox_tray_3d.png"
+    },
+    {
+      "name": "fluent-3d:briefcase",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "工作",
+        "项目",
+        "briefcase"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--briefcase.png",
+      "png_sha256": "b1cee11c4212de4d401109251f79ee875762b88d8b64d89a82847b8ebc0878e0",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Briefcase/3D/briefcase_3d.png"
+    },
+    {
+      "name": "fluent-3d:globe-with-meridians",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "网络",
+        "全球",
+        "globe_with_meridians"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--globe-with-meridians.png",
+      "png_sha256": "4a9f820aa69194995d91c6a23432814d67ea6740acc9939eadcc8d6ad1b90546",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Globe%20with%20meridians/3D/globe_with_meridians_3d.png"
+    },
+    {
+      "name": "fluent-3d:puzzle-piece",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "模块",
+        "集成",
+        "puzzle_piece"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--puzzle-piece.png",
+      "png_sha256": "c0f47e02e87bd61118985d8ab7b5f40fe302c82e6bb7ae6a7b7add2eefc6de7a",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Puzzle%20piece/3D/puzzle_piece_3d.png"
+    },
+    {
+      "name": "fluent-3d:chart-increasing",
+      "collection": "fluent-3d",
+      "style": "3d",
+      "tags": [
+        "增长",
+        "数据",
+        "chart_increasing"
+      ],
+      "width": 256,
+      "height": 256,
+      "png": "files/fluent-3d--chart-increasing.png",
+      "png_sha256": "dd5e6b29aa4067c5a4d9e152119497832d70e094b380998e5f5b0c51abbb3a64",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Chart%20increasing/3D/chart_increasing_3d.png"
+    }
+  ]
+}

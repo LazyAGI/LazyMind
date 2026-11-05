@@ -13,6 +13,7 @@ from lxml import etree
 
 from .pptx_template_fill import NS, _load, _xml, _slots, fill_template
 from .pptx_content_edit import edit_content, _serialized, REL, OFFICE, CT
+from .pptx_tables import add_tables, recover_text_tables
 
 
 def _visual_box(prs, slide, box, kind):
@@ -20,21 +21,14 @@ def _visual_box(prs, slide, box, kind):
     if (not isinstance(box, list) or len(box) != 4
             or any(type(v) not in (int, float) or not math.isfinite(v) for v in box)):
         raise ValueError(f'{kind} box must be [x, y, width, height] in inches')
-    x, y, w, h = [Inches(v) for v in box]
-    if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > prs.slide_width or y + h > prs.slide_height:
-        raise ValueError(f'{kind} box must fit inside the slide')
-    for shape in slide.shapes:
-        picture = shape.element.tag.endswith('}pic')
-        # Full-slide raster backgrounds remain valid template artwork.
-        background = picture and shape.width >= prs.slide_width and shape.height >= prs.slide_height
-        if not (shape.has_chart or shape.has_table or (picture and not background)
-                or any((n.text or '').strip() for n in shape.element.xpath('.//a:t'))):
-            continue
-        if all(v is not None for v in (shape.left, shape.top, shape.width, shape.height)) and (
-            x < shape.left + shape.width and x + w > shape.left
-            and y < shape.top + shape.height and y + h > shape.top
-        ):
-            raise ValueError(f'{kind} overlaps existing content shape {shape.shape_id}; remove or choose free space')
+    # Placement quality must not abort a deliverable. Clamp requested geometry
+    # to the canvas; overlapping content can be improved by screenshot review.
+    slide_w, slide_h = prs.slide_width / 914400, prs.slide_height / 914400
+    x = min(max(0, box[0]), slide_w - 1 / 72)
+    y = min(max(0, box[1]), slide_h - 1 / 72)
+    w = min(max(1 / 72, box[2]), slide_w - x)
+    h = min(max(1 / 72, box[3]), slide_h - y)
+    x, y, w, h = [Inches(v) for v in (x, y, w, h)]
     return x, y, w, h
 
 
@@ -54,6 +48,58 @@ def _page_images(spec, assets):
     return result
 
 
+def _add_editable_diagrams(prs, slide, diagrams):
+    """Business flow/architecture diagrams; malformed optional visuals never block delivery."""
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+    from pptx.util import Pt
+
+    count, warnings = 0, []
+    if not isinstance(diagrams, list):
+        return 0, ['diagrams must be a list; optional diagrams skipped']
+    for index, diagram in enumerate(diagrams[:8]):
+        try:
+            nodes = {}
+            for item in diagram.get('nodes', [])[:24]:
+                identity = str(item['id'])
+                if identity in nodes or not isinstance(item.get('text'), str):
+                    continue
+                x, y, w, h = _visual_box(prs, slide, item['box'], 'Diagram')
+                shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
+                shape.name = 'Diagram node ' + identity
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = RGBColor.from_string('EDF5FA')
+                shape.line.color.rgb = RGBColor.from_string('32738C')
+                shape.text = item['text']
+                shape.text_frame.word_wrap = True
+                shape.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+                for paragraph in shape.text_frame.paragraphs:
+                    paragraph.alignment = PP_ALIGN.CENTER
+                    paragraph.font.name = 'Microsoft YaHei'
+                    paragraph.font.size = Pt(20)
+                    paragraph.font.color.rgb = RGBColor.from_string('173B4B')
+                nodes[identity] = shape
+            for edge in diagram.get('edges', [])[:40]:
+                source, target = nodes.get(str(edge.get('from'))), nodes.get(str(edge.get('to')))
+                if source is None or target is None:
+                    continue
+                horizontal = abs(target.left - source.left) >= abs(target.top - source.top)
+                start, end = ((3, 1) if target.left >= source.left else (1, 3)) if horizontal else (
+                    (2, 0) if target.top >= source.top else (0, 2))
+                connector = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, 0, 0, 1, 1)
+                connector.begin_connect(source, start)
+                connector.end_connect(target, end)
+                connector.line.color.rgb = RGBColor.from_string('32738C')
+                connector.line.width = Pt(2)
+                line = connector.element.find('p:spPr/a:ln', NS)
+                etree.SubElement(line, '{%s}tailEnd' % NS['a'], type='triangle')
+            count += bool(nodes)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            warnings.append(f'diagram[{index}] best-effort layout: {exc}')
+    return count, warnings
+
+
 def _add_visuals(path, pages, image_assets):
     from pptx import Presentation
     from pptx.chart.data import CategoryChartData
@@ -63,7 +109,8 @@ def _add_visuals(path, pages, image_assets):
     from PIL import Image
 
     prs = Presentation(path)
-    count, image_count = 0, 0
+    count, image_count, diagram_count, diagram_warnings = 0, 0, 0, []
+    table_reports = []
     kinds = {'column': XL_CHART_TYPE.COLUMN_CLUSTERED, 'bar': XL_CHART_TYPE.BAR_CLUSTERED,
              'line': XL_CHART_TYPE.LINE_MARKERS, 'pie': XL_CHART_TYPE.PIE,
              'doughnut': XL_CHART_TYPE.DOUGHNUT}
@@ -71,22 +118,29 @@ def _add_visuals(path, pages, image_assets):
         for field in slide.element.xpath('.//a:fld[@type="slidenum"]'):
             for text in field.xpath('.//a:t'):
                 text.text = str(page_number)
-        boxes = spec.get('text_boxes', [])
+        added, warnings = _add_editable_diagrams(prs, slide, spec.get('diagrams', []))
+        diagram_count += added
+        diagram_warnings.extend(warnings)
+        boxes, recovered = recover_text_tables(spec.get('text_boxes', []))
+        declared = spec.get('tables', [])
+        if not isinstance(declared, list):
+            raise ValueError('tables must be a list')
+        try:
+            reports = add_tables(prs, slide, declared + recovered)
+        except ValueError as exc:
+            raise ValueError(f'Page {page_number}: {exc}') from exc
+        table_reports.extend({**report, 'page': page_number, 'recovered': index >= len(declared)}
+                             for index, report in enumerate(reports))
         if not isinstance(boxes, list) or len(boxes) > 20:
-            raise ValueError('text_boxes must contain at most 20 editable text blocks')
+            raise ValueError('text_boxes must contain at most 20 editable text blocks; use tables for cell grids')
         for box in boxes:
             if not isinstance(box, dict) or not isinstance(box.get('text'), str) or not box['text'].strip():
                 raise ValueError('Each text box requires non-empty plain text')
             size = box.get('font_size', 22)
-            if type(size) not in (int, float) or not math.isfinite(size) or not 18 <= size <= 44:
-                raise ValueError('text_boxes font_size must be 18–44 pt; split dense content instead')
+            if type(size) not in (int, float) or not math.isfinite(size):
+                raise ValueError('text_boxes font_size must be a finite number')
+            size = min(44, max(18, size))
             x, y, w, h = _visual_box(prs, slide, box.get('box'), 'Text')
-            # Conservative line-fit check for mixed CJK/Latin text, with margins.
-            units = [sum(1 if ord(c) > 255 else .6 for c in line) for line in box['text'].split('\n')]
-            line_capacity = max(1, (w / 12700 - 12) / size)
-            lines = sum(max(1, math.ceil(n / line_capacity)) for n in units)
-            if lines * size * 1.3 + 12 > h / 12700:
-                raise ValueError('Text block does not fit; enlarge its box or split content')
             shape = slide.shapes.add_textbox(x, y, w, h)
             frame = shape.text_frame
             frame.word_wrap = True
@@ -201,7 +255,7 @@ def _add_visuals(path, pages, image_assets):
             image_count += 1
     # Serialize the reachable graph to discard hidden original sample slides/notes.
     prs.save(path)
-    return count, image_count
+    return count, image_count, diagram_count, diagram_warnings, table_reports
 
 
 def compose_template(source: Path, output: Path, source_sha256: str, pages: list[dict],
@@ -267,10 +321,12 @@ def compose_template(source: Path, output: Path, source_sha256: str, pages: list
             if (not isinstance(box, list) or len(box) != 4
                     or any(type(v) not in (int, float) or not math.isfinite(v) for v in box)):
                 raise ValueError('shape_boxes box must be [x,y,width,height] inches')
-            x, y, w, h = [round(v * 914400) for v in box]
-            if (x < 0 or y < 0 or w <= 0 or h <= 0
-                    or x + w > int(slide_size.get('cx')) or y + h > int(slide_size.get('cy'))):
-                raise ValueError('shape_boxes must fit inside the slide')
+            slide_w, slide_h = int(slide_size.get('cx')) / 914400, int(slide_size.get('cy')) / 914400
+            x = min(max(0, box[0]), slide_w - 1 / 72)
+            y = min(max(0, box[1]), slide_h - 1 / 72)
+            w = min(max(1 / 72, box[2]), slide_w - x)
+            h = min(max(1 / 72, box[3]), slide_h - y)
+            x, y, w, h = [round(v * 914400) for v in (x, y, w, h)]
             props = shape.find('p:spPr', NS)
             if props is None:
                 props = etree.SubElement(shape, '{%s}spPr' % NS['p'])
@@ -346,8 +402,11 @@ def compose_template(source: Path, output: Path, source_sha256: str, pages: list
                 archive.writestr(name, raw)
         stats = fill_template(draft, filled, hashlib.sha256(draft.read_bytes()).hexdigest(), edits)
         edit_content(filled, final, hashlib.sha256(filled.read_bytes()).hexdigest(), speaker_notes=notes)
-        chart_count, image_count = _add_visuals(final, pages, image_assets)
+        chart_count, image_count, diagram_count, diagram_warnings, table_reports = _add_visuals(
+            final, pages, image_assets)
         os.replace(final, output)
     return {**stats, 'template_mode': 'composed', 'source_pages': [s['source_page'] for s in pages],
             'removed_shape_count': removed_count, 'editable_chart_count': chart_count,
-            'inserted_image_count': image_count, 'sample_notes_cleared': True}
+            'inserted_image_count': image_count, 'editable_diagram_count': diagram_count,
+            'diagram_warnings': diagram_warnings, 'editable_table_count': len(table_reports),
+            'table_layouts': table_reports, 'sample_notes_cleared': True}

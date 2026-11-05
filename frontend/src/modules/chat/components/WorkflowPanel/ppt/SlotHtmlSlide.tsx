@@ -20,6 +20,8 @@ import {
 } from './exportHtmlToPptx';
 import { htmlWithInlinedEcharts } from './echartsInline';
 import { resolveSlideAssets } from './slideAssets';
+import { DEFAULT_SLIDE_CANVAS as DEFAULT_CANVAS, measureSlideCanvas } from './slideCanvas';
+export { measureSlideCanvas, type SlideCanvasSize } from './slideCanvas';
 
 /** Compatibility shape used by the current composite preview pager. */
 export interface SlideNavigation {
@@ -63,15 +65,15 @@ interface FittedFrame {
   top: number;
 }
 
-/** Fit the fixed 1600×900 slide into any composite material frame. */
-export function fitSlideFrame(containerW: number, containerH: number): FittedFrame {
+/** Fit the slide's own canvas into the material frame without adding body margins. */
+export function fitSlideFrame(containerW: number, containerH: number, canvas = DEFAULT_CANVAS): FittedFrame {
   if (!containerW || containerW < 1) return { scale: 0.5, left: 0, top: 0 };
-  const availableH = containerH > 0 ? containerH : containerW * 9 / 16;
-  const scale = Math.max(0.02, Math.min(containerW / 1600, availableH / 900, 1));
+  const availableH = containerH > 0 ? containerH : containerW * canvas.height / canvas.width;
+  const scale = Math.max(0.02, Math.min(containerW / canvas.width, availableH / canvas.height, 1));
   return {
     scale,
-    left: Math.max(0, (containerW - 1600 * scale) / 2),
-    top: Math.max(0, (availableH - 900 * scale) / 2),
+    left: Math.max(0, (containerW - canvas.width * scale) / 2),
+    top: Math.max(0, (availableH - canvas.height * scale) / 2),
   };
 }
 
@@ -99,11 +101,11 @@ export function pptClickedText(target: HTMLElement, clicked: HTMLElement): strin
   return (source.innerText || source.textContent || target.innerText || target.textContent || '').trim();
 }
 
-function scaleFromViewport(): number {
+function scaleFromViewport(canvas = DEFAULT_CANVAS): number {
   if (typeof window === 'undefined') return 0.8;
   return Math.max(0.25, Math.min(
-    (window.innerWidth - 64) / 1600,
-    (window.innerHeight - 104) / 900,
+    (window.innerWidth - 64) / canvas.width,
+    (window.innerHeight - 104) / canvas.height,
     1,
   ));
 }
@@ -498,9 +500,10 @@ export function SlotHtmlSlide({
   const [sourceHtml, setSourceHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fittedFrame, setFittedFrame] = useState<FittedFrame | null>(null);
+  const [canvasSize, setCanvasSize] = useState(DEFAULT_CANVAS);
   const [internalExpanded, setInternalExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const [expandedScale, setExpandedScale] = useState(scaleFromViewport);
+  const [expandedScale, setExpandedScale] = useState(() => scaleFromViewport());
   const [selection, setSelection] = useState<ArtifactRewriteSelection | null>(null);
   const [editPreview, setEditPreview] = useState<RewriteSelectionPreview | null>(null);
   const [applying, setApplying] = useState(false);
@@ -561,7 +564,7 @@ export function SlotHtmlSlide({
 
   useEffect(() => {
     if (!expanded) return undefined;
-    const update = () => setExpandedScale(scaleFromViewport());
+    const update = () => setExpandedScale(scaleFromViewport(canvasSize));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeExpanded();
     };
@@ -572,7 +575,7 @@ export function SlotHtmlSlide({
       window.removeEventListener('resize', update);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeExpanded, expanded]);
+  }, [closeExpanded, expanded, canvasSize]);
 
   useEffect(() => () => {
     frameCleanupRef.current.forEach((cleanup) => cleanup());
@@ -615,13 +618,13 @@ export function SlotHtmlSlide({
     if (!viewport) return undefined;
     const update = () => {
       const rect = viewport.getBoundingClientRect();
-      setFittedFrame(fitSlideFrame(Math.max(0, rect.width), Math.max(0, rect.height)));
+      setFittedFrame(fitSlideFrame(Math.max(0, rect.width), Math.max(0, rect.height), canvasSize));
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [compact]);
+  }, [compact, canvasSize]);
 
   const selectElements = useCallback((
     frame: HTMLIFrameElement,
@@ -732,6 +735,8 @@ export function SlotHtmlSlide({
     frameCleanupRef.current.get(frame)?.();
     const doc = frame.contentDocument;
     if (!doc) return;
+    const measured = measureSlideCanvas(doc);
+    setCanvasSize(current => current.width === measured.width && current.height === measured.height ? current : measured);
     applyHtmlPreviewCompatibilityFallbacks(doc);
     const style = doc.createElement('style');
     style.dataset.lazymindPptEditor = 'true';
@@ -895,8 +900,8 @@ export function SlotHtmlSlide({
         position: 'absolute',
         left: zoomed ? 0 : (fittedFrame?.left ?? 0),
         top: zoomed ? 0 : (fittedFrame?.top ?? 0),
-        width: 1600,
-        height: 900,
+        width: canvasSize.width,
+        height: canvasSize.height,
         transform: `scale(${zoomed ? expandedScale : (fittedFrame?.scale ?? 0.5)})`,
         transformOrigin: 'top left',
       }}
@@ -1013,7 +1018,7 @@ export function SlotHtmlSlide({
           )}
           <div
             className='slot-html-slide__zoom-stage'
-            style={{ width: 1600 * expandedScale, height: 900 * expandedScale }}
+            style={{ width: canvasSize.width * expandedScale, height: canvasSize.height * expandedScale }}
           >
             {error ? <div className='slot-html-slide--error'>{error}</div>
               : srcDoc ? renderFrame(true) : <div className='slot-html-slide--loading'>正在加载幻灯片…</div>}

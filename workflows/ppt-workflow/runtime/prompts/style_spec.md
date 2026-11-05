@@ -44,6 +44,16 @@ keep the user colors in palette and primary_color.hex. The catalog hex and
 compatibility rules below apply only to unspecified properties. Do not infer a
 dark/cyan scheme just because the topic is technical.
 
+The built-in 科研风格 / academic default uses a plain white #FFFFFF canvas,
+black #111111 titles and body text, and restrained blue/teal/orange/purple chart
+accents. Choose the Academic catalog style with Light tone, unless a user
+explicitly requests another direction. Write background and text colors into
+palette.background / palette.text and art_direction; carry them into tables,
+formulas, chart axes/legends and diagram labels. Prefer white or pale gray
+surfaces and thin gray rules. Do not interpret scientific/technical content as
+a request for dark dashboards, neon/HUD decoration or gradient backgrounds.
+Uploaded templates and explicit user color requests retain priority.
+
 ## Rules for the triple
 
 1. **One deck-wide contract** — Select exactly one visual triple for the whole deck. This result is authoritative for every slide; downstream pages must reuse it instead of selecting their own page-specific styles or palettes.

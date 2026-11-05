@@ -1820,7 +1820,7 @@ def edit_presentation(
     filename: str,
     action: Literal[
         'inspect', 'replace_fonts', 'replace_palette', 'apply_template',
-        'inspect_content', 'edit_content', 'prepare_font', 'format_text'
+        'inspect_content', 'edit_content', 'prepare_font', 'import_font', 'format_text'
     ],
     source_font: Optional[str] = None,
     target_font: Optional[str] = None,
@@ -1834,11 +1834,13 @@ def edit_presentation(
     require_all_notes: bool = False,
     workflow_session_id: Optional[str] = None,
     slot_ids: Optional[List[str]] = None,
-    allow_font_download: bool = False,
+    allow_font_download: bool = True,
+    font_filename: Optional[str] = None,
     style_edits: Optional[List[Dict[str, Any]]] = None,
     chart_edits: Optional[List[Dict[str, Any]]] = None,
     template_filename: Optional[str] = None,
     template_turn: Optional[int] = None,
+    layout_edits: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Inspect or directly edit an uploaded PPTX without starting a Workflow.
 
@@ -1860,10 +1862,16 @@ def edit_presentation(
     For font-only edits use replace_fonts; exact inspected slot_ids select text
     runs/table cells, pages select slides. For native_pptx provide source_sha256.
     edit_content can combine target_font with text/notes into one revision.
+    layout_edits: [{page,shape_id,expected_box,box}] moves/resizes inspected native
+    shapes, using inches and geometry from inspect_content.layout. It preserves
+    all unmentioned objects and package parts; do not regenerate for local edits.
     chart_edits=[{page,chart_index,palette}] changes only an inspected chart's colors;
     palette is blue/teal/orange/purple or distinct #RRGGBB colors. Values stay unchanged.
-    prepare_font checks target_font without a file (filename may be empty).
-    Only explicitly requested open-font downloads may set allow_font_download.
+    import_font imports an uploaded TTF/OTF named by filename into the shared font library.
+    font_filename can import that attachment as part of a scoped font edit.
+    prepare_font checks portable font files without a file (filename may be empty).
+    Missing allowlisted open fonts download by default for font changes;
+    set allow_font_download=false if the user disables downloads.
     format_text (or edit_content) takes style_edits: a list of objects with
     pages/slot_ids/text_scope plus optional target_font, font_size_pt (1-400 pt),
     bold, italic, underline (true/false), text_color (#RRGGBB), allow_download.
@@ -1874,10 +1882,27 @@ def edit_presentation(
     placeholder geometry to the source PPTX. Both inputs must be native PPTX files;
     the operation stays in main Chat and never starts a Workflow.
     """
-    if action == 'prepare_font':
-        from lazymind.chat.engine.tools.file_resources.font_library import ensure_font
+    if action == 'import_font' or font_filename:
+        font_path, err = _resolve_attachment(font_filename or filename, turn)
+        if err:
+            raise ToolExecutionError(f'Font attachment not found: {err}')
+        from lazymind.chat.engine.tools.file_resources.font_library import register_font
+        from lazymind.chat.engine.tools.file_resources.portable_fonts import font_bytes
         try:
-            return {'status': 'ok', 'target_font': ensure_font(target_font, allow_font_download)}
+            record = register_font(_materialize_local_path(font_path))
+            font_bytes(record)
+            if target_font and target_font.casefold() not in {a.casefold() for a in record['aliases']}:
+                raise ValueError('Uploaded font family does not match target_font')
+        except (ValueError, OSError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        if action == 'import_font':
+            return {'status': 'ok', 'font': record, 'portable': True}
+    if action == 'prepare_font':
+        from lazymind.chat.engine.tools.file_resources.portable_fonts import portable_font_faces
+        try:
+            family, records = portable_font_faces(target_font, allow_font_download)
+            return {'status': 'ok', 'target_font': family, 'portable': True,
+                    'font_files': [{'id': r['id'], 'weight': r['weight'], 'style': r['style']} for r in records]}
         except (ValueError, OSError) as exc:
             raise ToolExecutionError(str(exc)) from exc
     native_artifact = None
@@ -1972,8 +1997,9 @@ def edit_presentation(
                                         pages, slot_ids, text_scope, allow_font_download))
                 os.replace(font_output, candidate)
             if not candidate.exists():
-                if not style_edits:
-                    raise ToolExecutionError('Provide text_edits, speaker_notes, target_font or style_edits')
+                if not style_edits and not layout_edits:
+                    raise ToolExecutionError(
+                        'Provide text_edits, speaker_notes, target_font, style_edits or layout_edits')
             if style_edits is not None:
                 from lazymind.chat.engine.tools.file_resources.pptx_font_edit import edit_style_batch
                 if text_edits and any(isinstance(e, Mapping) and e.get('slot_ids') for e in style_edits):
@@ -1982,8 +2008,19 @@ def edit_presentation(
                 style_hash = hashlib.sha256(
                     style_source.read_bytes()).hexdigest() if candidate.exists() else source_sha256
                 style_output = Path(temporary) / 'styles.pptx'
-                stats.update(edit_style_batch(style_source, style_output, style_hash, style_edits))
+                scoped_styles = [{**edit, 'allow_download': edit.get('allow_download', allow_font_download)}
+                                 if isinstance(edit, Mapping) else edit for edit in style_edits]
+                stats.update(edit_style_batch(style_source, style_output, style_hash, scoped_styles))
                 os.replace(style_output, candidate)
+            if layout_edits is not None:
+                from lazymind.chat.engine.tools.file_resources.pptx_layout_edit import apply_layout_repairs
+                layout_source = candidate if candidate.exists() else Path(effective)
+                layout_hash = hashlib.sha256(layout_source.read_bytes()).hexdigest() if (
+                    candidate.exists()) else source_sha256
+                layout_output = Path(temporary) / 'layout.pptx'
+                stats.update(apply_layout_repairs(layout_source, layout_output, {'moves': layout_edits},
+                                                  source_sha256=layout_hash))
+                os.replace(layout_output, candidate)
             if native_artifact is not None:
                 import base64
                 raw = candidate.read_bytes()
@@ -2056,6 +2093,13 @@ def edit_presentation(
             pages=pages if normalized_action == 'replace_fonts' else None,
             text_scope=text_scope if normalized_action == 'replace_fonts' else 'all',
         )
+        if normalized_action == 'replace_fonts':
+            from lazymind.chat.engine.tools.file_resources.portable_fonts import portable_font_faces
+            from lazymind.chat.engine.tools.file_resources.pptx_font_embedding import embed_pptx_file
+            family, records = portable_font_faces(requested, allow_font_download)
+            stats['embedded_fonts'] = embed_pptx_file(candidate, family, records)
+            stats['edit_mode'] = 'sparse_patch'
+            stats['regenerated_pages'] = []
         os.replace(candidate, draft.draft_path)
     except (OSError, ValueError) as exc:
         try:

@@ -4073,7 +4073,7 @@ const zhCN = {
     workflowExportNoHtml: "暂无可导出的 HTML 幻灯片。",
     workflowExportFailed: "PPT 导出失败。",
     workflowExportSelectModeTitle: "选择导出格式",
-    workflowExportSelectModeDesc: "可编辑 PPTX 会保留文字、图形和字体名称（打开设备需安装对应字体）；图片版 PPTX 与 PDF 会完整保留当前视觉效果。",
+    workflowExportSelectModeDesc: "可编辑 PPTX 保留文字、图形和普通图表的编辑能力，复杂图表优先保留原始外观；打开设备需安装对应字体。图片版 PPTX 与 PDF 保留页面视觉效果。",
     workflowExportModeRaster: "图片版 PPTX",
     workflowExportModePdf: "PDF",
     workflowExportModeEditable: "可编辑 PPTX",

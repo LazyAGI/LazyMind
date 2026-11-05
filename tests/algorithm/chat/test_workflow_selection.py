@@ -826,6 +826,7 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
         )
         # resolve_workflow_injection's patch is applied to agentic_config by ChatService.
         lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
+        lazyllm.globals['agentic_config']['workflow_current_query'] = '过期的原始深色生成要求'
         result = _tool(contribution, 'advance_step')(['generate_ppt'])
 
     assert result == {'status': 'succeeded'}

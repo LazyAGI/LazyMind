@@ -4145,7 +4145,7 @@ const enUS = {
     workflowExportNoHtml: "No generated HTML slides are available to export.",
     workflowExportFailed: "PPT export failed.",
     workflowExportSelectModeTitle: "Choose export format",
-    workflowExportSelectModeDesc: "Editable PPTX preserves text, shapes, and font names (the fonts must be installed on the device that opens it); raster PPTX and PDF preserve the exact appearance.",
+    workflowExportSelectModeDesc: "Editable PPTX keeps text, shapes, and standard chart data editable; complex charts retain their original appearance. Matching fonts must be installed on the viewing device. Raster PPTX and PDF preserve the page appearance.",
     workflowExportModeRaster: "Raster PPTX",
     workflowExportModePdf: "PDF",
     workflowExportModeEditable: "Editable PPTX",

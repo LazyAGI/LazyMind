@@ -11,6 +11,9 @@ from lazymind.chat.engine.tools.file_resources.pptx_font_edit import edit_fonts
 @pytest.fixture
 def deck(tmp_path, monkeypatch):
     from lazymind.chat.engine.tools.file_resources import presentation_edit
+    from lazymind.chat.engine.tools.file_resources.font_library import register_font
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'font-library'))
+    register_font(make_font(tmp_path))
     monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: {'Test Font'})
     prs = Presentation()
     for p in range(2):
@@ -45,9 +48,14 @@ def test_font_scope_preserves_unselected_parts(deck, tmp_path, scope):
         assert run.font.size == Pt(20) and run.font.bold is True
     with ZipFile(deck) as before, ZipFile(out) as after:
         for name in before.namelist():
-            if name not in ({'ppt/slides/slide1.xml', 'ppt/slides/slide2.xml'}
-                            if scope == 'all' else {'ppt/slides/slide1.xml'}):
+            metadata = {'ppt/presentation.xml', 'ppt/_rels/presentation.xml.rels', '[Content_Types].xml'}
+            if name not in metadata | ({'ppt/slides/slide1.xml', 'ppt/slides/slide2.xml'}
+                                       if scope == 'all' else {'ppt/slides/slide1.xml'}):
                 assert before.read(name) == after.read(name), name
+        assert any(n.startswith('ppt/fonts/') for n in after.namelist())
+        assert b'embeddedFontLst' in after.read('ppt/presentation.xml')
+    assert stats['regenerated_pages'] == []
+    assert stats['embedded_fonts'][0]['family'] == 'Test Font'
     assert result.slides[0].shapes[-1].text_frame.paragraphs[0].runs[0].font.name == (
         None if scope == 'title' else 'Test Font')
 
@@ -215,3 +223,166 @@ def test_download_validates_and_registers_font_with_license(tmp_path, monkeypatc
     assert list((tmp_path / 'library').glob('*.OFL.txt'))
     assert font_library.ensure_font('Download Test', True) == 'Download Test'
     factory.assert_called_once_with(timeout=60, follow_redirects=False)
+
+
+def make_font(folder, family='Test Font', fs_type=0, text='正文 textTitle0123456789BodyKeep notes'):
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    builder = FontBuilder(1000, isTTF=True)
+    chars = sorted(set(text))
+    glyphs = ['.notdef'] + [f'u{ord(c):04X}' for c in chars]
+    builder.setupGlyphOrder(glyphs)
+    builder.setupCharacterMap({ord(c): g for c, g in zip(chars, glyphs[1:])})
+    builder.setupGlyf({g: TTGlyphPen(None).glyph() for g in glyphs})
+    builder.setupHorizontalMetrics({g: (500, 0) for g in glyphs})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable({'familyName': family, 'styleName': 'Regular',
+                           'fullName': family + ' Regular', 'psName': family.replace(' ', '') + '-Regular'})
+    builder.setupOS2(fsType=fs_type)
+    builder.setupPost()
+    path = folder / (family + '.ttf')
+    builder.save(path)
+    return path
+
+
+def test_font_resource_failures_do_not_change_source_or_destination(deck, tmp_path, monkeypatch):
+    from lazymind.chat.engine.tools.file_resources.font_library import register_font
+    from lazymind.chat.engine.tools.file_resources import presentation_edit
+    monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: {'Restricted', 'No Chinese'})
+    register_font(make_font(tmp_path, 'Restricted', fs_type=4))
+    register_font(make_font(tmp_path, 'No Chinese', text='text'))
+    original = deck.read_bytes()
+    output = tmp_path / 'unchanged.pptx'
+    output.write_bytes(b'previous output')
+    for family, message in [('Restricted', '不允许'), ('No Chinese', '缺少')]:
+        with pytest.raises(ValueError, match=message):
+            edit_fonts(deck, output, inspect_content(deck)['sha256'], family, pages=[1])
+        assert deck.read_bytes() == original
+        assert output.read_bytes() == b'previous output'
+
+
+def test_repeated_font_edit_reuses_resources_and_preserves_other_slides(deck, tmp_path):
+    first, second = tmp_path / 'first.pptx', tmp_path / 'second.pptx'
+    edit_fonts(deck, first, inspect_content(deck)['sha256'], 'Test Font', pages=[1])
+    edit_fonts(first, second, inspect_content(first)['sha256'], 'Test Font', pages=[2], text_scope='titles')
+    with ZipFile(first) as before, ZipFile(second) as after:
+        assert before.read('ppt/slides/slide1.xml') == after.read('ppt/slides/slide1.xml')
+        fonts = [n for n in after.namelist() if n.startswith('ppt/fonts/')]
+        assert len(fonts) == 1
+        from lazymind.chat.engine.tools.file_resources.font_library import local_fonts, font_library_root
+        raw = (font_library_root() / local_fonts()[0]['file']).read_bytes()
+        assert after.read(fonts[0]).endswith(raw)
+        from lxml import etree
+        root = etree.fromstring(after.read('ppt/presentation.xml'))
+        assert len(root.findall('.//{*}embeddedFont')) == 1
+
+
+@pytest.fixture
+def html_tools(monkeypatch, deck):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        'portable_html_tools', Path(__file__).parents[2]
+        / 'workflows/ppt-workflow/scripts/tests/test_style_flow.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module.TOOLS, 'available_font_families', lambda: {'Test Font'})
+    return module.TOOLS
+
+
+@pytest.mark.parametrize('scope,pages', [('all', [1]), ('titles', [1]), ('titles', None), ('all', None)])
+def test_html_font_edit_packages_bytes_and_never_generates(html_tools, tmp_path, monkeypatch, scope, pages):
+    folder = tmp_path / 'html'
+    (folder / 'pages').mkdir(parents=True)
+    original = ('<html><head></head><body><h1 data-el="title"><span style="font-family:Old">Title 1</span></h1>'
+                '<p data-el="body">正文 text</p><script>const unchanged = 123;</script></body></html>')
+    paths = [folder / f'pages/page_{p:03}.html' for p in (1, 2)]
+    for path in paths:
+        path.write_text(original)
+    monkeypatch.setattr(html_tools, '_resolve_deck_dir', lambda _: folder)
+    publisher = Mock(return_value={'published_count': len(pages or [1, 2]), 'failed_count': 0})
+    monkeypatch.setattr(html_tools, '_publish_pages_from_disk', publisher)
+    model = Mock(side_effect=AssertionError('font replacement must never generate'))
+    monkeypatch.setattr(html_tools, '_run_stage_inprocess', model)
+    result = html_tools.ppt_replace_deck_fonts(str(folder), 'Test Font', pages=pages, text_scope=scope)
+    assert result['regenerated_pages'] == []
+    assert publisher.call_args.args[1] == (pages or [1, 2])
+    changed = paths[0].read_text()
+    assert 'data-lazymind-font-required="true"' in changed
+    assert 'data:font/ttf;base64,' in changed
+    assert '<script>const unchanged = 123;</script>' in changed
+    assert 'font-family:Old' not in changed
+    if scope == 'titles':
+        assert '<p data-el="body">正文 text</p>' in changed
+    if pages:
+        assert paths[1].read_text() == original
+        assert not (folder / 'style_spec.json').exists()
+    model.assert_not_called()
+
+
+def test_html_missing_glyph_does_not_write_or_publish_any_page(html_tools, tmp_path, monkeypatch):
+    folder = tmp_path / 'html'
+    (folder / 'pages').mkdir(parents=True)
+    paths = [folder / f'pages/page_{p:03}.html' for p in (1, 2)]
+    for p, path in enumerate(paths):
+        path.write_text('<html><body><h1>' + ('Title' if p == 0 else '缺字') + '</h1></body></html>')
+    originals = [p.read_bytes() for p in paths]
+    monkeypatch.setattr(html_tools, '_resolve_deck_dir', lambda _: folder)
+    publisher = Mock()
+    monkeypatch.setattr(html_tools, '_publish_pages_from_disk', publisher)
+    with pytest.raises(RuntimeError, match='缺少'):
+        html_tools.ppt_replace_deck_fonts(str(folder), 'Test Font')
+    assert [p.read_bytes() for p in paths] == originals
+    publisher.assert_not_called()
+
+
+@pytest.mark.parametrize('stage', ['page-html', 'batch-page-html', 'style', 'outline'])
+def test_font_followup_cannot_enter_generation_stage(html_tools, tmp_path, monkeypatch, stage):
+    (tmp_path / 'pages').mkdir()
+    original = '<html><body>Keep content</body></html>'
+    path = tmp_path / 'pages/page_001.html'
+    path.write_text(original)
+    monkeypatch.setattr(html_tools, '_resolve_deck_dir', lambda _: tmp_path)
+    monkeypatch.setattr(html_tools, '_require_html_output', lambda: None)
+    monkeypatch.setattr(html_tools, 'require_context', lambda: SimpleNamespace(params={
+        'current_user_input': '第一页字体换成 Test Font，不要重新生成',
+    }))
+    model = Mock(side_effect=AssertionError('generation reached'))
+    monkeypatch.setattr(html_tools, '_run_stage_inprocess', model)
+    with pytest.raises(RuntimeError, match='ppt_replace_deck_fonts'):
+        html_tools.ppt_run_stage(str(tmp_path), stage, page=1)
+    assert path.read_text() == original
+    model.assert_not_called()
+
+
+def test_selected_html_font_edit_also_carries_font_bytes(html_tools):
+    original = ('<html><head></head><body><div data-el="title"><span>Title</span></div>'
+                '<p data-el="body">Body</p></body></html>')
+    updated, _, _, _ = html_tools._apply_html_ops(original, [
+        {'op': 'set_style', 'el': 'title', 'styles': {'font-family': 'Test Font'}}])
+    assert '<p data-el="body">Body</p>' in updated
+    assert 'data-lazymind-font-required="true"' in updated
+
+
+def test_import_font_attachment_is_available_to_scoped_native_edit(deck, tmp_path, monkeypatch):
+    from lazymind.chat.engine.subagent import tools
+    from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit
+    source = make_font(tmp_path, 'Uploaded Font')
+    monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
+    monkeypatch.setattr(tools, '_materialize_local_path', lambda value: value)
+    result = tools.edit_presentation(source.name, 'import_font')
+    assert result['portable'] is True and result['font']['family'] == 'Uploaded Font'
+    monkeypatch.setattr(presentation_edit, 'available_font_families',
+                        lambda: {r['family'] for r in font_library.local_fonts()})
+    output = tmp_path / 'uploaded-font.pptx'
+    report = edit_fonts(deck, output, inspect_content(deck)['sha256'], 'Uploaded Font', pages=[1])
+    assert report['embedded_fonts'][0]['family'] == 'Uploaded Font'
+
+
+def test_html_without_head_keeps_fonts_after_publication_sanitizer(html_tools):
+    from lazymind.chat.engine.tools.file_resources.font_library import local_font_css
+    original = '<html><body><h1 data-el="title">Title</h1><p>Body</p></body></html>'
+    updated, _, _, _ = html_tools._apply_html_ops(original, [
+        {'op': 'set_style', 'el': 'title', 'styles': {'font-family': 'Test Font'}}])
+    assert 'data-lazymind-font-required="true"' in html_tools._sanitize_page_html(updated)
+    assert local_font_css(updated) == ''  # Do not duplicate large font resources in preview.

@@ -205,6 +205,36 @@ deletion comes back: the rewriter keeps four columns and the generator invents a
 filler card. `ppt_patch_page_outline` warns about this, and both page prompts
 forbid padding a grid.
 
+## Font replacement and portable exports
+
+Font-only follow-ups patch existing content; they never call page generation,
+rewrite the outline, move boxes or regenerate unselected pages. Examples:
+
+- “全文字体换成 Noto Sans SC”：`ppt_replace_deck_fonts`, no `pages` filter.
+- “第一页字体换成 Noto Sans SC”：`pages=[1]`.
+- “全部标题字体换成 Noto Serif SC”：`text_scope=titles`.
+- For selected text, inspect its current element/slot ID and patch only that selection.
+
+For native PPTX, title scope means title placeholders; custom text-box titles
+need inspected slot IDs. Chart/SmartArt parts and text baked into images are not
+rewritten by the native text editor and are disclosed in its result.
+
+Missing Noto Sans SC / Noto Serif SC fonts download from the allowlisted source
+automatically; `allow_font_download=false` disables downloads. Other missing
+fonts fail without changing the document. User-provided
+TTF/OTF files can be imported with `ppt_import_font(filename=...)`; native edits
+also accept `font_filename`. System fonts are copied into the managed library
+only when their font metadata permits editable embedding. Restricted fonts and
+fonts missing the selected text's glyphs are rejected.
+
+HTML font edits contain full font data, so preview and editable export do not
+need the original font library or network. Native PPTX edits embed full font
+files without rebuilding slide content. Editable HTML-to-PPTX export validates
+the required font parts and relationships before replacing the exported file;
+failure preserves the previous export. This guarantees packaged font resources,
+not identical rendering in every presentation application. Existing export and
+artifact-size limits still apply; large fonts can cause an explicit size error.
+
 ## Defaults
 
 - Preview: iframe HTML (`preview_html`), auto-published after `page-html` stages

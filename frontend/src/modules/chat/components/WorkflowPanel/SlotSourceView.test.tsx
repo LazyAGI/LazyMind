@@ -71,3 +71,33 @@ it('displays PPT prompt text literally even with a legacy Markdown descriptor', 
   fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
   expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(prompt);
 });
+
+it.each(['academic_brief', 'deck_outline'])('renders %s as Markdown and preserves comments in editable source', async (slotName) => {
+  const text = '<!-- 汇报共 8 页 -->\n\n## 方法与证据\n\n**复杂度**：$O(n)$\n\n| 指标 | 数值 |\n| --- | --- |\n| 准确率 | 95% |';
+  const slot = { slot_id: slotName, slot: slotName, selected: true,
+    revision: 1, created_at: '', content_type: 'text', artifact_value: { text },
+    artifact_id: 'legacy-markdown', document: { representation: 'markdown', editable: true, capabilities: ['save'] },
+  } as SlotRevision;
+  const { container } = render(<SlotRenderer slot={slot} sessionId='ppt-session' widget={{ widgetType: 'text-markdown' }} />);
+  expect(await screen.findByRole('heading', { name: '方法与证据' })).toBeVisible();
+  expect(screen.getByRole('table')).toHaveTextContent('95%');
+  expect(screen.queryByText(/文档格式暂时无法解析/)).not.toBeInTheDocument();
+  expect(container.querySelector('.writer-markdown-editor')).toBeNull();
+  fireEvent.click(container.querySelector('.workflow-slot__text--markdown')!);
+  expect(await screen.findByRole('textbox', { name: '编辑文本' })).toHaveValue(text);
+});
+
+it('loads historical offloaded research analysis as Markdown without requiring a widget', async () => {
+  const text = '## 科研内容分析\n\n- **论文 A**：方法、公式与实验证据';
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, text: async () => text })));
+  const slot = { slot_id: 'academic_brief', slot: 'academic_brief', selected: true,
+    revision: 1, created_at: '', content_type: 'text',
+    artifact_value: { type: 'text', path: '/artifacts/research.txt', url: '/research.txt' },
+  } as SlotRevision;
+  render(<SlotRenderer slot={slot} sessionId='ppt-session' readOnly />);
+  expect(await screen.findByRole('heading', { name: '科研内容分析' })).toBeVisible();
+  fireEvent.doubleClick(screen.getByRole('heading', { name: '科研内容分析' }));
+  expect(screen.queryByRole('textbox', { name: '编辑文本' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '展示源码' }));
+  expect(await screen.findByRole('textbox', { name: '源码' })).toHaveValue(text);
+});

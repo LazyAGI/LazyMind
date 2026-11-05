@@ -59,8 +59,11 @@ def ensure_font(family: str, allow_download: bool = False) -> str:
             names = {n.toUnicode().casefold() for n in font['name'].names if n.nameID in {1, 16}}
             if canonical.casefold() not in names or int(getattr(font.get('OS/2'), 'fsType', 0)) & (2 | 512):
                 raise ValueError('Downloaded font family or embedding permission mismatch')
-        record = register_font(source)
-        (font_library_root() / (record['id'] + '.OFL.txt')).write_text(license_response.text, encoding='utf-8')
+        with TTFont(source) as font:
+            weights = (400, 700) if 'fvar' in font and any(a.axisTag == 'wght' for a in font['fvar'].axes) else (400,)
+        for weight in weights:
+            record = register_font(source, weight=weight)
+            (font_library_root() / (record['id'] + '.OFL.txt')).write_text(license_response.text, encoding='utf-8')
     return canonical
 
 
@@ -71,7 +74,7 @@ def font_library_root() -> Path:
                 or Path.home() / '.local/share/lazymind/fonts').expanduser().resolve()
 
 
-def register_font(source: str | Path) -> dict:
+def register_font(source: str | Path, *, weight=400) -> dict:
     from fontTools.ttLib import TTFont
 
     source = Path(source)
@@ -83,7 +86,7 @@ def register_font(source: str | Path) -> dict:
         if 'fvar' in font:
             from fontTools.varLib.instancer import instantiateVariableFont
             font = instantiateVariableFont(font, {
-                a.axisTag: min(a.maxValue, max(a.minValue, 400)) if a.axisTag == 'wght' else a.defaultValue
+                a.axisTag: min(a.maxValue, max(a.minValue, weight)) if a.axisTag == 'wght' else a.defaultValue
                 for a in font['fvar'].axes
             })
         names = font['name']
@@ -136,8 +139,14 @@ def local_fonts() -> list[dict]:
 def local_font_css(html: str) -> str:
     """Self-contained fonts for browser previews; no expiring cloud URLs."""
     blocks = []
+    packaged = set()
+    for token in re.findall(r'/\*lazymind-font:([A-Za-z0-9+/=]+)\*/', html):
+        try:
+            packaged.add(json.loads(base64.b64decode(token))['sha256'])
+        except (ValueError, KeyError, TypeError):
+            continue
     for record in local_fonts():
-        if not record['embeddable']:
+        if not record['embeddable'] or record['id'] in packaged:
             continue
         aliases = [name for name in record['aliases'] if name.casefold() in html.casefold()]
         if not aliases:

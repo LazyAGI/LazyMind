@@ -23,6 +23,13 @@ class SpeakerNote(TypedDict):
     text: str
 
 
+class LayoutEdit(TypedDict):
+    page: int
+    shape_id: int
+    expected_box: List[float]
+    box: List[float]
+
+
 class StyleEdit(TypedDict, total=False):
     pages: List[int]
     slot_ids: List[str]
@@ -65,10 +72,11 @@ def _session() -> str:
 
 @fc_register(host_file='NONE')
 def inspect_current_pptx(page: int = 1) -> Dict[str, Any]:
-    """Read ONE page's editable text, chart indices/colors and speaker notes. Pages are 1-based.
+    """Read ONE page's text, shape geometry, chart colors and notes. Pages are 1-based.
 
     Copy exact slot IDs, never guess. For all-page speeches read each page using
-    next_page until null. Layout/font diagnostics are intentionally omitted.
+    next_page until null. Layout shape_ids differ from text slot IDs; copy the
+    inspected box as expected_box for a local geometry edit. Boxes use inches.
     """
     result = tools.edit_presentation('native_pptx', 'inspect_content', pages=page,
                                      workflow_session_id=_session())
@@ -79,7 +87,7 @@ def inspect_current_pptx(page: int = 1) -> Dict[str, Any]:
                                   **{k: s[k] for k in ('shape_name', 'shape_id') if s.get(k) is not None}}
                                  for s in p['slots']],
                        'speaker_notes': p['speaker_notes'],
-                       'charts': p.get('charts', [])} for p in result['pages']]}
+                       'charts': p.get('charts', []), 'layout': p.get('layout')} for p in result['pages']]}
 
 
 @fc_register(host_file='NONE')
@@ -108,9 +116,11 @@ def publish_pptx_edit(source_sha256: str,
                       pages: Optional[List[int]] = None,
                       slot_ids: Optional[List[str]] = None,
                       text_scope: str = 'all',
-                      allow_font_download: bool = False,
+                      allow_font_download: bool = True,
+                      font_filename: Optional[str] = None,
                       style_edits: Optional[List[StyleEdit]] = None,
-                      chart_edits: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+                      chart_edits: Optional[List[Dict[str, Any]]] = None,
+                      layout_edits: Optional[List[LayoutEdit]] = None) -> Dict[str, Any]:
     """Publish sparse text edits and/or notes once, then finish the task.
 
     Use the inspected source_sha256. text_edits: [{id,expected_text,text}],
@@ -122,7 +132,10 @@ def publish_pptx_edit(source_sha256: str,
     for page one, or exact inspected slot_ids for selected text. text_scope can
     be all/titles/body (titles matches native title placeholders; use slot_ids
     for custom text-box titles). Keep font size, weight and content unchanged.
-    Set allow_font_download only when user asks to download missing open fonts.
+    Missing allowlisted open fonts download by default as part of replacement.
+    Set allow_font_download=false when the user disables downloads.
+    font_filename imports a user-uploaded TTF/OTF before changing fonts. Font
+    resources are embedded in the resulting PPTX; failure must not regenerate.
     style_edits applies differently scoped text formatting in ONE revision, e.g.
     [{pages:[1],text_scope:'titles',font_size_pt:28,bold:true},
      {slot_ids:['4:3'],italic:true,underline:false,text_color:'#CC0000'}].
@@ -133,6 +146,10 @@ def publish_pptx_edit(source_sha256: str,
     chart_edits: [{page, chart_index, palette}] recolors only an inspected chart.
     palette is blue/teal/orange/purple or a list of distinct #RRGGBB colors.
     It preserves chart values, workbook, labels, positions and other pages.
+    layout_edits: [{page,shape_id,expected_box,box}] moves/resizes only inspected
+    shapes; boxes are [x,y,width,height] in inches. Copy expected_box from layout.
+    Use this for local layout changes instead of rebuilding the deck. Top-level
+    groups move/resize as a unit. Content and all unmentioned shapes are retained.
     """
     session = _session()
     ctx = require_context()
@@ -144,8 +161,10 @@ def publish_pptx_edit(source_sha256: str,
         require_all_notes=require_all_notes, workflow_session_id=session,
         target_font=target_font, pages=pages, slot_ids=slot_ids,
         text_scope=text_scope, allow_font_download=allow_font_download,
+        font_filename=font_filename,
         style_edits=style_edits,
         chart_edits=chart_edits,
+        layout_edits=layout_edits,
     )
     if result.get('status') != 'ok' or not result.get('workflow_artifact'):
         raise ToolExecutionError('PPTX publication did not return a successful artifact revision')

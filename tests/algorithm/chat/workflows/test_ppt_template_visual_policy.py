@@ -9,13 +9,13 @@ def test_template_collection_preserves_visuals_and_text_evidence():
     steps = state['steps']
     collect = steps['collect_materials']
     assert {'material': 'template_mode', 'required': False} in collect['inputs']
-    assert 'Default to zero material_images' in collect['prompt']
+    assert 'A template disables AI backgrounds, not evidence screenshots' in collect['prompt']
     assert 'image_topk=0' in collect['prompt']
     assert 'No applicable KB alone is not a reason' in collect['prompt']
     assert 'must not skip required text sources' in collect['prompt']
     assert 'ppt_collect_github_prs' in collect['tools']
     assert steps['generate_backgrounds']['skip_if'] == {'material': 'skip_background_images'}
-    assert 'Do not collect additional images or generate backgrounds' in steps['generate_ppt']['prompt']
+    assert 'Reuse registered evidence screenshots/figures' in steps['generate_ppt']['prompt']
 
 
 def test_template_is_read_before_material_collection():
@@ -69,7 +69,7 @@ def test_material_stage_only_displays_summary():
     root = Path(__file__).resolve().parents[4]
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     tab = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
-    assert tab['slots'] == [{'id': 'material_summary'}, {'id': 'academic_brief'}]
+    assert tab['slots'] == [{'id': 'material_summary'}]
     slots = {slot['id']: slot for slot in workflow['slots']}
     for name in ('template_pptx', 'uploaded_materials', 'material_images'):
         assert slots[name]['exposed'] is False

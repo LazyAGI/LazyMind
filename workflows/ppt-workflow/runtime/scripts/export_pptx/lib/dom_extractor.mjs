@@ -200,6 +200,8 @@ const BROWSER_EXTRACT_FN = () => {
       'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
       'stroke-dasharray', 'stroke-miterlimit',
       'opacity', 'fill-opacity', 'stroke-opacity',
+      'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing',
+      'text-anchor', 'dominant-baseline', 'stop-color', 'stop-opacity',
     ];
     const clone = svgEl.cloneNode(true);
     const origNodes = [svgEl, ...svgEl.querySelectorAll('*')];
@@ -212,8 +214,8 @@ const BROWSER_EXTRACT_FN = () => {
       for (const attr of SVG_PRESENTATION_ATTRS) {
         let val = cs.getPropertyValue(attr);
         if (!val || val === 'normal' || val === 'auto') continue;
-        // Skip if attribute already explicitly set (HTML wins over computed)
-        if (target.hasAttribute(attr)) continue;
+        // Computed CSS wins over presentation attributes and resolves variables.
+        target.style.setProperty(attr, val);
         // SVG presentation attrs use unitless lengths (vs CSS px). Strip 'px'
         // suffix so PowerPoint's strict SVG parser accepts the value.
         if (/-(?:width|miterlimit|offset)$/.test(attr) || attr === 'stroke-dasharray') {
@@ -222,7 +224,7 @@ const BROWSER_EXTRACT_FN = () => {
         target.setAttribute(attr, val);
       }
     }
-    return clone.outerHTML;
+    return new XMLSerializer().serializeToString(clone);
   }
 
   function hasOwnDecoration(el) {
@@ -818,8 +820,17 @@ export async function extractPage(page, htmlPath) {
         const inst = window.echarts.getInstanceByDom(el);
         if (!inst) continue;
         const opt = inst.getOption();
+        let renderedImageDataUri;
+        // ECharts' SVG string exporter can emit unescaped quotes in font-family.
+        // SVG charts use the styled DOM serialization below; canvas charts use PNG.
+        if (!el.querySelector('svg')) {
+          try { renderedImageDataUri = inst.getDataURL({ type: 'png', pixelRatio: 2 }); } catch { /* keep native option */ }
+        }
         result[el.id] = {
           option: opt,
+          // Keep an exact visual for features the native mapper cannot express.
+          // SVG renderers return a vector image; canvas renderers return PNG.
+          renderedImageDataUri,
           bounds: (() => {
             const r = el.getBoundingClientRect();
             return { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -833,6 +844,21 @@ export async function extractPage(page, htmlPath) {
   });
 
   const ir = await page.evaluate(BROWSER_EXTRACT_FN);
+
+  // Reuse the computed-style SVG clone, whose attributes are safely escaped by
+  // DOM serialization. This also preserves fonts and colors outside page CSS.
+  const attachChartSvg = node => {
+    if (!node) return;
+    const entry = chartOptionsMap[node.id];
+    if (entry && !entry.renderedImageDataUri) {
+      const findSvg = current => current?.svgContent || (current?.children || []).map(findSvg).find(Boolean);
+      const svg = findSvg(node);
+      if (svg) entry.renderedImageDataUri = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
+    }
+    for (const child of node.children || []) attachChartSvg(child);
+  };
+  for (const key of ['bg', 'header', 'ct', 'footer']) attachChartSvg(ir?.[key]);
+  for (const node of [...(ir?.overlays || []), ...(ir?.rest || [])]) attachChartSvg(node);
 
   // Attach chart options to the IR so pptx_builder can emit native charts.
   if (Object.keys(chartOptionsMap).length > 0 && ir) {

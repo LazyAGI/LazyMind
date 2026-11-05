@@ -16,6 +16,13 @@ This workflow helps users create a multi-slide presentation using the
 
 Workflow:
 
+Main Chat owns requirement analysis and launch: understand the user's goal,
+bind supplied template and source references, and trigger the Workflow. It does
+not list work records, read document bodies, search local source directories,
+compare evidence or select the largest contributions before launch. Preserve
+those instructions for `collect_materials`. After launch, main Chat coordinates
+Workflow steps and relays progress, questions and user feedback.
+
 Uploaded PPTX templates are read inside `analyze_requirements`, before material
 collection. This step reads every original page and additionally saves
 `template_content_brief` (sections, slots, evidence requirements and gaps).
@@ -53,18 +60,19 @@ template prompts for HTML/PPTX; never ask whether to upload/use a template.
 
 Steps 3 and 4 are skipped together when AI backgrounds are disabled.
 There is one staged generation route. Do not ask quick/full generation mode.
-Charts (including proportions),
+ Charts (including proportions),
 icons and formulas use the shared HTML renderer in every scenario. Native
 PPTX template filling retains its existing visual-editing limitations.
 
 Academic scenarios collect and analyze sources in the same `collect_materials`
 step, then continue to background/outline planning without a separate analysis
-or reading-reflection step. The Materials tab displays `academic_brief`, preserving per-paper attribution, formulas,
+or reading-reflection step. The Materials tab displays one Markdown `material_summary`,
+combining the source inventory and detailed analysis while preserving per-paper attribution, formulas,
 figures, findings and limitations. Multiple attachments are parsed independently
 to EOF and retain source IDs through comparison, synthesis and page prompts.
 Before writing a multi-paper outline, collection records evidenced methodological
 prerequisites and calls `ppt_plan_paper_order` to put prerequisite methods first.
-The result and rationale live in `academic_brief`; citations or benchmark relations
+The result and rationale live in `material_summary`; citations or benchmark relations
 alone do not establish dependencies. Each paper retains problem/motivation,
 method/process, and experiments/limitations, including when the user requests a
 compressed deck. Page prompts and native PPTX composition follow that order.
