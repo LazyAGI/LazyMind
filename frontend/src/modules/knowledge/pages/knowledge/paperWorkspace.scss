@@ -65,7 +65,12 @@
   .knowledge-paper-workspace[data-narrow=true] > .paper-nav-pane:not(.is-collapsed) { inset: 0 auto 8px 8px; z-index: 65; }
   .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane:not(.is-collapsed) { inset: 4px 4px 4px auto; width: min(420px, calc(100% - 8px)); border-radius: 12px; }
 }
-.paper-document-actions-popover .paper-document-actions { max-width: min(520px, calc(100vw - 48px)); padding: 6px; }
+.paper-document-actions-popover .paper-document-actions { display: flex; flex-direction: column; gap: 8px; width: min(340px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto; padding: 8px; }
+.paper-document-actions-popover .pdf-reader-toolbar { position: static; display: block; width: 100%; max-width: 100% !important; min-height: 0; padding: 0; border: 0; background: transparent; box-sizing: border-box; }
+.paper-document-actions-popover .pdf-formula-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; }
+.paper-document-actions-popover .pdf-reader-service-notice { flex: 1 1 100%; padding: 10px 12px; border: 1px solid #dce7f7; border-radius: 8px; background: #f5f9ff; color: #42566e; font-size: 12px; line-height: 1.5; }
+.paper-document-actions-popover .pdf-reader-parser-details { flex: 1 1 100%; }
+.paper-document-actions-popover .pdf-reader-parser-details > div { position: static; width: auto; min-width: 0; margin-top: 6px; box-shadow: none; }
 .paper-document-actions > span { flex-wrap: wrap; }
 .paper-document-actions .detail-title-text { display: none; }
 .paper-document-metadata { max-width: min(400px, calc(100vw - 64px)); overflow-wrap: anywhere; }
