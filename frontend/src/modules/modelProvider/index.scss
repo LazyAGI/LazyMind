@@ -1793,6 +1793,58 @@
   padding: 16px;
 }
 
+.model-provider-python-component {
+  border-radius: 12px;
+
+  .model-provider-python-component-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .model-provider-service-category-head { align-items: center; }
+  .model-provider-python-component-copy { min-width: 0; }
+  .model-provider-python-component-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+
+    h3 { font-size: 16px; font-weight: 700; }
+    .ant-tag { margin: 0; padding-inline: 8px; border: 0; border-radius: 999px; }
+  }
+
+  .model-provider-python-component-meta {
+    display: block;
+    margin-top: 4px;
+    color: #718096;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .model-provider-python-component-actions {
+    flex: 0 0 auto;
+    max-width: 100%;
+
+    .ant-btn { border-radius: 8px; }
+  }
+
+  .model-provider-python-component-notice {
+    margin: 12px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid #e7edf5;
+    color: #64748b;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  > .ant-alert { margin-top: 12px; }
+}
+
+@media (max-width: 900px) {
+  .model-provider-python-component .model-provider-python-component-row { flex-wrap: wrap; gap: 12px; }
+}
+
 .model-provider-service-category-top {
   display: flex;
   align-items: flex-start;

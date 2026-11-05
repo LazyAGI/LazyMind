@@ -56,6 +56,8 @@ type Candidate = {
   disabledReasonKey?: string;
 };
 
+type CandidatePage = { items: Candidate[]; nextPageToken?: string };
+
 type QueryState = {
   trigger: "@" | "/";
   keyword: string;
@@ -189,6 +191,14 @@ function unwrap<T>(value: T | { data?: T }): T {
     : (value as T);
 }
 
+async function loadConversationCandidates(keyword: string, runInBackground: boolean, signal?: AbortSignal, pageToken = ""): Promise<CandidatePage> {
+  const response = await ChatServiceApi().conversationServiceListConversations({ keyword, pageSize: 50, pageToken }, { params: { is_task_conv: runInBackground }, signal });
+  return {
+    items: (response.data.conversations || []).map((item) => ({ id: item.conversation_id || item.name || "", type: "conversation", name: item.display_name || item.conversation_id || "" })),
+    nextPageToken: response.data.next_page_token,
+  };
+}
+
 async function loadCandidates(type: CandidateType, keyword: string, runInBackground: boolean, signal?: AbortSignal): Promise<Candidate[]> {
   if (type === "knowledge_base") {
     const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets({ keyword, pageSize: 100 });
@@ -228,8 +238,7 @@ async function loadCandidates(type: CandidateType, keyword: string, runInBackgro
       })
       .filter((item) => !keyword || `${item.name} ${item.description}`.toLowerCase().includes(keyword.toLowerCase()));
   }
-  const response = await ChatServiceApi().conversationServiceListConversations({ keyword, pageSize: 50, pageToken: "" }, { params: { is_task_conv: runInBackground }, signal });
-  return (response.data.conversations || []).map((item) => ({ id: item.conversation_id || item.name || "", type, name: item.display_name || item.conversation_id || "" }));
+  return (await loadConversationCandidates(keyword, runInBackground, signal)).items;
 }
 
 function replaceCandidateGroup(current: Candidate[], type: CandidateType, items: Candidate[]) {
@@ -300,7 +309,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [activeKey, setActiveKey] = useState<string>();
   const [loading, setLoading] = useState(false);
-  const [expandedTypes, setExpandedTypes] = useState<Set<CandidateType>>(new Set());
+  const [conversationPage, setConversationPage] = useState({ token: "", loading: false, error: false });
+  const pageRequestRef = useRef<AbortController | null>(null);
   const [menuPlacement, setMenuPlacement] = useState<MenuPlacement>({
     direction: "above",
     height: MENU_MAX_HEIGHT,
@@ -308,6 +318,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
 
   const closeMenu = useCallback(() => {
     requestRef.current += 1;
+    pageRequestRef.current?.abort();
+    pageRequestRef.current = null;
     queryRef.current = null;
     setQuery(null);
     setActiveKey(undefined);
@@ -422,21 +434,26 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     setCandidates([]);
     setLoading(true);
     setLoadError(false);
+    setConversationPage({ token: "", loading: false, error: false });
     const timer = window.setTimeout(() => {
       let remaining = targetGroups.length;
       if (!remaining) setLoading(false);
       targetGroups.forEach(group => {
         const key = `${group.type}:${query.keyword.toLocaleLowerCase()}`;
         const cached = candidateCache.current.get(key);
-        const request = group.type === 'file'
-          ? Promise.resolve(fileCandidates.map<Candidate>(file => ({ ...file, type: 'file' as const, disabledReasonKey: file.disabled ? 'chat.mentionFileUploading' : undefined })))
-          : cached && !bypassCandidateCache(group.type) ? Promise.resolve(cached)
-          : loadCandidates(group.type, query.keyword, runInBackground, controller.signal);
-        request.then(items => {
+        const request: Promise<CandidatePage> = group.type === 'conversation'
+          ? loadConversationCandidates(query.keyword, runInBackground, controller.signal)
+          : (group.type === 'file'
+            ? Promise.resolve(fileCandidates.map<Candidate>(file => ({ ...file, type: 'file' as const, disabledReasonKey: file.disabled ? 'chat.mentionFileUploading' : undefined })))
+            : cached && !bypassCandidateCache(group.type) ? Promise.resolve(cached)
+            : loadCandidates(group.type, query.keyword, runInBackground, controller.signal)).then(items => ({ items }));
+        request.then(({ items, nextPageToken }) => {
           if (requestRef.current !== requestId || controller.signal.aborted) return;
-          const filtered = items.filter(item => item.id && item.name && `${item.name} ${item.description || ""}`.toLocaleLowerCase().includes(query.keyword.trim().toLocaleLowerCase()));
+          const filtered = items.filter(item => item.id && item.name && (group.type === 'conversation'
+            || `${item.name} ${item.description || ""}`.toLocaleLowerCase().includes(query.keyword.trim().toLocaleLowerCase())));
           candidateCache.current.set(key, filtered);
           setCandidates(current => replaceCandidateGroup(current, group.type, filtered));
+          if (group.type === 'conversation') setConversationPage({ token: nextPageToken || "", loading: false, error: false });
         }).catch(() => {
           if (requestRef.current === requestId && !controller.signal.aborted) setLoadError(true);
         }).finally(() => {
@@ -445,8 +462,42 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         });
       });
     }, query.keyword ? 180 : 0);
-    return () => { controller.abort(); window.clearTimeout(timer); };
+    return () => {
+      controller.abort();
+      pageRequestRef.current?.abort();
+      pageRequestRef.current = null;
+      window.clearTimeout(timer);
+    };
   }, [query?.keyword, query?.type, query?.trigger, availableGroups, runInBackground, fileCandidates, retryCount]);
+
+  const loadMoreConversations = async () => {
+    if (!query || !conversationPage.token || pageRequestRef.current) return;
+    const controller = new AbortController();
+    pageRequestRef.current = controller;
+    const requestId = requestRef.current;
+    setConversationPage(current => ({ ...current, loading: true, error: false }));
+    try {
+      const page = await loadConversationCandidates(query.keyword, runInBackground, controller.signal, conversationPage.token);
+      if (controller.signal.aborted || requestRef.current !== requestId) return;
+      setCandidates(current => {
+        const loaded = current.filter(item => item.type === 'conversation');
+        const ids = new Set(loaded.map(item => item.id));
+        const added = page.items.filter(item => {
+          if (!item.id || !item.name || ids.has(item.id)) return false;
+          ids.add(item.id);
+          return true;
+        });
+        return replaceCandidateGroup(current, 'conversation', [...loaded, ...added]);
+      });
+      setConversationPage({ token: page.nextPageToken || "", loading: false, error: false });
+    } catch {
+      if (!controller.signal.aborted && requestRef.current === requestId) {
+        setConversationPage(current => ({ ...current, loading: false, error: true }));
+      }
+    } finally {
+      if (pageRequestRef.current === controller) pageRequestRef.current = null;
+    }
+  };
 
   useEffect(() => {
     if (!query) return;
@@ -473,7 +524,6 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     queryRef.current = next;
     setQuery(next);
     setActiveKey(undefined);
-    setExpandedTypes(new Set());
   }, [allowMentions, onQueryOpen]);
 
   const getDisabledReason = useCallback((candidate: Candidate) => (
@@ -543,24 +593,19 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     emit();
   };
 
-  const visibleCandidates = candidates.filter((candidate) => {
-    if (expandedTypes.has(candidate.type)) return true;
-    return candidates.filter((item) => item.type === candidate.type).indexOf(candidate) < 9;
-  });
-
-  const activeIndex = visibleCandidates.findIndex(item => `${item.type}:${item.id}` === activeKey);
+  const activeIndex = candidates.findIndex(item => `${item.type}:${item.id}` === activeKey);
 
   const moveActiveCandidate = (direction: 1 | -1) => {
-    if (!visibleCandidates.some((candidate) => !isCandidateDisabled(candidate))) {
+    if (!candidates.some((candidate) => !isCandidateDisabled(candidate))) {
       setActiveKey(undefined);
       return;
     }
     setActiveKey((current) => {
-      const currentIndex = visibleCandidates.findIndex(item => `${item.type}:${item.id}` === current);
+      const currentIndex = candidates.findIndex(item => `${item.type}:${item.id}` === current);
       let index = currentIndex < 0 ? (direction > 0 ? -1 : 0) : currentIndex;
-      for (let step = 0; step < visibleCandidates.length; step += 1) {
-        index = (index + direction + visibleCandidates.length) % visibleCandidates.length;
-        if (!isCandidateDisabled(visibleCandidates[index])) return `${visibleCandidates[index].type}:${visibleCandidates[index].id}`;
+      for (let step = 0; step < candidates.length; step += 1) {
+        index = (index + direction + candidates.length) % candidates.length;
+        if (!isCandidateDisabled(candidates[index])) return `${candidates[index].type}:${candidates[index].id}`;
       }
       return undefined;
     });
@@ -607,9 +652,9 @@ const MentionEditor = forwardRef<MentionEditorRef, {
               moveActiveCandidate(event.key === "ArrowDown" ? 1 : -1);
               return;
             }
-            if ((event.key === "Enter" || event.key === "Tab") && activeIndex >= 0 && visibleCandidates[activeIndex]) {
+            if ((event.key === "Enter" || event.key === "Tab") && activeIndex >= 0 && candidates[activeIndex]) {
               event.preventDefault();
-              insertCandidate(visibleCandidates[activeIndex]);
+              insertCandidate(candidates[activeIndex]);
               return;
             }
             if (event.key === "Escape") {
@@ -630,16 +675,21 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           id={menuId}
           className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}`}
           role="listbox"
+          aria-busy={loading || conversationPage.loading}
           style={{ height: menuPlacement.height }}
           onMouseDown={(event) => event.preventDefault()}
+          onScroll={(event) => {
+            const menu = event.currentTarget;
+            if (!conversationPage.error && menu.scrollHeight - menu.scrollTop - menu.clientHeight <= 24) {
+              void loadMoreConversations();
+            }
+          }}
         >
           {loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("common.loading")}</div> : null}
           {loadError ? <div className="chat-mention-empty" role="alert">{t("chat.mentionLoadFailed")} <button type="button" onClick={() => setRetryCount(count => count + 1)}>{t("common.retry")}</button></div> : null}
           {!loading && !loadError && candidates.length === 0 ? <div className="chat-mention-empty">{t("chat.mentionNoResults")}</div> : null}
           {availableGroups.filter((group) => group.trigger === query.trigger && (!query.type || group.type === query.type)).map((group) => {
-            const allItems = candidates.filter((item) => item.type === group.type);
-            const isExpanded = expandedTypes.has(group.type);
-            const items = isExpanded ? allItems : allItems.slice(0, 9);
+            const items = candidates.filter((item) => item.type === group.type);
             if (!items.length) return null;
             return <div className={`chat-mention-group${group.type === "conversation" ? " is-conversation" : ""}`} key={group.type}>
               <div className="chat-mention-group-title">
@@ -648,7 +698,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
               </div>
               <div className="chat-mention-options">
               {items.map((item) => {
-                const index = visibleCandidates.indexOf(item);
+                const index = candidates.indexOf(item);
                 const itemDisabled = isCandidateDisabled(item);
                 const itemDisabledReason = getDisabledReason(item);
                 const title = itemDisabled
@@ -661,11 +711,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
                 </button>;
               })}
               </div>
-              {allItems.length > 9 || isExpanded ? (
-                <button type="button" className="chat-mention-expand" onMouseDown={(event) => { event.preventDefault(); setExpandedTypes((current) => { const next = new Set(current); if (isExpanded) next.delete(group.type); else next.add(group.type); return next; }); setActiveKey(undefined); }}>
-                  {isExpanded ? t("chat.mentionCollapse") : t("chat.mentionShowMore", { count: allItems.length })}
-                </button>
-              ) : null}
+              {group.type === 'conversation' ? <>
+                {conversationPage.loading && <div className="chat-mention-empty" role="status">{t("common.loading")}</div>}
+                {conversationPage.error && <div className="chat-mention-empty" role="alert">
+                  {t("chat.mentionLoadFailed")} <button type="button" onClick={() => void loadMoreConversations()}>{t("common.retry")}</button>
+                </div>}
+              </> : null}
             </div>;
           })}
         </div>

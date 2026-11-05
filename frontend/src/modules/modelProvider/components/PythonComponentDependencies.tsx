@@ -1,6 +1,7 @@
 import { useRAGComponent } from "../contexts/RAGComponentContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Modal, Space, Tag } from "antd";
+import { DatabaseOutlined } from "@ant-design/icons";
 import { Link, useLocation } from "react-router-dom";
 import { getPythonComponents, type PythonComponentStatus } from "../api/systemDependencies";
 import {
@@ -46,25 +47,33 @@ export default function PythonComponentDependencies() {
     {loadError && !busy && <Alert type="error" showIcon message="无法读取可选组件状态" description={loadError}
       action={<Button onClick={() => void refresh()}>重试</Button>} />}
     {items.filter(item => item.installSupported).map(item => <section key={item.id}
-      id={`python-${item.id}-dependency`} className="model-provider-service-category">
-      <h3>{names[item.id]} <Tag color={item.active ? "green" : "default"}>
-        {busy ? progressLabel : item.active ? "已启用" : item.restartRequired ? "等待启用" : "未安装"}
-      </Tag></h3>
-      <p>{descriptions[item.id]}</p>
-      <Space wrap>
-        <span>{item.installMethod === "source" ? "按本地源码依赖配置下载并安装" : `下载约 ${((item.sizeBytes || 0) / 1048576).toFixed(1)} MiB`}</span>
-        {busy ? <Button type="primary" loading disabled>{progressLabel}</Button> : <>
-          {!item.installed && <Button type="primary" disabled={item.installing} onClick={() => setSelected(item)}>
-            {item.installing ? "安装中" : "安装组件"}
-          </Button>}
-          {item.restartRequired && (item.installMethod === "source"
-            ? <span>依赖已安装，请执行 make local-down，再执行 make local-up LAZYMIND_RAG_ENABLED=false 启用。</span>
-            : <Button onClick={() => void runPythonComponentTask(item.id, true)}>重试启用组件</Button>)}
-        </>}
-        {task.phase === "installing" && <Button onClick={cancelPythonComponentDownload}>取消下载</Button>}
-        <Button disabled={busy} onClick={() => void refresh()}>刷新状态</Button>
-      </Space>
-      {busy && <p>正在后台处理，可以继续浏览其他页面。安装后会自动重启本地服务，确认启用后再通知你。</p>}
+      id={`python-${item.id}-dependency`} className="model-provider-service-category model-provider-python-component">
+      <div className="model-provider-python-component-row">
+        <div className="model-provider-service-category-head">
+          <span aria-hidden="true"><DatabaseOutlined /></span>
+          <div className="model-provider-python-component-copy">
+            <div className="model-provider-python-component-title">
+              <h3>{names[item.id]}</h3>
+              <Tag color={item.active ? "success" : "default"}>
+                {busy ? progressLabel : item.active ? "已启用" : item.restartRequired ? "等待启用" : "未安装"}
+              </Tag>
+            </div>
+            <p>{descriptions[item.id]}</p>
+            <span className="model-provider-python-component-meta">{item.installMethod === "source" ? "按本地源码依赖配置下载并安装" : `下载约 ${((item.sizeBytes || 0) / 1048576).toFixed(1)} MiB`}</span>
+          </div>
+        </div>
+        <Space className="model-provider-python-component-actions" wrap>
+          {busy ? <Button type="primary" loading disabled>{progressLabel}</Button> : <>
+            {!item.installed && <Button type="primary" disabled={item.installing} onClick={() => setSelected(item)}>
+              {item.installing ? "安装中" : "安装组件"}
+            </Button>}
+            {item.restartRequired && item.installMethod !== "source" && <Button onClick={() => void runPythonComponentTask(item.id, true)}>重试启用组件</Button>}
+          </>}
+          {task.phase === "installing" && <Button onClick={cancelPythonComponentDownload}>取消下载</Button>}
+        </Space>
+      </div>
+      {!busy && item.restartRequired && item.installMethod === "source" && <p className="model-provider-python-component-notice">依赖已安装，请执行 make local-down，再执行 make local-up LAZYMIND_RAG_ENABLED=false 启用。</p>}
+      {busy && <p className="model-provider-python-component-notice">正在后台处理，可以继续浏览其他页面。安装后会自动重启本地服务，确认启用后再通知你。</p>}
       {task.phase === "error" && <Alert type="error" showIcon message="组件未完成启用" description={task.error} />}
     </section>)}
     <Modal title={selected ? `安装${names[selected.id]}` : "安装组件"} open={!!selected}

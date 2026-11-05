@@ -948,7 +948,10 @@
 }
 .settings-system-tools-stack.has-local-dependencies {
   display: grid;
-  grid-template-rows: minmax(0, 2fr) minmax(220px, 1fr);
+  grid-template-rows: minmax(320px, 1fr);
+  grid-auto-rows: max-content;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .settings-system-tools-dependencies {
   min-height: 0;
@@ -966,7 +969,7 @@
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
-  padding: 20px;
+  padding: 18px;
   border-radius: 12px;
   background: rgba(255, 255, 255, .97);
 }
@@ -982,8 +985,8 @@
 }
 .settings-integrated-surface.is-system-tools .model-provider-service-category-top {
   align-items: center;
-  margin-bottom: 18px;
-  padding-bottom: 16px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #e7edf5;
 }
 .settings-integrated-surface.is-system-tools .model-provider-tool-category-title > span {
@@ -1061,8 +1064,8 @@
   min-width: auto;
 }
 .settings-integrated-surface.is-system-tools .model-provider-managed-tool-pagination.ant-pagination {
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid #edf1f6;
 }
 .settings-model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 18px; }

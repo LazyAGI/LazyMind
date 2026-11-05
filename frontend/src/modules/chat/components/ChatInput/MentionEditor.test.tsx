@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRef } from "react";
 import MentionEditor, { type MentionEditorRef } from "./MentionEditor";
@@ -60,6 +60,16 @@ describe("MentionEditor", () => {
     fireEvent.input(editor);
   };
 
+  const scrollMenu = (scrollTop = 600) => {
+    const menu = screen.getByRole('listbox');
+    Object.defineProperties(menu, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: scrollTop, writable: true },
+    });
+    fireEvent.scroll(menu);
+  };
+
   it('separates reference candidates from slash invocations and offers current files', async () => {
     mocks.listDatasets.mockResolvedValue({ data: { datasets: [{ dataset_id: 'split-kb', display_name: 'Reference knowledge' }] } });
     mocks.listSkillAssetsPage.mockResolvedValue({ records: [{ id: 'split-skill', name: 'Execute skill' }] });
@@ -106,6 +116,109 @@ describe("MentionEditor", () => {
     enterQuery('draft @');
     await screen.findByRole('option', { name: 'Task history' });
     expect(screen.queryByRole('option', { name: 'Old history' })).toBeNull();
+  });
+
+  it.each([false, true])('loads older conversation history on reaching the bottom in task mode %s', async runInBackground => {
+    const recent = Array.from({ length: 50 }, (_, index) => ({ conversation_id: `recent-${index}`, display_name: `Recent ${index}` }));
+    mocks.listConversations.mockImplementation(({ pageToken }) => Promise.resolve({ data: pageToken
+      ? { conversations: [recent[49], { conversation_id: 'older-51', display_name: 'Older conversation' }], next_page_token: '' }
+      : { conversations: recent, next_page_token: '50' } }));
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value='' placeholder='message' runInBackground={runInBackground}
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('@chat:');
+    await screen.findByRole('option', { name: 'Recent 0' });
+    expect(screen.getAllByRole('option')).toHaveLength(50);
+    expect(screen.queryByRole('button', { name: 'chat.mentionShowMore' })).toBeNull();
+    scrollMenu(550);
+    expect(mocks.listConversations.mock.calls.some(([params]) => params.pageToken === '50')).toBe(false);
+    scrollMenu();
+    const older = await screen.findByRole('option', { name: 'Older conversation' });
+    expect(screen.getAllByRole('option')).toHaveLength(51);
+    expect(mocks.listConversations).toHaveBeenCalledWith(
+      { keyword: '', pageSize: 50, pageToken: '50' },
+      expect.objectContaining({ params: { is_task_conv: runInBackground }, signal: expect.any(AbortSignal) }),
+    );
+    expect(screen.queryByRole('button', { name: 'chat.mentionLoadMoreConversations' })).toBeNull();
+    scrollMenu();
+    expect(mocks.listConversations.mock.calls.filter(([params]) => params.pageToken === '50')).toHaveLength(1);
+    fireEvent.mouseDown(older);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'conversation', resource_id: 'older-51' })]);
+  });
+
+  it('uses server search across history without discarding matches outside the display name', async () => {
+    mocks.listConversations.mockImplementation(({ keyword }) => Promise.resolve({ data: {
+      conversations: keyword === 'old decision' ? [{ conversation_id: 'old-meeting', display_name: 'Earlier meeting' }] : [],
+    } }));
+    render(<MentionEditor value='' placeholder='message' onChange={vi.fn()} onMentionsChange={vi.fn()}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('@chat:old decision');
+    expect(await screen.findByRole('option', { name: 'Earlier meeting' })).toBeVisible();
+    expect(mocks.listConversations).toHaveBeenCalledWith(
+      { keyword: 'old decision', pageSize: 50, pageToken: '' }, expect.anything(),
+    );
+  });
+
+  it('keeps loaded history and retries a failed next page without duplicate requests', async () => {
+    const recent = Array.from({ length: 50 }, (_, index) => ({ conversation_id: `recent-${index}`, display_name: `Recent ${index}` }));
+    let rejectPage!: (error: Error) => void;
+    let attempts = 0;
+    mocks.listConversations.mockImplementation(({ pageToken }) => {
+      if (!pageToken) return Promise.resolve({ data: { conversations: recent, next_page_token: '50' } });
+      attempts += 1;
+      return attempts === 1 ? new Promise((_resolve, reject) => { rejectPage = reject; })
+        : Promise.resolve({ data: { conversations: [{ conversation_id: 'older', display_name: 'Older conversation' }] } });
+    });
+    render(<MentionEditor value='' placeholder='message' onChange={vi.fn()} onMentionsChange={vi.fn()}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery('@chat:');
+    await screen.findByRole('option', { name: 'Recent 0' });
+    scrollMenu();
+    scrollMenu();
+    expect(attempts).toBe(1);
+    expect(screen.getByRole('status')).toHaveTextContent('common.loading');
+    await act(async () => rejectPage(new Error('temporary failure')));
+    expect(await screen.findByRole('alert')).toHaveTextContent('chat.mentionLoadFailed');
+    expect(screen.getAllByRole('option')).toHaveLength(50);
+    scrollMenu();
+    expect(attempts).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+    expect(await screen.findByRole('option', { name: 'Older conversation' })).toBeVisible();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(attempts).toBe(2);
+  });
+
+  it.each(['query', 'mode', 'close'])('cancels an in-flight next page on %s', async change => {
+    const recent = Array.from({ length: 50 }, (_, index) => ({ conversation_id: `recent-${index}`, display_name: `Recent ${index}` }));
+    let resolvePage!: (value: unknown) => void;
+    let pageSignal!: AbortSignal;
+    mocks.listConversations.mockImplementation(({ keyword, pageToken }, options) => {
+      if (keyword || options.params.is_task_conv) return Promise.resolve({ data: {
+        conversations: [{ conversation_id: 'fresh', display_name: 'Fresh history' }],
+      } });
+      if (!pageToken) return Promise.resolve({ data: { conversations: recent, next_page_token: '50' } });
+      pageSignal = options.signal;
+      return new Promise(resolve => { resolvePage = resolve; });
+    });
+    const props = { value: '', placeholder: 'message', onChange: vi.fn(), onMentionsChange: vi.fn(), onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} runInBackground={false} />);
+    enterQuery('@chat:');
+    await screen.findByRole('option', { name: 'Recent 0' });
+    scrollMenu();
+    if (change === 'close') {
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+      expect(pageSignal.aborted).toBe(true);
+      await act(async () => resolvePage({ data: { conversations: [{ conversation_id: 'late', display_name: 'Late old page' }] } }));
+      expect(screen.queryByRole('listbox')).toBeNull();
+      return;
+    }
+    if (change === 'mode') view.rerender(<MentionEditor {...props} runInBackground />);
+    enterQuery(change === 'query' ? '@chat:Fresh' : '@chat:');
+    await screen.findByRole('option', { name: 'Fresh history' });
+    expect(pageSignal.aborted).toBe(true);
+    await act(async () => resolvePage({ data: { conversations: [{ conversation_id: 'late', display_name: 'Late old page' }], next_page_token: '100' } }));
+    expect(screen.queryByRole('option', { name: 'Late old page' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'chat.mentionLoadMoreConversations' })).toBeNull();
   });
 
   it('deletes one chip without deleting surrounding text or the remaining identity', () => {
@@ -316,21 +429,23 @@ describe("MentionEditor", () => {
     expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ resource_id: "dismiss-skill" })]);
   });
 
-  it("keeps the menu open when clicking the editor, menu background, or expand control", async () => {
+  it("shows all loaded skills and workflows without expansion controls and supports keyboard selection", async () => {
     mocks.listSkillAssetsPage.mockResolvedValue({ records: Array.from({ length: 10 }, (_, index) => ({
-      id: `expand-skill-${index}`, name: `技能 ${index + 1}`,
+      id: `skill-${index}`, name: `技能 ${index + 1}`,
     })) });
-    render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={vi.fn()}
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: Array.from({ length: 13 }, (_, index) => ({
+      workflow_ref: `builtin:workflow-${index}`, workflow_id: `workflow-${index}`, name: `工作流 ${index + 1}`,
+    })) } });
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={vi.fn()} onMentionsChange={onMentionsChange}
       onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
     const editor = screen.getByRole("textbox");
-    editor.textContent = "/skill:";
-    const range = document.createRange();
-    range.setStart(editor.firstChild!, editor.textContent.length);
-    range.collapse(true);
-    window.getSelection()?.removeAllRanges();
-    window.getSelection()?.addRange(range);
-    fireEvent.input(editor);
-    expect(await screen.findByRole("option", { name: "技能 1" })).toBeVisible();
+    enterQuery('/');
+    expect(await screen.findByRole("option", { name: "技能 10" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "工作流 13" })).toBeVisible();
+    expect(screen.getAllByRole('option')).toHaveLength(23);
+    expect(screen.queryByRole('button', { name: 'chat.mentionShowMore' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'chat.mentionCollapse' })).toBeNull();
     fireEvent.pointerDown(editor);
     fireEvent.click(editor);
     const menu = screen.getByRole("listbox");
@@ -338,11 +453,9 @@ describe("MentionEditor", () => {
     fireEvent.mouseDown(menu);
     fireEvent.click(menu);
     expect(menu).toBeVisible();
-    expect(screen.queryByRole("option", { name: "技能 10" })).not.toBeInTheDocument();
-    const expand = screen.getByRole("button", { name: "chat.mentionShowMore" });
-    fireEvent.pointerDown(expand);
-    fireEvent.mouseDown(expand);
-    expect(await screen.findByRole("option", { name: "技能 10" })).toBeVisible();
+    for (let index = 0; index < 23; index += 1) fireEvent.keyDown(editor, { key: 'ArrowDown' });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'workflow', resource_id: 'builtin:workflow-12' })]);
   });
 
   it("reloads skills after a previously cached empty list", async () => {
