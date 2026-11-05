@@ -11217,6 +11217,9 @@ const enUS = {
     "topicPlaceholder": "For example: compare methods and limitations of tool use in AI agents",
     "expansionDepth": {
       "title": "Expansion tier",
+      "flow": "Expansion workflow",
+      "byTopic": "Search by topic",
+      "output": "Output",
       "start": "Start expansion",
       "startResearch": "Start preliminary research",
       "searchConfiguration": "Search service configuration",
@@ -11229,10 +11232,10 @@ const enUS = {
       "preparingAll": "You can leave this page. Research will continue with all directions; you will be notified if more information is needed.",
       "preparingManual": "You can leave this page. You will be notified to choose directions and confirm after initial research.",
       "steps": {"research": "Preliminary research", "chooseDirection": "Confirm research directions", "search": "Search and expansion", "screen": "Screening and follow-up", "analyze": "Research analysis and report", "prepareFulltext": "Retrieve missing full text", "handoff": "Hand off review materials"},
-      "outputs": {"fast": "Output: paper list", "balanced": "Output: paper list", "deep": "Outputs: paper list, research report and paper relationship graph"},
+      "outputs": {"fast": "Paper list", "balanced": "Paper list", "deep": "Paper list, research report and paper relationship graph"},
       "fast": {"label": "Quick expansion", "summary": "Focus on the most relevant papers"},
       "balanced": {"label": "Standard expansion", "summary": "Screen and follow up by direction"},
-      "deep": {"label": "Deep research", "summary": "Select relevant papers, read key sections, compare methods and write a research report"}
+      "deep": {"label": "Deep research", "summary": "Read, compare and write a research report"}
     },
     "flowStatus": {
       "done": "Completed",
@@ -11311,6 +11314,7 @@ const enUS = {
     "clearSelection": "Clear selection",
     "selectedCount": "{{count}} selected",
     "selectedLibraryPapers": "{{count}} selected papers from this library",
+    "selectedPaperCount": "{{count}} selected papers",
     "bulkImport": "Import selected ({{count}})",
     "bulkImportTitle": "Confirm batch import",
     "importSummary": "Import {{count}} papers and skip {{skipped}}. Reasons are listed below.",

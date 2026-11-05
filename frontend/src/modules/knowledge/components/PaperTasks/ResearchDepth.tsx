@@ -24,7 +24,7 @@ export default function ResearchDepth({ value, onChange, forReview = false, dire
   const modes = forReview ? reviewModes : expansionModes;
   return <section className="paper-research-depth">
     <h3>{title}</h3>
-    <div className={`paper-research-depth-options ${forReview ? 'is-review' : 'has-flow'}`} role="radiogroup" aria-label={title}>
+    <div className={`paper-research-depth-options ${forReview ? 'is-review' : 'is-expansion'}`} role="radiogroup" aria-label={title}>
       {modes.map(mode => {
         const label = t(`paperTasks.expansionDepth.${mode}.label`);
         const directionOptions = <span className="paper-expansion-direction-options" role="radiogroup"
@@ -46,14 +46,11 @@ export default function ResearchDepth({ value, onChange, forReview = false, dire
             {directionOptions}
             </div>}
           </> : <>
-            <span className="paper-expansion-mode-flow" role="list">
-              {expansionFlowSteps(mode).map(step => <span key={step.id} role="listitem"
-                className={`paper-expansion-mode-step step-${step.id}`}>
-                <span>{t(step.labelKey!)}</span>
-                {step.id === 'chooseDirection' && directionOptions}
-              </span>)}
-            </span>
-            <span className="paper-expansion-mode-output">{t(`paperTasks.expansionDepth.outputs.${mode}`)}</span>
+            <div className="paper-review-card-directions">
+              <span>{directionTitle}</span>
+              {mode === 'fast' ? <span>{t('paperTasks.expansionDepth.byTopic')}</span> : directionOptions}
+            </div>
+            <div className="paper-expansion-mode-output"><span>{t('paperTasks.expansionDepth.output')}</span><span>{t(`paperTasks.expansionDepth.outputs.${mode}`)}</span></div>
           </>}
         </div>;
       })}

@@ -10957,6 +10957,9 @@ const zhCN = {
     "topicPlaceholder": "例如：研究智能体的工具调用方法，比较主要方法及其局限",
     "expansionDepth": {
       "title": "扩展档位",
+      "flow": "扩展流程",
+      "byTopic": "按主题检索",
+      "output": "产出",
       "start": "开始扩展",
       "startResearch": "开始初步调研",
       "searchConfiguration": "检索服务配置",
@@ -10969,10 +10972,10 @@ const zhCN = {
       "preparingAll": "你可以离开此页面，调研完成后会按全部方向自动继续；需要补充信息时会通知你。",
       "preparingManual": "你可以离开此页面，调研完成后会通知你选择方向并确认继续。",
       "steps": {"research": "初步调研", "chooseDirection": "确定研究方向", "search": "检索与拓展", "screen": "筛选与补充", "analyze": "研究分析与报告", "prepareFulltext": "补齐论文正文", "handoff": "交接综述材料"},
-      "outputs": {"fast": "产出：论文清单", "balanced": "产出：论文清单", "deep": "产出：论文清单、研究报告与论文关系图"},
+      "outputs": {"fast": "论文清单", "balanced": "论文清单", "deep": "论文清单、研究报告与论文关系图"},
       "fast": {"label": "快速扩展", "summary": "聚焦最相关的论文"},
       "balanced": {"label": "标准扩展", "summary": "按方向筛选并补查"},
-      "deep": {"label": "深入研究", "summary": "筛选相关论文，阅读关键内容，比较主要方法并生成研究报告"}
+      "deep": {"label": "深入研究", "summary": "精读比较，形成研究报告"}
     },
     "flowStatus": {
       "done": "已完成",
@@ -11050,6 +11053,7 @@ const zhCN = {
     "clearSelection": "清空选择",
     "selectedCount": "已选 {{count}} 篇",
     "selectedLibraryPapers": "已选 {{count}} 篇库中论文",
+    "selectedPaperCount": "已选 {{count}} 篇论文",
     "bulkImport": "批量入库（{{count}} 篇）",
     "bulkImportTitle": "确认批量入库",
     "importSummary": "将入库 {{count}} 篇，跳过 {{skipped}} 篇；具体原因如下。",

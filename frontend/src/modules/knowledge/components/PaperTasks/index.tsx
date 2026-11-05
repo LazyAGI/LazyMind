@@ -15,7 +15,8 @@ import GeneratedContents from './GeneratedContents';
 import ResearchRecords from './ResearchRecords';
 import ReviewRecordDrawer from './ReviewRecordDrawer';
 import { ReviewEntryFlow } from './ReviewFlow';
-import { expansionRecordIsActive, paperMaterialPhase, reviewMaterialCounts } from './paperFlowModel';
+import { expansionFlowSteps, expansionRecordIsActive, paperMaterialPhase, reviewMaterialCounts } from './paperFlowModel';
+import PaperFlow from './PaperFlow';
 import ReviewTopic from './ReviewTopic';
 import ResearchDepth from './ResearchDepth';
 import PaperTaskStatus from './PaperTaskStatus';
@@ -89,7 +90,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [expansionEnabled, setExpansionEnabled] = useState(false);
     const [topicBusy, setTopicBusy] = useState(false);
     const [selectionRetry, setSelectionRetry] = useState(0);
-    const [reviewPapersExpanded, setReviewPapersExpanded] = useState(false);
     const [reviewTopic, setReviewTopic] = useState('');
     const [reviewSelection, setReviewSelection] = useState<PaperSelection>();
     const [selectionLoading, setSelectionLoading] = useState(false);
@@ -165,7 +165,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         setReflectionFirst(false);
         setExpansionEnabled(false);
         setReviewTopic('');
-        setReviewPapersExpanded(false);
         setBudgetMode('balanced');
         setDirectionSelection('all');
         setLaunch({ kind, direction });
@@ -615,49 +614,32 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         });
     };
     const reviewSelectedCount = reviewSelection ? reviewSelection.papers.length + reviewSelection.invalid.length : selected.length;
-    const reviewPaperRows = directReview && reviewSelection ? [
-        ...reviewSelection.papers.map(item => {
-            const material = reviewSelection.materials?.find(value => value.paper_id === item.paper.paper_id);
-            const status = material?.eligible ? 'ready' : material && pendingReviewMaterialStatuses.has(material.status) ? 'processing' : 'unavailable';
-            return { id: item.paper.paper_id, title: item.paper.title || item.paper.paper_id, status, description: material?.reason };
-        }),
-        ...reviewSelection.invalid.map(item => ({ id: item.document_id, title: item.document_id, status: 'unavailable', description: item.reason })),
-    ] : selected.map((id, index) => ({ id, title: selectedTitles[index] || id,
-        status: selectionFailure ? 'unchecked' : 'checking', description: undefined }));
+    const launchPaperRows = directReview && reviewSelection ? [
+        ...reviewSelection.papers.map(item => ({ id: item.paper.paper_id, title: item.paper.title || item.paper.paper_id })),
+        ...reviewSelection.invalid.map(item => ({ id: item.document_id, title: selectedTitles[selected.indexOf(item.document_id)] || item.document_id })),
+    ] : selected.map((id, index) => ({ id, title: selectedTitles[index] || id }));
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.reviewFlow.writing') : launch?.kind === 'expansion' || launch?.kind === 'review' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
+        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={launch?.kind === 'review' ? t('paperTasks.reviewFlow.writing') : launch?.kind === 'expansion' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy} onCancel={() => !busy && !topicBusy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
             {launch?.kind === 'review' && <ReviewEntryFlow mode={directReview ? 'direct' : reviewBudgetMode} directionOnly={launch.direction} />}
-            {selectedReview && <section className="paper-review-selected" aria-label={t('paperTasks.reviewSelectionTitle')}>
-                <div className="paper-review-selected-heading">
-                    <h3>{t('paperTasks.reviewSelectionTitle')}</h3>
-                    {!directReview && <Typography.Text type="secondary">{t('paperTasks.reviewExpansionSeeds', { count: selected.length })}</Typography.Text>}
-                    {directReview && reviewSelection && <Typography.Text type="secondary">{t('paperTasks.reviewLaunchSummary', { selected: reviewSelectedCount, count: eligibleReviewPapers.length })}</Typography.Text>}
-                </div>
-                <List id="review-selected-papers" size="small" loading={directReview && selectionLoading} rowKey="id"
-                    dataSource={reviewPapersExpanded ? reviewPaperRows : reviewPaperRows.slice(0, 3)}
-                    renderItem={item => {
-                        const statusLabel = t(`paperTasks.reviewMaterialStatus.${item.status}`);
-                        const statusColor = item.status === 'ready' ? 'success' : item.status === 'processing' ? 'processing' : 'default';
-                        return <List.Item extra={directReview && <Tag color={statusColor}>{statusLabel}</Tag>}>
-                            <List.Item.Meta title={item.title} description={item.description !== statusLabel ? item.description : undefined} />
-                        </List.Item>;
-                    }} />
-                {reviewPaperRows.length > 3 && <Button type="link" aria-expanded={reviewPapersExpanded} aria-controls="review-selected-papers"
-                    onClick={() => setReviewPapersExpanded(value => !value)}>
-                    {t(reviewPapersExpanded ? 'paperTasks.collapseSelectedPapers' : 'paperTasks.expandSelectedPapers', { count: reviewPaperRows.length })}
-                </Button>}
+            {(selectedReview || launch?.kind === 'expansion' && !launch.direction) && <section className="paper-review-selected" aria-label={t('paperTasks.reviewSelectionTitle')}>
+                <details className="paper-selected-list">
+                    <summary>{t('paperTasks.selectedPaperCount', { count: launchPaperRows.length })}</summary>
+                    <ul>{launchPaperRows.map(item => <li key={item.id}>{item.title}</li>)}</ul>
+                </details>
                 {directReview && !reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
                 {directReview && selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
                 {directReview && !selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
+                {directReview && reviewSelection && eligibleReviewPapers.length >= 2 && eligibleReviewPapers.length < reviewSelectedCount && <Alert type="warning" showIcon message={t('paperTasks.reviewSummary', { selected: reviewSelectedCount, count: eligibleReviewPapers.length, skipped: reviewSelectedCount - eligibleReviewPapers.length })} />}
             </section>}
-            {launch && !launch.direction && !selectedReview && <div className="paper-task-launch-selection">
+            {launch && !launch.direction && !selectedReview && launch.kind !== 'expansion' && <div className="paper-task-launch-selection">
                 <Typography.Text type="secondary">{t('paperTasks.selectedLibraryPapers', { count: selected.length })}</Typography.Text>
                 {selectedTitles.length > 0 && <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: true }}>{selectedTitles.join(' · ')}</Typography.Paragraph>}
             </div>}
+            {launch?.kind === 'expansion' && <PaperFlow title={t('paperTasks.expansionDepth.flow')} steps={expansionFlowSteps(launchBudgetMode)} preview />}
             {launch?.kind === 'review' && !launch.direction && <ReviewTopic value={reviewTopic} onChange={setReviewTopic}
                 input={{ dataset_id: dataset, document_ids: selected, user_instruction: instruction }} disabled={busy}
                 onBusyChange={setTopicBusy} />}
