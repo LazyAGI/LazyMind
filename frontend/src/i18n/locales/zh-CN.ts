@@ -3544,6 +3544,7 @@ const zhCN = {
     workflowContinueWithLatestOutline: "根据最新大纲生成成稿",
     workflowSaveAndContinue: "保存并继续",
     workflowRetry: "重试",
+    workflowThumbnailFailed: "缩略图生成失败，点击页面重试",
     workflowGeneratedImage: "生成图片",
     workflowAddAttachment: "新增附件",
     previewNamedFile: "预览 {{name}}",

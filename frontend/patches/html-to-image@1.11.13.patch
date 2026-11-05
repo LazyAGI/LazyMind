@@ -1,0 +1,79 @@
+diff --git a/es/util.js b/es/util.js
+index 90a3cd19a6bcc763d98cbd476fde17f4bc0428fa..157dd36038568dfbbc2226e8184ad6763c5d0f55 100644
+--- a/es/util.js
++++ b/es/util.js
+@@ -150,8 +150,19 @@ export function createImage(url) {
+         const img = new Image();
+         img.onload = () => {
+             img.decode().then(() => {
+-                requestAnimationFrame(() => resolve(img));
+-            });
++                // Bound the paint delay when a hidden frame suspends rAF.
++                let frame = 0;
++                let settled = false;
++                const finish = () => {
++                    if (settled) return;
++                    settled = true;
++                    clearTimeout(timer);
++                    cancelAnimationFrame(frame);
++                    resolve(img);
++                };
++                const timer = setTimeout(finish, 100);
++                frame = requestAnimationFrame(finish);
++            }, reject);
+         };
+         img.onerror = reject;
+         img.crossOrigin = 'anonymous';
+diff --git a/lib/util.js b/lib/util.js
+index 6a6ae9c8bd15b276d46773d853c2182aaba8326e..57cb81ad2cadbfa24d7d438d02e62d5397efede4 100644
+--- a/lib/util.js
++++ b/lib/util.js
+@@ -203,8 +203,19 @@ function createImage(url) {
+         var img = new Image();
+         img.onload = function () {
+             img.decode().then(function () {
+-                requestAnimationFrame(function () { return resolve(img); });
+-            });
++                // Bound the paint delay when a hidden frame suspends rAF.
++                var frame = 0;
++                var settled = false;
++                var finish = function () {
++                    if (settled) return;
++                    settled = true;
++                    clearTimeout(timer);
++                    cancelAnimationFrame(frame);
++                    resolve(img);
++                };
++                var timer = setTimeout(finish, 100);
++                frame = requestAnimationFrame(finish);
++            }, reject);
+         };
+         img.onerror = reject;
+         img.crossOrigin = 'anonymous';
+diff --git a/src/util.ts b/src/util.ts
+index 3d430c8f33948972f8991c3b3d5ebcf234662c21..284419ea07e67236b3cd866e7b20070b3c02a9d3 100644
+--- a/src/util.ts
++++ b/src/util.ts
+@@ -201,8 +201,20 @@ export function createImage(url: string): Promise<HTMLImageElement> {
+     const img = new Image()
+     img.onload = () => {
+       img.decode().then(() => {
+-        requestAnimationFrame(() => resolve(img))
+-      })
++        // Cross-origin hidden frames may never dispatch rAF. Decoding has
++        // finished; bound this paint delay so thumbnail/export queues progress.
++        let frame = 0
++        let settled = false
++        const finish = () => {
++          if (settled) return
++          settled = true
++          clearTimeout(timer)
++          cancelAnimationFrame(frame)
++          resolve(img)
++        }
++        const timer = setTimeout(finish, 100)
++        frame = requestAnimationFrame(finish)
++      }, reject)
+     }
+     img.onerror = reject
+     img.crossOrigin = 'anonymous'

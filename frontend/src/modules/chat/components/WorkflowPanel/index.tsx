@@ -59,7 +59,7 @@ import {
   SlotDownloadContext,
   SlotMarkdownStream,
 } from './SlotComponents';
-import { SlideThumb } from './ppt/SlideThumb';
+import { SlideThumb, type SlideThumbHandle } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
@@ -644,6 +644,7 @@ function CompositeThumbnailRail({
   const isCol = position === 'left' || position === 'right';
   const idx = Math.max(0, pages.indexOf(currentPage));
   const dragPagesRef = useRef<Set<number>>(new Set());
+  const thumbnailRefs = useRef(new Map<number, SlideThumbHandle>());
   const [insertIdx, setInsertIdx] = useState<number | null>(null);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
   const [draggingPages, setDraggingPages] = useState<Set<number>>(new Set());
@@ -770,7 +771,10 @@ function CompositeThumbnailRail({
                     dragging ? 'composite-thumb-rail__item--dragging' : '',
                     !hasHtmlPreview ? 'composite-thumb-rail__item--fallback' : '',
                   ].filter(Boolean).join(' ')}
-                  onClick={(event) => handlePageClick(sortOrder, event)}
+                  onClick={(event) => {
+                    thumbnailRefs.current.get(sortOrder)?.retry();
+                    handlePageClick(sortOrder, event);
+                  }}
                   onDragStart={(event) => handleDragStart(sortOrder, event)}
                   onDragOver={(event) => handleDragOver(pageIdx, event)}
                   onDrop={(event) => { void handleDrop(pageIdx, event); }}
@@ -791,7 +795,10 @@ function CompositeThumbnailRail({
                     aria-hidden='true'
                   >
                     {revision ? (
-                      <SlideThumb slot={revision} sessionId={session.session_id} />
+                      <SlideThumb slot={revision} sessionId={session.session_id} ref={handle => {
+                        if (handle) thumbnailRefs.current.set(sortOrder, handle);
+                        else thumbnailRefs.current.delete(sortOrder);
+                      }} />
                     ) : (
                       <span className='composite-thumb-rail__page-number'>{pageIdx + 1}</span>
                     )}

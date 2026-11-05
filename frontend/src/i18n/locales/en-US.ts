@@ -3614,6 +3614,7 @@ const enUS = {
     workflowContinueWithLatestOutline: "Generate the final document from the latest outline",
     workflowSaveAndContinue: "Save and continue",
     workflowRetry: "Retry",
+    workflowThumbnailFailed: "Thumbnail failed. Select the page to retry.",
     workflowGeneratedImage: "Generated Image",
     workflowAddAttachment: "Add attachment",
     previewNamedFile: "Preview {{name}}",

@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  html-to-image@1.11.13:
+    hash: 60a669f6a8867fa147dcaa01d126a627fff170592d53ff5095cb1ff6b2a5a435
+    path: patches/html-to-image@1.11.13.patch
+
 importers:
 
   .:
@@ -69,8 +74,8 @@ importers:
         specifier: ^5.6.0
         version: 5.6.0
       html-to-image:
-        specifier: ^1.11.13
-        version: 1.11.13
+        specifier: 1.11.13
+        version: 1.11.13(patch_hash=60a669f6a8867fa147dcaa01d126a627fff170592d53ff5095cb1ff6b2a5a435)
       i18next:
         specifier: ^25.8.20
         version: 25.8.20(typescript@5.5.4)
@@ -9145,7 +9150,7 @@ snapshots:
     dependencies:
       void-elements: 3.1.0
 
-  html-to-image@1.11.13: {}
+  html-to-image@1.11.13(patch_hash=60a669f6a8867fa147dcaa01d126a627fff170592d53ff5095cb1ff6b2a5a435): {}
 
   html-url-attributes@3.0.1: {}
 
