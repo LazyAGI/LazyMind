@@ -79,13 +79,15 @@ type Projection struct {
 }
 
 type StartInput struct {
-	WorkflowID      string                   `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
-	RequestContext  string                   `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
-	Inputs          map[string][]InputSource `json:"inputs,omitempty" jsonschema:"Files to import and bind before starting; keys are declared external material IDs and values are ordered source arrays (use one item for a single material). Each source uses local_path or resource_id. Do not also name the same material in input_bindings."`
-	InputBindings   map[string]any           `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
-	IdempotencyKey  string                   `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it on retries"`
-	SessionID       string                   `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
-	DriverSessionID string                   `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
+	WorkflowID          string                   `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
+	RequestContext      string                   `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
+	RevisionID          string                   `json:"revision_id,omitempty" jsonschema:"Published Workflow revision; preserve the revision_id returned with needs_input when submitting answers"`
+	ClarificationValues map[string]any           `json:"clarification_values,omitempty" jsonschema:"Confirmed startup answers keyed by the exact question IDs returned by needs_input; merge previously confirmed clarification_values with new answers. Answers in request_context alone do not satisfy required fields."`
+	Inputs              map[string][]InputSource `json:"inputs,omitempty" jsonschema:"Files to import and bind before starting; keys are declared external material IDs and values are ordered source arrays (use one item for a single material). Each source uses local_path or resource_id. Do not also name the same material in input_bindings."`
+	InputBindings       map[string]any           `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
+	IdempotencyKey      string                   `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it for unchanged-payload retries. Use a new key when answers, revision or inputs change."`
+	SessionID           string                   `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
+	DriverSessionID     string                   `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
 }
 
 type InputResource struct {
@@ -104,11 +106,17 @@ type InputImportResult struct {
 }
 
 type StartResult struct {
-	PreparationID string     `json:"preparation_id"`
-	SessionID     string     `json:"session_id"`
-	WorkflowID    string     `json:"workflow_id"`
-	RevisionID    string     `json:"revision_id"`
-	State         Projection `json:"state"`
+	Status                     string           `json:"status,omitempty"`
+	PreparationID              string           `json:"preparation_id"`
+	SessionID                  string           `json:"session_id,omitempty"`
+	WorkflowID                 string           `json:"workflow_id"`
+	RevisionID                 string           `json:"revision_id,omitempty"`
+	Questions                  []map[string]any `json:"questions,omitempty"`
+	ClarificationValues        map[string]any   `json:"clarification_values,omitempty"`
+	MissingClarificationFields []string         `json:"missing_clarification_fields,omitempty"`
+	MissingInputs              []string         `json:"missing_inputs,omitempty"`
+	AgentInstruction           string           `json:"agent_instruction,omitempty"`
+	State                      *Projection      `json:"state,omitempty"`
 }
 
 type SessionSummary struct {
@@ -488,6 +496,12 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		"input_bindings": input.InputBindings, "origin_host": "external-agent", "origin_ref": "mcp",
 		"controller_host": "external-agent", "request_context": input.RequestContext,
 	}
+	if input.RevisionID != "" {
+		request["revision_id"] = input.RevisionID
+	}
+	if len(input.ClarificationValues) > 0 {
+		request["clarification_values"] = input.ClarificationValues
+	}
 	origin := c.origin
 	if c.HostProvider == "workbuddy" && c.RequireHostBinding {
 		origin.ExternalRef = "workbuddy:" + input.DriverSessionID
@@ -511,10 +525,38 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		request["conversation_id"] = origin.ConversationID
 	}
 	var prepared struct {
-		PreparationID string `json:"preparation_id"`
+		PreparationID              string           `json:"preparation_id"`
+		Status                     string           `json:"status"`
+		WorkflowRevision           string           `json:"workflow_revision"`
+		Questions                  []map[string]any `json:"questions"`
+		ClarificationValues        map[string]any   `json:"clarification_values"`
+		MissingClarificationFields []string         `json:"missing_clarification_fields"`
+		MissingInputs              []string         `json:"missing_inputs"`
 	}
 	if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-preparations", request, &prepared); err != nil {
 		return StartResult{}, err
+	}
+	if strings.TrimSpace(prepared.PreparationID) == "" {
+		return StartResult{}, errors.New("Workflow preparation did not return an identifier")
+	}
+	switch prepared.Status {
+	case "needs_input":
+		revisionID := strings.TrimSpace(prepared.WorkflowRevision)
+		if revisionID == "" {
+			revisionID = input.RevisionID
+		}
+		return StartResult{
+			Status: "needs_input", PreparationID: prepared.PreparationID,
+			WorkflowID: input.WorkflowID, RevisionID: revisionID,
+			Questions: prepared.Questions, ClarificationValues: prepared.ClarificationValues,
+			MissingClarificationFields: prepared.MissingClarificationFields, MissingInputs: prepared.MissingInputs,
+			AgentInstruction: "No Workflow session has been created. Ask the returned questions using their exact field IDs. Merge the returned clarification_values with the user's answers and submit them as clarification_values to workflow.start, preserving request_context and revision_id. Resolve missing_inputs with actual imported sources via inputs or input_bindings. Use a new idempotency_key when answers or inputs change; preserve the key only for unchanged-payload retries. Do not call workflow.step.begin or open a Workflow panel before a session_id is returned.",
+		}, nil
+	case "", "ready":
+		// Older Core versions returned only preparation_id. Keep that contract
+		// working; all explicit non-ready statuses must stop before consumption.
+	default:
+		return StartResult{}, fmt.Errorf("Workflow preparation returned unsupported status %q; no session was created", prepared.Status)
 	}
 	var consumed struct {
 		SessionID  string `json:"session_id"`
@@ -539,8 +581,8 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		workflowID = input.WorkflowID
 	}
 	return StartResult{
-		PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, WorkflowID: workflowID,
-		RevisionID: strings.TrimSpace(consumed.RevisionID), State: state,
+		Status: "started", PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, WorkflowID: workflowID,
+		RevisionID: strings.TrimSpace(consumed.RevisionID), State: &state,
 	}, nil
 }
 
