@@ -2667,3 +2667,40 @@ def test_completion_scope_preserves_legacy_objective(agent_type, scope):
     assert runner_mod._completion_review_objective(ctx, []) == (
         ctx.objective + '\n'.join(runner_mod._build_intent_context_section(params))
     )
+
+
+def test_pinned_review_does_not_repeat_expanded_global_objective():
+    """A record-only step must not inherit a later execution/delivery objective."""
+    from types import SimpleNamespace
+
+    request = 'Run the reproduction twice and deliver the final bug brief.'
+    ctx = SimpleNamespace(
+        agent_type='workflow_step', output_slots=['recorded_failure'],
+        objective='Runtime request: ' + request + '\nExtract the reported facts.',
+        params={
+            'step_id': 'record_failure', 'launch_user_input': request,
+            'current_user_input': request,
+            '_display_plan_scope': {
+                'prompt': 'Runtime request: {{user_input}}\nExtract the reported facts.',
+                'acceptance_criteria': ['Preserve unknown fields as unknown.'],
+            },
+        },
+    )
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': True, 'requires_artifact': True,
+        'artifact_keys': ['recorded_failure'], 'reason': 'Reported facts saved.',
+    })
+    runner_mod._evaluate_completion(
+        model, runner_mod._completion_review_objective(ctx, ['recorded_failure']), [],
+        [{'slot': 'recorded_failure', 'content_type': 'json',
+          'value': {'data': {'observed_error': 'Unknown'}}}], 'Recorded facts.',
+        workflow_scope=runner_mod._completion_review_scope(ctx, ['recorded_failure']),
+    )
+    prompt = model.share.return_value.call_args.args[0]
+    assert request in prompt, 'Applicable runtime requirements must remain available'
+    assert ctx.objective not in prompt, 'Expanded global objective duplicates downstream obligations'
+    assert prompt.count(request) == 1
+    assert 'Review completion of ONE assigned Workflow step' in prompt
+    assert 'Actually saved artifacts:' in prompt and 'observed_error' in prompt
+    assert 'Preserve unknown fields as unknown.' in prompt
