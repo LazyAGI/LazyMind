@@ -41,6 +41,10 @@ def test_request_options_preserve_authentication_and_mandatory_body():
 
 @pytest.mark.parametrize('model,source,tools,want', [
     ('gpt-5.6-sol', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], 'none'),
+    ('gpt-6-sol', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], 'none'),
+    ('gpt-6-luna', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], 'none'),
+    ('gpt-6-astra', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], None),
+    ('gpt-6.1-sol', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], None),
     ('gpt-5.6-sol', 'openai', [], None),
     ('gpt-4o', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], None),
     ('gpt-5.6-sol', 'openrouter', [{'type': 'function', 'function': {'name': 'lookup'}}], None),
@@ -58,6 +62,16 @@ def test_disabled_reasoning_still_sends_none_for_openai_chat_tools():
                                     json_body={'model': 'gpt-5.6-sol', 'messages': [], 'tools': [{'type': 'function'}]},
                                     features={'reasoning': False}, source='openai')
     assert result['json']['reasoning_effort'] == 'none'
+
+
+def test_gpt6_sol_installs_chat_completions_tool_compatibility():
+    import lazyllm
+    from lazyllm.common import new_session
+
+    with new_session('test-gpt6-completions-compatibility'):
+        configure_request_advanced({'llm': {'source': 'openai', 'model': 'gpt-6-sol',
+                                            'base_url': 'https://api.openai.com/v1/'}})
+        assert 'llm' in lazyllm.globals['lazymind_request_advanced']
 
 
 def test_saved_chat_reasoning_effort_uses_responses_shape_after_protocol_switch():
@@ -102,12 +116,13 @@ def test_chat_completions_compatibility_activates_without_advanced_settings(monk
         supplier = next(iter(model._suppliers.values()))
         generate = supplier._prompt.generate_prompt
 
-        def with_tool(**kwargs):
+        def with_tool(_self, **kwargs):
             return {**generate(**kwargs), 'tools': [{'type': 'function', 'function': {
                 'name': 'lookup', 'parameters': {'type': 'object', 'properties': {}}}}]}
 
-        monkeypatch.setattr(supplier._prompt, 'generate_prompt', with_tool)
-        assert model('Hi', stream_output=False)['content'] == 'ok'
+        with monkeypatch.context() as patch:
+            patch.setattr(type(supplier._prompt), 'generate_prompt', with_tool)
+            assert model('Hi', stream_output=False)['content'] == 'ok'
         assert sent[0].get('reasoning_effort') is None
         assert sent[1].get('reasoning_effort') == 'none', sent[1]
         configure_request_advanced({'llm': {'source': 'openai', 'model': 'gpt-4o',

@@ -29,6 +29,12 @@ _HOOK_LOCK = threading.Lock()
 _INSTALLED = False
 
 
+def _chat_completions_tools_require_no_reasoning(model):
+    name = str(model or '').lower()
+    return (bool(re.match(r'^gpt-5\.[456](?:[.-]|$)', name))
+            or name in {'gpt-6-sol', 'gpt-6-luna'})
+
+
 class ProviderRequestConfigurationError(ValueError):
     """A safe, explicit unsupported/invalid configuration diagnostic."""
 
@@ -230,13 +236,13 @@ def apply_request_advanced(config, *, method, url, headers=None, json_body=None,
             ):
                 result['json']['thinking'] = {'type': 'disabled'}
 
-    # GPT-5.4–5.6 Chat Completions only accept function tools with reasoning
-    # disabled. Apply this after feature filtering so an explicit disabled
-    # reasoning feature cannot accidentally restore the model's medium default.
+    # These Chat Completions models only accept function tools with reasoning
+    # disabled. Newer GPT-6 models require Responses for tool calls instead.
+    # Apply this after feature filtering so disabling reasoning is preserved.
     body = result.get('json')
     if (str(source).lower() == 'openai' and isinstance(body, dict)
             and urlsplit(str(url)).path.rstrip('/').endswith('/chat/completions')
-            and body.get('tools') and re.match(r'^gpt-5\.[456](?:[.-]|$)', str(body.get('model', '')).lower())):
+            and body.get('tools') and _chat_completions_tools_require_no_reasoning(body.get('model'))):
         body['reasoning_effort'] = 'none'
     if (str(source).lower() == 'openai_responses' and isinstance(body, dict)
             and urlsplit(str(url)).path.rstrip('/').endswith('/responses')):
@@ -261,7 +267,7 @@ def configure_request_advanced(model_config):
         private = any(advanced.get(key) for key in ('headers', 'query', 'extra_body'))
         source = str(entry.get('source') or '').lower()
         model = str(entry.get('model') or '').lower()
-        completions_compatibility = (source == 'openai' and re.match(r'^gpt-5\.[456](?:[.-]|$)', model))
+        completions_compatibility = source == 'openai' and _chat_completions_tools_require_no_reasoning(model)
         if not feature_disables and not private and not completions_compatibility:
             continue
         base = str(entry.get('base_url') or '').strip()
