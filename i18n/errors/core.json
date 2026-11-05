@@ -2016,6 +2016,7 @@
   "2005078": {"en-US": "Token limits must be positive integers and may use a K or M suffix", "zh-CN": "Token 限制须为正整数，可使用 K 或 M 后缀"},
   "2005079": {"en-US": "Input and output token limits must not exceed the context window", "zh-CN": "输入及输出 Token 限制不能超过上下文窗口"},
   "2005081": {"en-US": "This embedding model is in use; remove indexed knowledge bases before removing the model", "zh-CN": "此向量模型正在使用中，请先移除已建立向量索引的知识库，再移除模型"},
+  "2005082": {"en-US": "A supplier with this name already exists. Choose another name", "zh-CN": "供应商名称已存在，请使用其他名称"},
   "2005080": {"en-US": "This request protocol is not declared for the supplier service", "zh-CN": "此供应商服务未声明该请求协议"},
   "2005100": { "en-US": "Dataset write permission is required", "zh-CN": "需要知识库写入权限" },
   "2005101": { "en-US": "Library kind must be paper or document", "zh-CN": "知识库类型必须为论文库或文档库" },

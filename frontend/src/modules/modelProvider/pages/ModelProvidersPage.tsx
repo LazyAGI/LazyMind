@@ -1031,8 +1031,6 @@ export default function ModelProviderPage({
     };
   }, [credentialRestoreStatus.status, loadModelProviders]);
 
-  const [verificationEvent, setVerificationEvent] = useState<{ providerId: string; account: string | null; sequence: number }>();
-
   const verifyProviderGroup = async (
     provider: AddedProvider,
     group: ProviderConnectionGroup,
@@ -1040,7 +1038,6 @@ export default function ModelProviderPage({
     isCurrent: () => boolean = () => true,
   ) => {
     const providerId = provider.id;
-    const verificationAccount = localStorage.getItem("lazymind:user");
     const groupId = group.id;
     const requestApiKey = normalizeFormText(apiKey);
     const verifyKey = `${providerId}:${groupId}`;
@@ -1089,7 +1086,6 @@ export default function ModelProviderPage({
         ),
       );
       if (isVerified) {
-        setVerificationEvent(current => ({ providerId, account: verificationAccount, sequence: (current?.sequence || 0) + 1 }));
         await loadModelProviders();
         if (isCurrent()) message.success(t(checkResult?.reason === "credentials_recognized" ? "modelProvider.workspace.arkCredentialsRecognized" : "modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
@@ -1620,7 +1616,6 @@ export default function ModelProviderPage({
   return (
     <div className="model-provider-page-content">
       <ProviderWorkspace
-        verificationEvent={verificationEvent}
         providers={providerOptions}
         configuredProviders={addedProviderList}
         loading={loading}

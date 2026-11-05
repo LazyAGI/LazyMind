@@ -86,6 +86,71 @@ func TestCustomSupplierCRUDKeepsTechnicalProtocolAndCanonicalStorage(t *testing.
 	}
 }
 
+func TestCustomSupplierNameMustBeUniqueForUser(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	source := orm.UserModelProvider{ID: "source", Name: "OpenAI", Category: "model", BaseURL: "https://api.openai.com/v1/", BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	other := orm.UserModelProvider{ID: "other", Name: "My Proxy", ProtocolName: "OpenAI", IsCustom: true, Category: "model", BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	for _, provider := range []*orm.UserModelProvider{&source, &other} {
+		if err := db.Create(provider).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"openai", " MY PROXY "} {
+		rec := httptest.NewRecorder()
+		body, _ := json.Marshal(map[string]string{"name": name, "source_provider_id": source.ID, "base_url": "https://proxy.example/v1"})
+		CreateCustomProvider(rec, customProviderRequest(http.MethodPost, "", string(body)))
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("duplicate %q: %d %s", name, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Code int `json:"code"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || response.Code != 2005082 {
+			t.Fatalf("duplicate %q did not return the name conflict code: %s (%v)", name, rec.Body.String(), err)
+		}
+	}
+	var count int64
+	if err := db.Model(&orm.UserModelProvider{}).Count(&count).Error; err != nil || count != 2 {
+		t.Fatalf("duplicate created provider: count=%d err=%v", count, err)
+	}
+	rec := httptest.NewRecorder()
+	UpdateCustomProvider(rec, customProviderRequest(http.MethodPatch, other.ID, `{"name":" OPENAI "}`))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate rename: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := db.First(&other, "id = ?", other.ID).Error; err != nil || other.Name != "My Proxy" {
+		t.Fatalf("duplicate rename changed saved name: %#v %v", other, err)
+	}
+	rec = httptest.NewRecorder()
+	UpdateCustomProvider(rec, customProviderRequest(http.MethodPatch, other.ID, `{"name":"my proxy"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("case-only self rename: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := db.Model(&other).Update("deleted_at", time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	CreateCustomProvider(rec, customProviderRequest(http.MethodPost, "", `{"name":"My Proxy","source_provider_id":"source","base_url":"https://proxy.example/v1"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("soft-deleted name was not reusable: %d %s", rec.Code, rec.Body.String())
+	}
+	otherSource := source
+	otherSource.ID = "other-source"
+	otherSource.CreateUserID = "user-2"
+	if err := db.Create(&otherSource).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := customProviderRequest(http.MethodPost, "", `{"name":"My Proxy","source_provider_id":"other-source","base_url":"https://proxy.example/v1"}`)
+	req.Header.Set("X-User-Id", "user-2")
+	rec = httptest.NewRecorder()
+	CreateCustomProvider(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("another user could not reuse name: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCustomSupplierSeedSyncDoesNotSuppressCatalogSupplier(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	now := time.Now()

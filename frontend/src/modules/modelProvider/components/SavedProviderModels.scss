@@ -60,6 +60,10 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.saved-provider-model-tooltip .ant-tooltip-inner {
+  border: 1px solid var(--ant-color-border-secondary, #e6e9ef);
+  box-shadow: 0 8px 24px rgb(31 41 55 / 12%);
+}
 .saved-provider-model-actions {
   display: inline-flex;
   flex: 0 0 84px;

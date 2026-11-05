@@ -23,3 +23,10 @@ func TestProviderRequestConfigSurvivesEncryptedPayloadRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderRequestConfigAcceptsResponsesEndpointAndDefault(t *testing.T) {
+	config := `{"default_protocol":"openai-responses","endpoints":{"openai":"","openai-responses":"https://proxy.example/v1/","anthropic":""},"defaults":{"openai":"https://api.openai.com/v1/","openai-responses":"https://api.openai.com/v1/"}}`
+	if !ValidProviderRequestConfig(config) {
+		t.Fatal("OpenAI Responses configuration was rejected")
+	}
+}

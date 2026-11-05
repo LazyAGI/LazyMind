@@ -32,6 +32,20 @@ func RuntimeProviderName(provider orm.UserModelProvider) string {
 
 var errCanonicalGroupExists = errors.New("model supplier already has credential storage")
 var errEmbeddingConfirmationRequired = errors.New("removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked")
+var errCustomProviderNameExists = errors.New("model supplier name already exists")
+
+func checkCustomProviderName(tx *gorm.DB, userID, excludeID, name string) error {
+	var providers []orm.UserModelProvider
+	if err := tx.Select("id", "name").Where("create_user_id = ? AND category = ? AND deleted_at IS NULL", userID, defaultProviderCategory).Find(&providers).Error; err != nil {
+		return err
+	}
+	for _, provider := range providers {
+		if provider.ID != excludeID && strings.EqualFold(strings.TrimSpace(provider.Name), name) {
+			return errCustomProviderNameExists
+		}
+	}
+	return nil
+}
 
 type createCustomProviderRequest struct {
 	LogoDataURL      *string `json:"logo_data_url,omitempty"`
@@ -98,11 +112,18 @@ func CreateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		if err := lockProvider(tx, &source); err != nil {
 			return err
 		}
+		if err := checkCustomProviderName(tx, user, "", row.Name); err != nil {
+			return err
+		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
 		return tx.Create(&group).Error
 	}); err != nil {
+		if errors.Is(err, errCustomProviderNameExists) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "create custom provider failed", 500)
 		return
 	}
@@ -184,6 +205,9 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 			return tx.Model(&row).Updates(updates).Error
 		}
 		name := *req.Name
+		if err := checkCustomProviderName(tx, row.CreateUserID, row.ID, name); err != nil {
+			return err
+		}
 		var groups []orm.UserModelProviderGroup
 		if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Find(&groups).Error; err != nil {
 			return err
@@ -213,6 +237,10 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, errCustomProviderNameExists) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "rename custom provider failed", 500)
 		return
 	}

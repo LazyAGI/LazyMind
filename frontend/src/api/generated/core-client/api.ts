@@ -7563,6 +7563,7 @@ export interface ProviderRequestConfigOpenAPIResponse {
 
 export const ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 
@@ -9565,6 +9566,7 @@ export interface UpdateProviderRequestConfigOpenAPIRequest {
 
 export const UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 

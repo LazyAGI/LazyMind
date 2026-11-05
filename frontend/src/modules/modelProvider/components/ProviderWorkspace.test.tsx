@@ -122,9 +122,7 @@ function setup(
   let updateConfiguredProviders: (
     providers: AddedProvider[],
   ) => void = () => {};
-  let updateVerification: (id: string, account?: string | null) => void = () => {};
   const callbacks = {
-    verified: (id: string, account?: string | null) => updateVerification(id, account),
     setProvider: (next: AddedProvider) => updateConfiguredProviders([next]),
     onReload: vi.fn().mockResolvedValue(undefined),
     onDeleteModel: vi.fn(),
@@ -134,12 +132,9 @@ function setup(
     const [drawer, setDrawer] = useState(false);
     const [configuredProviders, setConfiguredProviders] = useState([provider]);
     updateConfiguredProviders = setConfiguredProviders;
-    const [verificationEvent, setVerificationEvent] = useState<{ providerId: string; account: string | null; sequence: number }>();
-    updateVerification = (id, account = localStorage.getItem("lazymind:user")) => setVerificationEvent(current => ({ providerId: id, account, sequence: (current?.sequence || 0) + 1 }));
     return (
       <>
         <ProviderWorkspace
-          verificationEvent={verificationEvent}
           providers={[provider]}
           configuredProviders={configuredProviders}
           loading={false}
@@ -681,12 +676,29 @@ describe("compact provider workspace", () => {
     expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
   });
 
-  it("shows a verified keyless custom supplier as connected without adding a sidebar status dot", () => {
+  it("shows a verified keyless custom supplier as connected with a green sidebar dot", () => {
     const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: true }] };
     setup({ providers: [custom], configuredProviders: [custom] });
     expect(document.querySelector(".provider-workspace-status")).toHaveTextContent("modelProvider.workspace.connected");
     const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name: /Local models/ }).querySelector("i")).toHaveClass("is-ready");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.configured" }));
+    expect(navigation.getByRole("button", { name: /Local models/ })).toBeInTheDocument();
+  });
+
+  it("does not mark an unverified keyless supplier as connected", () => {
+    const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: false }] };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
     expect(navigation.getByRole("button", { name: /Local models/ }).querySelector("i")).not.toBeInTheDocument();
+  });
+
+  it.each(["vLLM", "LMDeploy"])("shows a verified keyless %s preset with a green sidebar dot", (name) => {
+    const local = { ...provider, id: name.toLowerCase(), name, source: name,
+      groups: [{ ...provider.groups[0], baseUrl: "http://localhost:8000/v1/", keys: [], apiKeyConfigured: false, verified: true }] };
+    setup({ providers: [local], configuredProviders: [local] });
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name }).querySelector("i")).toHaveClass("is-ready");
   });
 
   it("separates pointer focus from keyboard navigation without removing focused controls", () => {
@@ -757,20 +769,14 @@ describe("compact provider workspace", () => {
     expect(callbacks.onReload).not.toHaveBeenCalled();
   });
 
-  it("promotes only a new verification transition, keeping initial verified order", async () => {
+  it("keeps supplier order when a connection becomes verified", async () => {
     const sense = { ...provider, id: "sense", name: "SenseNova" };
     const callbacks = setup({ providers: [sense, provider] });
     const order = () => [...document.querySelectorAll('.provider-workspace-sortable-row')].map(row => row.getAttribute('data-provider-id'));
     expect(order()).toEqual(["sense", "openai"]);
-    act(() => callbacks.verified(provider.id));
-    await waitFor(() => expect(order()).toEqual(["openai", "sense"]));
-  });
-
-  it("ignores verification responses captured under a different account", () => {
-    const sense = { ...provider, id: "sense", name: "SenseNova" };
-    const callbacks = setup({ providers: [sense, provider] });
-    act(() => callbacks.verified(provider.id, "old-account"));
-    expect(document.querySelector('.provider-workspace-sortable-row')).toHaveAttribute('data-provider-id', 'sense');
+    await act(async () => callbacks.setProvider({ ...provider, groups: [{ ...provider.groups[0], verified: false }] }));
+    await act(async () => callbacks.setProvider(provider));
+    expect(order()).toEqual(["sense", "openai"]);
   });
 
   it("keeps a supplier logo when its request protocol changes", () => {
@@ -866,6 +872,32 @@ describe("compact provider workspace", () => {
       source_provider_id: "openai",
       base_url: provider.baseUrl,
     }));
+  });
+
+  it("rejects a new supplier name that matches an existing supplier", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), {
+      target: { value: "  openai  " },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    expect(await dialog.findByText("modelProvider.workspace.supplierNameDuplicate")).toBeInTheDocument();
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps the name editor open when the server reports a duplicate", async () => {
+    const custom = { ...provider, id: "custom", name: "Private proxy", isCustom: true };
+    mocks.updateProvider.mockRejectedValueOnce({ response: { data: { code: 2005082 } } });
+    setup({ providers: [custom], configuredProviders: [custom] });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.editSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), {
+      target: { value: "New proxy" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    expect(await dialog.findByText("modelProvider.workspace.supplierNameDuplicate")).toBeInTheDocument();
+    expect(dialog.getByLabelText("modelProvider.workspace.supplierName")).toHaveValue("New proxy");
   });
 
   it.each(["custom", "default", "empty"] as const)(

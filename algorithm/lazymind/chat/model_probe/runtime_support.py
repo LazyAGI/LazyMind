@@ -16,6 +16,7 @@ RUNTIME_TYPES_BY_SOURCE = {
     'kimi': {'llm', 'vlm'},
     'minimax': {'llm', 'vlm', 'text2image', 'tts'},
     'openai': {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank'},
+    'openai_responses': {'llm', 'vlm'},
     'openrouter': {'llm', 'vlm', 'embed', 'text2image', 'text2video', 'tts', 'stt'},
     'ppio': {'llm', 'vlm'},
     'qwen': {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank', 'text2image', 'image_editing',
@@ -28,7 +29,7 @@ RUNTIME_TYPES_BY_SOURCE = {
 SOURCE_ALIASES = {
     'anthropic': 'claude', 'bigmodel': 'glm', 'moonshot': 'kimi', 'tongyiqianwen': 'qwen',
     'volcanoark': 'doubao', 'volcengine': 'doubao', 'zhipu': 'glm', 'zhipuai': 'glm',
-    'vllm': 'openai', 'lmdeploy': 'openai',
+    'vllm': 'openai', 'lmdeploy': 'openai', 'openairesponses': 'openai_responses',
 }
 
 

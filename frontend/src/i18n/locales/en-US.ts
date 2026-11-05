@@ -955,6 +955,7 @@ const enUS = {
       disabled: "Disabled",
       modelsLoadFailed: "Unable to load models",
       supplierNameBytes: "Supplier name cannot exceed 255 UTF-8 bytes.",
+      supplierNameDuplicate: "A supplier with this name already exists. Choose another name.",
       "loadFailed": "Could not load supplier settings. Please retry.",
       "retry": "Retry",
       "savedRefreshFailed": "Changes were saved, but reloading failed. Please reload again.",
