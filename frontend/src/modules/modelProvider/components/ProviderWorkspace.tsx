@@ -108,7 +108,6 @@ interface Props {
     isCurrent: () => boolean,
   ) => Promise<void>;
   cloudContent: ReactNode;
-  verificationEvent?: { providerId: string; account: string | null; sequence: number };
 }
 
 function Logo({ provider }: { provider: ProviderOption }) {
@@ -128,7 +127,8 @@ function Logo({ provider }: { provider: ProviderOption }) {
 
 function hasProviderConfiguration(provider: AddedProvider): boolean {
   return provider.groups.some(
-    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 || group.models.length > 0,
+    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 ||
+      group.models.length > 0 || group.verified && canDiscoverWithoutApiKey(provider, group),
   );
 }
 
@@ -211,16 +211,7 @@ export function ProviderWorkspace(props: Props) {
     [props.providers, props.configuredProviders],
   );
   const projectedNavigation = useMemo(() => projectSupplierNavigation(mergedProviders), [mergedProviders]);
-  const { providers: navigation, reorder: reorderSuppliers, promote, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
-  const lastVerification = useRef<Props["verificationEvent"]>();
-  useEffect(() => {
-    const event = props.verificationEvent;
-    if (!event || event === lastVerification.current) return;
-    lastVerification.current = event;
-    if (event.account !== localStorage.getItem("lazymind:user")) return;
-    const node = navigation.find(item => item.children.some(child => child.id === event.providerId));
-    if (node) promote(node.id);
-  }, [props.verificationEvent, navigation, promote]);
+  const { providers: navigation, reorder: reorderSuppliers, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
   const providers = useMemo(() => navigation.flatMap((node) => node.children), [navigation]);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
@@ -531,7 +522,9 @@ export function ProviderWorkspace(props: Props) {
       }
       message.success(label("supplierSaved"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      if ((error as { response?: { data?: { code?: number } } })?.response?.data?.code === 2005082) {
+        providerForm.setFields([{ name: "name", errors: [label("supplierNameDuplicate")] }]);
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       providerSavePending.current = false;
       setProviderSaving(false);
@@ -631,7 +624,8 @@ export function ProviderWorkspace(props: Props) {
       }
     }
   });
-  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0)) ? (
+  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) =>
+    candidate.apiKeyConfigured || candidate.keys.length > 0 || candidate.verified && canDiscoverWithoutApiKey(item, candidate))) ? (
     <i className={items.some((item) => item.groups.some((candidate) => candidate.verified &&
       (candidate.keys.some((key) => key.enabled) || (!candidate.keys.length && candidate.apiKeyConfigured) || canDiscoverWithoutApiKey(item, candidate)))) ? "is-ready" : ""}
       aria-label={label("configured")} />
@@ -1181,6 +1175,15 @@ export function ProviderWorkspace(props: Props) {
                   new TextEncoder().encode(value?.trim() || "").length <= 255
                     ? Promise.resolve()
                     : Promise.reject(new Error(label("supplierNameBytes"))),
+              },
+              {
+                validator: (_, value?: string) => {
+                  const name = value?.trim().toLocaleLowerCase();
+                  return !name || !providers.some(item => item.id !== providerModalTarget.current?.id &&
+                    item.name.trim().toLocaleLowerCase() === name)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(label("supplierNameDuplicate")));
+                },
               },
             ]}
           >

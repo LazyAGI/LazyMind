@@ -16960,6 +16960,7 @@ components:
                 default_protocol:
                     enum:
                         - openai
+                        - openai-responses
                         - anthropic
                     type: string
                 protocols:
@@ -19080,12 +19081,13 @@ components:
                 default_protocol:
                     enum:
                         - openai
+                        - openai-responses
                         - anthropic
                     type: string
                 endpoints:
                     additionalProperties:
                         type: string
-                    description: Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+                    description: Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
                     type: object
             required:
                 - default_protocol

@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { MinusOutlined, SettingOutlined } from "@ant-design/icons";
-import { Button, Spin, Tooltip, message } from "antd";
+import { Button, Spin, Tooltip, message, theme } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import type {
@@ -40,6 +40,7 @@ export interface SavedProviderModelsProps {
 
 export function SavedProviderModels(props: SavedProviderModelsProps) {
   const { t } = useTranslation();
+  const { token } = theme.useToken();
   const pending = useRef(new Set<string>());
   const activeProbes = useRef(new Set<string>());
   const [probing, setProbing] = useState<Set<string>>(new Set());
@@ -101,6 +102,8 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
             />
             <Tooltip
               trigger={["hover", "focus", "click"]}
+              color={token.colorBgElevated}
+              classNames={{ root: "saved-provider-model-tooltip" }}
               title={
                 <div className="saved-provider-model-detail">
                   <strong>{model.name}</strong>

@@ -36,12 +36,13 @@ describe("saved supplier sidebar order", () => {
     expect(next.result.current.providers.map(item => item.id)).toEqual(["a", "b", "c"]);
   });
 
-  it("moves a verified supplier to the front and permits subsequent manual movement", () => {
-    const view = renderHook(() => useSupplierOrder(suppliers));
-    act(() => view.result.current.promote("c"));
-    expect(view.result.current.providers.map(item => item.id)).toEqual(["c", "a", "b"]);
-    act(() => view.result.current.reorder(["a", "b", "c"], "c", "b"));
+  it("keeps the order when a supplier's connection state changes", () => {
+    const view = renderHook(({ items }) => useSupplierOrder(items), {
+      initialProps: { items: suppliers.map(item => ({ ...item, verified: false })) },
+    });
+    view.rerender({ items: suppliers.map(item => ({ ...item, verified: item.id === "c" })) });
     expect(view.result.current.providers.map(item => item.id)).toEqual(["a", "b", "c"]);
+    expect(localStorage.getItem("lazymind:supplier-order:[\"user-a\",\"tenant-a\"]")).toBeNull();
   });
 
   it("isolates saved order by user and tenant and resets immediately when the account changes", () => {

@@ -7572,6 +7572,7 @@ export interface ProviderRequestConfigOpenAPIResponse {
 
 export const ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 
@@ -9567,13 +9568,14 @@ export interface UpdateProviderRequestConfigOpenAPIRequest {
     'advanced'?: ProviderRequestAdvanced;
     'default_protocol': UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum;
     /**
-     * Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+     * Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
      */
     'endpoints'?: { [key: string]: string; };
 }
 
 export const UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 

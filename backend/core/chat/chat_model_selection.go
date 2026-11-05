@@ -1327,11 +1327,12 @@ func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatMo
 	}
 	baseURL, apiKey := model.BaseURL, model.APIKey
 	var advanced credentialvault.ProviderRequestAdvanced
+	var requestProtocol string
 	var err error
 	if model.ProviderGroupID != "" {
 		var runtimeConfig modelprovider.RuntimeProviderConfiguration
 		runtimeConfig, err = modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, model.ProviderGroupID)
-		baseURL, apiKey, advanced = runtimeConfig.BaseURL, runtimeConfig.APIKey, runtimeConfig.Advanced
+		baseURL, apiKey, advanced, requestProtocol = runtimeConfig.BaseURL, runtimeConfig.APIKey, runtimeConfig.Advanced, runtimeConfig.Protocol
 	} else {
 		apiKey, err = modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
 	}
@@ -1339,7 +1340,7 @@ func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatMo
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
-		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ModelSettings: model.ModelSettings, RequestAdvanced: advanced, ProviderName: model.ProviderName, ModelName: model.ModelName,
+		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ModelSettings: model.ModelSettings, RequestAdvanced: advanced, RequestProtocol: requestProtocol, ProviderName: model.ProviderName, ModelName: model.ModelName,
 		BaseURL: baseURL, APIKey: apiKey, SkipAuth: strings.TrimSpace(apiKey) == "" && strings.TrimSpace(baseURL) != "", MaxInputTokens: model.MaxInputTokens, InputTokenLimit: model.InputTokenLimit, MaxOutputTokens: model.MaxOutputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]

@@ -68,10 +68,10 @@ func TestUpstreamModelUsesTypedMetadataAndExactInputLimit(t *testing.T) {
 	}{
 		{name: "typed image", json: `{"name":"opaque-model","model_type":"text2image","input":["text","image"],"output":["text","image"]}`, typeName: "text2image"},
 		{name: "typed embed", json: `{"name":"opaque-model","model_type":"multimodal_embedding","input":["text","image"],"output":["text"]}`, typeName: "multimodal_embedding"},
-		{name: "explicit input", json: `{"name":"gpt-4o","input":["text"],"output":["text"],"context":200000,"max_input":123456}`, typeName: "llm", tokens: "123456"},
+		{name: "context is not input ceiling", json: `{"name":"gpt-6-sol","input":["text"],"output":["text"],"context":1050000,"max_input":922000,"max_output":128000}`, typeName: "llm", tokens: "1050000"},
 		{name: "context beats legacy window", json: `{"name":"gpt-4o","input":["text"],"output":["text"],"context":1000000}`, typeName: "llm", tokens: "1000000"},
 		{name: "binary window exact", json: `{"name":"unknown-chat","input":["text"],"output":["text"],"context":131072}`, typeName: "llm", tokens: "131072"},
-		{name: "embedding input", json: `{"name":"opaque-model","model_type":"embed","input":["text"],"output":["text"],"context":8192,"max_input":8191}`, typeName: "embed", tokens: "8191"},
+		{name: "embedding context", json: `{"name":"opaque-model","model_type":"embed","input":["text"],"output":["text"],"context":8192,"max_input":8191}`, typeName: "embed", tokens: "8192"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var item upstreamCatalogModel

@@ -169,6 +169,7 @@ describe("provider request configuration drawer", () => {
         default_protocol: "anthropic",
         endpoints: {
           openai: "https://gateway.test/v1",
+          "openai-responses": "",
           anthropic: "https://proxy.test/anthropic",
         },
         advanced: {},
@@ -188,7 +189,7 @@ describe("provider request configuration drawer", () => {
     await waitFor(() =>
       expect(saveConfig).toHaveBeenCalledWith("provider-a", {
         default_protocol: "openai",
-        endpoints: { openai: "", anthropic: "" },
+        endpoints: { openai: "", "openai-responses": "", anthropic: "" },
         advanced: {},
       }),
     );

@@ -777,7 +777,7 @@ const zhCN = {
       "unknown": "未分类",
     },
     taskTypeDescription: {
-      "chat": "理解输入、推理并回答；可包含视觉理解和工具调用。",
+      "chat": "理解输入并回答问题，可用于推理、写作和代码等任务。",
       "embedding": "把文本或其他内容转换成向量，用于语义检索和匹配。",
       "rerank": "对已有候选结果按相关性重新排序。",
       "asr": "把语音转成文字，用于转写和语音指令。",
@@ -953,6 +953,7 @@ const zhCN = {
       disabled: "已停用",
       modelsLoadFailed: "模型加载失败",
       supplierNameBytes: "供应商名称不能超过 255 字节（中文约占 3 字节）。",
+      supplierNameDuplicate: "供应商名称已存在，请使用其他名称。",
       "loadFailed": "供应商配置加载失败，请重试。",
       "retry": "重试",
       "savedRefreshFailed": "更改已保存，但刷新失败，请重试加载。",

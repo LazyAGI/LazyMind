@@ -296,6 +296,7 @@ type RuntimeProviderConfiguration struct {
 	BaseURL  string
 	APIKey   string
 	Advanced credentialvault.ProviderRequestAdvanced
+	Protocol string
 }
 
 // ResolveProviderRuntimeConfiguration reads credentials and private request
@@ -306,6 +307,7 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 	}
 	var baseURL, key string
 	var advanced credentialvault.ProviderRequestAdvanced
+	var protocol string
 	var unavailable error
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var requested orm.UserModelProviderGroup
@@ -316,6 +318,7 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 		if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", requested.UserModelProviderID, requested.CreateUserID).Take(&parent).Error; err != nil {
 			return err
 		}
+		protocol = savedRequestConfig(tx, parent).DefaultProtocol
 		baseURL = connectionBaseURL(parent, requested.BaseURL)
 		if !hasSharedProviderEndpoint(parent) {
 			pool, err := apiKeyForGroup(tx, &requested)
@@ -387,7 +390,7 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 	if unavailable != nil {
 		return RuntimeProviderConfiguration{}, unavailable
 	}
-	return RuntimeProviderConfiguration{BaseURL: baseURL, APIKey: key, Advanced: advanced}, nil
+	return RuntimeProviderConfiguration{BaseURL: baseURL, APIKey: key, Advanced: advanced, Protocol: protocol}, nil
 }
 
 func ResolveProviderAPIKey(ctx context.Context, db *gorm.DB, groupID string) (string, error) {

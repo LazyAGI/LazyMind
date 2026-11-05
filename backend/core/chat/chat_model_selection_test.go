@@ -143,7 +143,7 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load default chat llm: %v", err)
 	}
-	if cfg["model"] != "gpt-5" || cfg["source"] != "openai" {
+	if cfg["model"] != "gpt-5" || cfg["source"] != "openai_responses" {
 		t.Fatalf("default chat llm = %#v", cfg)
 	}
 	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", "")
