@@ -1,0 +1,22 @@
+name: Branch naming
+
+on:
+  pull_request:
+    branches: [main, master, 'dev/*']
+
+permissions:
+  contents: read
+
+jobs:
+  reject-codex-prefix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject codex/ pull request branches
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" == codex/* ]]; then
+            echo "::error::Branches starting with codex/ are not allowed. Use feat/ for feature work."
+            exit 1
+          fi

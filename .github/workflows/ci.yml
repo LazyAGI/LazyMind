@@ -16,20 +16,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  branch-name:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - name: Reject codex/ pull request branches
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          if [[ "$HEAD_REF" == codex/* ]]; then
-            echo "::error::Branches starting with codex/ are not allowed. Use feat/ for feature work."
-            exit 1
-          fi
-
   verify-skill-lock:
     runs-on: ubuntu-latest
     timeout-minutes: 10
