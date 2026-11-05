@@ -11,9 +11,9 @@ when_to_use: >
   when the user wants to create, plan, draft, or revise a multi-slide
   presentation/deck/PPT. Use it for requests such as "make a PPT", "generate a
   presentation", "帮我做一个路演 PPT", or "做一份汇报幻灯片".
-  A paper-library handoff (kind=ppt) is an academic presentation with its sources
-  already supplied. Bind the complete handoff JSON as task_context; never ask
-  the user to re-upload those papers or type internal IDs.
+  Treat every supplied source as an ordinary conversation attachment. Use the
+  user's instructions to distinguish research reports, paper reviews and reading
+  notes. Preserve all selected papers; never ask for internal paper IDs.
   Academic/scientific presentations, including paper group meetings, default to
   科研风格（白底黑字：#FFFFFF background, #111111 text, restrained chart accents,
   readable evidence-led typography and diagrams）and
@@ -55,14 +55,7 @@ when_to_use: >
   PowerPoint file.
 
 runtime:
-  trigger_inputs: [task_context, template_pptx, uploaded_materials]
-  paper_attachments:
-    accept: [.pdf, .doc, .docx, .txt, .md]
-    satisfies: [academic_materials]
-  paper_handoff:
-    kind: ppt
-    input: task_context
-    satisfies: [academic_materials, visual_style, generate_background_images]
+  trigger_inputs: [template_pptx, uploaded_materials]
   publisher_owned_slots:
     - reflection_markdown
     - deck_outline
@@ -259,8 +252,6 @@ runtime:
         Only for research reports, paper reviews, thesis defenses or reading-note
         presentations when no relevant source attachments, substantive research
         text or reading notes have already been supplied in this conversation.
-        A paper-library handoff with selected papers also counts as supplied
-        research material; never ask to upload it again.
         Reuse existing materials without asking again. A PPTX visual template
         is not a research source. Do not ask this question for general PPT tasks.
       question: 请提供科研材料，可上传单篇或多篇论文，也可以直接输入研究内容或阅读心得。
@@ -450,8 +441,7 @@ tool_scripts:
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
       - ppt_analyze_template
-      - ppt_paper_handoff_context
-      - ppt_cache_library_papers
+      - ppt_publish_paper_reflection
       - ppt_cache_academic_sources
       - ppt_read_academic_source
       - ppt_plan_paper_order
@@ -511,19 +501,10 @@ steps:
     label: Generate PPT
 
 slots:
-  - id: task_context
-    label: Paper Task Context
-    type: text
-    cardinality: single
-    external: true
-    required: false
-    user_visible: false
-    exposed: false
   - id: reflection_markdown
     label: 阅读心得
     type: text
     cardinality: single
-    external: true
     required: false
     user_visible: true
   - id: native_pptx

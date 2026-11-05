@@ -865,127 +865,15 @@ def ppt_plan_paper_order(papers_json: str, dependencies_json: str = '[]') -> dic
             'ordering_policy': 'prerequisites first; supplied narrative order breaks ties'}
 
 
-def ppt_paper_handoff_context(action: Literal['read'] = 'read') -> dict[str, Any]:
-    """Read this Chat's authorized frozen paper task, never model-supplied IDs.
-
-    Invoke for a paper-library handoff, not an ordinary attachment-based deck.
-    Existing saved reading reflections are returned without replacing the papers.
-
-    Args:
-        action: Use "read". Paper selection and identity come from the authorized
-            Chat context; never supply IDs, pagination or placeholder parameters.
-    """
-    from lazymind.chat.service.academic_handoff import academic_handoff_context
-
-    if action != 'read':
-        raise ValueError('action must be read')
-    context = academic_handoff_context()
-    papers = (context.get('input') or {}).get('papers')
-    if context.get('kind') != 'ppt' or not context.get('handoff_id') or not isinstance(papers, list) or not papers:
-        raise ValueError('Current Chat has no valid PPT paper handoff')
-    if any(not isinstance(paper, dict) or not paper.get('paper_id') for paper in papers):
-        raise ValueError('Frozen handoff must contain PaperRef objects with paper_id')
-    result = dict(context)
-    try:
-        reflection = _resolve_artifact_text(require_context(), 'reflection_markdown')
-        if isinstance(reflection, tuple):
-            reflection = reflection[0]
-        if isinstance(reflection, str) and reflection.strip() and reflection != 'reflection_markdown':
-            result['reflection_markdown'] = reflection
-    except (ValueError, KeyError):
-        pass
-    return result
-
-
 def ppt_publish_paper_reflection(markdown: str) -> dict[str, Any]:
     """Publish real reading prose before the PPT; reject empty/mock handoffs."""
     if not isinstance(markdown, str) or not markdown.strip():
         raise ValueError('Reading reflection must contain nonempty saved prose')
     if markdown.strip() in {'阅读心得生成能力待对接', '材料已接收，生成能力待对接', 'generation pending'}:
         raise ValueError('A mock receipt is not a reading reflection')
-    context = ppt_paper_handoff_context()
-    if not context.get('reflection_first'):
-        raise ValueError('This paper task did not request a preliminary reflection')
     saved = _save_artifact('reflection_markdown', markdown, content_type='text',
                            source_tool='ppt_publish_paper_reflection', internal_publish=True)
-    return {'artifact': saved, 'paper_count': len(context['input']['papers'])}
-
-
-def ppt_cache_library_papers(action: Literal['read'] = 'read') -> dict[str, Any]:
-    """Read ALL frozen paper selections to EOF through the authenticated API.
-
-    Preserve page numbers, provenance and versions; never accept abstracts as
-    full text. Processing/errors are explicit and partial files are not cached.
-    Every call revalidates authorization and current content through the API.
-
-    Args:
-        action: Use "read". Reads all authorized selected papers, including every
-            fulltext page. Do not supply force_refresh, paper IDs or placeholder
-            parameters. Do not retry argument errors with invented parameters.
-    """
-    from lazymind.chat.service.academic_handoff import academic_handoff_context, academic_read_paper
-
-    if action != 'read':
-        raise ValueError('action must be read')
-    context = academic_handoff_context()
-    papers = (context.get('input') or {}).get('papers')
-    if context.get('kind') != 'ppt' or not context.get('handoff_id') or not isinstance(papers, list) or not papers:
-        raise ValueError('Current Chat has no valid PPT paper handoff')
-    root = _conversation_root() / 'academic_sources'
-    root.mkdir(parents=True, exist_ok=True)
-    sources = []
-    for paper in papers:
-        if not isinstance(paper, dict) or not paper.get('paper_id'):
-            raise ValueError('Invalid PaperRef in frozen handoff')
-        entry = {'paper': paper, 'paper_id': paper['paper_id']}
-        try:
-            chunks, seen = [], set()
-            page = academic_read_paper(paper_id=paper['paper_id'])
-            identity = None
-            while True:
-                if page.get('status') != 'ready' or page.get('content_level') != 'fulltext':
-                    entry.update(status=page.get('status') or 'unavailable', warnings=page.get('warnings') or [],
-                                 error='Full text is not ready; do not generate from the abstract')
-                    break
-                current = (page.get('content_hash'), page.get('source_version'))
-                returned_paper = page.get('paper') or {}
-                if (not current[0] or returned_paper.get('paper_id') != paper['paper_id']
-                        or (identity is not None and identity != current)
-                        or (paper.get('source_version') and current[1] != paper['source_version'])):
-                    raise ValueError('Paper content identity/version changed; refresh task context and retry from the start')
-                identity = current
-                pages = page.get('pages')
-                if not isinstance(pages, list) or not pages or any(
-                    not isinstance(item, dict) or not isinstance(item.get('text'), str) for item in pages
-                ) or not any(item['text'].strip() for item in pages):
-                    raise ValueError('Fulltext response contains no readable pages')
-                chunks.append({'text': '\n\n'.join(
-                    f"[page {item.get('page', 0)}]\n{item['text']}" for item in pages),
-                    'pages': pages, 'warnings': page.get('warnings') or [],
-                    'content_hash': current[0], 'source_version': current[1]})
-                cursor = page.get('next_cursor')
-                if not cursor:
-                    source_id = hashlib.sha256(json.dumps(
-                        [context['handoff_id'], paper['paper_id'], *identity], ensure_ascii=False,
-                    ).encode()).hexdigest()
-                    payload = {'sha256': source_id, 'complete': True, 'paper': paper,
-                               'handoff_id': context['handoff_id'], 'chunks': chunks}
-                    temporary = root / f'{source_id}.{uuid.uuid4().hex}.tmp'
-                    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
-                    os.replace(temporary, root / f'{source_id}.json')
-                    entry.update(status='ok', source_id=source_id, chunk_count=len(chunks),
-                                 content_hash=identity[0], source_version=identity[1])
-                    break
-                if not isinstance(cursor, str) or cursor in seen:
-                    raise ValueError('Fulltext reader returned a non-progressing cursor')
-                seen.add(cursor)
-                page = academic_read_paper(cursor=cursor)
-        except Exception as exc:
-            entry.update(status='error', error=str(exc))
-        sources.append(entry)
-    return {'handoff_id': context['handoff_id'], 'sources': sources,
-            'success_count': sum(source['status'] == 'ok' for source in sources),
-            'complete': all(source['status'] == 'ok' for source in sources)}
+    return {'artifact': saved}
 
 
 def ppt_cache_academic_sources(
@@ -1046,6 +934,10 @@ def ppt_cache_academic_sources(
                     if not isinstance(next_offset, int) or next_offset <= offset:
                         raise ValueError('Reader did not reach EOF or provide a progressing next_offset')
                     offset = next_offset
+                if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                    raise ValueError('Attachment changed while reading; retry from the start')
+                if not any(str(chunk.get('text') or '').strip() for chunk in chunks):
+                    raise ValueError('Fulltext reader returned no readable text')
                 payload = {'sha256': digest, 'complete': True, 'chunks': chunks}
                 temporary = cache.with_name(f'{digest}.{uuid.uuid4().hex}.tmp')
                 temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')

@@ -118,7 +118,7 @@ def test_shared_pdf_pool_feeds_native_pptx_and_html(tools, pdf, tmp_path, monkey
     attached = tools._attach_material_images_to_deck(deck)
     html_image = Path(attached['reference_images'][0])
     assert html_image.read_bytes() == Path(asset['path']).read_bytes()
-    info = json.loads((deck / 'info_pack.json').read_text())['user_assets']
+    info = json.loads((deck / 'info_pack.json').read_text(encoding='utf-8'))['user_assets']
     assert 'p. 1' in info['reference_image_captions'][str(html_image)]
     assert '坐标轴' in info['reference_image_captions'][str(html_image)]
     assert info['reference_image_sources'][str(html_image)]['pdf_provenance']['filename'] == pdf.name
@@ -227,7 +227,7 @@ def test_pdf_asset_can_be_bound_to_existing_html_page(tools, pdf, tmp_path, monk
     monkeypatch.setattr(tools, 'ppt_run_stage', render)
     result = tools.ppt_replace_page_material_image(str(deck), 1, material_index=1)
     assert not tools._tool_failed(result)
-    outline = json.loads((deck / 'outline.json').read_text())
+    outline = json.loads((deck / 'outline.json').read_text(encoding='utf-8'))
     assert outline['pages'][0]['use_image'] == {'reference_image_index': 0}
     assert stages == [('asset-plan', {}), ('page-html', {'page': 1})]
 

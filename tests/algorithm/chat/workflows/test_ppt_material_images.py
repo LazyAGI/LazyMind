@@ -84,6 +84,7 @@ def test_ppt_material_images_are_optional_and_search_failure_can_continue():
     }
 
     assert outputs == {
+        'reflection_markdown': False,
         'material_summary': True,
         'material_images': False,
         'material_clarification': True,
@@ -194,8 +195,10 @@ def test_visual_call_sends_actual_image_to_selected_role(monkeypatch, tmp_path, 
     monkeypatch.setattr(tools, 'select_vision_model_role', lambda: role)
     assert tools._agent_vlm_call('Inspect', 'Explain the flow', [str(picture)]) == 'Visible flow diagram'
     factory.assert_called_once_with(model=role, type='vlm')
-    query = model.call_args.args[0]
-    assert str(picture.resolve()) in query
+    from lazyllm.components.formatter import decode_query_with_filepaths
+    query = decode_query_with_filepaths(model.call_args.args[0])
+    assert query['files'] == [str(picture.resolve())]
+    assert query['query'] == 'Inspect\n\nExplain the flow'
     assert model.call_args.kwargs['llm_chat_history'] == []
 
 

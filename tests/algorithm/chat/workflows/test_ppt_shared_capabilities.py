@@ -88,14 +88,14 @@ def test_general_presentation_elements_edit_in_place(tools, monkeypatch, kind, c
 
 
 def test_single_generation_route_and_source_inputs():
-    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text())
+    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     assert state['transitions']['__start__'] == [{'to': 'analyze_requirements'}]
     assert state['transitions']['build_outline'] == [{'to': 'plan_page_prompts'}]
     planner = state['steps']['plan_page_prompts']
     assert {'material': 'material_summary', 'required': False} in planner['inputs']
     assert all(item['material'] != 'academic_brief' for item in planner['inputs'])
     assert all(step['mode'] == 'auto' for step in state['steps'].values())
-    workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())
+    workflow = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     fields = {field['id']: field for field in workflow['runtime']['clarification_fields']}
     assert 'generation_mode' not in fields
     assert fields['academic_materials']['attachment']['max_files'] == -1
@@ -106,141 +106,35 @@ def test_single_generation_route_and_source_inputs():
     assert 'compact_presentation' not in slots
 
 
-@pytest.fixture
-def library(monkeypatch, tools, tmp_path):
-    service = types.ModuleType('lazymind.chat.service.academic_handoff')
-    frozen = {'handoff_id': 'owned', 'kind': 'ppt', 'reflection_first': True,
-              'input': {'user_instruction': '8页组会', 'papers': [
-                  {'paper_id': 'a', 'title': 'Paper A', 'source_version': 'v2'},
-                  {'paper_id': 'b', 'title': 'Paper B', 'source_version': 'v1'}]}}
-    service.academic_handoff_context = lambda: frozen
-    monkeypatch.setitem(sys.modules, service.__name__, service)
-    monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
-    return service, frozen
+@pytest.mark.parametrize('failure', ['empty', 'cursor', 'permission', 'changed'])
+def test_attachment_partial_read_never_caches_complete_source(tools, tmp_path, monkeypatch, failure):
+    paper = tmp_path / 'paper.pdf'
+    paper.write_text('original bytes')
+    reader = types.ModuleType('lazymind.chat.engine.tools.file_resources.tools')
 
-
-def library_page(paper_id='a', version='v2', cursor='', text='Full paper text', content_hash='same'):
-    return {'status': 'ready', 'content_level': 'fulltext', 'paper': {'paper_id': paper_id},
-            'source_version': version, 'content_hash': content_hash,
-            'pages': [{'page': 6 if cursor == '' else 1, 'text': text}], 'next_cursor': cursor}
-
-
-def test_library_fulltext_pages_feed_shared_academic_reader(tools, library):
-    service, _ = library
-    calls = []
-
-    def read(**kwargs):
-        calls.append(kwargs)
-        if kwargs.get('paper_id') == 'a':
-            return library_page(cursor='opaque-cursor', text='A first batch')
-        if kwargs.get('cursor'):
-            return library_page(text='A final batch')
-        return library_page('b', 'v1', text='B full text')
-    service.academic_read_paper = read
-    result = tools.ppt_cache_library_papers()
-    assert result['complete'] and result['success_count'] == 2
-    assert calls == [{'paper_id': 'a'}, {'cursor': 'opaque-cursor'}, {'paper_id': 'b'}]
-    source = result['sources'][0]
-    assert source['paper']['title'] == 'Paper A' and source['chunk_count'] == 2
-    chunk = tools.ppt_read_academic_source(source['source_id'], 2)
-    assert chunk['reader_result']['pages'] == [{'page': 6, 'text': 'A final batch'}]
-    assert chunk['next_chunk'] is None
-
-
-@pytest.mark.parametrize('name', ['ppt_paper_handoff_context', 'ppt_cache_library_papers'])
-@pytest.mark.parametrize('arguments', [{}, {'action': 'read'}])
-def test_library_tools_accept_explicit_read_without_loosening_selection(tools, library, monkeypatch, name, arguments):
-    from lazyllm.tools.agent.toolsManager import ModuleTool, ToolManager
-
-    service, frozen = library
-    frozen['input']['papers'] = frozen['input']['papers'][:1]
-    service.academic_read_paper = mock.Mock(return_value=library_page())
-    monkeypatch.setattr(tools, '_resolve_artifact_text', mock.Mock(side_effect=ValueError('No saved reflection')))
-    # Build the actual schema/validator; do not accept invented fields as a workaround.
-    function = getattr(tools, name)
-    tool = ModuleTool(apply_func=function, schema_func=function)
-    manager = ToolManager([tool])
-    schema = manager.tools_description[0]['function']['parameters']
-    assert schema['properties']['action']['const'] == 'read'
-    assert schema['additionalProperties'] is False
-    validated = tool._validate_input(arguments)
-    result = tool.apply(**validated)
-    if name == 'ppt_cache_library_papers':
-        assert result['complete'] and result['success_count'] == 1
-        service.academic_read_paper.assert_called_once_with(paper_id='a')
-    else:
-        assert result['input'] == frozen['input']
-        service.academic_read_paper.assert_not_called()
-    for invalid in ({'force_refresh': 'false'}, {'paper_id': 'unselected'}, {'action': 'replace'}):
-        assert not tool.validate_parameters(invalid)
-
-
-@pytest.mark.parametrize('status', ['processing', 'failed', 'unavailable'])
-def test_library_not_ready_is_not_cached_or_replaced_by_abstract(tools, library, tmp_path, status):
-    service, frozen = library
-    frozen['input']['papers'] = frozen['input']['papers'][:1]
-    service.academic_read_paper = lambda **kwargs: {
-        'status': status, 'content_level': 'none', 'warnings': ['not ready'], 'abstract': 'a tempting summary',
-    }
-    result = tools.ppt_cache_library_papers()
-    assert not result['complete'] and result['success_count'] == 0
-    assert result['sources'][0]['status'] == status
-    assert not list((tmp_path / 'academic_sources').glob('*.json'))
-
-
-@pytest.mark.parametrize('failure', ['version', 'hash', 'cursor', 'permission'])
-def test_library_partial_read_failure_never_publishes_complete_source(tools, library, tmp_path, failure):
-    service, frozen = library
-    frozen['input']['papers'] = frozen['input']['papers'][:1]
-
-    def read(**kwargs):
-        if kwargs.get('paper_id'):
-            return library_page(cursor='opaque')
+    def read(path, offset, limit):
+        if failure == 'empty':
+            return {'text': '', 'eof': True}
+        if offset == 1:
+            return {'text': 'first batch', 'eof': False, 'next_offset': 2}
         if failure == 'permission':
             raise PermissionError('403 forbidden')
-        return library_page(version='v3' if failure == 'version' else 'v2',
-                            content_hash='changed' if failure == 'hash' else 'same',
-                            cursor='opaque' if failure == 'cursor' else '')
-    service.academic_read_paper = read
-    result = tools.ppt_cache_library_papers()
-    assert not result['complete'] and result['sources'][0]['status'] == 'error'
+        if failure == 'changed':
+            paper.write_text('replacement bytes')
+            return {'text': 'second batch', 'eof': True}
+        return {'text': 'second batch', 'eof': False, 'next_offset': 2}
+    reader.read_file_resource = read
+    monkeypatch.setitem(sys.modules, reader.__name__, reader)
+    monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
+    monkeypatch.setattr(tools, 'find_user_attachment', lambda name: {'path': str(paper)})
+    result = tools.ppt_cache_academic_sources(['paper.pdf'])
+    assert result['success_count'] == 0
+    assert result['sources'][0]['status'] == 'error'
     assert 'source_id' not in result['sources'][0]
-    assert not list((tmp_path / 'academic_sources').glob('*.json'))
+    assert list((tmp_path / 'academic_sources').glob('*.json')) == [tmp_path / 'academic_sources/manifest.json']
 
 
-def test_reflection_context_keeps_saved_prose_and_original_selection(tools, library, monkeypatch):
-    _, frozen = library
-    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda context, key: ('已保存的真实心得', 'text'))
-    result = tools.ppt_paper_handoff_context()
-    assert result['reflection_markdown'] == '已保存的真实心得'
-    assert result['input'] == frozen['input'] and result['reflection_first'] is True
-    assert 'reflection_markdown' not in frozen
-
-
-def test_library_launch_binds_authoritative_input_and_satisfies_upload_question():
-    spec = importlib.util.spec_from_file_location(
-        'paper_handoff_launch', ROOT / 'algorithm/lazymind/chat/workflow/paper_handoff.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    policy = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
-    frozen = {'handoff_id': 'h', 'kind': 'ppt', 'input': {'papers': [{'paper_id': 'a'}, {'paper_id': 'b'}]}}
-    requests = []
-    response = types.SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: frozen)
-    client = types.SimpleNamespace(base_url='http://core', _headers=lambda: {'Authorization': 'bound-user'},
-                                   transport=types.SimpleNamespace(request=lambda *a, **kw:
-                                                                   requests.append((a, kw)) or response))
-    bindings, satisfied = module.resolve_paper_handoff(client, 'owned-chat', policy)
-    assert json.loads(bindings['task_context']) == frozen
-    # A paper-library launch uses the approved research-style/no-background defaults.
-    assert satisfied == ['academic_materials', 'visual_style', 'generate_background_images']
-    assert requests[0][1]['params'] == {'conversation_id': 'owned-chat'}
-    assert requests[0][1]['headers'] == {'Authorization': 'bound-user'}
-    response.status_code = 404
-    assert module.resolve_paper_handoff(client, 'ordinary-chat', policy) == ({}, [])
-
-
-def test_reflection_publisher_rejects_empty_and_preserves_original_papers(tools, library, monkeypatch):
-    _, frozen = library
+def test_reflection_publisher_rejects_empty_and_preserves_original_papers(tools, monkeypatch):
     monkeypatch.setattr(tools, '_resolve_artifact_text', lambda context, key: (None, 'text'))
     published = []
     monkeypatch.setattr(tools, '_save_artifact', lambda *a, **kw: published.append((a, kw)) or {'status': 'ok'})
@@ -250,15 +144,36 @@ def test_reflection_publisher_rejects_empty_and_preserves_original_papers(tools,
     assert published == []
     prose = 'Paper A 的方法贡献与 Paper B 的实验条件不同，应分开讨论。读者观点：进一步复现实验。'
     result = tools.ppt_publish_paper_reflection(prose)
-    assert result == {'artifact': {'status': 'ok'}, 'paper_count': 2}
+    assert result == {'artifact': {'status': 'ok'}}
     assert published[0][0] == ('reflection_markdown', prose)
     assert published[0][1]['internal_publish'] is True
-    assert [paper['paper_id'] for paper in frozen['input']['papers']] == ['a', 'b']
+
+
+def test_reflection_publishes_in_real_material_collection_context(tools, tmp_path, monkeypatch):
+    from lazymind.chat.engine.subagent import tools as artifact_tools
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+    from lazymind.chat.engine.subagent.db import MemorySubAgentStore
+
+    package = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
+    state = yaml.safe_load((ROOT / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
+    events = []
+    ctx = SubAgentContext(
+        task_id='collect', conversation_id='papers', agent_type='workflow_step', objective='先写心得',
+        params={'workflow_runtime': package['runtime']}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[item['material'] for item in state['steps']['collect_materials']['outputs']],
+        db=MemorySubAgentStore({'id': 'collect'}), emit=events.append,
+    )
+    monkeypatch.setattr(artifact_tools, 'require_context', lambda: ctx)
+    monkeypatch.setattr(tools, '_save_artifact', artifact_tools._save_artifact)
+    prose = '两篇论文的研究问题不同，应分别讨论方法与实验局限。'
+    tools.ppt_publish_paper_reflection(prose)
+    assert events[0]['slot'] == 'reflection_markdown'
+    assert ctx.read_draft('reflection_markdown') == (prose, 'text')
 
 
 @pytest.mark.parametrize('layout', ['files_only', 'same_turn', 'across_turns'])
 def test_direct_upload_manifest_resolves_and_caches_every_same_named_paper(tools, tmp_path, monkeypatch, layout):
-    from lazymind.chat.workflow.paper_handoff import paper_attachment_context
+    from lazymind.chat.workflow.attachments import attachment_context
     from lazymind.chat.engine.tools.file_resources import resolver
 
     paths = []
@@ -273,15 +188,15 @@ def test_direct_upload_manifest_resolves_and_caches_every_same_named_paper(tools
         cfg['history_files_per_turn'] = {'3': paths}
     elif layout == 'across_turns':
         cfg['history_files_per_turn'] = {'2': paths[:1], '3': paths[1:]}
-    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
-    context, satisfied = paper_attachment_context(cfg, runtime)
+    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
+    context, satisfied = attachment_context(cfg, runtime)
     sources = json.loads(context.splitlines()[3])
     assert len(sources) == 2
     assert satisfied == ['academic_materials']
     monkeypatch.setattr(resolver, '_agentic_config', lambda: cfg)
     reader = types.ModuleType('lazymind.chat.engine.tools.file_resources.tools')
     reader.read_file_resource = mock.Mock(side_effect=lambda path, **kwargs: {
-        'text': Path(path).read_text(), 'eof': True,
+        'text': Path(path).read_text(encoding='utf-8'), 'eof': True,
     })
     monkeypatch.setitem(sys.modules, reader.__name__, reader)
     monkeypatch.setattr(tools, '_conversation_root', lambda: tmp_path)
@@ -295,12 +210,14 @@ def test_direct_upload_manifest_resolves_and_caches_every_same_named_paper(tools
 
 
 def test_nonpaper_or_unavailable_uploads_do_not_satisfy_paper_question(tmp_path):
-    from lazymind.chat.workflow.paper_handoff import paper_attachment_context
+    from lazymind.chat.workflow.attachments import attachment_context
     paths = [tmp_path / name for name in ('image.png', 'template.pptx', 'missing.pdf')]
     for path in paths[:2]:
         path.write_text('not a paper')
-    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text())['runtime']
-    assert paper_attachment_context({'files': list(map(str, paths))}, runtime) == ('', [])
+    runtime = yaml.safe_load((ROOT / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))['runtime']
+    context, satisfied = attachment_context({'files': list(map(str, paths))}, runtime)
+    assert 'image.png' in context and 'template.pptx' in context
+    assert 'missing.pdf' not in context and satisfied == []
 
 
 def test_paper_order_places_transitive_prerequisites_before_dependents(tools):

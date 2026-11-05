@@ -172,7 +172,7 @@ def test_separate_scripts_publish_hidden_file_and_visual_only_prompts(tmp_path, 
     assert scripts[0] not in str(result)
     assert [p['value'] for p in prompts] == ['Layout A', 'Layout B']
     assert files[0]['content_type'] == 'file'
-    manifest = json.loads(Path(files[0]['value']).read_text())
+    manifest = json.loads(Path(files[0]['value']).read_text(encoding='utf-8'))
     assert [p['text'] for p in manifest['pages']] == scripts
 
 
@@ -227,8 +227,8 @@ def test_html_inserts_exact_saved_script_once_and_escapes_markup():
 def test_notes_source_is_hidden_and_bound_to_generation():
     import yaml
     root = Path(__file__).resolve().parents[4]
-    workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text())
-    state = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text())
+    workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
+    state = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))
     source = next(s for s in workflow['slots'] if s['id'] == 'speaker_notes_source')
     assert source['user_visible'] is False and source['type'] == 'file'
     assert {'material': 'speaker_notes_source'} in state['steps']['plan_page_prompts']['outputs']
@@ -251,7 +251,7 @@ def test_html_publication_uses_saved_notes_for_both_export_and_presenter(tmp_pat
                         lambda **kw: (published.append(kw), {'ok': True})[1])
     result = tools._publish_one_page(tmp_path, 1, slot_orders={})
     assert result['ok']
-    assert script in page.read_text()
+    assert script in page.read_text(encoding='utf-8')
     assert script in next(p['value'] for p in published if p['slot'] == 'preview_html')
     assert next(p['value'] for p in published if p['slot'] == 'preview_notes') == script
 
@@ -325,7 +325,7 @@ def test_without_vlm_automatic_images_never_reach_registration_or_native_fill(mo
 def test_planning_authors_scripts_and_generation_only_references_them():
     import yaml
     root = Path(__file__).resolve().parents[4]
-    steps = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text())['steps']
+    steps = yaml.safe_load((root / 'workflows/ppt-workflow/scenario/state.yml').read_text(encoding='utf-8'))['steps']
     plan, generate = steps['plan_page_prompts'], steps['generate_ppt']
     assert 'speaker_notes=[<complete timed spoken script' in plan['prompt']
     assert 'Talk timing plan:' in plan['prompt']
@@ -376,5 +376,5 @@ def test_no_vlm_removes_previously_attached_automatic_materials(tmp_path, monkey
     }}))
     result = tools._attach_material_images_to_deck(tmp_path)
     assert result['reason'] == 'vision_unavailable'
-    data = json.loads((tmp_path / 'info_pack.json').read_text())
+    data = json.loads((tmp_path / 'info_pack.json').read_text(encoding='utf-8'))
     assert data['user_assets']['reference_images'] == ['/images/user-logo.png']

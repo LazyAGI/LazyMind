@@ -1598,17 +1598,11 @@ def _workflow_trigger_tools(
                            or bound_runtime)
                 if session_holder is not None:
                     session_holder['runtime_policy'] = runtime
-                if isinstance(runtime, dict) and runtime.get('paper_handoff'):
-                    from lazymind.chat.workflow.paper_handoff import resolve_paper_handoff
-                    trusted_bindings, _ = resolve_paper_handoff(client, conversation_id, runtime)
-                    input_bindings.pop(runtime['paper_handoff'].get('input'), None)
-                    input_bindings.update(trusted_bindings)
-                if isinstance(runtime, dict) and runtime.get('paper_attachments'):
-                    from lazymind.chat.workflow.paper_handoff import paper_attachment_context
-                    upload_context, _ = paper_attachment_context(_agentic_config(), runtime)
-                    effective_context += upload_context
-                    if session_holder is not None:
-                        session_holder['request_context'] = effective_context
+                from lazymind.chat.workflow.attachments import attachment_context
+                upload_context, _ = attachment_context(_agentic_config(), runtime)
+                effective_context += upload_context
+                if session_holder is not None:
+                    session_holder['request_context'] = effective_context
                 clarification_ids = {str(field['id']) for field in _runtime_clarification_fields(runtime)}
                 has_contract = (_trigger_input_contract(package) is not None
                                 or isinstance((package.get('compiled_graph') or {}).get('material_producers'), dict))
@@ -1921,16 +1915,11 @@ def resolve_workflow_injection(
         str(value).strip() for value in (allowed_workflow_refs or []) if str(value).strip()
     }
     runtime_policy = _selected_runtime_policy(context, catalog, allowed_refs)
-    if not session_id and allowed_refs and runtime_policy.get('paper_handoff'):
-        from lazymind.chat.workflow.paper_handoff import resolve_paper_handoff
-        _, satisfied = resolve_paper_handoff(_client(), conversation_id, runtime_policy)
-        runtime_policy = {**runtime_policy, '_host_satisfied_fields': satisfied}
-    if not session_id and allowed_refs and runtime_policy.get('paper_attachments'):
-        from lazymind.chat.workflow.paper_handoff import paper_attachment_context
-        _, satisfied = paper_attachment_context(cfg, runtime_policy)
-        runtime_policy = {**runtime_policy, '_host_satisfied_fields': [
-            *(runtime_policy.get('_host_satisfied_fields') or []), *satisfied,
-        ]}
+    if not session_id and allowed_refs:
+        from lazymind.chat.workflow.attachments import attachment_context
+        _, satisfied = attachment_context(cfg, runtime_policy)
+        if satisfied:
+            runtime_policy = {**runtime_policy, '_host_satisfied_fields': satisfied}
     allowed_items = [
         item for item in catalog
         if str(item.get('workflow_ref') or '') in allowed_refs
