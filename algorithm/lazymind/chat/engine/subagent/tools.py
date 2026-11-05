@@ -773,7 +773,8 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
 
     Returns:
         Without start_line/end_line: a locator (key/revision/path/hash/total_lines).
-        The artifact body stays in the workspace; use a line range or read_file.
+        Read the body with get_artifact(key, start_line=1, end_line=200).
+        Internal draft paths are not document attachments for read_file_resource.
         With start_line/end_line: a line-range view with total_lines.
     """
     ctx = require_context()
@@ -947,7 +948,9 @@ def _materialize_artifact_locator(ctx: Any, key: str, result: Dict[str, Any]) ->
         'total_lines': total_lines,
         'artifacts': artifacts,
         'message': (
-            'Artifact body is in the workspace. Pass start_line/end_line or read_file(path); '
+            'Read the artifact body with get_artifact(key, start_line=1, end_line=200). '
+            'Continue with further line ranges as needed. Internal draft paths are not '
+            'document attachments for read_file_resource; '
             'do not copy the full draft into the model context.'
         ),
     }
