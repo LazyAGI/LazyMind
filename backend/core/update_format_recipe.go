@@ -2,6 +2,6 @@
 package main
 
 const (
-	expectedCoreFormatSHA      = "652b30e199ccea13da558247b660d23f8d274f54113228bbbf0a4349cab7761c"
+	expectedCoreFormatSHA      = "31cf791cfe95c9f54179685f2026ce6327deb2e653a046f3448d59ef5a288df7"
 	expectedCoreStateFormatSHA = "f7dbfbac6032c813b85d62cbcfba322939c2e1dce55fb54a909f510e6c4e0cd2"
 )

@@ -1,0 +1,11 @@
+.pdf-citation-layer { position:absolute; inset:0; pointer-events:none; z-index:8; }
+.pdf-citation-trigger { position:absolute; pointer-events:none; border:0; padding:0; background:transparent; color:transparent; }
+.pdf-citation-trigger:focus-visible { outline:2px solid var(--primary-color,#3973ad); outline-offset:2px; border-radius:3px; }
+.pdf-citation-card { position:fixed; z-index:1500; width:min(376px,calc(100vw - 16px)); max-height:calc(100vh - 16px); overflow:auto; box-sizing:border-box; padding:14px; color:var(--text-color,#29384a); background:var(--paper-background,#fff); border:1px solid var(--border-color,#dbe2e9); border-radius:12px; box-shadow:0 10px 36px #29415c24; font:13px/1.55 system-ui,sans-serif; }
+.pdf-citation-heading,.pdf-citation-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pdf-citation-card button { flex-shrink:0; padding:6px 10px; color:var(--primary-color,#2f6297); background:var(--surface-background,#f5f8fb); border:1px solid var(--border-color,#dbe2e9); border-radius:6px; cursor:pointer; }
+.pdf-citation-card button:focus-visible { outline:2px solid var(--primary-color,#3973ad); outline-offset:2px; }
+.pdf-citation-raw { margin:10px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.pdf-citation-preview { display:block; width:100%; height:auto; max-height:200px; object-fit:contain; object-position:top left; margin:10px 0; background:white; }
+.pdf-citation-placeholder { display:flex; align-items:center; min-height:48px; margin:10px 0; padding:8px; border-radius:6px; color:var(--secondary-text-color,#65758a); background:var(--surface-background,#f5f8fb); font-size:12px; }
+.pdf-citation-footer { justify-content:flex-end; margin-top:10px; }

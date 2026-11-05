@@ -82,13 +82,22 @@ type Attachment struct {
 	AddedAt          time.Time      `json:"addedAt"`
 }
 type Note struct {
-	ID        string    `json:"id"`
-	PaperID   string    `json:"paperId"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	Kind      string    `json:"kind"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        string      `json:"id"`
+	PaperID   string      `json:"paperId"`
+	Title     string      `json:"title"`
+	Content   string      `json:"content"`
+	Kind      string      `json:"kind"`
+	Source    *NoteSource `json:"source,omitempty"`
+	CreatedAt time.Time   `json:"createdAt"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+}
+type NoteSource struct {
+	AttachmentID string       `json:"attachmentId"`
+	Page         int          `json:"page"`
+	Rects        [][4]float64 `json:"rects,omitempty"`
+	BBox         *[4]float64  `json:"bbox,omitempty"`
+	Quote        string       `json:"quote,omitempty"`
+	Color        string       `json:"color,omitempty"`
 }
 type Data struct {
 	// Legacy is an immutable export of the original graph; Extra contains live

@@ -42,11 +42,32 @@ import "./index.scss";
 
 type LoadStatus = "loading" | "ready" | "error";
 
+function AutoModelIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      focusable="false"
+    >
+      <path d="M20 8A9 9 0 0 0 3.3 7M3 3v4h4M4 16a9 9 0 0 0 16.7 1M21 21v-4h-4" />
+      <path d="m8.5 16 3.5-9 3.5 9M10 12.5h4" />
+    </svg>
+  );
+}
+
 interface ChatModelSelectorProps {
+  iconOnly?: boolean;
   menuHeight?: number;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   conversationId?: string;
+  draftSelectionKey?: string;
   disabled?: boolean;
   disabledReason?: string;
   thinkingDepth?: ThinkingDepth;
@@ -127,9 +148,11 @@ function modelLabel(
 }
 
 const ChatModelSelector = ({
+  iconOnly = false,
   menuHeight,  open: controlledOpen,
   onOpenChange,
   conversationId,
+  draftSelectionKey,
   disabled = false,
   disabledReason,
   thinkingDepth,
@@ -148,7 +171,7 @@ const ChatModelSelector = ({
   const normalizedConversationId = isRealConversationId(conversationId)
     ? conversationId
     : undefined;
-  const selectionKey = chatModelSelectionKey(normalizedConversationId);
+  const selectionKey = normalizedConversationId ? chatModelSelectionKey(normalizedConversationId) : (draftSelectionKey || chatModelSelectionKey(undefined));
   const setStoredSelection = useModelSelectionStore((state) => state.setSelection);
   const [catalog, setCatalog] = useState<ChatModelCatalog | null>(null);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading");
@@ -716,20 +739,7 @@ const ChatModelSelector = ({
               onClick={chooseAuto}
             >
               <span className="chat-model-option-icon" aria-hidden="true">
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  focusable="false"
-                >
-                  <path d="M20 8A9 9 0 0 0 3.3 7M3 3v4h4M4 16a9 9 0 0 0 16.7 1M21 21v-4h-4" />
-                  <path d="m8.5 16 3.5-9 3.5 9M10 12.5h4" />
-                </svg>
+                <AutoModelIcon />
               </span>
               <strong>Auto</strong>
               {!catalog.auto_available ? (
@@ -898,7 +908,7 @@ const ChatModelSelector = ({
       type="button"
       className={`chat-model-selector-trigger${
         triggerDisabled ? " is-disabled" : ""
-      }${combined ? " is-combined" : ""}`}
+      }${combined ? " is-combined" : ""}${iconOnly ? " is-icon-only" : ""}`}
       aria-label={t(
         combined ? "chat.modelThinkingSelectorTriggerLabel" : "chat.modelSelectorTriggerLabel",
         { model: triggerLabel, depth: thinkingDepth ? depthLabels[thinkingDepth] : "" },
@@ -918,6 +928,16 @@ const ChatModelSelector = ({
     >
       {loadStatus === "loading" ? (
         <Spin size="small" />
+      ) : iconOnly ? (
+        <span className="chat-model-selector-trigger-icon" aria-hidden="true">
+          {currentSelection?.mode === "auto" ? (
+            <AutoModelIcon size={16} />
+          ) : currentProviderLogoUrl ? (
+            <img src={currentProviderLogoUrl} alt="" width={16} height={16} />
+          ) : (
+            <ApiOutlined />
+          )}
+        </span>
       ) : currentProviderName ? (
         <span className="chat-model-selector-trigger-icon" aria-hidden="true">
           {currentProviderLogoUrl ? (
@@ -927,15 +947,19 @@ const ChatModelSelector = ({
           )}
         </span>
       ) : null}
-      <span className="chat-model-selector-trigger-model">
-        {combined ? compactModelLabel : triggerLabel}
-      </span>
-      {thinkingDepth ? (
-        <span className="chat-model-selector-trigger-depth">
-          {depthLabels[thinkingDepth]}
-        </span>
-      ) : null}
-      <DownOutlined aria-hidden="true" />
+      {!iconOnly && (
+        <>
+          <span className="chat-model-selector-trigger-model">
+            {combined ? compactModelLabel : triggerLabel}
+          </span>
+          {thinkingDepth ? (
+            <span className="chat-model-selector-trigger-depth">
+              {depthLabels[thinkingDepth]}
+            </span>
+          ) : null}
+          <DownOutlined aria-hidden="true" />
+        </>
+      )}
     </button>
   );
 

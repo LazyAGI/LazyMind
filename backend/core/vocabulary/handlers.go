@@ -2,6 +2,7 @@ package vocabulary
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -90,6 +91,17 @@ func DeleteAnkiDeck(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, map[string]bool{"deleted": true})
 }
+
+// Database errors are server failures, not invalid user input. Never expose
+// PostgreSQL messages/details, which may contain SQL or submitted private text.
+func replyAddWordError(w http.ResponseWriter, err error) {
+	var sqlState interface{ SQLState() string }
+	if errors.As(err, &sqlState) {
+		common.ReplyErr(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+}
 func AddWord(w http.ResponseWriter, r *http.Request) {
 	var req AddWordRequest
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
@@ -98,7 +110,7 @@ func AddWord(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := service().AddWord(r.Context(), store.UserID(r), req)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), 400)
+		replyAddWordError(w, err)
 		return
 	}
 	common.ReplyOK(w, result)

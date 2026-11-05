@@ -1,7 +1,9 @@
 package chat
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -33,6 +35,27 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	// Creation/resumption starts a real runner. Wait for its failed HTTP attempt
+	// and workspace lease cleanup before resuming or deleting the SQLite files.
+	// Merely observing the persisted params does not mean the runner has stopped.
+	waitForRun := func() {
+		t.Helper()
+		sqlDB, err := db.DB.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			current, taskErr := subagent.GetTask(t.Context(), db.DB, "child")
+			_, leaseErr := stateStore.Get(t.Context(), "rag/subagent/execution:child")
+			if taskErr == nil && current.Status == subagent.StatusFailed && errors.Is(leaseErr, sql.ErrNoRows) && sqlDB.Stats().InUse == 0 {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("subagent runner did not finish and release its workspace lease")
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +75,7 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "owner", event, nil, nil, "dynamic", nil); err != nil {
 		t.Fatal(err)
 	}
+	waitForRun()
 	var task orm.SubAgentTask
 	if err := db.Where("id = ?", "child").First(&task).Error; err != nil {
 		t.Fatal(err)
@@ -73,6 +97,7 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	if _, err := handleTaskCreated(t.Context(), db.DB, stateStore, "work", "history", "owner", event, nil, nil, "dynamic", nil); err != nil {
 		t.Fatal(err)
 	}
+	waitForRun()
 	if err := db.Where("id = ?", "child").First(&task).Error; err != nil {
 		t.Fatal(err)
 	}

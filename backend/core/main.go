@@ -58,6 +58,7 @@ import (
 	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/userenv"
+	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
@@ -829,6 +830,7 @@ func run(ctx context.Context) error {
 	}
 	modelprovider.SetCredentialKeyManager(credentialKeys)
 	userenv.SetCredentialKeyManager(credentialKeys)
+	vocabulary.SetCloudCredentialKeyManager(credentialKeys)
 	if err := initializeWriteStage(func() error {
 		if err := migrate.RunUp(); err != nil {
 			return &startupError{msg: "run SQL migrations", err: err}
@@ -949,6 +951,7 @@ func run(ctx context.Context) error {
 	resourceupdate.DirectoryIdleHandler = documentdirectory.QueueIdle
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
+	doc.RegisterPDFIRJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflow.RegisterExternalWorkflowTaskJob()
 	workflow.RegisterDocumentPublicationJob()
@@ -1006,7 +1009,12 @@ func run(ctx context.Context) error {
 				// History samples have already been downloaded and imported above.
 				backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 				asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-				excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
+				if vocabulary.Enabled() {
+					vocabulary.RegisterCloudSync(store.DB())
+					vocabularyRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
+					backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+				}
+				excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
 				if !systemdeps.PythonComponentActive("rag") {
 					excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 						doc.MarketUpdateAllJobType, "document_pdf_translation")
@@ -1018,6 +1026,8 @@ func run(ctx context.Context) error {
 					LockTTL:         asyncConfig.LockTTL,
 				})
 				backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+				readingRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{doc.ReadingPreparationJob}, Concurrency: 1, SerializeResources: true, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				backgroundDone = append(backgroundDone, readingRunner.Done(), doc.StartReadingPreparation(runtimeCtx, store.DB()))
 				paperChatRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 				paperPreparationRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.PreparationJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 				backgroundDone = append(backgroundDone, paperChatRunner.Done(), paperPreparationRunner.Done())

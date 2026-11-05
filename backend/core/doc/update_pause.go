@@ -2,6 +2,8 @@ package doc
 
 import "lazymind/core/common/maintenancegate"
 
+// Both deferred indexing and automatic reading enrollment are document
+// background writers and share the update pause/bootstrap lifecycle.
 var deferredIndexingWork = maintenancegate.New()
 
 func PauseDeferredIndexingForUpdate(epoch uint64) (*maintenancegate.Ticket, error) {

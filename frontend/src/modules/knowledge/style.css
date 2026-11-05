@@ -86,3 +86,10 @@
 }
 
 .micro-knowledge-page:has(.knowledge-detail-page--paper) { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+/* The reader supplies its own narrow gutter; do not stack the library padding. */
+.micro-knowledge-page:has(.knowledge-container.is-paper-document),
+.micro-knowledge-page:has(.paper-document-loading) {
+  padding: 0;
+  overflow: hidden;
+}

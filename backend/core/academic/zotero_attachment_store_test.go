@@ -112,14 +112,18 @@ func TestZoteroAttachmentResumesCancelledSubmission(t *testing.T) {
 	}
 }
 
-func TestZoteroAttachmentProcessingFailureIsLinkedAndReported(t *testing.T) {
+func TestZoteroAttachmentStoresOriginalWithoutImplicitParsing(t *testing.T) {
 	db, path := zoteroStorageFixture(t)
 	db.Model(&orm.Dataset{}).Where("id = ?", "papers").Update("processing_level", "parsed")
 	now := time.Now().UTC()
 	db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "owner", "document_parsing_enabled": false, "created_at": now, "updated_at": now})
 	result, err := storeZoteroFile(t.Context(), db, "papers", "paper", "zotero-attachment", path, "article.pdf", "owner", "Owner")
-	if err == nil || !strings.Contains(string(marshal(result.Data)), "contentRef") || !strings.Contains(string(marshal(result.Data)), "processingError") {
-		t.Fatalf("processing failure lost: %+v %v", result.Data, err)
+	if err != nil || !strings.Contains(string(marshal(result.Data)), "contentRef") || strings.Contains(string(marshal(result.Data)), "processingError") {
+		t.Fatalf("original-only import should not require parsing: %+v %v", result.Data, err)
+	}
+	var jobs int64
+	if err := db.Model(&orm.AsyncJob{}).Where("job_type IN ?", []string{"document.paper_processing", "document_pdf_ir", "document_reading_preparation"}).Count(&jobs).Error; err != nil || jobs != 0 {
+		t.Fatalf("Zotero import queued unbounded processing: %d %v", jobs, err)
 	}
 }
 

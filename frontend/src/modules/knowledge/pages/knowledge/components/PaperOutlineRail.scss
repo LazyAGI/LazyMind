@@ -1,0 +1,103 @@
+.paper-outline-rail {
+ position:absolute;
+ top:48px;
+ bottom:8px;
+ left:6px;
+ display:flex;
+ align-items:center;
+ width:38px;
+ z-index:12;
+ pointer-events:none;
+ font:inherit;
+
+ &__trigger {
+  pointer-events:auto;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  width:38px;
+  min-height:44px;
+  max-height:min(70vh, calc(100vh - 96px));
+  overflow:hidden;
+  padding:16px 6px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  cursor:pointer;
+  &:hover {background:rgba(255,255,255,.7);}
+  &:disabled {opacity:.4;cursor:default;}
+  &:focus-visible {outline:2px solid var(--color-primary, #006ae6);outline-offset:1px;}
+ }
+ &__ticks {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:9px;
+  width:24px;
+  max-height:100%;
+  overflow:hidden;
+  >span {display:block;width:22px;height:2px;min-height:2px;border-radius:2px;background:#b7bcc5;}
+  >[data-depth="1"] {width:14px;}
+  >[data-depth="2"] {width:9px;}
+  >[data-depth="3"] {width:6px;}
+  >.is-active {background:var(--color-primary, #006ae6);}
+  >.is-empty {width:18px;opacity:.6;}
+ }
+ &__popover {
+  pointer-events:none;
+  visibility:hidden;
+  opacity:0;
+  transform:translateX(-8px) scale(.985);
+  transform-origin:left center;
+  transition:opacity 160ms ease,transform 180ms ease,visibility 0s linear 180ms;
+  &.is-open {pointer-events:auto;visibility:visible;opacity:1;transform:translateX(0) scale(1);transition-delay:0s;}
+  position:absolute;
+  top:0;
+  left:0;
+  width:320px;
+  max-width:calc(100vw - 88px);
+  height:100%;
+  box-sizing:border-box;
+  overflow:auto;
+  overscroll-behavior:contain;
+  padding:12px 8px;
+  border:1px solid #e6e7eb;
+  border-radius:12px;
+  background:#fff;
+  box-shadow:0 6px 28px rgba(24,30,42,.12);
+  color:#414753;
+  ol {list-style:none;margin:0;padding:0;}
+ }
+ &__title {padding:4px 12px 12px;font-size:13px;font-weight:600;color:#858a94;}
+ &__chapter {
+  display:flex;
+  align-items:baseline;
+  gap:14px;
+  width:100%;
+  min-height:36px;
+  padding:9px 12px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  font-size:14px;
+  line-height:1.45;
+  text-align:start;
+  cursor:pointer;
+  span {flex:1;min-width:0;overflow-wrap:anywhere;}
+  &:hover {background:#f5f5f6;}
+  &[aria-current='location'] {background:#f0f1f3;color:var(--color-primary, #006ae6);}
+  &:focus-visible {outline:2px solid var(--color-primary, #006ae6);outline-offset:-2px;}
+ }
+ &__empty {padding:0 12px;font-size:14px;line-height:1.6;color:#777e89;}
+}
+
+@media (prefers-reduced-motion:reduce) {
+ .paper-outline-rail__popover {transition:none;transform:none;}
+}
+
+// The rail belongs to the original PDF, not the overview article.
+.paper-reader-pane:has(.pdf-reader-workspace[data-reader-mode="overview"]) > .paper-outline-rail {
+ display:none;
+}
