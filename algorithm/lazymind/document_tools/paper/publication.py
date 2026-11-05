@@ -227,7 +227,7 @@ def _literal(entry):
     return re.sub(r'([\\`*_{}\[\]])', r'\\\1', entry)
 
 
-def publish_citations(text, papers):
+def publish_citations(text, papers, *, paper_language=None):
     body, region = split_references(text)
     matches, catalog = _scan(body, papers)
     if not matches:
@@ -238,7 +238,16 @@ def publish_citations(text, papers):
         identifier = match['new'] or match['saved']
         link = f'[\\[{numbers[identifier]}\\]](#paper-ref-{identifier})'
         body = body[:match.start()] + link + body[match.end():]
-    entries = ['**参考文献**']
+    title = 'References' if paper_language == 'en' else '参考文献'
+    # A stable heading anchor keeps editor rendering out of the protected reference region.
+    heading = '<a id="block-paper-references"></a>\n\n## ' + title
+    if paper_language is None and region:
+        # Citation-only validation also accepts previously published headings.
+        existing = re.match(re.escape(START) + r'\n\n((?:<a id="block-paper-references"></a>\n\n)?'
+                            r'(?:## References|## 参考文献|\*\*参考文献\*\*))\n', region)
+        if existing:
+            heading = existing[1]
+    entries = [heading]
     for identifier in ids:
         entries.append(f'<a id="paper-ref-{identifier}"></a>\n\n'
                        f'[{numbers[identifier]}] {_literal(catalog[identifier])}')
@@ -256,7 +265,7 @@ def validate_unmanaged_additions(original, revised):
         raise ValueError('新增文献引用必须使用 [文献:ref-ID]，不能自行编写序号')
 
 
-def normalize_source_citations(text, papers):
+def normalize_source_citations(text, papers, *, material_source_ids=()):
     """Import explicit PR #81 source markers; never infer numeric bibliography IDs.
 
     A trailing source list is removable only when every line exactly matches the
@@ -266,6 +275,11 @@ def normalize_source_citations(text, papers):
     if region:
         return text
     catalog = _catalog(papers)
+    # Study attachments are evidence provenance, not bibliography entries.
+    material_ids = set(material_source_ids) - catalog.keys()
+    for match in reversed(list(_CITATION.finditer(prose(body)))):
+        if match['new'] in material_ids:
+            body = body[:match.start()] + body[match.end():]
     masked = prose(body)
     heading = re.search(
         r'(?mi)^(?:#{1,6}\s+(?:参考文献|references|bibliography)|'

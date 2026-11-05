@@ -140,10 +140,12 @@ def test_skip_code_and_escape_literal_entries():
     publication.validate_citations(published, [dict(id='ref-001', citation='A & B. <Study> [x].')], published=True)
 
 
-@pytest.mark.parametrize('source', ['[文献:ref-missing]', '[文献:ref-001', '[文献：ref-001]',
+@pytest.mark.parametrize('source', [
+    '[文献:ref-missing]', '[文献:ref-001', '[文献：ref-001]',
     '[x](#paper-ref-ref-001)', '[文献:ref-001]\n旧引用[1]',
     '[文献:ref-001]\n## 参考文献\n人工列表', publication.START,
-    publication.START + publication.END + '额外正文'])
+    publication.START + publication.END + '额外正文',
+])
 def test_reject_unresolved_corrupt_or_mixed_references(source):
     with pytest.raises(ValueError):
         publication.publish_citations(source, PAPERS)
@@ -183,7 +185,6 @@ def test_chart_id_does_not_claim_writer_text_or_unowned_images(tmp_path, monkeyp
     exported = render_document(published)['export_document']
     assert '![图1 原稿照片]' in exported
     assert '![图2 比较]' in exported
-
 
 
 @pytest.mark.parametrize('payload', [
@@ -234,8 +235,9 @@ def test_missing_ids_stable_across_order_retry_and_metadata_changes():
     assert items[0]['metadata']['year'] == 2025
 
 
-@pytest.mark.parametrize('items', [[paper('SRC-001'), paper('SRC-001')], [paper(), paper()],
-                                    [paper('bad id')], [paper(123)]])
+@pytest.mark.parametrize('items', [
+    [paper('SRC-001'), paper('SRC-001')], [paper(), paper()], [paper('bad id')], [paper(123)],
+])
 def test_reject_ambiguous_or_invalid_identity(items):
     with pytest.raises(ValueError):
         normalize_papers(items)
@@ -257,6 +259,7 @@ def test_old_pool_missing_identity_creates_papers_version(monkeypatch):
     workflow.material(pool, 'papers')['content'][0].pop('id')
     workflow.material(pool, 'papers')['content'][0]['abstract'] = 'Already prepared'
     before = copy.deepcopy(pool)
+
     def run(step, inputs):
         assert inputs['papers'][0]['id'].startswith('ref-')
         return {'outline': '# T\n\n## 方法', 'manuscript': '# T\n\n## 方法\n正文。', 'is_demo': False}
@@ -269,7 +272,8 @@ def test_old_pool_missing_identity_creates_papers_version(monkeypatch):
 
 def test_source_evidence_preserved_and_manuscript_imported():
     papers = [paper('SRC-001'), {**paper('KB-001'), 'citation': 'KB source[Z].'}]
-    original = '# T\n\n## Findings\nResult[SRC-001], context[KB-001], again[SRC-001].\n\n## 参考文献\n[SRC-001] A study[Z].\n[KB-001] KB source[Z].'
+    original = ('# T\n\n## Findings\nResult[SRC-001], context[KB-001], again[SRC-001].'
+                '\n\n## 参考文献\n[SRC-001] A study[Z].\n[KB-001] KB source[Z].')
     normalized = contracts.validate_input('revise_document', {
         'topic': 'T', 'papers': papers, 'evidence': original, 'manuscript': original})
     assert normalized['evidence'] == original
@@ -293,8 +297,9 @@ def test_source_import_skips_code_links_images_and_numeric_ids():
         publication.publish_citations(normalized, [paper('SRC-001')])
 
 
-@pytest.mark.parametrize('body', ['Unknown[SRC-999]',
-    'Known[SRC-001]\n\n## 参考文献\n[SRC-001] Different entry'])
+@pytest.mark.parametrize('body', [
+    'Unknown[SRC-999]', 'Known[SRC-001]\n\n## 参考文献\n[SRC-001] Different entry',
+])
 def test_source_import_rejects_unknown_or_conflicting_entries(body):
     with pytest.raises(ValueError):
         publication.normalize_source_citations(body, [paper('SRC-001')])
@@ -330,6 +335,7 @@ def test_chart_publication_validates_each_representation_once(tmp_path, monkeypa
     monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(tmp_path))
     calls = []
     validate = publication.validate_chart_references
+
     def record(source, charts):
         calls.append(source)
         return validate(source, charts)
@@ -361,3 +367,63 @@ body = '[' + (r'\[' * 100) + '](https://example.com)'
 assert validate_chart_references(body, []) == []
 """
     subprocess.run([sys.executable, '-c', code], check=True, timeout=10)
+
+
+@pytest.mark.parametrize('language,title', [('en', 'References'), ('zh-CN', '参考文献')])
+def test_reference_heading_uses_paper_language_and_is_a_section(language, title):
+    from lazyllm.tools.writer.utils import parse_document_markdown
+    source = '# Paper\n\n## Introduction\nEvidence[文献:ref-002][文献:ref-001].'
+    published = publication.publish_citations(source, PAPERS, paper_language=language)
+    assert f'\n## {title}\n' in published
+    assert '**参考文献**' not in published
+    parsed = parse_document_markdown(published, document_id='reference-heading')
+    assert any(block.type == 'heading' and block.content == title for block in parsed.iter_blocks())
+    publication.validate_citations(published, PAPERS, published=True)
+    assert publication.publish_citations(published, PAPERS, paper_language=language) == published
+    assert publication.publish_citations(published, PAPERS) == published
+
+
+@pytest.mark.parametrize('old_heading', ['**参考文献**', '## 参考文献', '## References'])
+@pytest.mark.parametrize('language,title', [('en', 'References'), ('zh-CN', '参考文献')])
+def test_existing_reference_headings_remain_readable_and_migrate_on_publication(old_heading, language, title):
+    original = publication.publish_citations('# Paper\n\nEvidence[文献:ref-001].', PAPERS)
+    original = original.replace('<a id="block-paper-references"></a>\n\n', '')
+    original = original.replace('## 参考文献', old_heading)
+    publication.validate_citations(original, PAPERS, published=True)
+    updated = publication.publish_citations(original, PAPERS, paper_language=language)
+    assert updated.replace('<a id="block-paper-references"></a>\n\n', '').replace(
+        f'## {title}', old_heading) == original
+    rendered = render_document(updated)['document']
+    publication.protect_reference_region(updated, rendered)
+    publication.validate_citations(rendered, PAPERS, published=True)
+    publication.validate_citations(updated, PAPERS, published=True)
+    with pytest.raises(ValueError, match='未同步'):
+        publication.validate_citations(original.replace('第一篇', '篡改条目'), PAPERS, published=True)
+
+
+def test_reference_validation_still_rejects_unknown_heading():
+    original = publication.publish_citations('Evidence[文献:ref-001].', PAPERS, paper_language='en')
+    with pytest.raises(ValueError, match='未同步'):
+        publication.validate_citations(original.replace('## References', '## Unrelated'), PAPERS, published=True)
+
+
+@pytest.mark.parametrize('language,title', [('en', 'References'), ('zh-CN', '参考文献')])
+def test_manuscript_edit_publication_reads_language_from_pool(language, title):
+    papers = [{**paper, 'title': paper['id'], 'text': 'Evidence.'} for paper in PAPERS]
+    original = publication.publish_citations('# Paper\n\nResult[文献:ref-001].', papers)
+    original = original.replace('<a id="block-paper-references"></a>\n\n', '')
+    original = original.replace('## 参考文献', '**参考文献**')
+    pool = workflow.pool_from_business(dict(
+        topic='Paper', papers=papers, manuscript=original, constraints={'paper_language': language}))
+    pool['history'].append(dict(node='F5', step='write_document', inputs=[], outputs=[]))
+    pool['sequence'] += 1
+    before = copy.deepcopy(pool)
+    workflow.business_input('peer_review', pool)
+    loaded = workflow.pool_from_inputs({
+        'write_document_pool': pool, 'write_document_document': original.replace('Result', 'Edited result')})
+    published = workflow.material(loaded, 'manuscript')['content']
+    assert f'\n## {title}\n' in published
+    assert 'Edited result' in published
+    assert '**参考文献**' not in published
+    assert pool == before
+    workflow.business_input('peer_review', loaded)

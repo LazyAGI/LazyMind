@@ -66,7 +66,7 @@ def test_recorded_draft_converts_known_markers_before_strict_validation(record, 
     assert draft(monkeypatch, source, record['references']) == expected
 
 
-@pytest.mark.parametrize('marker', ['[SRC-UNKNOWN]', '[文献:SRC-UNKNOWN]', '[1]'])
+@pytest.mark.parametrize('marker', ['[SRC-UNKNOWN]', '[文献:SRC-UNKNOWN]', '[文献:upload-unknown]', '[1]'])
 def test_draft_normalization_still_rejects_unknown_and_unmanaged_citations(record, monkeypatch, marker):
     with pytest.raises(ValueError):
         draft(monkeypatch, '# Paper\n\n## Discussion\n\n' + marker, record['references'])

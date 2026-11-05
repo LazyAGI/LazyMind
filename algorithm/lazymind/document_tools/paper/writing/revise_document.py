@@ -402,7 +402,9 @@ def run(inputs):
     from .. import peer_review
     from ..review.schema import ReviewResult, ReviewIssue
     # Check the same canonical Markdown that publication will deliver.
-    body = publish_citations(output['manuscript'], inputs.get('papers') or [])
+    body = publish_citations(
+        output['manuscript'], inputs.get('papers') or [],
+        paper_language=inputs['constraints']['paper_language'])
     body = resolve_chart_sources(body, prepared['charts'])
     review_inputs = {key: copy.deepcopy(inputs.get(key)) for key in contracts.FIELDS['peer_review']}
     review_inputs.update(topic=inputs['topic'], manuscript=body,

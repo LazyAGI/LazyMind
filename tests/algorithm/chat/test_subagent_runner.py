@@ -19,33 +19,94 @@ import pytest
 import lazymind.chat.engine.subagent.runner as runner_mod
 
 
-def test_terminal_tool_failure_keeps_structured_error_message():
-    payload = {'ok': False, 'value': '论文已收到，但模型摘录在正文中找不到'}
-    for result in (payload, json.dumps(payload, ensure_ascii=False)):
-        event = {'tag': 'tool_results', 'tool_results': [{'name': 'run_paper_step', 'result': result}]}
-        assert '模型摘录在正文中找不到' in runner_mod._terminal_tool_failure(event, {'run_paper_step'})
-        assert runner_mod._terminal_tool_failure(event, {'unrelated_tool'}) == ''
-    event['tool_results'][0]['result'] = {'ok': True, 'value': {'status': 'completed'}}
-    assert runner_mod._terminal_tool_failure(event, {'run_paper_step'}) == ''
-
-
-def test_terminal_failure_stops_in_producer_before_another_model_round():
+@pytest.mark.parametrize('invalid', [
+    {'operation': '{}'},
+    {'function_arguments': '{}'},
+    {'operation': '{"op": "write_document"}'},
+])
+@pytest.mark.parametrize('repair', [True, False])
+def test_workflow_terminal_tool_uses_existing_argument_repairs(monkeypatch, tmp_path, invalid, repair):
+    import uuid
     import lazyllm
-    original = lazyllm.locals['_lazyllm_agent']
-    try:
-        lazyllm.locals['_lazyllm_agent'] = {'workspace': {'tool_call_trace': [{
-            'function': {'name': 'publish_result'},
-            'tool_call_result': {'ok': False, 'msg': 'invalid result schema'},
-        }]}}
-        with pytest.raises(RuntimeError, match='invalid result schema'):
-            runner_mod._workflow_stop_condition({'publish_result'})({'tool_calls': []})
-        assert runner_mod._workflow_stop_condition({'different_terminal'})({}) is False
-        assert runner_mod._workflow_stop_condition(set())({}) is False
-        lazyllm.locals['_lazyllm_agent']['workspace']['tool_call_trace'][0]['tool_call_result'] = {
-            'ok': True, 'value': {'status': 'completed'}}
-        assert runner_mod._workflow_stop_condition({'publish_result'})({}) is False
-    finally:
-        lazyllm.locals['_lazyllm_agent'] = original
+    from lazymind.chat.engine.agent_runtime import AgentExecutor
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+
+    executions = []
+
+    def publish_result():
+        """Publish the workflow result using its bound inputs."""
+        executions.append('published')
+        return {'result': 'saved'}
+
+    class Model:
+        def __init__(self):
+            self._module_id = uuid.uuid4().hex
+            self.requests = 0
+
+        def share(self, **kwargs):
+            return self
+
+        def used_by(self, _):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            self.requests += 1
+            return {'content': '', 'tool_calls': [{
+                'id': str(self.requests), 'type': 'function',
+                'function': {'name': 'publish_result', 'arguments': json.dumps(
+                    {} if repair and self.requests > 1 else invalid,
+                )},
+            }]}
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: lambda _: False)
+    ctx = SubAgentContext(
+        task_id='terminal-repair', conversation_id='conversation', agent_type='workflow_step',
+        objective='Publish the workflow result.',
+        params={'terminal_tools': ['publish_result'], 'tools_only': True},
+        workspace_path=str(tmp_path), input_slots=[], output_slots=['result'], db=None,
+        emit=lambda _event: None,
+    )
+    model = Model()
+    with lazyllm.locals._scope():
+        plan = runner_mod._build_subagent_plan(
+            ctx, None, tools=[publish_result], tool_prompt_appendices={},
+            workspace_permission=WorkspaceContext(local_runtime=False),
+        )
+        agent = AgentExecutor().create_agent(model, plan)
+        if repair:
+            assert 'saved' in agent('Publish the workflow result.')
+        else:
+            with pytest.raises(runner_mod.ToolArgumentRetryExhausted, match='TOOL_ARGUMENT_RETRY_EXHAUSTED'):
+                agent('Publish the workflow result.')
+    assert model.requests == (2 if repair else 3)
+    assert executions == (['published'] if repair else [])
+
+
+@pytest.mark.parametrize('recovered', [True, False])
+@pytest.mark.parametrize('failure', [
+    'Invalid arguments: operation: Extra inputs are not permitted',
+    'Document generation failed',
+])
+def test_workflow_terminal_error_can_recover_but_cannot_replace_outputs(completion_case, recovered, failure):
+    events = [{'tag': 'tool_results', 'tool_results': [{
+        'name': 'publish_result', 'result': {'ok': False, 'value': failure},
+    }]}]
+    if recovered:
+        events.append({'tag': 'tool_results', 'tool_results': [{
+            'name': 'publish_result', 'result': {'ok': True, 'value': {'status': 'saved'}},
+        }]})
+    result, model, _ = completion_case(
+        agent_type='workflow_step', output_slots=['document'],
+        params={'terminal_tools': ['publish_result'], 'required_output_artifact_keys': ['document'],
+                'output_slot_types': {'document': 'file'}},
+        events=events, save=('document', 'file') if recovered else None,
+    )
+    terminal = _terminal(result)
+    assert terminal['status'] == ('succeeded' if recovered else 'failed')
+    if not recovered:
+        assert terminal['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
 
 
 def test_workflow_script_tool_is_loaded_from_pinned_revision():

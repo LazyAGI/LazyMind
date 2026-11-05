@@ -46,6 +46,14 @@ def candidate_tables(inputs):
     return by_id
 
 
+def model_input(inputs):
+    # F2 keeps source documents in the pool; F3 needs their bibliographic summaries only.
+    return {**inputs, 'papers': [
+        {key: paper[key] for key in ('id', 'title', 'abstract') if key in paper}
+        for paper in inputs.get('papers') or []
+    ]}
+
+
 def prepare(inputs, on_event=None):
     tables = candidate_tables(inputs)
     if on_event:
@@ -67,7 +75,7 @@ def prepare(inputs, on_event=None):
         'hashes, '
         'routing decisions or repeated warnings.\n'
     )
-    facts = {key: value for key, value in inputs.items() if key not in {'data', 'source_data'}}
+    facts = {key: value for key, value in model_input(inputs).items() if key not in {'data', 'source_data'}}
     payload = {'facts': facts, 'tables': prompt_tables({key: entry['table'] for key, entry in tables.items()}),
                'sources': {key: entry['description'] for key, entry in tables.items()}}
     prompt += json.dumps(payload, ensure_ascii=False)

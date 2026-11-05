@@ -79,10 +79,12 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
                                     draft_sections_json=_json(sections), writing_context_json=context_json,
                                     outline_json=_CHART_OWNERS.sub('', outline), title=signature[0][1],
                                     ))
-    body = normalize_source_citations(result['draft_document'], prepared['reference_candidates'])
+    body = result['draft_document']
     body = _materialize_chart_insertions(body, prepared['charts'])
     report_progress(85, '正在核对来源事实与正文中的比较关系')
     body = _trace_call('shared_fact_relations', check_fact_relations, body, prepared)
+    body = normalize_source_citations(body, prepared['reference_candidates'],
+                                      material_source_ids=prepared.get('material_source_ids', []))
     objects = _validate_chart_references(body, prepared['charts'])
     if {match[1] for match in objects} != {chart['id'] for chart in prepared['charts']}:
         raise ValueError('Draft must insert every planned chart exactly once.')

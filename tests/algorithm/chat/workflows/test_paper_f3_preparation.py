@@ -351,3 +351,35 @@ def test_existing_report_renders_tables_with_readable_headings_and_preserves_han
     handed = to_analysis({'topic': 'T', 'experiment': output['experiment'], 'result_meta': output['result_meta']})
     assert handed['data']['tables'] == before
     assert tables == before
+
+
+@pytest.mark.parametrize('action', ['use_existing', 'compute'])
+def test_f3_selects_complete_data_without_forwarding_literature_documents(model_boundary, monkeypatch, action):
+    calls, choice = model_boundary
+    choice['value'] = action
+    from lazymind.document_tools.paper import research_topic
+    monkeypatch.setattr(research_topic, '_prompt_token_limit', lambda: 103219)
+    inputs = contracts.validate_input('experiment', {
+        'topic': '已有实验结果', 'request': '分析现有结果',
+        'papers': [
+            {'id': 'user-results', 'title': '实验记录', 'text': MATERIAL},
+            {'id': 'reference', 'title': 'Related work', 'abstract': 'A concise literature abstract.',
+             'text': 'EXTERNAL_DOCUMENT_BODY' * 30000,
+             'reading': {'content_type': 'document', 'content': 'NESTED_DOCUMENT_BODY' * 30000}},
+        ],
+    })
+    before = copy.deepcopy(inputs)
+    existing, updated = preparation.prepare(inputs)
+    payload = json.loads(calls[-1][calls[-1].index('\n{') + 1:])
+    assert payload['facts']['papers'] == [
+        {'id': 'user-results', 'title': '实验记录'},
+        {'id': 'reference', 'title': 'Related work', 'abstract': 'A concise literature abstract.'},
+    ]
+    assert 'EXTERNAL_DOCUMENT_BODY' not in calls[-1]
+    assert 'NESTED_DOCUMENT_BODY' not in calls[-1]
+    candidates = preparation.candidate_tables(inputs)
+    assert len(candidates) == 2
+    selected = existing['experiment']['results'] if existing else updated['data']
+    assert selected['tables'] == list(candidates.values())
+    assert payload['tables'] == preparation.prompt_tables({key: entry['table'] for key, entry in candidates.items()})
+    assert inputs == before

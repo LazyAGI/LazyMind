@@ -1057,8 +1057,7 @@ def _build_subagent_plan(
             skill_search=None if not inherited_skills else core_skill_search,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
-            extra_stop_condition=_workflow_stop_condition(
-                terminal_tool_names if str(ctx.agent_type or '') == 'workflow_step' else set()),
+            extra_stop_condition=make_cancel_stop_condition(),
             max_retries=(execution_policy.rounds - 1 if execution_policy else
                          max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)),
             expanded_round_limit=execution_policy.rounds if execution_policy else None,
@@ -1247,29 +1246,7 @@ def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str])
                 return f'{name} failed: {payload}'
         if not isinstance(payload, dict):
             return f'{name} failed without a structured result: {payload!r}'
-        if payload.get('ok') is False:
-            reason = payload.get('value') or payload.get('msg') or payload.get('error') or 'tool returned ok=false'
-            return f'{name} failed: {reason}'
     return ''
-
-
-def _workflow_stop_condition(terminal_names: set[str]):
-    """Check terminal failures in the producer thread, before another ReAct model round."""
-    cancelled = make_cancel_stop_condition()
-
-    def check(output):
-        cancelled(output)
-        if not terminal_names:
-            return False
-        trace = lazyllm.locals['_lazyllm_agent'].get('workspace', {}).get('tool_call_trace', [])
-        results = [{'name': (item.get('function') or {}).get('name') or item.get('name', ''),
-                    'result': item.get('tool_call_result')} for item in trace if isinstance(item, dict)]
-        error = _terminal_tool_failure({'tag': 'tool_results', 'tool_results': results}, terminal_names)
-        if error:
-            raise RuntimeError(error)
-        return False
-
-    return check
 
 
 def _signal_task_cancel(task_id: str) -> bool:

@@ -389,7 +389,7 @@ def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return compact
 
 
-def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
+def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') -> Dict[str, Any]:
     pending = _input_required_result(result)
     if pending:
         return {**result, **pending}
@@ -404,6 +404,12 @@ def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
         }}
     workflow_state = result.get('workflow_state')
     workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
+    if (workflow_id == 'paper-writing'
+            and result.get('status') == 'failed' and result.get('outcome') == 'step_failed'):
+        return {**result, '_agent_control': {
+            'stop': True, 'reason': 'workflow_step_failed',
+            'final_text': '论文步骤执行失败，已保留当前材料并停止自动重试和回退。请在工作流查看原因，修复后重试。',
+        }}
     projection = result.get('projection')
     if not isinstance(projection, dict):
         projection = workflow_state.get('projection')
@@ -461,6 +467,7 @@ def _safe_session_tools(
     toolkit: HostWorkflowToolkit,
     session: Union[str, Callable[[], str]],
     user_input: Optional[Union[str, Callable[[], str]]] = None,
+    workflow_context: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     """Model tools whose protocol and concurrency parameters are Host-injected."""
     capability = (
@@ -565,7 +572,7 @@ def _safe_session_tools(
                 )
                 if state_refreshed:
                     result = {**result, **_state_refresh_notice()}
-                result = _with_terminal_agent_control(result)
+                result = _with_terminal_agent_control(result, str((workflow_context or {}).get('workflow_id') or ''))
                 if user_retry:
                     # One user retry must not authorize further model-initiated attempts.
                     cfg.pop('user_authorized_workflow_retry', None)
@@ -1523,7 +1530,8 @@ def _workflow_trigger_tools(
                         ))
                         _write_agent_data('ask_pending', **card)
                         return {'status': 'needs_input', 'missing_clarification_fields': [f['id'] for f in missing],
-                                '_agent_control': {'stop': True, 'reason': 'awaiting_user', 'final_text': ''}}
+                                '_agent_control': {'stop': True, 'reason': 'awaiting_user',
+                                                   'final_text': '请补充问题卡片中的必要信息后继续。'}}
                     # Never append a second, model-guessed copy of fields after
                     # the resolver's canonical values (especially explicit opt-ins).
                     input_bindings = {key: value for key, value in input_bindings.items()
@@ -1630,7 +1638,7 @@ def _workflow_trigger_tools(
                         ))
                         _write_agent_data('ask_pending', **card)
                         return {**prepared, '_agent_control': {
-                            'stop': True, 'reason': 'awaiting_user', 'final_text': '',
+                            'stop': True, 'reason': 'awaiting_user', 'final_text': '请补充问题卡片中的必要信息后继续。',
                         }}
                     return {
                         **prepared,
@@ -1913,7 +1921,7 @@ def resolve_workflow_injection(
                 if str(item.get('tool_name') or '') not in activation_names
             ],
         ]
-    session_holder: Dict[str, Any] = {'session_id': session_id}
+    session_holder: Dict[str, Any] = {'session_id': session_id, 'workflow_id': workflow_id}
 
     def bind_successor(result: Dict[str, Any]) -> None:
         target = str(result.get('session_id') or '')
@@ -2004,6 +2012,7 @@ def resolve_workflow_injection(
                 toolkit,
                 selected_session_id,
                 user_input=launch_user_input,
+                workflow_context=session_holder,
             ),
             handoff,
         ]
@@ -2027,6 +2036,7 @@ def resolve_workflow_injection(
                     toolkit,
                     selected_session_id,
                     user_input=selected_request_context,
+                    workflow_context=session_holder,
                 ),
                 _handoff_tool(
                     selected_session_id,
@@ -2054,7 +2064,8 @@ def resolve_workflow_injection(
             *[tool for tool in tools if isinstance(tool, dict)],
         ]
     if session_id:
-        tools = [*trigger_tools, *_safe_session_tools(toolkit, selected_session_id)]
+        tools = [*trigger_tools, *_safe_session_tools(
+            toolkit, selected_session_id, workflow_context=session_holder)]
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,

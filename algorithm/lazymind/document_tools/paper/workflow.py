@@ -575,7 +575,9 @@ def pool_from_inputs(inputs: dict[str, Any]) -> dict:
                     from .publication import protect_reference_region, publish_citations
                     protect_reference_region(content, document)
                     papers = material(pool, 'papers')
-                    document = publish_citations(document, papers['content'] if papers else [])
+                    document = publish_citations(
+                        document, papers['content'] if papers else [],
+                        paper_language=(pool.get('constraints') or {}).get('paper_language', 'zh-CN'))
                 updated = {**content,
                            'report': document} if kind == 'experiment' and isinstance(content, dict) else document
                 add_material(pool, kind, updated, [pool['current'][kind]],
@@ -984,7 +986,9 @@ def _run_paper_step(context, stream=None) -> dict:
             manuscript = material(result['pool'], 'manuscript')
             charts = material(result['pool'], 'charts')
             papers = material(result['pool'], 'papers')
-            original = publish_citations(manuscript['content'], papers['content'] if papers else [])
+            original = publish_citations(
+                manuscript['content'], papers['content'] if papers else [],
+                paper_language=(result['pool'].get('constraints') or {}).get('paper_language', 'zh-CN'))
             media = material(result['pool'], 'media_assets')
             published = publish_charts(original, figure_catalog(
                 charts['content'] if charts else [], media['content'] if media else None))

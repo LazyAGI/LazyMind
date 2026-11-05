@@ -372,6 +372,8 @@ def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
         'outline': source['outline'], 'manuscript': source['manuscript'],
         'charts': charts, 'chart_directory': chart_directory, 'selected_issues': selected_issues,
         'reference_candidates': candidates,
+        'material_source_ids': [paper['id'] for paper in source['papers']
+                                if paper.get('attachment_key') and not paper.get('citation')],
     }
 
 

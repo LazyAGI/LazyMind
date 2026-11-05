@@ -173,6 +173,8 @@ slots:
   - {id: analysis_chart, label: 分析图表, type: file, cardinality: list, ordered: true}
   - {id: finish_document, label: 结束说明, type: file, cardinality: single, exposed: false}
 ui:
+  follow_mode:
+    default: following
   hide_skipped_steps: true
   hide_unstarted_steps: true
   task_presentation:
