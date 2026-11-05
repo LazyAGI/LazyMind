@@ -311,8 +311,8 @@ def test_real_public_writer_and_draft_entry_reach_streaming(monkeypatch, uploade
     expected = body.replace('[文献:upload-records]', '')
     assert write_document._write_draft(inputs, toolkit=toolkit)['manuscript'] == expected
     assert 'paper_facts' not in plans[0]['meta']
-    assert len(calls) == 2 and len(streamed) == 1
-    assert 'manuscript' in calls[-1] and calls[-1]['source_facts']
+    assert len(calls) == 1 and len(streamed) == 1
+    assert 'source_paragraphs' in calls[0] and 'manuscript' not in calls[0]
     context = json.loads(streamed[0]['writing_context_json'])
     assert 'UNRELATED_FULL_TEXT_MARKER' not in json.dumps(context)
     assert 'Results are simulated.' in json.dumps(context)

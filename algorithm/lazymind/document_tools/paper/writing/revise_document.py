@@ -234,7 +234,7 @@ def _bounded_replacements(source, allowed, generated):
 
 def _validate_review_plan(plan, issues):
     """Check selected-issue coverage; public Writer owns manuscript locating."""
-    selected = {issue['id'] for issue in issues if issue['action_type'] == 'text_revision'}
+    selected = {issue['id'] for issue in issues}
     covered = set()
     for item in plan.instructions:
         ids = item.meta.get('issue_ids')

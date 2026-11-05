@@ -238,20 +238,26 @@ def publish_citations(text, papers, *, paper_language=None):
         identifier = match['new'] or match['saved']
         link = f'[\\[{numbers[identifier]}\\]](#paper-ref-{identifier})'
         body = body[:match.start()] + link + body[match.end():]
+    papers = [{'id': identifier, 'citation': catalog[identifier]} for identifier in ids]
+    return body.rstrip() + '\n\n' + render_references(papers, paper_language=paper_language, existing_region=region)
+
+
+def render_references(papers, *, paper_language=None, existing_region=''):
+    """Render review and manuscript bibliographies in the editor's reference format."""
     title = 'References' if paper_language == 'en' else '参考文献'
     # A stable heading anchor keeps editor rendering out of the protected reference region.
     heading = '<a id="block-paper-references"></a>\n\n## ' + title
-    if paper_language is None and region:
+    if paper_language is None and existing_region:
         # Citation-only validation also accepts previously published headings.
         existing = re.match(re.escape(START) + r'\n\n((?:<a id="block-paper-references"></a>\n\n)?'
-                            r'(?:## References|## 参考文献|\*\*参考文献\*\*))\n', region)
+                            r'(?:## References|## 参考文献|\*\*参考文献\*\*))\n', existing_region)
         if existing:
             heading = existing[1]
     entries = [heading]
-    for identifier in ids:
-        entries.append(f'<a id="paper-ref-{identifier}"></a>\n\n'
-                       f'[{numbers[identifier]}] {_literal(catalog[identifier])}')
-    return body.rstrip() + '\n\n' + START + '\n\n' + '\n\n'.join(entries) + '\n\n' + END
+    for number, paper in enumerate(papers, 1):
+        entries.append(f'<a id="paper-ref-{paper["id"]}"></a>\n\n'
+                       f'[{number}] {_literal(paper["citation"])}')
+    return START + '\n\n' + '\n\n'.join(entries) + '\n\n' + END
 
 
 def validate_unmanaged_additions(original, revised):

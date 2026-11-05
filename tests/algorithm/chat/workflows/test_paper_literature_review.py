@@ -427,11 +427,33 @@ def test_references_are_numbered_from_actual_papers_and_background_cannot_be_cit
                         f'## {heading}\n\n[upload-data] Wrong reference\n[upload-academic] Duplicate')
     document = literature_review._render({'papers': notes + background}, notes, background)
     assert 'Result [\\[1\\]](#paper-ref-upload-academic) [\\[2\\]](#paper-ref-sciverse-retrieved). Context .' in document
-    assert document.endswith(f'## {heading}\n\n'
-                             '1. <a id="paper-ref-upload-academic"></a> Uploaded scholarly paper[J].\n'
-                             '2. <a id="paper-ref-sciverse-retrieved"></a> Retrieved paper[J].')
+    assert document.endswith('<a id="paper-references-start"></a>\n\n'
+                             f'<a id="block-paper-references"></a>\n\n## {heading}\n\n'
+                             '<a id="paper-ref-upload-academic"></a>\n\n[1] Uploaded scholarly paper\\[J\\].\n\n'
+                             '<a id="paper-ref-sciverse-retrieved"></a>\n\n[2] Retrieved paper\\[J\\].\n\n'
+                             '<a id="paper-references-end"></a>')
     assert '[upload-' not in document and '[sciverse-' not in document and 'Wrong reference' not in document
     assert 'Incorrect paper citation' not in document
+
+
+@pytest.mark.parametrize('language,heading', [('zh', '参考文献'), ('en', 'References')])
+def test_review_uses_manuscript_reference_format_and_preserves_source_order(monkeypatch, language, heading):
+    from lazymind.document_tools.paper import publication, runtime_events
+    notes = [{'id': 'P1', 'citation': 'A & B. <Study> *title* [J].'},
+             {'id': 'P2', 'citation': 'Second paper.'},
+             {'id': 'P3', 'citation': 'Reviewed but not cited in prose.'}]
+    monkeypatch.setattr(literature_review, '_input_budget', lambda: 8192)
+    monkeypatch.setattr(literature_review, 'AutoModel', lambda **_: None)
+    monkeypatch.setattr(runtime_events, 'generate_markdown', lambda *_args, **_kwargs:
+                        f'# Review\n\nSecond [P2], first [P1], again [P2].\n\n## {heading}')
+    document = literature_review._render({'papers': notes}, notes, [])
+    body, references = publication.split_references(document)
+    assert body == ('# Review\n\nSecond [\\[2\\]](#paper-ref-P2), first [\\[1\\]](#paper-ref-P1), '
+                    'again [\\[2\\]](#paper-ref-P2).')
+    manuscript = publication.publish_citations('[文献:P1] [文献:P2] [文献:P3]', notes, paper_language=language)
+    assert references == publication.split_references(manuscript)[1]
+    assert '[1] A &amp; B. &lt;Study&gt; \\*title\\* \\[J\\].' in references
+    assert '[3] Reviewed but not cited in prose.' in references
 
 
 def test_background_discovered_during_reading_cannot_produce_a_paper_review(monkeypatch):
@@ -692,12 +714,12 @@ def test_supplied_papers_are_read_synthesized_and_published_for_downstream(tmp_p
         'Read: Test source material.', 'Read: Abstract-only evidence.', 'Read: Complete Sciverse paper']
     assert [p['title'] for p in synthesis['background']] == ['System context', '背景与创新点', '实验数据']
     assert all(p['citation'] == '' for p in synthesis['background'])
-    assert PAPER['citation'] in body and 'Model reference for Abstract paper[Z].' in body
+    assert 'Test paper\\[Z\\].' in body and 'Model reference for Abstract paper\\[Z\\].' in body
     assert '[\\[1\\]](#paper-ref-P1)' in body and '[\\[2\\]](#paper-ref-A2)' in body and '[M1]' not in body
     assert '[P1]' not in body and '[B1]' not in body and 'upload-' not in body
-    assert '1. <a id="paper-ref-P1"></a> Test paper[Z].\n' in body
-    assert '2. <a id="paper-ref-A2"></a> Model reference for Abstract paper[Z].\n' in body
-    assert body.endswith('Model reference for Related research[Z].')
+    assert '<a id="paper-ref-P1"></a>\n\n[1] Test paper\\[Z\\].\n' in body
+    assert '<a id="paper-ref-A2"></a>\n\n[2] Model reference for Abstract paper\\[Z\\].\n' in body
+    assert body.endswith('Model reference for Related research\\[Z\\].\n\n<a id="paper-references-end"></a>')
     final_stream = next(e['stream_id'] for e in reversed(events) if e['type'] == 'artifact_stream_start')
     assert ''.join(e['delta'] for e in events
                    if e['type'] == 'artifact_stream' and e['stream_id'] == final_stream) == body

@@ -19,14 +19,19 @@ BODY = '仅比较单次得分。新方法得分高 15 分；不能推断统计�
 
 @pytest.mark.parametrize('defect', [None, 'structure', 'reference', 'chart'])
 def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect):
+    from lazymind.document_tools.paper import shared_facts, workflow
     from lazymind.document_tools.paper.writing import write_document
 
     inputs = contracts.validate_input('write_document', {'topic': '方法比较', 'outline': OUTLINE})
     prepared = dict(writing_task={'constraints': contracts.normalize_constraints({})},
                     writing_context={}, outline=OUTLINE,
-                    charts=[], reference_candidates=[])
+                    charts=[], reference_candidates=[], shared_facts=[shared_facts._fact(
+                        'source:1', 'status', 'The evidence still needs review.', 'writing_materials')])
+    forbidden_review = Mock(side_effect=AssertionError('Source review belongs to F6'))
+    monkeypatch.setattr(shared_facts, 'AutoModel', forbidden_review)
     monkeypatch.setattr(write_document, 'prepare_writer_context', lambda *a, **k: prepared)
     toolkit = Mock()
+    monkeypatch.setattr(write_document, 'WriterCreateToolkit', lambda: toolkit)
     toolkit.check_consistency.side_effect = AssertionError('Semantic review belongs to F6')
     toolkit.generate_section_instructions.return_value = json.dumps({'section_instructions': {
         'instructions': [dict(instruction_id=str(i), content_ref={'heading_path': ['方法比较', title]},
@@ -42,11 +47,17 @@ def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect)
     elif defect == 'chart':
         body += '\n\n[图表:unknown]'
     toolkit.generate_draft_document_markdown.return_value = json.dumps({'draft_document': body})
+    pool = workflow.pool_from_business(dict(
+        topic=inputs['topic'], outline=inputs['outline'], constraints=inputs['constraints']))
     if defect:
         with pytest.raises(ValueError):
-            write_document._write_draft(inputs, toolkit=toolkit)
+            workflow.execute_step('write_document', pool)
     else:
-        assert write_document._write_draft(inputs, toolkit=toolkit)['manuscript'] == body
+        completed = workflow.execute_step('write_document', pool)['pool']
+        assert workflow.material(completed, 'manuscript')['content'] == body
+        assert workflow.routes_after(completed) == ['F6']
+        assert workflow.business_input('peer_review', completed)['manuscript'] == body
+    forbidden_review.assert_not_called()
     toolkit.check_consistency.assert_not_called()
 
 
@@ -493,3 +504,26 @@ def test_pending_only_without_writer_target_keeps_manuscript():
     assert data == before
     tools.generate_modify_plan.assert_not_called()
     tools.apply_string_replace.assert_not_called()
+
+
+@pytest.mark.parametrize('action', ['needs_material', 'needs_experiment'])
+@pytest.mark.parametrize('clarify_pending', [False, True])
+def test_selected_pending_issues_allow_optional_text_clarification(action, clarify_pending):
+    data = prepared([('R1', '方法', 'text_revision'), ('R2', '局限', action)])
+    before = copy.deepcopy(data)
+    operations, changes = [instruction()], [replacement()]
+    expected = SOURCE.replace('原方法。', '修订方法。')
+    if clarify_pending:
+        operations.append(instruction('局限', ids=['R2']))
+        clarification = '保留原局限；仍需补充材料或实验，未声称完成。'
+        changes.append(replacement('保留原局限。', clarification, '局限'))
+        expected = expected.replace('保留原局限。', clarification)
+    tools = editor(operations, changes)
+    quality = Mock()
+    result = revision_entry._modify_manuscript(
+        data, {'word_target': None, 'paper_language': 'zh-CN'}, quality, editor=tools)
+    assert result['manuscript'] == expected
+    assert data == before
+    assert data['selected_issues'][1]['action_type'] == action
+    quality.check_consistency.assert_not_called()
+    tools.apply_string_replace.assert_called_once()

@@ -3,7 +3,7 @@ from ...toolkits import WriterCreateToolkit
 from ..publication import validate_chart_references as _validate_chart_references
 from ..publication import normalize_source_citations
 from ..runtime_events import current_events, report_progress
-from ..shared_facts import bind_shared_facts, check_fact_relations
+from ..shared_facts import bind_shared_facts
 import json
 
 from .common import (
@@ -81,8 +81,6 @@ def _write_draft(inputs, *, toolkit=None, on_delta=None):
                                     ))
     body = result['draft_document']
     body = _materialize_chart_insertions(body, prepared['charts'])
-    report_progress(85, '正在核对来源事实与正文中的比较关系')
-    body = _trace_call('shared_fact_relations', check_fact_relations, body, prepared)
     body = normalize_source_citations(body, prepared['reference_candidates'],
                                       material_source_ids=prepared.get('material_source_ids', []))
     objects = _validate_chart_references(body, prepared['charts'])
