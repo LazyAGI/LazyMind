@@ -58,7 +58,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 interface RenderPdfProps {
   paperMode?: boolean;
   pdfHeaderStart?: React.ReactNode;
-  pdfHeaderEnd?: React.ReactNode;
+  pdfHeaderEnd?: React.ReactNode | ((tools: React.ReactNode) => React.ReactNode);
   paperTitle?: string;
   onStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: PdfIRDocument | undefined) => void;
@@ -1025,7 +1025,7 @@ export default function RenderPdf({
     studyExplanationRef.current=record.explanation?{kind:record.kind,blockId:record.blockId,data:record.explanation}:undefined;
     setActiveStudyPinId(record.id);setStudyPinned(true);
     setStudyOpen(record.kind==='formula');setTableStudyOpen(record.kind==='table'&&record.view!=='visual');
-    setStudySelection(record.kind==='formula'?{block,explain:false}:undefined);
+    setStudySelection(record.kind==='formula'?{block,explain:!record.explanation}:undefined);
     setTableSelection(record.kind==='table'&&record.view!=='visual'?block:undefined);
     setVisualPreview(record.sourcePreview);
     setVisualSelection(record.kind==='image'||record.view==='visual'?block:undefined);
@@ -1040,6 +1040,14 @@ export default function RenderPdf({
       pinBoard.update(activeStudyPinId,{explanation:data});
     }
   };
+  const handleStudyGeometryChange=useCallback((geometry:PinnedGeometry)=>{
+    if(!activeStudyPinId)return;
+    pinBoard.change(current=>{
+      const stored=current.find(item=>item.id===activeStudyPinId);
+      if(!stored||stored.geometry.x===geometry.x&&stored.geometry.y===geometry.y&&stored.geometry.width===geometry.width&&stored.geometry.height===geometry.height)return;
+      return current.map(item=>item.id===activeStudyPinId?{...item,geometry}:item);
+    });
+  },[activeStudyPinId,pinBoard.change]);
   const handleStudyPinChange=(pinned:boolean,geometry?:PinnedGeometry)=>{
     if(!pinned){
       if(activeStudyPinId)pinBoard.remove(activeStudyPinId);
@@ -1111,6 +1119,7 @@ export default function RenderPdf({
   };
   const currentStudySnapshot=currentStudyPin();
   const activeStoredStudyPin=activeStudyPinId?pinBoard.records.find((item):item is PdfStudyPinRecord=>item.kind!=='region'&&item.id===activeStudyPinId):undefined;
+  const hasRestoredVisualSnapshot=!!activeStudyPinId&&!!visualSelection&&restoredStudyPinId.current===activeStudyPinId&&activeStoredStudyPin?.blockId===visualSelection.id&&!!activeStoredStudyPin?.explanation;
   useEffect(()=>{
     if(!activeStudyPinId||!visualSelection||!visualPreview)return;
     const stored=pinBoard.records.find(item=>item.id===activeStudyPinId);
@@ -1247,11 +1256,13 @@ export default function RenderPdf({
         {readerMode === "original" && <button type="button" className="pdf-reader-hand-trigger" aria-label={readerLabel("panPaper")} title={readerLabel("panPaper")} aria-pressed={handPan.active} disabled={!pdfLoaded} onClick={toggleHandPan}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 13.5V7a1.5 1.5 0 0 1 3 0v4.5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v5-3a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-5-2.7l-3.3-4.8a1.6 1.6 0 0 1 2.6-1.8L8 13.5Z"/></svg></button>}
         {readerMode === "original" && <button type="button" className="pdf-reader-pin-trigger" aria-label={readerLabel("captureRegion")} title={readerLabel("captureRegion")} aria-pressed={pinCaptureActive} disabled={!pdfLoaded||!pinBoardReady} onClick={()=>{handPan.disable();setPinCaptureActive(active=>!active);}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg></button>}
         {readerMode === "original" && pdfIRTarget && <ReadingPreparationAction key={`${pdfIRTarget.dataset}/${pdfIRTarget.document}`} target={pdfIRTarget} onPrepared={pdfIR.refresh} />}
-        {readerMode === "original" && <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
-          <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
-          {readerTools}
-        </div>}
-        {readerMode === "original" && pdfHeaderEnd}
+        {readerMode === "original" && (typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(readerTools) : <>
+          <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
+            <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
+            {readerTools}
+          </div>
+          {pdfHeaderEnd}
+        </>)}
       </div>
     </nav>
   );
@@ -1441,10 +1452,10 @@ export default function RenderPdf({
         </div>
       </Document>
     </div>
-    {(studyOpen||tableStudyOpen||!!visualSelection)&&formulaDocument&&<PdfStudyDialog key={activeStudyPinId||'current-study'} onClose={closeStudy} onPinChange={handleStudyPinChange} onMinimize={minimizeStudy} onGeometryChange={geometry=>{if(activeStudyPinId)pinBoard.update(activeStudyPinId,{geometry});}} initialPinned={!!activeStudyPinId} initialGeometry={activeStudyPinId?pinBoard.records.find(item=>item.id===activeStudyPinId)?.geometry:undefined}>
+    {(studyOpen||tableStudyOpen||!!visualSelection)&&formulaDocument&&<PdfStudyDialog key={activeStudyPinId||'current-study'} onClose={closeStudy} onPinChange={handleStudyPinChange} onMinimize={minimizeStudy} onGeometryChange={handleStudyGeometryChange} initialPinned={!!activeStudyPinId} initialGeometry={activeStudyPinId?pinBoard.records.find(item=>item.id===activeStudyPinId)?.geometry:undefined}>
       {studyOpen && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} initialExplanation={activeStoredStudyPin?.kind==='formula'&&activeStoredStudyPin.blockId===studySelection?.block?.id?activeStoredStudyPin.explanation as FormulaExplanation:undefined} onExplanationChange={data=>{if(studySelection?.block)rememberStudyExplanation('formula',studySelection.block.id,data);}} compact onSelect={block=>setStudySelection({block,explain:false})} onNavigate={navigateFromStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
       {tableStudyOpen && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateFromStudy} onExplainVisual={openVisualStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
-      {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} autoExplain={restoredStudyPinId.current!==activeStudyPinId} initialExplanation={activeStoredStudyPin?.kind===visualSelection.type&&activeStoredStudyPin.blockId===visualSelection.id?activeStoredStudyPin.explanation as VisualExplanation:undefined} onExplanationChange={data=>rememberStudyExplanation(visualSelection.type==='table'?'table':'image',visualSelection.id,data)} onNavigate={id=>{navigateSourceBlock(id);if(!studyPinned)setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
+      {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} autoExplain={!hasRestoredVisualSnapshot} initialExplanation={activeStoredStudyPin?.kind===visualSelection.type&&activeStoredStudyPin.blockId===visualSelection.id?activeStoredStudyPin.explanation as VisualExplanation:undefined} onExplanationChange={data=>rememberStudyExplanation(visualSelection.type==='table'?'table':'image',visualSelection.id,data)} onNavigate={id=>{navigateSourceBlock(id);if(!studyPinned)setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
     </PdfStudyDialog>}
     </div>
     {readerMode==="original" && <PdfPinnedRegion stageRef={pinStageRef} viewportRef={containerRef} pageRefs={pageRefs} sourceKey={fileData} active={pinCaptureActive} onActiveChange={setPinCaptureActive} language={readerLanguage === "zh" ? "zh" : "en"} pins={pinBoard.records.filter((item):item is PdfRegionPinRecord=>item.kind==='region')} onAddPin={pin=>!isPersistablePdfPin(pin)?(readerLanguage==='zh'?'截图过大，无法钉住并保存。':'The capture is too large to pin and save.'):pinBoard.add(pin)} onUpdatePin={record=>pinBoard.update(record.id,{geometry:record.geometry})} onRemovePin={pinBoard.remove} onMinimizePin={id=>{pinBoard.update(id,{minimized:true});}}/>}

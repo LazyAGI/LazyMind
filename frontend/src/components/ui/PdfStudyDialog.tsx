@@ -22,6 +22,8 @@ export function PdfStudyDialog({children,onClose,onPinChange,onMinimize,onGeomet
  const previousFocus=useRef<HTMLElement|null>(null);
  const drag=useRef<{pointerId:number;startX:number;startY:number;x:number;y:number;width:number;height:number}>();
  const resizeDrag=useRef<{pointerId:number;startX:number;startY:number;geometry:PinnedGeometry;edge:ResizeEdge}>();
+ const onGeometryChangeRef=useRef(onGeometryChange);
+ onGeometryChangeRef.current=onGeometryChange;
  const [pinned,setPinned]=useState(initialPinned);
  const [geometry,setGeometry]=useState<PinnedGeometry|undefined>(initialGeometry);
  useEffect(()=>{
@@ -54,10 +56,10 @@ export function PdfStudyDialog({children,onClose,onPinChange,onMinimize,onGeomet
   return()=>window.removeEventListener('resize',keepVisible);
  },[pinned]);
  useEffect(()=>{
-  if(!pinned||!geometry||!onGeometryChange)return;
-  const timer=window.setTimeout(()=>onGeometryChange(geometry),250);
+  if(!pinned||!geometry)return;
+  const timer=window.setTimeout(()=>onGeometryChangeRef.current?.(geometry),250);
   return()=>window.clearTimeout(timer);
- },[pinned,geometry,onGeometryChange]);
+ },[pinned,geometry]);
  const togglePinned=()=>{
   let nextGeometry=geometry;
   if(!pinned){

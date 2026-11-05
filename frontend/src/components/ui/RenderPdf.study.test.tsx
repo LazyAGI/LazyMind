@@ -6,9 +6,11 @@ const state=vi.hoisted(()=>({nativeClick:undefined as undefined|((item:{pageNumb
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
 vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file,onItemClick}:{file:unknown;onItemClick?:typeof state.nativeClick;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;state.nativeClick=onItemClick;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getViewport:()=>({width:600,height:800,convertToViewportPoint:(x:number,y:number)=>[x,800-y]}),getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
-vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:()=> <aside aria-label="visual-study"/>}));
+vi.mock('./pdfPinStore',async original=>({...await original<typeof import('./pdfPinStore')>(),readPdfPinBoard:vi.fn().mockResolvedValue([]),writePdfPinBoard:vi.fn().mockResolvedValue(true)}));
+vi.mock('./PdfVisualStudy',()=>({PdfVisualStudy:({autoExplain}:{autoExplain:boolean})=> <aside aria-label="visual-study" data-auto-explain={String(autoExplain)}/> }));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
 import RenderPdf from './RenderPdf';
+import {readPdfPinBoard,writePdfPinBoard} from './pdfPinStore';
 import {AUTH_USER_CHANGE_EVENT} from '@/components/auth';
 function render(ui:ReactNode){const view=renderView(ui);const tools=screen.queryByRole('button',{name:'阅读工具'});if(tools)fireEvent.click(tools);return view;}
 const target={dataset:'d',document:'one'};
@@ -16,7 +18,7 @@ function document(hash='hash'):PdfIRDocument{return {version:1,projection_versio
 function pageButton(page:number){return screen.getByRole('button',{name:`pdfReader.page ${page} / 3`});}
 function expectPage(page:number){expect(pageButton(page)).toBeInTheDocument();}
 
-beforeEach(()=>{state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
+beforeEach(()=>{vi.mocked(readPdfPinBoard).mockClear().mockResolvedValue([]);vi.mocked(writePdfPinBoard).mockClear().mockResolvedValue(true);state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
 
 it('keeps overview selected when geometry changes after a consumed page navigation',async()=>{
  const props={fileData:'outline-resize.pdf',pdfIRTarget:target,pdfSourceHash:'hash',pdfNavigateToPage:{page:2,requestId:1}};
@@ -288,6 +290,32 @@ it('minimizes a pinned formula and restores it from the six-slot dock',async()=>
  fireEvent.click(screen.getByRole('button',{name:/恢复公式/}));
  expect(screen.getByRole('dialog',{name:'原文解读'}).parentElement).toHaveClass('is-pinned');
  localStorage.removeItem('lazymind:user');
+});
+
+it('does not keep writing a stationary pinned study after its geometry is saved',async()=>{
+ localStorage.setItem('lazymind:user',JSON.stringify({userId:'pin-idle',username:'pin-idle',token:'pin-idle-token',tenantId:'tenant'}));
+ render(<RenderPdf fileData="stationary-pin.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'pdfReader.captureRegion'})).toBeEnabled());
+ fireEvent.click(window.document.querySelector('.pdf-formula-trigger')!);
+ fireEvent.click(screen.getByRole('button',{name:'钉住研读窗口'}));
+ await waitFor(()=>expect(writePdfPinBoard).toHaveBeenCalledTimes(1));
+ await act(async()=>{await new Promise(resolve=>setTimeout(resolve,450));});
+ expect(writePdfPinBoard).toHaveBeenCalledTimes(1);
+ localStorage.removeItem('lazymind:user');
+});
+
+it('auto explains a figure when it is first opened from the PDF',async()=>{
+ state.document={...document(),blocks:[...document().blocks,{id:'image',type:'image',page:0,bbox:[.1,.2,.3,.4],image:{captions:['Method architecture'],footnotes:[],related_blocks:[]}}]};
+ render(<RenderPdf fileData="first-figure.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ await waitFor(()=>expect(window.document.querySelector('.pdf-figure-layer button')).toBeInTheDocument());
+ fireEvent.click(window.document.querySelector('.pdf-figure-layer button')!);
+ expect(screen.getByRole('complementary',{name:'visual-study'})).toHaveAttribute('data-auto-explain','true');
+});
+
+it('passes PDF tools to a custom header action without rendering a second tools button',()=>{
+ renderView(<RenderPdf fileData="custom-header.pdf" pdfIRTarget={target} pdfSourceHash="hash" pdfHeaderEnd={tools=><div data-testid="custom-tools">{tools}</div>}/>);
+ expect(screen.getByTestId('custom-tools')).toContainElement(screen.getByText('pdfReader.displaySettings'));
+ expect(screen.queryByRole('button',{name:'阅读工具'})).toBeNull();
 });
 
 it('opens formula and table reading in a floating source dialog instead of a reader sidebar',()=>{
