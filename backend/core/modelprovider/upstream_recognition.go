@@ -18,10 +18,17 @@ type upstreamRecognitionCandidate struct {
 	featureConflicts [3]bool
 }
 
+type upstreamContextCandidate struct {
+	modelType string
+	context   int
+	conflict  bool
+}
+
 // Every map is immutable after construction. Existing unknown candidates and
 // conflicting types both block lookup in broader scopes.
 type upstreamModelRecognitionIndex struct {
 	providers      map[string]map[string]upstreamRecognitionCandidate
+	contexts       map[string]map[string]upstreamContextCandidate
 	exact          map[string]upstreamRecognitionCandidate
 	basenames      map[string]upstreamRecognitionCandidate
 	fuzzyBasenames map[string]upstreamRecognitionCandidate
@@ -32,6 +39,7 @@ var upstreamModelRecognition atomic.Pointer[upstreamModelRecognitionIndex]
 func newUpstreamModelRecognitionIndex(catalog upstreamCatalogFile) *upstreamModelRecognitionIndex {
 	index := &upstreamModelRecognitionIndex{
 		providers:      make(map[string]map[string]upstreamRecognitionCandidate),
+		contexts:       make(map[string]map[string]upstreamContextCandidate),
 		exact:          make(map[string]upstreamRecognitionCandidate),
 		basenames:      make(map[string]upstreamRecognitionCandidate),
 		fuzzyBasenames: make(map[string]upstreamRecognitionCandidate),
@@ -111,8 +119,21 @@ func newUpstreamModelRecognitionIndex(catalog upstreamCatalogFile) *upstreamMode
 		add(index.fuzzyBasenames, recognitionFuzzyBasename(key), modelType, model)
 	}
 	for provider, models := range catalog.Providers {
+		providerKey := normalizeProviderName(provider)
+		index.contexts[providerKey] = make(map[string]upstreamContextCandidate)
 		for _, model := range models {
 			addModel(LazyLLMSource(provider), model)
+			if model.Context <= 0 {
+				continue
+			}
+			name := strings.ToLower(strings.TrimSpace(model.Name))
+			modelType := normalizedDeclaredModelType(model.ModelType)
+			previous := index.contexts[providerKey][name]
+			if previous.context > 0 && (previous.context != model.Context || previous.modelType != modelType) {
+				previous.conflict = true
+			}
+			previous.context, previous.modelType = model.Context, modelType
+			index.contexts[providerKey][name] = previous
 		}
 	}
 	for _, model := range catalog.RecognitionModels {
@@ -152,6 +173,19 @@ func (index *upstreamModelRecognitionIndex) modelType(providerName, modelID stri
 		candidate, _ = index.lookupFuzzy(modelID)
 	}
 	return candidate.resolvedType()
+}
+
+// contextWindow uses only an exact model ID from the same supplier. Compatible
+// endpoints can serve a familiar name with a different context limit.
+func (index *upstreamModelRecognitionIndex) contextWindow(providerName, modelID, modelType string) int {
+	if index == nil {
+		return 0
+	}
+	candidate := index.contexts[normalizeProviderName(providerName)][strings.ToLower(strings.TrimSpace(modelID))]
+	if candidate.conflict || candidate.modelType != modelType {
+		return 0
+	}
+	return candidate.context
 }
 
 // A found but unresolved identity blocks fallback to weaker names or paths.
