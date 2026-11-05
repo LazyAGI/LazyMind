@@ -15,39 +15,40 @@ import (
 const stateBackendEnv = "LAZYMIND_STATE_BACKEND"
 
 type Config struct {
-	Address                           string
-	Port                              int
-	DBDriver                          string
-	DBDSN                             string
-	DBMigrationFile                   string
-	CoreBaseURL                       string
-	DefaultDatasetAlgoID              string
-	DefaultDatasetAlgoName            string
-	AgentBaseURL                      string
-	AgentToken                        string
-	LocalFSDefaultAgentID             string
-	LocalFSPublicRoot                 string
-	LocalFSAllowedRoots               []string
-	LocalFSDynamicRoots               bool
-	FeishuBaseURL                     string
-	AuthServiceBaseURL                string
-	AuthServiceInternalToken          string
-	RedisURL                          string
-	TempDir                           string
-	TempTTL                           time.Duration
-	TargetSearchCachePrewarmEnabled   bool
-	TargetSearchCachePrewarmInterval  time.Duration
-	TargetSearchCachePrewarmStagger   time.Duration
-	WorkerLeaseTTL                    time.Duration
-	WorkerMaxBackoff                  time.Duration
-	CrawlListRequestInterval          time.Duration
-	ParseDeadLetterAfter              int64
-	GenerateTasksMaxObjectsPerRequest int
-	ParseWorkerGlobalConcurrency      int
-	ParseWorkerSourceConcurrency      int
-	WorkerPollInterval                time.Duration
-	CoreResultPollInterval            time.Duration
-	CompensationPollInterval          time.Duration
+	UpdateBootstrapTx, UpdateBootstrapOwner, UpdateBootstrapStorage string
+	Address                                                         string
+	Port                                                            int
+	DBDriver                                                        string
+	DBDSN                                                           string
+	DBMigrationFile                                                 string
+	CoreBaseURL                                                     string
+	DefaultDatasetAlgoID                                            string
+	DefaultDatasetAlgoName                                          string
+	AgentBaseURL                                                    string
+	AgentToken                                                      string
+	LocalFSDefaultAgentID                                           string
+	LocalFSPublicRoot                                               string
+	LocalFSAllowedRoots                                             []string
+	LocalFSDynamicRoots                                             bool
+	FeishuBaseURL                                                   string
+	AuthServiceBaseURL                                              string
+	AuthServiceInternalToken                                        string
+	RedisURL                                                        string
+	TempDir                                                         string
+	TempTTL                                                         time.Duration
+	TargetSearchCachePrewarmEnabled                                 bool
+	TargetSearchCachePrewarmInterval                                time.Duration
+	TargetSearchCachePrewarmStagger                                 time.Duration
+	WorkerLeaseTTL                                                  time.Duration
+	WorkerMaxBackoff                                                time.Duration
+	CrawlListRequestInterval                                        time.Duration
+	ParseDeadLetterAfter                                            int64
+	GenerateTasksMaxObjectsPerRequest                               int
+	ParseWorkerGlobalConcurrency                                    int
+	ParseWorkerSourceConcurrency                                    int
+	WorkerPollInterval                                              time.Duration
+	CoreResultPollInterval                                          time.Duration
+	CompensationPollInterval                                        time.Duration
 }
 
 func Load() (Config, error) {
@@ -121,6 +122,9 @@ func defaultConfig() Config {
 }
 
 func (c *Config) applyEnv() {
+	c.UpdateBootstrapTx = os.Getenv("LAZYMIND_UPDATE_BOOTSTRAP_TRANSACTION")
+	c.UpdateBootstrapOwner = os.Getenv("LAZYMIND_UPDATE_BOOTSTRAP_OWNER")
+	c.UpdateBootstrapStorage = os.Getenv("LAZYMIND_UPDATE_BOOTSTRAP_STORAGE")
 	if address := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS")); address != "" {
 		c.Address = address
 	}

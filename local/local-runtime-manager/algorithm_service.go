@@ -551,6 +551,9 @@ func localSegmentStorePath(paths RuntimePaths) string {
 }
 
 func localSegmentStoreBackingPath(paths RuntimePaths) string {
+	if paths.FrozenUpdateStorage != nil {
+		return paths.FrozenUpdateStorage.Databases["segments"]
+	}
 	configured := strings.TrimSpace(os.Getenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH"))
 	if configured == "" || strings.HasPrefix(configured, "sqliteproxy://") {
 		return localSegmentStorePath(paths)

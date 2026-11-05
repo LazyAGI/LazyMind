@@ -192,7 +192,7 @@ describe("RecordList conversation pinning", () => {
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByRole("menuitem", { name: "conversationOrganizer.renameConversation" })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "归档" })).toBeInTheDocument();
-    expect(Boolean(within(menu).queryByRole("menuitem", { name: "置顶", exact: true }))).toBe(canPin);
+    expect(Boolean(within(menu).queryByRole("menuitem", { name: "置顶" }))).toBe(canPin);
     expect(mocks.setPinned).not.toHaveBeenCalled();
   });
 
@@ -215,7 +215,7 @@ describe("RecordList conversation pinning", () => {
   });
   it.each(["normal", "task"])("opens archives for the current %s filter", async filter => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, filter);
-    render(<MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()} onRemove={vi.fn()} /><ArchiveLocation /></MemoryRouter>);
+    render(<MemoryRouter><RecordList currentSessionId="" compact showBatchActions onSelected={vi.fn()} onRemove={vi.fn()} /><ArchiveLocation /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "settingsPage.recovery.viewArchived" }));
     expect(screen.getByTestId("archive-location")).toHaveTextContent(`kind=${filter === "task" ? "task" : "dialog"}`);
   });
@@ -224,7 +224,7 @@ describe("RecordList conversation pinning", () => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, filter);
     mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_task_conv: filter === "task" }] } });
     const source = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter>
-      <RecordList compact onSelected={vi.fn()} onRemove={vi.fn()} /><ArchiveLocation />
+      <RecordList currentSessionId="" compact onSelected={vi.fn()} onRemove={vi.fn()} /><ArchiveLocation />
     </MemoryRouter></ConfigProvider>);
     await screen.findByText(newerConversation.display_name);
     fireEvent.click(moreActionsFor(newerConversation.display_name));
@@ -259,7 +259,7 @@ describe("RecordList conversation pinning", () => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, scope === "task" ? "task" : "normal");
     mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_pinned: scope === "pinned", is_task_conv: scope === "task" }] } });
     mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { display_name: newerConversation.display_name, title_revision: 2 } } });
-    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact hideHeader searchText={scope === "search" ? "会话" : undefined} onSelected={onSelected} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList currentSessionId="" compact hideHeader searchText={scope === "search" ? "会话" : undefined} onSelected={onSelected} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
     const title = await screen.findByText(newerConversation.display_name);
     if (trigger === "contextMenu") fireEvent.contextMenu(title.closest(".record")!);
     else if (trigger === "hover") fireEvent.mouseEnter(moreActionsFor(newerConversation.display_name));
@@ -406,7 +406,7 @@ describe("RecordList conversation pinning", () => {
   it.each(["recent", "pinned", "search"])("shows the shared confirmation and fork notice from %s", async source => {
     mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_pinned: source === "pinned" }] } });
     mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { has_fork_descendants: true } } });
-    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact hideHeader
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList currentSessionId="" compact hideHeader
       searchText={source === "search" ? "会话" : undefined} onSelected={vi.fn()} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
     await screen.findByText(newerConversation.display_name);
     fireEvent.click(moreActionsFor(newerConversation.display_name));
@@ -1239,7 +1239,7 @@ describe("RecordList conversation pinning", () => {
     mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_task_conv: mode === 'task' }] } });
     const groups = [{ id: 'destination', name: '目标组', is_task_conv: mode === 'task' }] as any;
     vi.mocked(getConversationGroup).mockResolvedValue({ group: groups[0], conversations: [], nextPageToken: '' });
-    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList currentSessionId="" onRemove={vi.fn()} compact showBatchActions onSelected={vi.fn()}
       groupSection={(batchSelection) => <SidebarGroups groups={groups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter></ConfigProvider>);
     await screen.findByText(newerConversation.display_name);
     await screen.findByTitle('目标组');
@@ -1255,7 +1255,7 @@ describe("RecordList conversation pinning", () => {
   });
 
   it('removes drag handles in batch mode and restores them after cancelling', async () => {
-    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList currentSessionId="" onRemove={vi.fn()} compact showBatchActions onSelected={vi.fn()} /></MemoryRouter></ConfigProvider>);
     await screen.findByText(newerConversation.display_name);
     expect(screen.getAllByRole('button', { name: 'chat.reorderConversation' })).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: '批量' }));
@@ -1917,7 +1917,7 @@ describe("RecordList conversation pinning", () => {
       conversations: ['first', 'second'].map(page => ({ conversation_id: `${params.assistants}-${page}` })),
     } }));
     selectChatConversationSources(['codex']);
-    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList currentSessionId="" onRemove={vi.fn()} compact showBatchActions onSelected={vi.fn()}
       groupSection={(batchSelection, _filters, assistants) => <SidebarGroups key={assistants} assistants={assistants} groups={batchGroups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter></ConfigProvider>);
     await screen.findByText('codex-first');
     document.querySelector<HTMLElement>('.record-container')!.scrollTo = vi.fn();

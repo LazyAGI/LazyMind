@@ -1,8 +1,10 @@
 const childProcess = require("node:child_process");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
-const { createHash } = require("node:crypto");
+const { writeNativeUpdateMetadata } = require("../scripts/native-update-metadata.cjs");
+const productName = "LazyMind";
 
 const execFile = util.promisify(childProcess.execFile);
 const delay = (milliseconds) => new Promise((resolve) => {
@@ -31,6 +33,7 @@ const extraResources = [
   {
     from: runtimeStage,
     to: "runtime",
+    filter: ["**/*", "!bin/unsigned-update-helper"],
   },
 ];
 
@@ -122,7 +125,7 @@ async function developerIdSigningContext(context) {
 function stageEmbeddedRuntime(appOutDir) {
   const runtimeRoot = path.join(
     appOutDir,
-    "LazyMind.app",
+    `${productName}.app`,
     "Contents",
     "Resources",
     "runtime",
@@ -147,6 +150,22 @@ function restoreEmbeddedRuntime(appOutDir) {
   fs.renameSync(staged.stagedRuntime, staged.runtimeRoot);
   stagedRuntimePaths.delete(appOutDir);
   return staged.runtimeRoot;
+}
+
+function refreshSignedRuntimeChecksums(runtimeRoot) {
+  const checksum = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const bin = path.join(runtimeRoot, "bin");
+  // CLI identity pins refer to signed bytes. Refresh them before hashing the
+  // manifest's entire tracked set, which also contains these pin files.
+  for (const name of fs.readdirSync(bin).filter((name) => name.endsWith(".sha256"))) {
+    fs.writeFileSync(path.join(bin, name), `${checksum(path.join(bin, name.slice(0, -7)))}\n`);
+  }
+  const manifestPath = path.join(runtimeRoot, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  for (const name of Object.keys(manifest.checksums)) {
+    manifest.checksums[name] = checksum(path.join(runtimeRoot, name));
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function adhocSignAppBundle(appPath) {
@@ -202,9 +221,9 @@ async function splitPythonComponents(runtimeRoot) {
       throw new Error(`Bundled Python architecture does not match native build: ${machine.trim()}`);
     }
     if (process.env.LAZYMIND_DESKTOP_DEFER_PYTHON !== "false") {
-      // A fixed published bundle may have been signed by another team (or ad-hoc).
-      // Developer ID builds must split the binaries signed above in this build.
-      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS === "true";
+      // Match CI: pair components with the current resolved base by default.
+      // Published reuse is explicit; Developer ID must use this build's signatures.
+      const rebuild = macSigningMode === "developer-id" || process.env.LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS !== "false";
       const published = componentArch === "arm64" && !rebuild;
       const componentArgs = [
         path.resolve(__dirname, published ? "../scripts/stage-published-python-components.py" : "../scripts/build-python-components.py"),
@@ -248,7 +267,7 @@ async function signAndStageEmbeddedRuntime(context) {
   if (!targetMachine || targetMachine !== nativeMachine) {
     throw new Error("Mac runtime packaging requires a native host matching the Electron target");
   }
-  const appPath = path.join(context.appOutDir, "LazyMind.app");
+  const appPath = path.join(context.appOutDir, `${productName}.app`);
   const runtimeRoot = path.join(appPath, "Contents", "Resources", "runtime");
 
   if (macSigningMode === "developer-id") {
@@ -322,6 +341,7 @@ async function signAndStageEmbeddedRuntime(context) {
   console.log("Ad-hoc signing Electron app bundle");
   await adhocSignAppBundle(appPath);
   restoreEmbeddedRuntime(context.appOutDir);
+  refreshSignedRuntimeChecksums(runtimeRoot);
   await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", appPath], appPath);
   await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
   console.log("Restored embedded runtime and resealed the outer ad-hoc app signature");
@@ -332,9 +352,10 @@ async function restoreRuntimeAndFinalizeSignature(context) {
     return;
   }
 
-  restoreEmbeddedRuntime(context.appOutDir);
+  const runtimeRoot = restoreEmbeddedRuntime(context.appOutDir);
+  refreshSignedRuntimeChecksums(runtimeRoot);
 
-  const appPath = path.join(context.appOutDir, "LazyMind.app");
+  const appPath = path.join(context.appOutDir, `${productName}.app`);
   const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
   const signArgs = [
     "--sign",
@@ -417,6 +438,7 @@ function installMacDesktopLauncher(context) {
 async function preparePackagedDesktop(context) {
   installWindowsDesktopLauncher(context);
   installMacDesktopLauncher(context);
+  await writeNativeUpdateMetadata(context);
   await signAndStageEmbeddedRuntime(context);
 }
 
@@ -431,10 +453,12 @@ module.exports = {
   beforePack: async (context) => {
     if (context.electronPlatformName !== "darwin") return;
     const identity = macSigningMode === "developer-id" ? (await developerIdSigningContext(context)).identity : "-";
-    require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch: context.arch === 0 ? "x64" : "arm64", identity });
+    const arch = { 1: "x64", 3: "arm64" }[context.arch];
+    if (!arch) throw new Error(`Unsupported macOS recording helper architecture: ${context.arch}`);
+    require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch, identity });
   },
   appId: "ai.lazymind.desktop",
-  productName: "LazyMind",
+  productName,
   artifactName: "LazyMind-${os}-${arch}.${ext}",
   asar: true,
   asarUnpack: ["node_modules/uiohook-napi/**/*", "node_modules/node-gyp-build/**/*"],
@@ -444,6 +468,7 @@ module.exports = {
   },
   files: [
     "src/**/*",
+    "!src/unsigned-test-*.js",
     "assets/**/*",
     "package.json",
   ],

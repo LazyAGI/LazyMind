@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 	"io"
 	"log"
 	"os"
@@ -25,14 +27,15 @@ func main() {
 }
 
 type CLI struct {
-	out      io.Writer
-	errOut   io.Writer
-	runner   CommandRunner
-	execPath string
+	out        io.Writer
+	errOut     io.Writer
+	runner     CommandRunner
+	execPath   string
+	newManager func(CommandRunner, string) *RuntimeManager
 }
 
 func NewCLI(out, errOut io.Writer, runner CommandRunner, execPath string) *CLI {
-	return &CLI{out: out, errOut: errOut, runner: runner, execPath: execPath}
+	return &CLI{out: out, errOut: errOut, runner: runner, execPath: execPath, newManager: NewRuntimeManager}
 }
 
 func (c *CLI) Run(ctx context.Context, args []string) error {
@@ -41,10 +44,49 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("no command")
 	}
 
-	manager := NewRuntimeManager(c.runner, c.execPath)
+	manager := c.newManager(c.runner, c.execPath)
 	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
+	case "install-component":
+		return c.installComponentCommand(ctx, args[1:])
+	case "update-bootstrap":
+		return c.updateBootstrapCommand(ctx, manager, args[1:])
+	case "update-components-check":
+		return c.updateComponentsCommand(ctx, args[1:])
+	case "update-control":
+		return c.desktopUpdateCommand(ctx, manager, args[1:])
+	case "startup-guard":
+		opts, err := parseCommonArgs("startup-guard", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		opts, err = nativeRuntimeOptions(ctx, opts)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := newRuntimeConfigWithOptions(opts, true)
+		if err != nil {
+			return err
+		}
+		if err = registerDesktopUpdateCoordinator(ctx, cfg, paths); err != nil {
+			return err
+		}
+		return json.NewEncoder(c.out).Encode(map[string]string{"status": "allowed"})
+	case "update-state":
+		opts, err := parseCommonArgs("update-state", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := newRuntimeConfigWithOptions(opts, true)
+		if err != nil {
+			return updateStateFailure("data_unknown")
+		}
+		state, err := measureDesktopUpdateState(ctx, cfg, paths)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(c.out).Encode(state)
 	case "install-rag":
 		opts, err := parseCommonArgs("install-rag", args[1:], c.errOut)
 		if err != nil {
@@ -54,9 +96,23 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
+		if err != nil {
+			return err
+		}
+		defer lease.Close()
 		if cfg.Profile != "local" {
 			return fmt.Errorf("source RAG installation requires local profile")
 		}
+		root, err := resolveRuntimeRecoveryRoot()
+		if err != nil {
+			return err
+		}
+		writer, err := desktopupdate.BeginIndependentComponentWrite(ctx, root, paths.RuntimeRoot)
+		if err != nil {
+			return err
+		}
+		defer desktopupdate.ReleaseNativeLock(writer)
 		release, err := acquireAlgorithmPythonLock(ctx, paths)
 		if err != nil {
 			return err
@@ -78,11 +134,18 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		opts, err = nativeRuntimeOptions(ctx, opts)
+		if err != nil {
+			return err
+		}
 		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
 		if err != nil {
 			return err
 		}
-		return manager.Up(ctx, cfg, paths)
+		if err := bindNativeStartup(ctx, &cfg, &paths, opts.UpdateBootstrapTx, opts.UpdateBootstrapOwner); err != nil {
+			return err
+		}
+		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Up(ctx, cfg, paths) })
 	case "warmup":
 		opts, err := parseCommonArgs("warmup", args[1:], c.errOut)
 		if err != nil {
@@ -95,7 +158,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return manager.Warmup(ctx, cfg, paths)
+		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Warmup(ctx, cfg, paths) })
 	case "down":
 		opts, err := parseCommonArgs("down", args[1:], c.errOut)
 		if err != nil {
@@ -105,7 +168,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return manager.Down(ctx, cfg, paths)
+		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Down(ctx, cfg, paths) })
 	case "status":
 		asJSON, opts, err := parseStatusArgs(args[1:], c.errOut)
 		if err != nil {
@@ -133,7 +196,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return manager.Reset(ctx, cfg, paths, scope)
+		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.Reset(ctx, cfg, paths, scope) })
 	case "service":
 		service, action, opts, err := parseServiceArgs(args[1:], c.errOut)
 		if err != nil {
@@ -143,7 +206,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return manager.RunServiceAction(ctx, cfg, paths, service, action)
+		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.RunServiceAction(ctx, cfg, paths, service, action) })
 	case "guard":
 		ownerPID, opts, err := parseGuardArgs(args[1:], c.errOut)
 		if err != nil {
@@ -153,7 +216,10 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return runRuntimeGuard(ctx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
+		err = withRuntimeUpdateLease(ctx, cfg, paths, func() error {
+			return runRuntimeGuard(ctx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
+		})
+		return err
 	case "internal":
 		return c.runInternal(ctx, manager, args[1:])
 	default:
@@ -180,9 +246,15 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 			return err
 		}
 		if sub == "algorithm-run" {
-			return manager.algorithm.Run(ctx, cfg, paths, service)
+			if err := inheritCommittedRuntimeStorage(&cfg, &paths); err != nil {
+				return err
+			}
+			if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+				return err
+			}
+			return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.algorithm.Run(ctx, cfg, paths, service) })
 		}
-		return manager.algorithm.Down(ctx, paths, service)
+		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.algorithm.Down(ctx, paths, service) })
 	}
 	opts, err := parseCommonArgs("internal", subArgs, c.errOut)
 	if err != nil {
@@ -192,7 +264,20 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 	if err != nil {
 		return err
 	}
+	if strings.HasSuffix(sub, "-run") {
+		if err := inheritCommittedRuntimeStorage(&cfg, &paths); err != nil {
+			return err
+		}
+		if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+			return err
+		}
+	}
 
+	lease, err := registerRuntimeUpdateLease(ctx, cfg, paths)
+	if err != nil {
+		return err
+	}
+	defer lease.Close()
 	switch sub {
 	case "local-proxy-run":
 		return manager.localProxy.Run(ctx, cfg, paths)
@@ -343,8 +428,11 @@ func addRuntimeFlags(fs *flag.FlagSet) func() RuntimeConfigOptions {
 	runtimeRoot := fs.String("runtime-root", "", "")
 	buildRoot := fs.String("build-root", "", "")
 	resourcesRoot := fs.String("resources-root", "", "")
+	bootstrapTx := fs.String("update-bootstrap", "", "")
+	bootstrapOwner := fs.String("bootstrap-owner", "", "")
 	return func() RuntimeConfigOptions {
 		return RuntimeConfigOptions{
+			UpdateBootstrapTx: *bootstrapTx, UpdateBootstrapOwner: *bootstrapOwner,
 			Profile:         *profile,
 			MaintenanceMode: *maintenanceMode,
 			OwnerToken:      *ownerToken,

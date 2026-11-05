@@ -32,7 +32,7 @@ function fixture() {
     ipcMain: { handle: (name, callback) => handlers.set(name, callback), on: (name, callback) => handlers.set(name, callback) },
   };
   const start = source.indexOf('ipcMain.handle("lazymind:assistantSessionSet"');
-  const end = source.indexOf('ipcMain.handle("lazymind:restartRuntime"', start);
+  const end = source.indexOf('handleDesktopWork("lazymind:restartRuntime"', start);
   assert.ok(start > 0 && end > start);
   vm.runInNewContext(source.slice(start, end), context);
   return { handlers, calls, context, finish };

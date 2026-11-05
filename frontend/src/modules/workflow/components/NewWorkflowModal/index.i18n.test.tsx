@@ -51,7 +51,7 @@ describe('NewWorkflowModal during translation refresh', () => {
       const picker = screen.getByRole('combobox', { name: '搜索并选择技能' });
       fireEvent.focus(picker);
       fireEvent.mouseDown(picker);
-      fireEvent.click(await screen.findByRole('option', { name: skill.name, exact: true }));
+      fireEvent.click(await screen.findByRole('option', { name: skill.name }));
     }
     await screen.findByText('Review conversion risks.');
     await waitFor(() => expect(screen.getByRole('button', { name: '开始转换' })).toBeEnabled());

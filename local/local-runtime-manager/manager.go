@@ -348,6 +348,14 @@ func classifyAlgorithmStartupPortFailure(err error, cfg RuntimeConfig, paths Run
 }
 
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (resultErr error) {
+	if err := recoverCommittedBootstrap(ctx, m, &cfg, &paths); err != nil {
+		return err
+	}
+	if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+		return err
+	}
+	storage := cloneUpdateStorage(paths.FrozenUpdateStorage)
+
 	var state RuntimeState
 	statePersisted := false
 	failureContext := runtimeFailureContext{Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight}
@@ -364,6 +372,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 			resultErr = attachRuntimeDiagnostic(resultErr, failureContext)
 			diagnostic, _ := runtimeDiagnosticFromError(resultErr)
 			if statePersisted {
+				if latest, err := readRuntimeState(paths.StateFile); err == nil && latest.OwnerToken == cfg.OwnerToken {
+					state = latest
+				}
 				failureCfg := applyStateConfig(cfg, state)
 				if runtimeFailureStateBelongsTo(paths, failureCfg) {
 					state = newStateWithServiceStatus(state, failureCfg, "failed")
@@ -391,7 +402,21 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
+	if cfg.UpdateBootstrap != nil && state.OverallStatus == "stopped" {
+		state.ProcessCompose.APIPort = 0
+	}
 	stateCfg := applyStateConfig(freshCfg, state)
+	if freshCfg.UpdateStorage.Version == 2 {
+		stateCfg.UpdateStorage.Version = 2
+		stateCfg.UpdateStorage.VectorEngine = stateCfg.ModeProfile.VectorStore.Engine
+		stateCfg.UpdateStorage.VectorPath = stateCfg.ModeProfile.VectorStore.DBPath
+		stateCfg.UpdateStorage.LayoutSource = "resolved-runtime"
+	}
+	if storage != nil {
+		if err := restoreRuntimeStorage(&stateCfg, &paths, storage); err != nil {
+			return err
+		}
+	}
 	if state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
 			failureContext.Fact = runtimeFailureFactInstanceConflict
@@ -413,7 +438,21 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
+	if cfg.UpdateBootstrap != nil && state.OverallStatus == "stopped" {
+		state.ProcessCompose.APIPort = 0
+	}
 	stateCfg = applyStateConfig(freshCfg, state)
+	if freshCfg.UpdateStorage.Version == 2 {
+		stateCfg.UpdateStorage.Version = 2
+		stateCfg.UpdateStorage.VectorEngine = stateCfg.ModeProfile.VectorStore.Engine
+		stateCfg.UpdateStorage.VectorPath = stateCfg.ModeProfile.VectorStore.DBPath
+		stateCfg.UpdateStorage.LayoutSource = "resolved-runtime"
+	}
+	if storage != nil {
+		if err := restoreRuntimeStorage(&stateCfg, &paths, storage); err != nil {
+			return err
+		}
+	}
 	if state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
 			failureContext.Fact = runtimeFailureFactInstanceConflict
@@ -437,7 +476,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	state.RepoRoot = cfg.RepoRoot
 	state.ResourcesRoot = cfg.ResourcesRoot
 	state.RuntimeRoot = cfg.RuntimeRoot
+	committedTx, committedRelease := state.Config.NativeCommittedTx, state.Config.NativeCommittedReleaseID
 	state.Config = snapshotRuntimeConfig(stateCfg)
+	if storage != nil {
+		state.Config.NativeCommittedTx, state.Config.NativeCommittedReleaseID = committedTx, committedRelease
+	}
 	state = newStateWithServiceStatus(state, stateCfg, "stopped")
 	state.OverallStatus = "starting"
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
@@ -487,6 +530,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
+	if storage != nil {
+		freshCfg.UpdateBootstrap = cfg.UpdateBootstrap
+		if err := restoreRuntimeStorage(&freshCfg, &paths, storage); err != nil {
+			return err
+		}
+	}
 	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
@@ -520,6 +569,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		})
 		if configErr != nil {
 			return configErr
+		}
+		if storage != nil {
+			attemptCfg.UpdateBootstrap = cfg.UpdateBootstrap
+			if err := restoreRuntimeStorage(&attemptCfg, &attemptPaths, storage); err != nil {
+				return err
+			}
 		}
 		if err := ensureRuntimeDirs(attemptCfg, attemptPaths); err != nil {
 			return err
@@ -790,6 +845,9 @@ func runtimeFailureStateBelongsTo(paths RuntimePaths, cfg RuntimeConfig) bool {
 func (m *RuntimeManager) Warmup(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (err error) {
 	if cfg.MaintenanceMode != installerWarmupMaintenanceMode {
 		return fmt.Errorf("warmup requires maintenance mode %q", installerWarmupMaintenanceMode)
+	}
+	if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+		return err
 	}
 	defer func() {
 		downErr := m.Down(context.Background(), cfg, paths)

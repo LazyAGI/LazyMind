@@ -39,13 +39,35 @@ func sourceRAGInstalled(paths RuntimePaths) bool {
 }
 
 func loadPythonComponentCatalog(paths RuntimePaths) (*pythonComponentCatalog, error) {
+	return loadPythonComponentCatalogWithInstallationCheck(paths, false)
+}
+
+// Normal startup may degrade gracefully when an optional component is damaged.
+// Update planning must instead preserve that evidence, so it cannot mistake a
+// previously installed capability for a component the user never installed.
+func loadPythonComponentCatalogForUpdate(paths RuntimePaths) (*pythonComponentCatalog, error) {
+	return loadPythonComponentCatalogWithInstallationCheck(paths, true)
+}
+
+func loadPythonComponentCatalogWithInstallationCheck(paths RuntimePaths, strictInstallation bool) (*pythonComponentCatalog, error) {
 	data, err := os.ReadFile(filepath.Join(paths.ResourcesRoot, "config", "python-components.json"))
 	if os.IsNotExist(err) {
+		if strictInstallation {
+			installed, evidenceErr := otherPythonComponentInstallation(paths, "rag", "")
+			if evidenceErr != nil || installed {
+				return nil, fmt.Errorf("component installation evidence has no catalog")
+			}
+		}
 		return nil, nil // Older full bundles and source development.
 	}
 	if err != nil {
 		return nil, err
 	}
+	return resolvePythonComponentCatalog(paths, data, strictInstallation)
+}
+
+// Share selection rules between startup and the read-only update preflight.
+func resolvePythonComponentCatalog(paths RuntimePaths, data []byte, strictInstallation bool) (*pythonComponentCatalog, error) {
 	var catalog pythonComponentCatalog
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return nil, fmt.Errorf("read Python component catalog: %w", err)
@@ -72,10 +94,34 @@ func loadPythonComponentCatalog(paths RuntimePaths) (*pythonComponentCatalog, er
 				componentDigestPattern.MatchString(selected.Revision) && componentDigestPattern.MatchString(selected.SHA256) &&
 				installedPythonComponentPath(paths, selected) != "" {
 				catalog.Components[id] = selected
+			} else if strictInstallation {
+				if !os.IsNotExist(err) {
+					return nil, fmt.Errorf("component selection evidence is invalid")
+				}
+				installed, evidenceErr := otherPythonComponentInstallation(paths, id, entry.Revision)
+				if evidenceErr != nil || installed {
+					return nil, fmt.Errorf("component selection evidence is missing")
+				}
 			}
 		}
 	}
 	return &catalog, nil
+}
+
+func otherPythonComponentInstallation(paths RuntimePaths, id, pinnedRevision string) (bool, error) {
+	entries, err := os.ReadDir(filepath.Join(paths.RuntimeRoot, "deps", "python-components", id))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.Name() == "source.ready" || (componentDigestPattern.MatchString(entry.Name()) && entry.Name() != pinnedRevision) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) string {
@@ -101,6 +147,8 @@ func installedPythonComponentPath(paths RuntimePaths, entry pythonComponent) str
 
 func pythonComponentEnvironment(paths RuntimePaths, ragDisabled bool) []string {
 	values := []string{
+		"LAZYMIND_COMPONENT_MAINTENANCE_MANAGER=" + filepath.Join(paths.BuildRoot, "bin", executableName("local-runtime-manager")),
+		"LAZYMIND_RUNTIME_RESOURCES_ROOT=" + paths.ResourcesRoot,
 		"LAZYMIND_PYTHON_COMPONENT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "python-components.json"),
 		"LAZYMIND_ALGORITHM_PYTHON=" + paths.AlgorithmPython,
 		"LAZYMIND_ALGORITHM_SOURCE=" + filepath.Join(paths.RepoRoot, "algorithm"),

@@ -373,7 +373,7 @@ describe('WriterIRDocumentEditor image previews', () => {
       expect(firstImage).toHaveAttribute('src', '/static-files/test-image.png?version=1');
     }
 
-    rerender(<WriterIRDocumentEditor {...props} numbering={{ entries: { 'sec-1': { label: '1.' } } }} />);
+    rerender(<WriterIRDocumentEditor {...props} numbering={{ ordered_style: 'hierarchical', entries: { 'sec-1': { label: '1.' } } }} />);
     await waitFor(() => {
       expect(container.querySelector('img')).toHaveAttribute('src', '/static-files/test-image.png?version=2');
     });
@@ -404,6 +404,7 @@ describe('WriterIRDocumentEditor numbering sidecar', () => {
     const { container } = render(
       <WriterIRDocumentEditor
         document={dividerDocument}
+        onFocus={vi.fn()} onBlur={vi.fn()}
         ariaLabel='Writer document'
         onChange={onChange}
       />,
@@ -425,7 +426,7 @@ describe('WriterIRDocumentEditor numbering sidecar', () => {
       ...document,
       blocks: [{ node_id: 'empty-heading', type: 'heading', content: '', numbering: { level } }],
     };
-    const { container } = render(<WriterIRDocumentEditor document={emptyDocument}
+    const { container } = render(<WriterIRDocumentEditor document={emptyDocument} onFocus={vi.fn()} onBlur={vi.fn()}
       numbering={{ ordered_style: 'hierarchical', entries: { 'empty-heading': { label: '1.', mode: 'ordered' } } }}
       ariaLabel='Writer document' onChange={onChange} />);
     const heading = container.querySelector<HTMLElement>(`h${level}[data-writer-block-content]`)!;
@@ -849,7 +850,7 @@ describe('WriterIRDocumentEditor cross-reference menu', () => {
             ? { ...block, content: 'Target section' }
             : block),
         }}
-        numbering={{ entries: { 'sec-1': { label } } }}
+        numbering={{ ordered_style: 'hierarchical', entries: { 'sec-1': { label } } }}
         ariaLabel='Writer document'
         onChange={vi.fn()}
         onCrossReferenceApplied={onCrossReferenceApplied}

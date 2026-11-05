@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -617,6 +618,9 @@ func loadDesktopCredentialManifest(cloudIssuer string) (*credentialvault.Manifes
 }
 
 func main() {
+	if runComponentMaintenanceEntry() {
+		return
+	}
 	log.Init()
 
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
@@ -634,6 +638,15 @@ func main() {
 		}
 		log.Logger.Info().Msg("OpenAPI artifacts exported")
 		return
+	}
+	if b, err := loadCoreBootstrap(); err != nil {
+		log.Logger.Error().Msg("update_bootstrap_invalid")
+		os.Exit(1)
+	} else if b != nil {
+		if err := verifyOwnBootstrapStorage(context.Background(), b); err != nil {
+			log.Logger.Error().Msg("update_bootstrap_invalid")
+			os.Exit(1)
+		}
 	}
 	if err := loadInternalServiceTokenEnvironment(); err != nil {
 		log.Logger.Fatal().Msg("invalid Core internal service token file")
@@ -695,6 +708,8 @@ func coordinateShutdown(
 	onClose func(),
 ) error {
 	g, gctx := errgroup.WithContext(ctx)
+	shutdownStarted := make(chan struct{})
+	var shutdownDeadline time.Time
 
 	// Serve HTTP until Shutdown is called (returns http.ErrServerClosed) or a
 	// fatal serve error occurs. A fatal error cancels gctx, which the watchdog
@@ -714,8 +729,11 @@ func coordinateShutdown(
 	// loop's final DB write cannot race with DB close.
 	g.Go(func() error {
 		<-gctx.Done()
+		shutdownDeadline = time.Now().Add(shutdownTimeout)
+		// Closing this channel publishes the shared deadline to every waiter.
+		close(shutdownStarted)
 		cancelRuntime()
-		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		shutCtx, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 		defer cancel()
 		if err := server.Shutdown(shutCtx); err != nil {
 			log.Logger.Warn().Err(err).Msg("http shutdown failed")
@@ -726,13 +744,21 @@ func coordinateShutdown(
 	// Wait for each background loop to fully exit, but bound the wait by the
 	// same shutdownTimeout so a handler that ignores cancellation cannot keep
 	// the process alive forever after a single SIGTERM.
-	deadline := time.After(shutdownTimeout)
 	for _, d := range backgroundDone {
 		d := d
 		g.Go(func() error {
 			select {
 			case <-d:
-			case <-deadline:
+				return nil
+			case <-shutdownStarted:
+			}
+			// Each waiter observes the same stop-time deadline; no waiter can
+			// consume another's timeout, and normal uptime spends no budget.
+			timer := time.NewTimer(time.Until(shutdownDeadline))
+			defer timer.Stop()
+			select {
+			case <-d:
+			case <-timer.C:
 				log.Logger.Warn().Msg("background loop did not exit within shutdown timeout; giving up")
 			}
 			return nil
@@ -740,8 +766,8 @@ func coordinateShutdown(
 	}
 
 	err := g.Wait()
-	// All HTTP serving, drain, and background loops have now exited (or the
-	// deadline elapsed); it is safe to release shared state and DB connections.
+	// Preserve the ordinary shutdown callback after its bounded waits. A timeout
+	// is not evidence that all writers finished and must not authorize updating.
 	if onClose != nil {
 		onClose()
 	}
@@ -773,6 +799,19 @@ func (e *startupError) Unwrap() error { return e.err }
 // ordered shutdown completes. It returns an error only when initialization or
 // the HTTP listener fails; a signal-triggered shutdown is a nil return.
 func run(ctx context.Context) error {
+	bootstrap, err := loadCoreBootstrap()
+	if err != nil {
+		return err
+	}
+	var deferredWrites []func() error
+	initializeWriteStage := func(fn func() error) error {
+		if bootstrap != nil {
+			deferredWrites = append(deferredWrites, fn)
+			return nil
+		}
+		return fn()
+	}
+
 	modelconfig.SetConversationResolver(chat.LoadConversationLLMConfig)
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
@@ -792,32 +831,52 @@ func run(ctx context.Context) error {
 	modelprovider.SetCredentialKeyManager(credentialKeys)
 	userenv.SetCredentialKeyManager(credentialKeys)
 	vocabulary.SetCloudCredentialKeyManager(credentialKeys)
-	if err := migrate.RunUp(); err != nil {
-		return &startupError{msg: "run SQL migrations", err: err}
-	}
-	if err := episode.Initialize(db.DB); err != nil {
-		return &startupError{msg: "initialize Episode Memory search", err: err}
-	}
-	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
-		return &startupError{msg: "migrate model provider credentials", err: err}
+	if err := initializeWriteStage(func() error {
+		if err := migrate.RunUp(); err != nil {
+			return &startupError{msg: "run SQL migrations", err: err}
+		}
+		if err := episode.Initialize(db.DB); err != nil {
+			return &startupError{msg: "initialize Episode Memory search", err: err}
+		}
+		if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
+			return &startupError{msg: "migrate model provider credentials", err: err}
+		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 	modelprovider.MustLoadContextWindows(filepath.Join(".", "config", "model_context_windows.yaml"))
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	upstreamCatalogPath := filepath.Join(".", "config", "upstream_model_catalog.json")
 	if modelprovider.HardcodedModelCatalogEnabled() {
 		// Legacy path. The YAML model lists and SeedModelCatalog stay in the tree.
-		modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+		if err := initializeWriteStage(func() error { modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath); return nil }); err != nil {
+			return err
+		}
 	} else {
-		modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, upstreamCatalogPath)
+		if err := initializeWriteStage(func() error {
+			modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, upstreamCatalogPath)
+			return nil
+		}); err != nil {
+			return err
+		}
 		if err := modelprovider.LoadUpstreamModelRecognitionCatalog(upstreamCatalogPath); err != nil {
 			return &startupError{msg: "load upstream model recognition catalog", err: err}
 		}
 	}
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
-	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
+	if err := initializeWriteStage(func() error { modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath); return nil }); err != nil {
+		return err
+	}
 
 	knowledgeMarketCatalogPath := filepath.Join(".", "config", "knowledge_market_catalog.yaml")
-	knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
+	if err := initializeWriteStage(func() error {
+		knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))
@@ -868,15 +927,21 @@ func run(ctx context.Context) error {
 	localworkspace.SetStopConversationFunc(func(ctx context.Context, userID, conversationID string) error {
 		return chat.StopConversationExecution(ctx, db.DB, store.State(), userID, conversationID, "", "workspace authorization revoked")
 	})
-	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
-		return &startupError{msg: "seed built-in workflows", err: err}
+	if err := initializeWriteStage(func() error {
+		if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
+			return &startupError{msg: "seed built-in workflows", err: err}
+		}
+		if err := runHistoryInjections(ctx, store.DB()); err != nil {
+			return &startupError{msg: "inject bundled history", err: err}
+		}
+		if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
+			return &startupError{msg: "initialize conversation result read baseline", err: err}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if err := runHistoryInjections(ctx, store.DB()); err != nil {
-		return &startupError{msg: "inject bundled history", err: err}
-	}
-	if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
-		return &startupError{msg: "initialize conversation result read baseline", err: err}
-	}
+
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
@@ -915,66 +980,128 @@ func run(ctx context.Context) error {
 	chat.RegisterTaskCenterEnvCleanup()
 	startBackgroundJobs := backgroundJobsEnabled()
 	var runner *asyncjob.Runner
-	if !startBackgroundJobs {
-		log.Logger.Info().Msg("core background jobs are disabled")
-	} else {
-		// History samples have already been downloaded and imported above.
-		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
-		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		if vocabulary.Enabled() {
-			vocabulary.RegisterCloudSync(store.DB())
-			vocabularyRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
-			backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+	updateControl := &desktopUpdateControl{token: strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")),
+		participants: []desktopUpdateParticipant{{scheduler.PauseForUpdate, scheduler.ResumeFromUpdate}, {doc.PauseDeferredIndexingForUpdate, doc.ResumeDeferredIndexingFromUpdate}},
+		count: func(ctx context.Context) (int64, error) {
+			return desktopUpdateTaskCount(ctx, store.DB(), store.LazyLLMDB(), systemdeps.PythonComponentActive("rag"))
+		},
+	}
+	if bootstrap != nil {
+		if err := updateControl.BeginUpdateBootstrap(bootstrap.TransactionID, bootstrap.Owner); err != nil {
+			return err
 		}
-		excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
-		if !systemdeps.PythonComponentActive("rag") {
-			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
-				doc.MarketUpdateAllJobType, "document_pdf_translation")
-		}
-		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
-			Concurrency:     asyncConfig.Concurrency,
-			ExcludeJobTypes: excludedJobs,
-			PollInterval:    asyncConfig.PollInterval,
-			LockTTL:         asyncConfig.LockTTL,
+	}
+	var jobsOnce sync.Once
+	var jobsError error
+	jobsStarted := make(chan struct{})
+	startJobs := func() error {
+		jobsOnce.Do(func() {
+			defer close(jobsStarted)
+			for _, initialize := range deferredWrites {
+				if err := initialize(); err != nil {
+					jobsError = err
+					return
+				}
+			}
+			if !startBackgroundJobs {
+				log.Logger.Info().Msg("core background jobs are disabled")
+			} else {
+				// History samples have already been downloaded and imported above.
+				backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
+				asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
+				if vocabulary.Enabled() {
+					vocabulary.RegisterCloudSync(store.DB())
+					vocabularyRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
+					backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+				}
+				excludedJobs := append([]string{doc.ReadingPreparationJob, vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType, academic.PreparationJobType}, chat.ConversationTitleJobTypes...)
+				if !systemdeps.PythonComponentActive("rag") {
+					excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
+						doc.MarketUpdateAllJobType, "document_pdf_translation")
+				}
+				runner = updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{
+					Concurrency:     asyncConfig.Concurrency,
+					ExcludeJobTypes: excludedJobs,
+					PollInterval:    asyncConfig.PollInterval,
+					LockTTL:         asyncConfig.LockTTL,
+				})
+				backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+				readingRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{doc.ReadingPreparationJob}, Concurrency: 1, SerializeResources: true, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				backgroundDone = append(backgroundDone, readingRunner.Done(), doc.StartReadingPreparation(runtimeCtx, store.DB()))
+				paperChatRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				paperPreparationRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.PreparationJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				backgroundDone = append(backgroundDone, paperChatRunner.Done(), paperPreparationRunner.Done())
+				academic.RecoverPaperExpansions(runtimeCtx, store.DB())
+				backgroundDone = append(backgroundDone, workflow.StartDocumentImageExportCleanup(runtimeCtx))
+				directoryRunner := updateControl.startRunner(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+				backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
+
+				backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
+				backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
+				backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
+				backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB(), func(r *asyncjob.Runner) {
+					updateControl.participants = append(updateControl.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
+				})...)
+				if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+					backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
+				}
+
+				importConfig := evalset.LoadImportRuntimeConfigFromEnv()
+				backgroundDone = append(backgroundDone,
+					evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
+
+				backgroundDone = append(backgroundDone, updateControl.startResourceUpdates(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv())...)
+				resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
+				resourceupdate.LogStartup(resourceUpdateEnabled)
+				if resourceUpdateEnabled {
+					resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
+
+				}
+				backgroundDone = append(backgroundDone, recovery.Start(runtimeCtx, store.DB(), recovery.DefaultCleanupInterval))
+
+				// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
+				if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
+					log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
+				} else if n > 0 {
+					log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
+				}
+			}
+
+			// Start the schedule ticker.
+			if startBackgroundJobs {
+				backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
+				backgroundDone = append(backgroundDone, taskcenter.RunNotificationDelivery(runtimeCtx, store.DB()))
+			}
+			initializeCloudSession(context.Background())
+			if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {
+				log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential backup is unavailable")
+			}
+			if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
+				log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
+			}
+
 		})
-		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
-		readingRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{doc.ReadingPreparationJob}, Concurrency: 1, SerializeResources: true, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
-		backgroundDone = append(backgroundDone, readingRunner.Done(), doc.StartReadingPreparation(runtimeCtx, store.DB()))
-		paperChatRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
-		paperPreparationRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.PreparationJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
-		backgroundDone = append(backgroundDone, paperChatRunner.Done(), paperPreparationRunner.Done())
-		academic.RecoverPaperExpansions(runtimeCtx, store.DB())
-		backgroundDone = append(backgroundDone, workflow.StartDocumentImageExportCleanup(runtimeCtx))
-		directoryRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
-		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
-		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
-		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
-		backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
-		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
-		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
-		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
-			backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
+		return jobsError
+	}
+	groupDone := make(chan struct{})
+	go func() {
+		defer close(groupDone)
+		select {
+		case <-jobsStarted:
+		case <-runtimeCtx.Done():
+			return
 		}
-
-		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
-		backgroundDone = append(backgroundDone,
-			evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
-
-		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
-		resourceupdate.LogStartup(resourceUpdateEnabled)
-		if resourceUpdateEnabled {
-			resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
-			backgroundDone = append(backgroundDone,
-				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
+		<-runtimeCtx.Done()
+		for _, done := range backgroundDone {
+			<-done
 		}
-		recovery.Start(context.Background(), store.DB(), recovery.DefaultCleanupInterval)
-
-		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
-		if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
-			log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
-		} else if n > 0 {
-			log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
+	}()
+	if bootstrap == nil {
+		if err := startJobs(); err != nil {
+			return err
 		}
+	} else {
+		updateControl.onBootstrapRelease = startJobs
 	}
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
@@ -984,19 +1111,6 @@ func run(ctx context.Context) error {
 	subagent.EventHooks.RegisterConversationEventHook(chat.PublishConversationEvent)
 
 	log.Logger.Info().Msg("plugin subagent hooks registered")
-
-	// Start the schedule ticker.
-	if startBackgroundJobs {
-		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
-		backgroundDone = append(backgroundDone, taskcenter.RunNotificationDelivery(runtimeCtx, store.DB()))
-	}
-	initializeCloudSession(context.Background())
-	if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {
-		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential backup is unavailable")
-	}
-	if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
-		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
-	}
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -1062,21 +1176,19 @@ func run(ctx context.Context) error {
 	}
 	log.Logger.Info().Str("addr", listener.Addr().String()).Msg("Core listening")
 
-	// DB/Redis connections are intentionally NOT closed on shutdown. The
-	// scheduler launches detached task-execution goroutines (sendScheduledChatRequest)
-	// that outlive RunScheduler's Done() channel and may still be writing task
-	// results to the DB after the background loops have exited; closing the pool
-	// would race with those final writes (sql: database is closed). This matches
-	// the pre-PR behavior — the process relied on os.Exit/Fatal, which never
-	// closed pools either. The OS reclaims the TCP connections on process exit,
-	// and PostgreSQL/Redis clean up their side on disconnect identically to a
-	// graceful QUIT (abort tx, release locks), so there is no functional or data
-	// difference. The graceful-shutdown value lives in: HTTP drain, asyncjob
-	// lease release, and short-lived background loops exiting cleanly.
+	// Keep the existing DB/Redis lifetime. Scheduler completion now includes its
+	// admitted executions and final writes, but the coordinator's bounded wait
+	// and other background owners do not yet prove that every writer has exited.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+		r.HandleFunc("/internal/desktop-update", updateControl.control).Methods(http.MethodPost)
+		// Realtime multiplexes chat requests back through this router. Admission
+		// belongs to each routed operation, not the idle WebSocket transport.
+		r.Use(updateControl.wrap)
+	}
 	server := &http.Server{
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Logger.Info().Dur("timeout", shutdownTimeout()).Msg("core graceful shutdown armed")
-	return coordinateShutdown(ctx, server, listener, backgroundDone, shutdownTimeout(), cancelRuntime, nil)
+	return coordinateShutdown(ctx, server, listener, []<-chan struct{}{groupDone}, shutdownTimeout(), cancelRuntime, nil)
 }

@@ -150,7 +150,7 @@ function renderWorkbookTableFallback(
 function requiresTableRenderer(fileData: ArrayBuffer): boolean {
   try {
     const workbook = XLSX.read(new Uint8Array(fileData), { type: "array" });
-    return !workbook.Props?.Application && !workbook.Props?.Creator;
+    return !workbook.Props?.Application && !workbook.Props?.Author;
   } catch {
     return false;
   }

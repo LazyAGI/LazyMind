@@ -78,7 +78,7 @@ describe("Chat export actions", () => {
     await act(async () => resolve({ data: { data: artifact } }));
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.queryByText("报告😀")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "报告.md", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "报告.md" }));
     expect(screen.getByText("报告😀")).toBeVisible();
     fireEvent.click(screen.getByTitle("chat.artifactCollectorDownload 报告.md"));
     await waitFor(() => expect(api.download).toHaveBeenCalledWith(expect.any(Blob), "报告.md"));
@@ -112,7 +112,7 @@ describe("Chat export actions", () => {
     expect(saved).toContain("原始证据");
     expect(saved).toContain("`[1](#source-1.1)`");
     view.rerender(<ChatExportActions {...props} content={body} exports={exports} sources={[{ ...sources[0], url: "https://example.com/new" }]} />);
-    fireEvent.click(screen.getByRole("button", { name: "报告.md", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "报告.md" }));
     expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).toHaveTextContent("https://example.com/report");
     fireEvent.click(screen.getByTitle("chat.artifactCollectorDownload 报告.md"));
     await waitFor(() => expect(api.download).toHaveBeenCalled());
@@ -184,12 +184,12 @@ describe("Chat export actions", () => {
     expect(within(ordinary).queryByText(/chat.export(Current|Previous|Unknown)Generation/)).not.toBeInTheDocument();
     expect(screen.queryByText("chat.exportUnknownGeneration")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "chat.exportPreviewing" })).not.toBeInTheDocument();
-    fireEvent.click(within(previous).getByRole("button", { name: "报告.md", exact: true }));
+    fireEvent.click(within(previous).getByRole("button", { name: "报告.md" }));
     expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).toHaveTextContent("旧报告");
     expect(within(previous).getByText("chat.exportPreviewing")).toBeVisible();
     fireEvent.click(within(current).getByRole("checkbox"));
     expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).toHaveTextContent("旧报告");
-    fireEvent.click(within(current).getByRole("button", { name: "报告.md", exact: true }));
+    fireEvent.click(within(current).getByRole("button", { name: "报告.md" }));
     expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).toHaveTextContent("报告😀");
     expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).not.toHaveTextContent("旧报告");
     expect(within(previous).queryByText("chat.exportPreviewing")).not.toBeInTheDocument();

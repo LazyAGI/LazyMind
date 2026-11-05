@@ -14,6 +14,8 @@ Desktop mode wraps the existing host-process Local runtime in an Electron shell.
 
 Desktop packages bundle the Go services, process-compose, Caddy, Pandoc 3.11, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, and shared Local dependencies. Default builds provide RAG/Milvus dependencies as a separately installable component and fetch published workflow examples during warmup. Model weights are not bundled.
 
+Local macOS builds generate and verify a RAG ZIP/catalog for the current resolved dependencies by default, matching CI. Publish that paired component before users download it. For an ad-hoc ARM64 build, `LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS=false` explicitly reuses the pinned published bundle; its exact dependency and component-boundary checks must still pass. Developer ID builds always rebuild to retain matching signatures.
+
 F4 statistics and plotting run natively on Windows 10/11 using an AppContainer and a Job Object; Docker and WSL are not required. Each execution has its own private scratch directory and AppContainer profile, receives no service credentials or network capabilities, and is limited to one process, 1 GiB of committed memory, and the configured execution timeout. A custom read-only capability grants access to the bundled Python runtime and its installed libraries, including shared `.pth` dependencies; service data and source paths from `PYTHONPATH` are not granted. Runtime ACLs must permit AppContainer reads (user-owned installations are prepared automatically). Failure to set up isolation stops execution. Linux deployments continue to use the existing service-container sandbox. Run `python -m pytest tests/algorithm/chat/workflows/test_paper_execution.py` on native Windows to check computation, SVG/PNG/PDF exports, access restrictions and cleanup; these tests are collected by the Windows algorithm CI job.
 
 On Windows, the parent checks scratch and AppContainer private storage every 50 ms and once after exit: 16 MiB per file, 64 MiB combined, and at most 1024 directory entries. Exceeding a budget aborts the job and cleans up its private storage. These are monitored budgets that may briefly overshoot between checks, not filesystem-enforced quotas; Linux retains its existing file-size rlimit.
@@ -54,6 +56,143 @@ Platform-maintained Skill directories and installable Skill links are declared t
 The frontend dependency tree is installed while building, but raw `frontend/node_modules` is not distributed. Vite compiles browser dependencies into `frontend/dist`, and Desktop serves that static output through bundled Caddy.
 
 ## Outputs
+
+### Desktop update build and publication
+
+Update configuration is public JSON supplied at build time, either by the file path
+`LAZYMIND_DESKTOP_UPDATE_CONFIG` or by `LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON`, never both.
+There is no built-in personal download source. The helper and native packaging metadata
+consume the same input. Builds without either input keep automatic updates disabled.
+`version`, `platform` and `arch` are derived from the build; supplied values must match.
+`releaseId` may be omitted to derive it from platform, architecture and version (a `+`
+in build metadata becomes `_`). Explicit release IDs remain supported.
+
+Example public configuration (replace the placeholders before building):
+
+```json
+{
+  "trustDomain": "your-desktop-release",
+  "audience": "official",
+  "channel": "stable",
+  "mode": "official",
+  "signingIdentity": "YOUR_APPLE_TEAM_ID_OR_WINDOWS_PUBLISHER",
+  "updaterProtocol": 1,
+  "policyURL": "https://modelscope.cn/datasets/OWNER/REPO/resolve/master/updates/stable.json",
+  "allowedOrigins": ["https://modelscope.cn"],
+  "publicKeys": {"release-key": "BASE64_RAW_32_BYTE_ED25519_PUBLIC_KEY"}
+}
+```
+
+`allowedOrigins` pins every download redirect as well as initial URLs. Verify real
+large-file downloads and add only the exact required HTTPS CDN origins before release.
+Existing installations retain their embedded source and keys until a compatible update
+replaces them. Keep private signing keys and upload tokens out of this JSON and bundles.
+
+Both installer workflows have an `enable_updates` input (default `false`). Configure:
+
+| Build variable | Value |
+| --- | --- |
+| `LAZYMIND_MAC_UPDATE_CONFIG_JSON` / `LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON` | Platform-specific public JSON above |
+| `LAZYMIND_UPDATE_BASE_URL` | HTTPS dataset prefix, e.g. `https://modelscope.cn/datasets/OWNER/REPO/resolve/master/updates/` |
+| `LAZYMIND_MAC_UPDATE_MINIMUM_SYSTEM_VERSION` / `LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION` | Supported OS minimum as `major.minor.patch` |
+| `LAZYMIND_DESKTOP_UPDATES_ENABLED` | Optional `true` to enable update artifact generation in the tag release workflow |
+
+macOS `signing_mode` accepts `auto`, `developer-id`, or `adhoc`. `auto` signs/notarizes
+requested tags and uses ad-hoc signing for branches, irrespective of repository name.
+A fork tag therefore needs the same signing secrets or an explicit manual `adhoc` build;
+missing credentials never silently downgrade a requested signed build. Existing `mac_dev`
+environment protections still apply. Windows uses `WIN_CSC_LINK` and
+`WIN_CSC_KEY_PASSWORD`; enabled update builds require a valid Authenticode installer.
+Official automatic updates require these native signatures. The external local lab
+continues to own ad-hoc update installation; no unsigned production mode is added.
+
+Enabled builds export `desktop-update-macos-<run-id>` or
+`desktop-update-windows-<run-id>` containing one directory per release: the actual ZIP/EXE,
+`feed.json`, the exact built `components.json`, and `release.json` with identity, hashes,
+sizes and the runtime manifest digest. macOS ZIP metadata must match the built app.
+This creates GitHub artifacts only; the existing installer/RAG mirror jobs retain their
+own destinations and behavior. Release-specific Python components must also be published
+through the existing RAG workflow before users install those components.
+
+Use the separate **Publish desktop update policy** manual workflow after the selected
+build runs succeed. It downloads the update artifacts from those runs in the current
+repository, assembles/signs an explicit plan, and publishes to ModelScope. Configure its
+`desktop_updates` environment with approval/branch protection appropriate to the publisher:
+
+| Setting | Kind |
+| --- | --- |
+| `LAZYMIND_UPDATE_POLICY_PRIVATE_KEY` (PKCS8 Ed25519 PEM) | Secret |
+| `MODELSCOPE_UPDATE_TOKEN` (write access to the target Dataset) | Secret |
+| `LAZYMIND_UPDATE_POLICY_KEY_ID` (must match the embedded public key) | Variable |
+| `LAZYMIND_UPDATE_MODELSCOPE_REPO` (`OWNER/REPO`) | Variable |
+
+Pass comma-separated build run IDs and a JSON plan. The first publication can contain
+only A with no edges; subsequent plans retain the supported history. Example plan shape:
+
+```json
+{
+  "policySequence": 2,
+  "issuedAt": "REPLACE_WITH_CURRENT_RFC3339_UTC_TIME",
+  "expiresAt": "REPLACE_WITH_FUTURE_RFC3339_UTC_TIME",
+  "releaseIds": ["darwin-arm64-1.0.0", "darwin-arm64-1.1.0"],
+  "edges": [{
+    "sourceReleaseId": "darwin-arm64-1.0.0",
+    "targetReleaseId": "darwin-arm64-1.1.0",
+    "priority": 0,
+    "dataProfile": "REPLACE_WITH_VERIFIED_SAME_V1_PROFILE",
+    "requiredComponents": {}
+  }],
+  "revoked": []
+}
+```
+
+A data profile is measured from the actual supported runtime state, not inferred from
+version numbers or a build manifest. Authorize an edge only after verifying compatible
+data and components. Different profiles, downgrades, same-version edges, different native
+signers/platforms and unimplemented migrations are rejected. Client-side component
+preflight remains authoritative for each installed component selection.
+
+Offline commands are `go run ./cmd/update-publisher sign` / `verify` from the runtime
+manager module (use `--help` for flags). The signer checks its output using the existing
+client policy contract and against every selected release's embedded public configuration.
+The publisher needs only the signed policy and public config, never the private key.
+Historical policy verification allows expired policies solely to check sequence ordering;
+new policies must be current. Retries cannot overwrite different immutable files or
+replace a newer policy with an older/equivocal one.
+
+The upload script preflights the complete local file set and existing remote files,
+uploads missing artifacts, downloads and checks their SHA-256, then rechecks the old
+policy before publishing the new signed policy last and reading it back. A failed final
+readback is a failed publication, not proof of rollback. Reconcile remote state before
+retrying. The workflow serializes publishing; use one publishing repository/workflow per
+dataset/channel. The ModelScope API is not treated as a cross-publisher compare-and-swap
+transaction. Never overwrite an artifact referenced by a published policy.
+
+Unit checks (no real uploads/downloads):
+
+```bash
+node --test desktop/scripts/update-build-config.test.mjs desktop/scripts/prepare-update-release.test.mjs desktop/scripts/update-publication-workflow.test.mjs
+python3 -m unittest discover -s desktop/scripts -p test_publish_desktop_update.py
+python3 -m unittest discover -s desktop/scripts -p test_update_publication_transport.py
+# In local/local-runtime-manager:
+go test ./internal/desktopupdate ./cmd/update-publisher -run 'TestPublication|TestAssemble|TestSignCommand'
+```
+
+Real signing/notarization, ModelScope download redirects and A→B installation are release
+acceptance checks, not established by these unit tests.
+
+### Component compatibility during updates
+
+Automatic installation checks the target's immutable `components` catalog against
+the runtime's actual installed-component selection before native preparation and
+again after tasks drain, before stopping services. The artifact must be copied
+from the target bundle and its size/SHA pinned by the signed release policy.
+`same-v1` cannot replace or drop an installed component identity: compatible
+same-tag repacks can keep the selected revision, while unsupported tag/base/ABI
+changes are blocked with the current application still running. Component/data
+migration is not implemented by this check. Existing clients must first receive
+an updater with this check through a compatible same-tag bridge release; do not
+publish unsupported cross-tag edges to older clients.
 
 macOS:
 

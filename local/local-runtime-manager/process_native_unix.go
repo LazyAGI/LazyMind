@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 func configureChildProcess(cmd *exec.Cmd, sessionLeader bool) {
@@ -50,7 +52,13 @@ func nativeProcessGroupID(pid int) int {
 	return pgid
 }
 
-func processStartIdentity(pid int) uint64 { return 0 }
+func processStartIdentity(pid int) uint64 {
+	actor, err := desktopupdate.IdentifyProcess(pid)
+	if err != nil {
+		return 0
+	}
+	return actor.StartID
+}
 
 func attachProcessJob(_ RuntimePaths, _ string, _ *os.Process) (func(), error) {
 	return func() {}, nil

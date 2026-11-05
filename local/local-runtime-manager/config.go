@@ -137,6 +137,7 @@ const installerWarmupMaintenanceMode = "installer-warmup"
 const installerWarmupSkipProcessorWorkerEnvVar = "LAZYMIND_SKIP_PROCESSOR_WORKER_READINESS"
 
 type RuntimePaths struct {
+	FrozenUpdateStorage      *UpdateStorageSnapshot
 	RepoRoot                 string
 	ResourcesRoot            string
 	BuildRoot                string
@@ -235,35 +236,40 @@ type RuntimePaths struct {
 }
 
 type RuntimeConfig struct {
-	Profile            string
-	MaintenanceMode    string
-	OwnerToken         string
-	RepoRoot           string
-	BuildRoot          string
-	ResourcesRoot      string
-	RuntimeRoot        string
-	ModeProfile        RuntimeModeProfileConfig
-	ProcessComposePort int
-	SQLiteServerPort   int
-	FrontendPort       int
-	NetworkProfile     string
-	LocalProxy         LocalProxyConfig
-	AuthService        AuthServiceConfig
-	ChannelGateway     ChannelGatewayConfig
-	CaddyVersion       string
-	Algorithm          AlgorithmConfig
-	FileWatcher        FileWatcherConfig
-	PortResolutions    []PortResolution `json:"-"`
+	clearInheritedBootstrap bool
+	UpdateBootstrap         *RuntimeUpdateBootstrap
+	UpdateStorage           *UpdateStorageSnapshot
+	Profile                 string
+	MaintenanceMode         string
+	OwnerToken              string
+	RepoRoot                string
+	BuildRoot               string
+	ResourcesRoot           string
+	RuntimeRoot             string
+	ModeProfile             RuntimeModeProfileConfig
+	ProcessComposePort      int
+	SQLiteServerPort        int
+	FrontendPort            int
+	NetworkProfile          string
+	LocalProxy              LocalProxyConfig
+	AuthService             AuthServiceConfig
+	ChannelGateway          ChannelGatewayConfig
+	CaddyVersion            string
+	Algorithm               AlgorithmConfig
+	FileWatcher             FileWatcherConfig
+	PortResolutions         []PortResolution `json:"-"`
 }
 
 type RuntimeConfigOptions struct {
-	Profile         string
-	MaintenanceMode string
-	OwnerToken      string
-	RepoRoot        string
-	RuntimeRoot     string
-	BuildRoot       string
-	ResourcesRoot   string
+	UpdateBootstrapTx    string
+	UpdateBootstrapOwner string
+	Profile              string
+	MaintenanceMode      string
+	OwnerToken           string
+	RepoRoot             string
+	RuntimeRoot          string
+	BuildRoot            string
+	ResourcesRoot        string
 }
 
 type RuntimePathLayout struct {
@@ -1026,7 +1032,8 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	if ragDisabled {
 		modeProfile.VectorStore.ManagedProcess = false
 	}
-	return RuntimeConfig{
+	cfg := RuntimeConfig{
+		UpdateStorage:      captureUpdateStorage(p, authServiceDatabaseURL(p.AuthServiceDBPath)),
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,
 		OwnerToken:         strings.TrimSpace(firstNonEmpty(opts.OwnerToken, os.Getenv(runtimeOwnerTokenEnvVar))),
@@ -1084,7 +1091,11 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", defaultFileWatcherHostPathStyle()),
 		},
 		PortResolutions: ports.resolutions,
-	}, p, nil
+	}
+	if err := inheritBootstrapRuntime(&cfg, &p); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
+	return cfg, p, nil
 }
 
 func applyDesktopManifestPaths(paths *RuntimePaths) error {

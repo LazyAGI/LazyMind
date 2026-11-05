@@ -396,7 +396,21 @@ function Assert-WindowsPythonComponent {
     )
 }
 
+function Assert-UpdateBuildConfiguration {
+    $updateSigningMode = if ($env:WIN_CSC_LINK -or $env:CSC_LINK) { 'authenticode' } else { 'none' }
+    Invoke-Native 'node.exe' @(
+        (Join-Path $repoRoot 'desktop\scripts\prepare-update-build-config.mjs'),
+        '--platform', 'windows', '--arch', 'amd64', '--signing-mode', $updateSigningMode,
+        '--package', (Join-Path $electronRoot 'package.json'),
+        '--verify-helper', (Join-Path $runtimeRoot 'bin\lazymind-update-helper.exe')
+    )
+}
+
 function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = 'zip') {
+    # Resume must not stamp a new identity onto old staged binaries. Re-evaluate
+    # the current config/signing route, compare the helper, and require rebuild
+    # on any change, before staging or packaging mutates the previous output.
+    Assert-UpdateBuildConfiguration
     $finalZipName = New-WindowsZipFileName
     Materialize-PythonAliases
     Prune-PythonTree (Join-Path $runtimeRoot 'runtimes\python')
@@ -523,6 +537,13 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
     Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
     Assert-WindowsGUISubsystem $desktopManager
+    $updateSigningMode = if ($env:WIN_CSC_LINK -or $env:CSC_LINK) { 'authenticode' } else { 'none' }
+    $updateBuildConfig = & node (Join-Path $repoRoot 'desktop\scripts\prepare-update-build-config.mjs') --platform windows --arch amd64 --signing-mode $updateSigningMode --package (Join-Path $repoRoot 'desktop\electron\package.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare public update build configuration' }
+    $updateBuildConfig = ($updateBuildConfig -join '').Trim()
+    $updateHelper = Join-Path $runtimeRoot 'bin\lazymind-update-helper.exe'
+    Invoke-NativeWithRetry 'Build update helper' 'go.exe' @('build', '-trimpath', '-buildvcs=false', "-ldflags=-s -w -X main.embeddedConfig=$updateBuildConfig", '-o', $updateHelper, '.\cmd\update-helper') (Join-Path $repoRoot 'local\local-runtime-manager')
+    Invoke-Native $updateHelper @('config') $repoRoot
     Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'integrations\workbuddy-workflow\connector')
     Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'integrations\workbuddy-workflow\connector')
     Build-GoBinary (Join-Path $repoRoot 'local\lazymind-cli') (Join-Path $runtimeRoot 'bin\lazymind.exe') @('.\cmd\lazymind')

@@ -4,7 +4,8 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), ragAvailability: "ready" }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({ useRAGComponent: () => ({ availability: mocks.ragAvailability }) }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -62,6 +63,7 @@ async function mount(search: string) {
 beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ragAvailability = "ready";
   mocks.list.mockResolvedValue(localResponse);
   mocks.scenes.mockResolvedValue({ profiles: [
     { key: "general", name_i18n_key: "learning.profile.general.name" },
@@ -268,4 +270,13 @@ describe("knowledge list URL and data restoration", () => {
     expect(await screen.findByRole("button", { name: /查看知识库.*官方手册|查看.*官方手册.*详情/ })).toBeVisible();
     expect(screen.getByDisplayValue("手册")).toBeVisible();
   });
+});
+
+// An unavailable component must leave cloud-source navigation usable without issuing a scan request.
+it.each(["missing", "checking", "error"])("keeps cloud-source navigation safe while RAG is %s", async (availability) => {
+  mocks.ragAvailability = availability;
+  const router = await mount("?source=cloudArchive&page=3");
+  expect(mocks.scan).not.toHaveBeenCalled();
+  expect(new URLSearchParams(router.state.location.search).get("page")).toBe("3");
+  expect(screen.getByText("第 3 页")).toBeVisible();
 });

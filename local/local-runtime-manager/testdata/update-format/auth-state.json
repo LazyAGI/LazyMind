@@ -1,0 +1,24 @@
+{
+  "producer": "backend/auth-service/core/state_store.SQLiteStateStore",
+  "sourceCommit": "70b5b4835c4e01fce60e87b91ba86b613893df41",
+  "lazyllmCommit": "d53007dd95ce5f9180399a095cf81fb0b643093a",
+  "shape": {
+    "present": true,
+    "applicationId": 0,
+    "userVersion": 0,
+    "schema": [
+      {
+        "type": "table",
+        "name": "state_kv",
+        "table": "state_kv",
+        "sql": "CREATE TABLE state_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+      },
+      {
+        "type": "table",
+        "name": "state_zset",
+        "table": "state_zset",
+        "sql": "CREATE TABLE state_zset (key TEXT NOT NULL, member TEXT NOT NULL, score REAL NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (key, member))"
+      }
+    ]
+  }
+}

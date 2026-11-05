@@ -2,7 +2,18 @@ const path = require("node:path");
 
 // All privileged work stays in Electron's main process. The local renderer can
 // only confirm/dismiss the request currently displayed by this controller.
-function createAgentRecovery({ BrowserWindow, ipcMain, screen, wait, dismiss, reconnect, check, finishView, platform = process.platform, locale = () => "en", log = () => {}, retryMs = 5000, successMs = 1200, checkMs = 1000 }) {
+function createAgentRecovery({ BrowserWindow, ipcMain, screen, wait, dismiss, reconnect, check, finishView, canStart = () => true, platform = process.platform, locale = () => "en", log = () => {}, retryMs = 5000, successMs = 1200, checkMs = 1000 }) {
+  const pending = new Set();
+  const tracked = action => (...args) => {
+    const work = Promise.resolve(action(...args));
+    pending.add(work);
+    work.then(() => pending.delete(work), () => pending.delete(work));
+    return work;
+  };
+  wait = tracked(wait); dismiss = tracked(dismiss); reconnect = tracked(reconnect);
+  if (check) check = tracked(check);
+  if (finishView) finishView = tracked(finishView);
+  let polling, stopping;
   let running = false;
   let generation = 0;
   let lifetime;
@@ -187,12 +198,13 @@ function createAgentRecovery({ BrowserWindow, ipcMain, screen, wait, dismiss, re
     }
   }
   function start() {
-    if (running) return;
+    if (running || stopping || !canStart()) return;
     running = true;
     lifetime = new AbortController();
-    void poll(++generation);
+    polling = poll(++generation);
   }
   function stop() {
+    if (stopping) return stopping;
     const request = current;
     running = false;
     generation += 1;
@@ -200,7 +212,13 @@ function createAgentRecovery({ BrowserWindow, ipcMain, screen, wait, dismiss, re
     clearTimeout(successTimer);
     window?.destroy();
     // Logout/disable callers await this while the old pairing is still valid.
-    return request ? dismiss(request.id).catch(() => {}) : Promise.resolve();
+    const cleanup = request ? dismiss(request.id).catch(() => {}) : Promise.resolve();
+    stopping = (async () => {
+      await Promise.allSettled([polling, cleanup]);
+      // Closing the window can schedule its final dismissal after polling yields.
+      while (pending.size) await Promise.allSettled([...pending]);
+    })().finally(() => { stopping = undefined; });
+    return stopping;
   }
   return { start, stop };
 }
@@ -213,29 +231,36 @@ function runRecoveryCommand({ spawn, executable, env, id, onStage, signal, timeo
       env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
     });
     let buffer = "", error = "", done = false;
-    let finished = false;
-    const timer = setTimeout(() => { child.kill(); complete(new Error("Codex recovery timed out")); }, timeoutMs);
-    const abort = () => { child.kill(); complete(new Error("Codex recovery cancelled")); };
+    let finished = false, failure, killTimer;
+    const terminate = error => {
+      if (done || failure) return;
+      failure = error;
+      child.kill();
+      killTimer = setTimeout(() => { if (!done) child.kill("SIGKILL"); }, 5000);
+      killTimer.unref?.();
+    };
+    const timer = setTimeout(() => terminate(new Error("Codex recovery timed out")), timeoutMs);
+    const abort = () => terminate(new Error("Codex recovery cancelled"));
     function complete(failure) {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      clearTimeout(timer); clearTimeout(killTimer);
       signal?.removeEventListener("abort", abort);
       failure ? reject(failure) : resolve();
     }
     child.stdout.on("data", chunk => {
       buffer += String(chunk);
-      if (buffer.length > 16384) { child.kill(); complete(new Error("Invalid recovery progress")); return; }
+      if (buffer.length > 16384) { terminate(new Error("Invalid recovery progress")); return; }
       let newline;
       while ((newline = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
         try { const value = JSON.parse(line); if (value.stage === "done") finished = true; else onStage(value.stage); }
-        catch { child.kill(); complete(new Error("Invalid recovery progress")); return; }
+        catch { terminate(new Error("Invalid recovery progress")); return; }
       }
     });
     child.stderr.on("data", chunk => { error = (error + String(chunk)).slice(-4096); });
-    child.once("error", complete);
-    child.once("close", code => complete(code === 0 && finished ? undefined : new Error(error.trim() || "Codex recovery did not complete")));
+    child.once("error", error => { failure ||= error; });
+    child.once("close", code => complete(failure || (code === 0 && finished ? undefined : new Error(error.trim() || "Codex recovery did not complete"))));
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
   });

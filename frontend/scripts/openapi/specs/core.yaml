@@ -2407,6 +2407,43 @@ components:
             required:
                 - name
             type: object
+        AutomationGroupListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/AutomationGroupResponse'
+                    type: array
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+            type: object
+        AutomationGroupResponse:
+            properties:
+                created_at:
+                    type: string
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                name:
+                    type: string
+                remark:
+                    type: string
+                task_count:
+                    type: integer
+                timezone:
+                    type: string
+            required:
+                - id
+                - name
+                - remark
+                - timezone
+                - enabled
+                - created_at
+                - task_count
+            type: object
         BatchAddACLData:
             properties:
                 count:
@@ -12170,6 +12207,44 @@ components:
                 - requested_at
                 - running_attempt_count
             type: object
+        ScheduleDependencyResponse:
+            properties:
+                content_types:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                incomplete_policy:
+                    type: string
+                max_wait_seconds:
+                    type: integer
+                source_name:
+                    type: string
+                source_schedule_id:
+                    type: string
+                window_type:
+                    type: string
+            required:
+                - id
+                - source_schedule_id
+                - source_name
+                - window_type
+                - incomplete_policy
+                - max_wait_seconds
+            type: object
+        ScheduleListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ScheduleResponse'
+                    type: array
+                total:
+                    type: integer
+            required:
+                - items
+                - total
+            type: object
         ScheduleMoveRequest:
             properties:
                 group_id:
@@ -12218,6 +12293,75 @@ components:
                 - configured
                 - revision
                 - config
+            type: object
+        ScheduleResponse:
+            properties:
+                created_at:
+                    type: string
+                cron_expr:
+                    type: string
+                dependencies:
+                    items:
+                        $ref: '#/components/schemas/ScheduleDependencyResponse'
+                    nullable: true
+                    type: array
+                enabled:
+                    type: boolean
+                file_ids:
+                    items:
+                        type: string
+                    type: array
+                group_id:
+                    type: string
+                group_position:
+                    type: integer
+                id:
+                    type: string
+                kb_ids:
+                    items:
+                        type: string
+                    type: array
+                last_run_at:
+                    type: string
+                name:
+                    type: string
+                next_run_at:
+                    type: string
+                prompt_template:
+                    type: string
+                remark:
+                    type: string
+                run_count:
+                    type: integer
+                timezone:
+                    type: string
+                user_id:
+                    type: string
+            required:
+                - id
+                - user_id
+                - name
+                - remark
+                - cron_expr
+                - timezone
+                - prompt_template
+                - group_position
+                - enabled
+                - run_count
+                - next_run_at
+                - created_at
+            type: object
+        ScheduleRunResponse:
+            properties:
+                conversation_id:
+                    type: string
+                status:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - task_id
+                - conversation_id
             type: object
         SearchDatasetMemberRequest:
             properties:
@@ -22229,8 +22373,12 @@ paths:
         get:
             responses:
                 "200":
-                    description: OK
-            summary: GET /automation-groups
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AutomationGroupListResponse'
+                    description: Automation groups
+            summary: List automation groups
         post:
             requestBody:
                 content:
@@ -22240,6 +22388,10 @@ paths:
                 required: true
             responses:
                 "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AutomationGroupResponse'
                     description: Automation group
             summary: Create an automation group
     /api/core/automation-groups/{group_id}:
@@ -33423,6 +33575,10 @@ paths:
                     type: boolean
             responses:
                 "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ScheduleListResponse'
                     description: Schedules
             summary: List schedules
         post:
@@ -33467,12 +33623,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    id:
-                                        type: string
-                                    name:
-                                        type: string
-                                type: object
+                                $ref: '#/components/schemas/ScheduleResponse'
                     description: Schedule
             summary: Save schedule and optional notification draft atomically
             tags:
@@ -33537,12 +33688,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    id:
-                                        type: string
-                                    name:
-                                        type: string
-                                type: object
+                                $ref: '#/components/schemas/ScheduleResponse'
                     description: Schedule
             summary: Save schedule and optional notification draft atomically
             tags:
@@ -33796,8 +33942,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /schedules/{schedule_id}:enable
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ScheduleResponse'
+                    description: Schedule
+            summary: Enable schedule
     /api/core/schedules/{schedule_id}:move:
         post:
             parameters:
@@ -33826,8 +33976,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /schedules/{schedule_id}:run-now
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ScheduleRunResponse'
+                    description: Scheduled run
+            summary: Run schedule now
     /api/core/settings/checks:
         post:
             responses:

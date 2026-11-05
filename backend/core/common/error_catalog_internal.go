@@ -27,6 +27,9 @@ func init() {
 		"removal cancellation has no execution snapshot",
 		"workflow stop pending",
 		"chat stop unavailable",
+		"task state unavailable",
+		"task state invalid",
+		"document state unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}

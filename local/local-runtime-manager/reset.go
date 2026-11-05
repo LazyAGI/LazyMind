@@ -30,6 +30,9 @@ func (m *RuntimeManager) Reset(ctx context.Context, cfg RuntimeConfig, paths Run
 	if scope != ResetScopeKB && scope != ResetScopeAll {
 		return fmt.Errorf("unsupported reset scope %q", scope)
 	}
+	if err := guardNativeMutation(ctx, cfg, paths); err != nil {
+		return err
+	}
 	m.progressf("stopping Local Runtime before %s reset", scope)
 	if err := m.Down(ctx, cfg, paths); err != nil {
 		return fmt.Errorf("runtime must stop before %s reset: %w", scope, err)
@@ -56,11 +59,17 @@ func (m *RuntimeManager) RunServiceAction(ctx context.Context, cfg RuntimeConfig
 	}
 	switch action {
 	case "build":
+		if err := guardNativeMutation(ctx, cfg, paths); err != nil {
+			return err
+		}
 		if err := paths.EnsureAllDirs(); err != nil {
 			return err
 		}
 		return m.fileWatcher.build(ctx, cfg, paths)
 	case "start":
+		if err := bindNativeStartup(ctx, &cfg, &paths, bootstrapTransaction(cfg), cfg.OwnerToken); err != nil {
+			return err
+		}
 		return m.fileWatcher.Run(ctx, cfg, paths)
 	case "stop":
 		return m.fileWatcher.Down(ctx, paths)

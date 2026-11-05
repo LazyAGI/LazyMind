@@ -13,6 +13,7 @@ import {
   CodeOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   ExperimentOutlined,
   InfoCircleOutlined,
   KeyOutlined,
@@ -60,6 +61,7 @@ import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
+import DesktopUpdateSettings from "./DesktopUpdateSettings";
 import VocabularySettings from "@/modules/vocabulary/VocabularySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import UserEnvironmentVariablesSettings from "./UserEnvironmentVariablesSettings";
@@ -106,6 +108,7 @@ type SectionID =
   | "diagnostics"
   | "organization"
   | "recovery"
+  | "updates"
   | "developer";
 type MasterSetting = "task_center_enabled" | "schedules_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled" | "document_directories_enabled";
 type DefaultServiceCategory = "parsing" | "search" | "academic" | "translation";
@@ -193,6 +196,7 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
         ...(isSettingsSectionVisible("organization", isAdmin) ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
 		...(isDesktopRuntime() && cloudRuntimeAvailable ? [{ id: "cloud-usage" as const, label: t("settingsPage.sections.cloudUsage"), keywords: t("settingsPage.sectionKeywords.cloudUsage"), icon: <CloudOutlined /> }] : []),
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
+        ...(isDesktopRuntime() ? [{ id: "updates" as const, label: t("desktopUpdates.title"), keywords: t("desktopUpdates.keywords"), icon: <DownloadOutlined /> }] : []),
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
         ...(isSettingsSectionVisible("developer", isAdmin) ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
       ],
@@ -881,6 +885,8 @@ function SettingsPageContent() {
       content = <CloudUsageSettings headingRef={headingRef} />;
     } else if (section === "recovery") {
       content = <RecoverySettings headingRef={headingRef} />;
+    } else if (section === "updates") {
+      content = <DesktopUpdateSettings headingRef={headingRef} />;
     } else if (section === "diagnostics") {
       content = renderDiagnostics();
     } else {

@@ -1,0 +1,18 @@
+{
+  "producer": "backend/scan-control-plane/internal/state.NewSQLiteStore",
+  "sourceCommit": "70b5b4835c4e01fce60e87b91ba86b613893df41",
+  "lazyllmCommit": "d53007dd95ce5f9180399a095cf81fb0b643093a",
+  "shape": {
+    "present": true,
+    "applicationId": 0,
+    "userVersion": 0,
+    "schema": [
+      {
+        "type": "table",
+        "name": "state_kv",
+        "table": "state_kv",
+        "sql": "CREATE TABLE state_kv (key TEXT PRIMARY KEY, value BLOB NOT NULL, expires_at INTEGER NOT NULL)"
+      }
+    ]
+  }
+}

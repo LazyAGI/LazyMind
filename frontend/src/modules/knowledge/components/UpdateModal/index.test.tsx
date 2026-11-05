@@ -27,7 +27,7 @@ async function open(reject = false) {
   const ref = createRef<UpdateImperativeProps>();
   const onUpdate = reject ? vi.fn().mockRejectedValue(new Error("at least one capability is required")) : vi.fn().mockResolvedValue(undefined);
   render(<ConfigProvider theme={{ token: { motion: false } }}><UpdateModal ref={ref} onUpdate={onUpdate} /></ConfigProvider>);
-  await act(async () => ref.current!.onOpen({ dataset_id: "mcp-library", display_name: "MCP-library", desc: "before", tags: ["test"], algo: { algo_id: "general_algo" } }));
+  await act(async () => ref.current!.onOpen({ type: "DATASET_TYPE_TEXT", dataset_id: "mcp-library", display_name: "MCP-library", desc: "before", tags: ["test"], algo: { algo_id: "general_algo" } }));
   await screen.findByRole("dialog");
   return onUpdate;
 }

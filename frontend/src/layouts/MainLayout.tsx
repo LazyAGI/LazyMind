@@ -73,6 +73,7 @@ import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
+import { DesktopUpdateNotice } from "@/modules/settings/DesktopUpdateSettings";
 import { beginCloudLogin, getCloudSession, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, logoutCloudSession, type CloudSessionState } from "@/runtime/cloud/session";
 import {
   closeCloudLoginPopup,
@@ -570,7 +571,7 @@ export default function MainLayout() {
     navigate(getChatConversationPath(conversationId));
   };
 
-  const handleSidebarConversationRemoved = (conversation: Conversation) => {
+  const handleSidebarConversationRemoved = (conversation: Pick<Conversation, "conversation_id">) => {
     const conversationId = conversation.conversation_id || "";
     if (
       !conversationId ||
@@ -1352,6 +1353,7 @@ export default function MainLayout() {
         <SidebarResizeHandle key={pathname} width={sidebarWidth} onResize={resizeSidebar} />
       </Sider>
       <Layout className={contentClassName}>
+        <DesktopUpdateNotice />
         <Content className="main-layout-body">
           <div className="sub-app-container">
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>

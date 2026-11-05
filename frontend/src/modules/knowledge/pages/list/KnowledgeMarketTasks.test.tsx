@@ -224,7 +224,7 @@ describe("knowledge market background tasks", () => {
     });
     await mountPage();
     await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
-    const button = screen.getByRole("button", { name: "一键更新", exact: true });
+    const button = screen.getByRole("button", { name: "一键更新" });
     expect(button).toBeDisabled();
     await click(button);
     expect(marketApi.updateAllKnowledgeMarketItems).not.toHaveBeenCalled();

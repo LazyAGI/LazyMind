@@ -3,6 +3,16 @@ name: macOS Desktop Installer
 on:
   workflow_call:
     inputs:
+      enable_updates:
+        description: "Embed configured update trust and export update artifacts"
+        required: false
+        type: boolean
+        default: false
+      signing_mode:
+        description: "auto (signed tags), developer-id, or adhoc"
+        required: false
+        type: string
+        default: auto
       git_ref:
         description: "Branch, tag, or commit SHA to build"
         required: false
@@ -31,6 +41,16 @@ on:
         value: ${{ jobs.build-macos-installer.outputs.release_tag }}
   workflow_dispatch:
     inputs:
+      enable_updates:
+        description: "Embed configured update trust and export update artifacts"
+        required: false
+        type: boolean
+        default: false
+      signing_mode:
+        description: "auto (signed tags), developer-id, or adhoc"
+        required: false
+        type: string
+        default: auto
       git_ref:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
@@ -56,6 +76,9 @@ env:
   LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS: "true"
   LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ format('https://modelscope.cn/datasets/{0}/resolve/master/RAG/', vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst') }}
   LAZYMIND_MS_COMPONENT_REPO: ${{ vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst' }}
+  LAZYMIND_UPDATE_BUILD_CONFIG_JSON: ${{ inputs.enable_updates && vars.LAZYMIND_MAC_UPDATE_CONFIG_JSON || '' }}
+  LAZYMIND_UPDATE_BASE_URL: ${{ vars.LAZYMIND_UPDATE_BASE_URL }}
+  LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION: ${{ vars.LAZYMIND_MAC_UPDATE_MINIMUM_SYSTEM_VERSION }}
   LAZYMIND_DESKTOP_SHARE_PYTHON: "false"
   LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
@@ -86,7 +109,7 @@ jobs:
           EXPLICIT_REF: ${{ inputs.git_ref }}
           REQUESTED_REF: ${{ inputs.git_ref || github.ref }}
           REQUESTED_REF_TYPE: ${{ github.ref_type }}
-          OFFICIAL_REPOSITORY: ${{ github.repository == 'LazyAGI/LazyMind' }}
+          SIGNING_MODE: ${{ inputs.signing_mode || 'auto' }}
         run: |
           set -euo pipefail
 
@@ -119,9 +142,14 @@ jobs:
             echo "is_tag=false" >> "${GITHUB_OUTPUT}"
             echo "Requested ref is not a tag; notarization will be skipped."
           fi
-          if [[ -n "${release_tag}" && "${OFFICIAL_REPOSITORY}" == "true" ]]; then
+          case "${SIGNING_MODE}" in
+            auto) [[ -n "${release_tag}" ]] && signing_mode=developer-id || signing_mode=adhoc ;;
+            developer-id|adhoc) signing_mode="${SIGNING_MODE}" ;;
+            *) echo "::error::Invalid signing mode"; exit 1 ;;
+          esac
+          if [[ "${signing_mode}" == "developer-id" ]]; then
             echo "official_release=true" >> "${GITHUB_OUTPUT}"
-            echo "Official LazyAGI release: signing and notarization are required."
+            echo "Developer ID build: signing and notarization are required."
           else
             echo "official_release=false" >> "${GITHUB_OUTPUT}"
             echo "Non-official build: using ad-hoc signing and skipping notarization."
@@ -233,6 +261,23 @@ jobs:
           fi
           xcrun notarytool --version
 
+      - name: Prepare update-helper test dependencies
+        shell: bash
+        working-directory: local/local-runtime-manager
+        run: go list -mod=readonly -deps ./cmd/update-helper > /dev/null
+
+      - name: Install Desktop test dependencies
+        working-directory: desktop/electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate update publication inputs
+        if: inputs.enable_updates
+        run: |
+          test -n "${LAZYMIND_UPDATE_BUILD_CONFIG_JSON}"
+          test -n "${LAZYMIND_UPDATE_BASE_URL}"
+          test -n "${LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION}"
+          test "${{ steps.release.outputs.official_release }}" = true
+
       - name: Run Desktop tests
         run: |
           node --test desktop/scripts/*.test.mjs
@@ -240,6 +285,7 @@ jobs:
       - name: Build app ZIP
         id: build
         env:
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ env.LAZYMIND_UPDATE_BUILD_CONFIG_JSON }}
           CSC_LINK: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_PACKAGE_KIND: zip
@@ -463,9 +509,29 @@ jobs:
           retry_stapler validate "${app_path}"
           spctl --assess --type execute --verbose=4 "${app_path}"
 
+      - name: Prepare immutable update artifacts
+        if: inputs.enable_updates && steps.zip_notarization.outputs.status == 'Accepted'
+        run: |
+          node desktop/scripts/prepare-update-release.mjs \
+            --resources desktop/dist/mac-arm64/LazyMind.app/Contents/Resources \
+            --package desktop/dist/LazyMind-darwin-arm64.zip \
+            --base-url "${LAZYMIND_UPDATE_BASE_URL}" \
+            --minimum-system-version "${LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION}" \
+            --output desktop/dist/update-publication
+
+      - name: Upload immutable update artifacts
+        if: inputs.enable_updates && steps.zip_notarization.outputs.status == 'Accepted'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-update-macos-${{ github.run_id }}
+          path: desktop/dist/update-publication/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Package app as DMG
         id: package
         env:
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ env.LAZYMIND_UPDATE_BUILD_CONFIG_JSON }}
           CSC_LINK: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ steps.release.outputs.official_release == 'true' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           LAZYMIND_DESKTOP_RUNTIME_STAGE: ${{ github.workspace }}/desktop/build/darwin-arm64/runtime

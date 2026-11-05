@@ -94,6 +94,7 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 		records = append(records, LocalProcessRecord{
 			Service:     inferServiceFromProcessText(paths, exe),
 			PID:         pid,
+			StartID:     processStartIdentity(pid),
 			PGID:        processGroupID(pid),
 			RepoRoot:    paths.RepoRoot,
 			RuntimeRoot: paths.RuntimeRoot,

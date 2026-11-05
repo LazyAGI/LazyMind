@@ -3,11 +3,20 @@ name: Windows Desktop Installer
 on:
   workflow_call:
     inputs:
+      enable_updates:
+        description: "Embed configured update trust and export update artifacts"
+        required: false
+        type: boolean
+        default: false
       git_ref:
         description: "Branch, tag, or commit SHA to build"
         required: false
         type: string
     secrets:
+      WIN_CSC_LINK:
+        required: false
+      WIN_CSC_KEY_PASSWORD:
+        required: false
       HF_TOKEN:
         description: "Hugging Face dataset write token for installer mirrors"
         required: false
@@ -21,6 +30,11 @@ on:
         value: ${{ jobs.build-windows-installer.outputs.release_tag }}
   workflow_dispatch:
     inputs:
+      enable_updates:
+        description: "Embed configured update trust and export update artifacts"
+        required: false
+        type: boolean
+        default: false
       git_ref:
         description: "Branch, tag, or commit SHA to build; leave empty to build the selected workflow branch"
         required: false
@@ -44,6 +58,9 @@ env:
   LAZYMIND_DESKTOP_DEFER_PYTHON: "true"
   LAZYMIND_PYTHON_COMPONENT_BASE_URL: ${{ format('https://modelscope.cn/datasets/{0}/resolve/master/RAG/', vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst') }}
   LAZYMIND_MS_COMPONENT_REPO: ${{ vars.LAZYMIND_MS_COMPONENT_REPO || 'CarlosShaoting/lazymind-cst' }}
+  LAZYMIND_UPDATE_BUILD_CONFIG_JSON: ${{ inputs.enable_updates && vars.LAZYMIND_WINDOWS_UPDATE_CONFIG_JSON || '' }}
+  LAZYMIND_UPDATE_BASE_URL: ${{ vars.LAZYMIND_UPDATE_BASE_URL }}
+  LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION: ${{ vars.LAZYMIND_WINDOWS_UPDATE_MINIMUM_SYSTEM_VERSION }}
   LAZYMIND_DESKTOP_SHARE_PYTHON: "false"
   LAZYMIND_DESKTOP_PRUNE_PYTHON: "true"
 
@@ -225,6 +242,15 @@ jobs:
           Write-Host "Requested ref: $env:REQUESTED_REF"
           Write-Host "Checked out commit: $(git rev-parse HEAD)"
 
+      - name: Prepare update-helper test dependencies
+        shell: bash
+        working-directory: local/local-runtime-manager
+        run: go list -mod=readonly -deps ./cmd/update-helper > /dev/null
+
+      - name: Install Desktop test dependencies
+        working-directory: desktop/electron
+        run: pnpm install --frozen-lockfile
+
       - name: Run Desktop tests
         shell: bash
         run: |
@@ -239,8 +265,21 @@ jobs:
             -File desktop/scripts/build-windows-x64.ps1 `
             doctor
 
+      - name: Validate update publication inputs
+        if: inputs.enable_updates
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          foreach ($name in @('LAZYMIND_UPDATE_BUILD_CONFIG_JSON', 'LAZYMIND_UPDATE_BASE_URL', 'LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION', 'WIN_CSC_LINK')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing update build input: $name" }
+          }
+
       - name: Build Windows installer
         env:
+          LAZYMIND_DESKTOP_UPDATE_CONFIG_JSON: ${{ env.LAZYMIND_UPDATE_BUILD_CONFIG_JSON }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           LAZYMIND_RELEASE_BUILD: ${{ steps.release.outputs.is_tag }}
         shell: pwsh
         run: |
@@ -288,6 +327,13 @@ jobs:
 
           $hash = Get-FileHash -LiteralPath $outputPath -Algorithm SHA256
           $signature = Get-AuthenticodeSignature -LiteralPath $outputPath
+          if ('${{ inputs.enable_updates }}' -eq 'true') {
+            if ($signature.Status -ne 'Valid') { throw 'Update installer must have a valid Authenticode signature' }
+            $helperConfig = & 'desktop/dist/win-unpacked/resources/runtime/bin/lazymind-update-helper.exe' config | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $helperConfig.status -ne 'enabled') { throw 'Invalid built update helper' }
+            $publisher = $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+            if ($publisher -cne $helperConfig.config.signingIdentity) { throw 'Installer publisher does not match update identity' }
+          }
           "installer_path=$outputPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
           "artifact_name=$outputName" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
           "installer_sha256=$($hash.Hash.ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
@@ -324,6 +370,29 @@ jobs:
           }
 
           Get-ChildItem -LiteralPath $publishDir | Format-Table Name, Length
+
+      - name: Prepare immutable update artifacts
+        if: inputs.enable_updates
+        shell: pwsh
+        env:
+          UPDATE_INSTALLER: ${{ steps.package.outputs.installer_path }}
+        run: |
+          node desktop/scripts/prepare-update-release.mjs `
+            --resources desktop/dist/win-unpacked/resources `
+            --package $env:UPDATE_INSTALLER `
+            --base-url $env:LAZYMIND_UPDATE_BASE_URL `
+            --minimum-system-version $env:LAZYMIND_UPDATE_MINIMUM_SYSTEM_VERSION `
+            --output desktop/dist/update-publication
+          if ($LASTEXITCODE -ne 0) { throw 'Update artifact preparation failed' }
+
+      - name: Upload immutable update artifacts
+        if: inputs.enable_updates
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-update-windows-${{ github.run_id }}
+          path: desktop/dist/update-publication/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload Windows RAG ZIP directly
         id: upload_rag

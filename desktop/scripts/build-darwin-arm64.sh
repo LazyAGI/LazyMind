@@ -274,10 +274,13 @@ echo "==> Building WorkBuddy Workflow resources"
 (cd "${ROOT}/integrations/workbuddy-workflow/connector" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run build)
 
 echo "==> Building Go desktop runtime binaries"
+UPDATE_BUILD_CONFIG="$(node "${ROOT}/desktop/scripts/prepare-update-build-config.mjs" --platform darwin --arch "${GO_ARCH}" --signing-mode "${SIGNING_MODE}" --package "${ROOT}/desktop/electron/package.json")"
 (cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)
 shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/feishu-credential-helper.sha256"
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${DESKTOP_LAUNCHER}" ./cmd/desktop-launcher)
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/lazymind-update-helper" ./cmd/update-helper)
+"${RUNTIME_ROOT}/bin/lazymind-update-helper" config >/dev/null
 (cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)
 (cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
 (cd "${ROOT}/backend/core" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/core" .)
@@ -485,12 +488,8 @@ if [[ ! -d "${APP_PATH}" ]]; then
   fi
 fi
 if [[ -d "${APP_PATH}" ]]; then
-  if [[ "${SIGNING_MODE}" == "adhoc" ]]; then
-    echo "==> Applying local ad-hoc signature"
-    codesign --force --deep --sign - "${APP_PATH}"
-    shasum -a 256 "${APP_PATH}/Contents/Resources/runtime/bin/gh" | awk '{print $1}' > "${APP_PATH}/Contents/Resources/runtime/bin/gh.sha256"
-    codesign --force --sign - "${APP_PATH}"
-  fi
+  # Builder finalizes runtime pins and seals the bundle. Re-signing here would
+  # invalidate those pins and make the app differ from the already-built DMG.
   if [[ "${SIGNING_MODE}" != "none" ]]; then
     codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
   fi

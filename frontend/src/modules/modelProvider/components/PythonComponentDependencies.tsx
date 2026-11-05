@@ -69,7 +69,7 @@ export default function PythonComponentDependencies() {
     </section>)}
     <Modal title={selected ? `安装${names[selected.id]}` : "安装组件"} open={!!selected}
       okText="下载并安装"
-      okButtonProps={{ disabled: busy || selected?.installing || (selected?.installMethod !== "source" && !selected?.url?.startsWith("https://")) }}
+      okButtonProps={{ disabled: busy || selected?.installing || (selected?.installMethod !== "source" && !selected?.url) }}
       cancelText="取消" onOk={beginInstall} onCancel={() => setSelected(null)}>
       <p>{selected?.installMethod === "source" ? "将使用本地运行环境的依赖安装器，按当前源码配置下载 RAG 依赖。" : "将从以下来源下载此版本所需组件，并自动校验文件完整性。"}</p>
       <p>{selected?.installMethod === "source" ? "下载在后台进行，可以继续浏览。完成后需重新运行 make local-up 启用组件。" : "下载在后台进行，可以继续浏览。完成后会自动重启本地服务，重启期间正在运行的任务会中断。"}</p>
