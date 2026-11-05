@@ -339,6 +339,8 @@ describe('paper task startup routes', () => {
         expect(selection.queryByRole('link')).not.toBeInTheDocument();
         fireEvent.click(toggle);
         expect(selection.getByRole('list')).not.toBeVisible();
+        fireEvent.click(toggle);
+        expect(selection.getByRole('list')).toBeVisible();
         fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }));
         fireEvent.click(screen.getByRole('button', { name: new RegExp(task) }));
         fireEvent.click(await screen.findByText(entry));
