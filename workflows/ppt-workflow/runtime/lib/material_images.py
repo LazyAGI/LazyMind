@@ -1,0 +1,141 @@
+"""Bind registered PPT materials to durable deck paths before page generation."""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from html import unescape
+from pathlib import Path
+from urllib.parse import unquote
+
+# Match local paths, including spaces, without matching paths inside HTTP URLs.
+_LOCAL_IMAGE = re.compile(
+    r'(?<![\w:/])(?:file://)?(?:/|[A-Za-z]:[\\/]|\.{1,2}/|images/)'
+    r"[^\n<>\"']+?\.(?:png|jpe?g|gif|webp|bmp|svg)(?=$|[\s\"'<>),;，。])", re.I,
+)
+_IMG_SRC = re.compile(r"(<img\b[^>]*?\bsrc\s*=\s*)([\"'])(.*?)\2", re.I)
+
+
+def _key(value: str) -> str:
+    return unquote(unescape(str(value))).removeprefix('file://').replace('\\', '/')
+
+
+def _materials(deck: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
+    path = deck / 'info_pack.json'
+    assets = json.loads(path.read_text(encoding='utf-8')).get('user_assets', {}) if path.is_file() else {}
+    aliases: dict[str, str] = {}
+    hashes: dict[str, list[str]] = {}
+    for item in assets.get('reference_images', []):
+        source = (item.get('path') or item.get('local_path')) if isinstance(item, dict) else item
+        if not source or str(source).startswith(('http:', 'https:', 'data:')):
+            continue
+        file = Path(source)
+        if not file.is_absolute():
+            file = deck / file
+        file = file.resolve()
+        try:
+            relative = file.relative_to(deck.resolve()).as_posix()
+        except ValueError:
+            continue
+        canonical = '../' + relative
+        for alias in (source, str(file), relative, canonical):
+            aliases[_key(alias)] = canonical
+        if file.is_file():
+            digest = hashlib.sha256(file.read_bytes()).hexdigest()
+            hashes.setdefault(digest[:16], []).append(canonical)
+    for alias, target in assets.get('reference_image_aliases', {}).items():
+        canonical = aliases.get(_key(target))
+        if canonical:
+            aliases[_key(alias)] = canonical
+    return aliases, hashes
+
+
+def _resolve(source: str, aliases: dict[str, str], hashes: dict[str, list[str]]) -> str | None:
+    key = _key(source)
+    if key.lower().startswith(('http:', 'https:', 'data:', '//')):
+        return None
+    if key in aliases:
+        return aliases[key]
+    # Core input snapshots carry a content-hash suffix. This also recognizes
+    # prior attempts after their workspace was removed, without opening a path
+    # supplied by the model or guessing a material from its display filename.
+    match = re.search(r'-([0-9a-f]{16})\.[^. /]+$', key, re.I)
+    matches = set(hashes.get(match[1].lower(), [])) if match else set()
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def bind_prompt_materials(deck: Path, brief: str) -> tuple[str, list[str]]:
+    aliases, hashes = _materials(deck)
+    required: list[str] = []
+
+    def replace(match: re.Match) -> str:
+        source = match[0]
+        canonical = _resolve(source, aliases, hashes)
+        if not canonical:
+            raise ValueError(f'Unregistered material image reference: {Path(source).name}')
+        file = (deck / 'pages' / canonical).resolve()
+        if not file.is_file():
+            raise ValueError(f'Required material image is missing: {canonical}')
+        relative = file.relative_to(deck.resolve()).as_posix()
+        if relative not in required:
+            required.append(relative)
+        return canonical
+
+    return _LOCAL_IMAGE.sub(replace, brief), required
+
+
+def normalize_material_sources(html: str, deck: Path) -> str:
+    aliases, hashes = _materials(deck)
+
+    def replace(match: re.Match) -> str:
+        canonical = _resolve(match[3], aliases, hashes)
+        return f'{match[1]}{match[2]}{canonical}{match[2]}' if canonical else match[0]
+
+    return _IMG_SRC.sub(replace, html)
+
+
+def missing_material_images(html: str, deck: Path, required: list[str]) -> list[str]:
+    present = set()
+    for match in _IMG_SRC.finditer(html):
+        src = _key(match[3])
+        if src.startswith(('http:', 'https:', 'data:', '//')):
+            continue
+        path = (deck / 'pages' / src).resolve()
+        try:
+            relative = path.relative_to(deck.resolve()).as_posix()
+        except ValueError:
+            continue
+        if path.is_file():
+            present.add(relative)
+    return [path for path in required if path not in present]
+
+
+def record_material_aliases(deck: Path, sources: list[dict], input_dir: Path | None = None) -> None:
+    """Persist trusted source/input aliases when their bytes match a deck asset."""
+    ip_path = deck / 'info_pack.json'
+    if not ip_path.is_file():
+        return
+    ip = json.loads(ip_path.read_text(encoding='utf-8'))
+    aliases, _ = _materials(deck)
+    full_hashes = {}
+    for relative in set(aliases.values()):
+        path = (deck / 'pages' / relative).resolve()
+        if path.is_file():
+            full_hashes[hashlib.sha256(path.read_bytes()).hexdigest()] = path.relative_to(deck.resolve()).as_posix()
+    saved = ip.setdefault('user_assets', {}).setdefault('reference_image_aliases', {})
+    for item in sources:
+        path = Path(str(item.get('path') or ''))
+        if path.is_file():
+            target = full_hashes.get(hashlib.sha256(path.read_bytes()).hexdigest())
+            if target:
+                for key in ('path', 'origin'):
+                    source = item.get(key)
+                    if source and not str(source).startswith(('http:', 'https:', 'data:')):
+                        saved[str(source)] = target
+    if input_dir and input_dir.is_dir():
+        for path in input_dir.iterdir():
+            if path.is_file() and path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg'}:
+                target = full_hashes.get(hashlib.sha256(path.read_bytes()).hexdigest())
+                if target:
+                    saved[str(path)] = target
+    ip_path.write_text(json.dumps(ip, ensure_ascii=False, indent=2), encoding='utf-8')
