@@ -29,6 +29,16 @@ describe('PDF title recognition', () => {
             metadata: {title: sample.expectedTitle}, incomplete: false, identityVerified: false,
         });
     });
+    it.each(['PDF metadata', 'verified bibliography'])('preserves long author lists from %s while filtering punctuation', async (source) => {
+        const authors = ['DeepSeek-AI', '张三', 'Ke Xu', 'Ke Xu', ...Array.from({ length: 1000 }, (_, i) => `Author ${i}`)];
+        const input = [' ', ' : ', '：', '—', '...', ...authors];
+        readablePdf({ ...samples[0], info: { ...samples[0].info, Author: input.join(';') } });
+        if (source === 'verified bibliography') {
+            vi.mocked(previewPaperLink).mockResolvedValue({ paper: { title: samples[0].expectedTitle, authors: input } } as never);
+        }
+        const paper = await paperFromPdf(file, 'dataset');
+        expect(paper.metadata.authors).toEqual(authors);
+    });
     it('verifies the arXiv identity after reconstructing small caps and line-end hyphenation', async () => {
         readablePdf(samples[0]);
         const title = 'LoRA: Low-Rank Adaptation of Large Language Models';

@@ -793,18 +793,26 @@ def test_search_result_count_excludes_tavily_summary_item():
     assert 'returned **1** results' in result_text
 
 
-def test_search_provider_meta_search_uses_structured_total_count():
+@pytest.mark.parametrize(('language', 'items', 'total', 'expected'), [
+    ('zh', [{'title': 'A'}, {'title': 'B'}, {'title': 'C'}], 10000,
+     '已获取 **3** 条 **Sciverse** 元数据，接口报告总命中 **10000** 条。'),
+    ('en', [{'title': 'A'}, {'title': 'B'}], 10000,
+     'Retrieved **2** **Sciverse** metadata records. The API reports **10000** total matches.'),
+    ('zh', [{'title': 'A'}], None, '已获取 **1** 条 **Sciverse** 元数据。'),
+    ('en', [], 7, 'No **Sciverse** metadata records returned for this request.'),
+])
+def test_search_provider_meta_search_distinguishes_retrieved_records(language, items, total, expected):
     result_text = _tool_result_frame_text(
         {
             'id': 'call-meta-search',
             'name': 'SciverseSearch_meta_search',
-            'result': {'ok': True, 'value': {'total_count': 7, 'items': []}},
+            'result': {'ok': True, 'value': {'total_count': total, 'items': items}},
         },
-        'zh',
+        language,
         'machine learning',
     )
 
-    assert '已找到 **7** 条 **Sciverse** 元数据结果。' in result_text
+    assert expected in result_text
 
 
 def test_calculator_preview_uses_wrapped_business_result_instead_of_expression():

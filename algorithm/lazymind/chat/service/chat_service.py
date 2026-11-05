@@ -91,6 +91,7 @@ from lazymind.chat.engine.agent_runtime.summary_range import (
     is_runtime_summary_message,
 )
 from lazymind.chat.engine.agent_runtime.steering import (
+    continue_before_invocation,
     continue_in_workspace,
     SteeringInterruptedError,
     install_stream_interrupt_hook,
@@ -693,14 +694,30 @@ def _build_ask_user_tool(runtime_policy: Any = None) -> list:
 def _should_register_ask_user(
     agentic_config: Dict[str, Any],
     disabled_tools: set[str] | None = None,
+    task_profile: Any = None,
+    query: str = '',
 ) -> bool:
     """Respect explicit non-interactive requests and legacy auto workflow sessions."""
     if 'ask_user' in (disabled_tools or set()):
+        return False
+    if _is_ready_simple_answer(task_profile, query):
         return False
     return not (
         agentic_config.get('enable_workflow', True)
         and agentic_config.get('workflow_mode') == 'auto'
     )
+
+
+def _is_ready_simple_answer(profile: Any, query: str = '') -> bool:
+    """Reuse the existing router's high-confidence fast path; no extra classifier."""
+    if re.search(r'问我|向我提问|采访我|访谈我|ask\s+me|interview\s+me', query, re.IGNORECASE):
+        return False
+    return bool(profile is not None and profile.primary_outcome == 'answer'
+                and not profile.secondary_outcomes and profile.complexity == 'simple'
+                and profile.freshness == 'stable' and profile.input_mode == 'query_only'
+                and profile.request_assessment.status == 'ready'
+                and profile.request_assessment.interaction_need == 'none'
+                and not profile.routing_review_required and profile.confidence >= 0.9)
 
 
 def _workflow_startup_clarification_available(
@@ -710,9 +727,9 @@ def _workflow_startup_clarification_available(
     *,
     discovery_mode: bool = False,
 ) -> bool:
-    """Allow a declaratively interactive Workflow to clarify before Session creation."""
+    """Keep declared clarification available during an interactive Workflow too."""
     context = workflow_context if isinstance(workflow_context, dict) else {}
-    if str(context.get('session_id') or '').strip():
+    if str(context.get('session_id') or '').strip() and context.get('workflow_mode') == 'auto':
         return False
 
     def has_fields(policy: Any) -> bool:
@@ -728,6 +745,8 @@ def _workflow_startup_clarification_available(
 
     if has_fields(runtime_policy):
         return True
+    if str(context.get('session_id') or '').strip():
+        return False
     if not discovery_mode:
         return False
     return any(
@@ -988,6 +1007,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     has_explicit_workflow = bool(
         request.explicit_resource_bindings.workflow_refs
         or request.workflow.allowed_workflow_refs
+        or request.workflow.clarification
         or str((request.workflow.workflow_context or {}).get('workflow_ref') or '').strip()
     )
     if has_explicit_workflow or not provisional.routing_review_required:
@@ -1107,7 +1127,6 @@ async def _handle_chat_impl(
         guard_workflow_agent_stream,
         resolve_workflow_injection_async,
         update_intentwriter,
-        workflow_startup_clarification_already_asked,
     )
 
     conversation_id = (conversation.conversation_id or '').strip()
@@ -1461,6 +1480,7 @@ async def _handle_chat_impl(
         allowed_workflow_refs=effective_allowed_workflow_refs,
         workflow_activations=workflow.activations,
         conversation_history=agent_history,
+        clarification=workflow.clarification,
     )
     agentic_config.update(workflow_contribution.agentic_config_patch)
     from lazymind.chat.host_extensions.registry import apply_host_extensions
@@ -1659,24 +1679,15 @@ async def _handle_chat_impl(
             effective_workflow_catalog,
             discovery_mode=not workflow_turn_is_bound,
         )
-        workflow_startup_clarification_asked = (
-            workflow_startup_clarification_declared
-            and workflow_startup_clarification_already_asked(
-                agent_history,
-                workflow_contribution.runtime_policy,
-                effective_workflow_catalog,
-                discovery_mode=not workflow_turn_is_bound,
-                current_query=language_query,
-            )
-        )
-        allow_ask_user = False if workflow_startup_clarification_asked else (
+        allow_ask_user = (
             (
                 not workflow_turn_is_bound
-                and _should_register_ask_user(agentic_config, disabled)
+                and _should_register_ask_user(agentic_config, disabled, task_profile, language_query)
             )
             or (
                 workflow_startup_clarification_declared
                 and 'ask_user' not in disabled
+                and not _is_ready_simple_answer(task_profile, language_query)
             )
         )
         ask_user_tools = (
@@ -2208,13 +2219,16 @@ async def _handle_chat_impl(
                 (['KBToolkit'] if (agentic_config.get('filters') or {}).get('kb_id') else [])
                 + (['MailToolkit'] if confirm_id or mailbox_confirm else [])
             ),
-            required_tool_names=tuple(getattr(tool, '__name__', '') for tool in (
-                [] if sidechat_readonly else [
-                    *workflow_tools, *attachment_tools,
+            required_tool_names=() if sidechat_readonly else (
+                *workflow_contribution.required_tool_names,
+                *(getattr(tool, '__name__', '') for tool in [
+                    *attachment_tools,
                     *([directory_runtime.list_document_directories, directory_runtime.open_document_directory,
                        directory_runtime.folders.inspect_document_folder,
                        directory_runtime.folders.submit_document_directory_organization]
-                      if directory_runtime else [])])),
+                      if directory_runtime else []),
+                ]),
+            ),
             tool_state_scope='sidechat' if sidechat_readonly else 'chat',
             context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
             configuration_runtime=configuration_runtime,
@@ -2357,33 +2371,40 @@ async def _handle_chat_impl(
             async with rag_sem:
                 current_plan = plan
                 current_query = query
+                pending_ask = workflow_contribution.pending_ask
                 while True:
-                    # runtime_llm builds ReactAgent's FunctionCall first, then
-                    # returns the configured model copy carrying this agent's
-                    # prompt, formatter, tools, and complete chat history.
-                    install_stream_interrupt_hook(executor.runtime_llm(react_agent))
                     invocation_result: Any = None
                     response_text: list[str] = []
                     steering_interrupted = False
-                    initial_agent_stream = lazyllm.enable_trace(
-                        AgentInvocation(executor, react_agent, current_plan),
-                        # Continuations share the stable outer run correlation ID.
-                        trace_id=translator.run.run_id,
-                        session_id=conversation.session_id,
-                        request_tags=['handle_chat', 'agent'],
-                        debug_capture_payload=False,
-                    )
-                    guarded_agent_stream = guard_workflow_agent_stream(
-                        initial_agent_stream,
-                        all_tools=all_tools,
-                        query=current_query,
-                        runtime_prompt=prompt_bundle.system_prompt,
-                        agent=agent,
-                        runtime_config=_cfg,
-                        fs=FS,
-                        stop_tools=stop_tools,
-                        history=current_plan.history,
-                    )
+                    if pending_ask:
+                        async def pending_question_stream(card=pending_ask):
+                            yield 'event', {'tag': 'ask_pending', **card}
+                            yield 'final', None
+                        guarded_agent_stream = pending_question_stream()
+                    else:
+                        # runtime_llm builds ReactAgent's FunctionCall first, then
+                        # returns the configured model copy carrying this agent's
+                        # prompt, formatter, tools, and complete chat history.
+                        install_stream_interrupt_hook(executor.runtime_llm(react_agent))
+                        initial_agent_stream = lazyllm.enable_trace(
+                            AgentInvocation(executor, react_agent, current_plan),
+                            # Continuations share the stable outer run correlation ID.
+                            trace_id=translator.run.run_id,
+                            session_id=conversation.session_id,
+                            request_tags=['handle_chat', 'agent'],
+                            debug_capture_payload=False,
+                        )
+                        guarded_agent_stream = guard_workflow_agent_stream(
+                            initial_agent_stream,
+                            all_tools=all_tools,
+                            query=current_query,
+                            runtime_prompt=prompt_bundle.system_prompt,
+                            agent=agent,
+                            runtime_config=_cfg,
+                            fs=FS,
+                            stop_tools=stop_tools,
+                            history=current_plan.history,
+                        )
                     try:
                         async with aclosing(guarded_agent_stream):
                             async for kind, payload in guarded_agent_stream:
@@ -2444,14 +2465,22 @@ async def _handle_chat_impl(
                     assistant_context = (
                         ''.join(response_text) if steering_interrupted else str(invocation_result or '')
                     )
-                    current_plan = continue_in_workspace(
-                        current_plan, late_guidance, assistant_context,
-                    )
+                    if pending_ask:
+                        # A host-generated card has not invoked the agent, so
+                        # the original input is not in model history yet.
+                        current_plan = continue_before_invocation(current_plan, late_guidance)
+                        pending_ask = None
+                    else:
+                        current_plan = continue_in_workspace(
+                            current_plan, late_guidance, assistant_context,
+                        )
                     # intentwrite validates evidence against user input, not the
                     # model's reply. Accepted guidance is additional user input
                     # for this run and must be available to the same tool.
                     append_intentwrite_guidance(intentwriter, [item.content for item in late_guidance])
                     current_query = current_plan.prompt.current_input
+                    if knowledge_management is not None:
+                        knowledge_management.steering_segment += len(late_guidance)
                     for frame in translator.begin_steering_segment():
                         yield log_and_emit_frame(
                             frame, round(time.time() - start_time, 3), query,

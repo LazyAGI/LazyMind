@@ -10,31 +10,65 @@ description: >
 when_to_use: >
   当用户提供中文招标文件（优先支持 DOCX、PDF，也支持 TXT、Markdown、HTML、RTF），
   希望生成完整投标技术方案、技术标正文或可下载 Markdown/Word 技术方案时使用。
-  启动前必须确认并绑定：招标文件、导出格式（md 或 docx）、目标总字数，以及是否
-  使用内置 DOCX 默认投标样式。用户已明确的参数直接使用；缺少任意参数时一次性
-  询问，例如“导出 Markdown 还是 Word？目标 5000/10000/20000/30000 字或其他字数？
-  Word 是否使用默认投标样式（否则采用基础样式）？”，不要先启动再猜默认值。
+  启动前必须解析招标文件和目标总字数；缺少才提问。导出格式未指定时采用 DOCX，
+  DOCX 未指定样式时采用默认投标样式，Markdown 不询问 DOCX 样式。
+  效果图未指定数量时保留按正文自动规划，明确指定时遵守 1–10 张范围。
+  用户已明确的参数直接使用，不重复提问；每次最多三个问题，不猜测必需参数。
   不用于仅编写商务报价、资质证明或制作 PPT 的请求。
 
 runtime:
   exclusive_tool_capabilities: [writer.create, writer.revise]
   collects_knowledge: true
   clarification_fields:
+    - id: bid_doc
+      label: 招标文件
+      question: 请上传本次需要依据的招标文件。
+      reason: 需要依据招标原文提取技术要求，不能编造或猜测条款。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices: [上传招标文件]
+      attachment:
+        when_choice: 上传招标文件
+        material_id: bid_doc
+        accept: [.pdf, .docx, .doc, .txt, .md, .html, .rtf]
+        max_files: 1
+        required: true
     - id: output_format
       label: 导出格式
+      default: docx
+      choice_policy: fixed
+      allow_other: false
+      value_aliases: {Word: docx, DOCX: docx, Markdown: md}
       question: 请选择最终导出格式。
       type: single
       choices: [docx, md]
     - id: word_target
       label: 目标总字数
+      required: true
+      resolution: explicit
+      reason: 目标字数决定技术方案的展开深度和章节预算。
+      patterns: ['(?:摘要|abstract)[^0-9零一二三四五六七八九十百千万两，。；;\n]*[0-9.,，零一二三四五六七八九十百千万两]+\s*(?:字|词|words)|([0-9.,，零一二三四五六七八九十百千万两]+)\s*字']
+      validation: {format: positive_integer, min: 1000, max: 500000, example: '例如：20000'}
       question: 请确认投标技术方案的目标总字数。
       type: single
       choices: ['5000', '10000', '20000', '30000']
     - id: use_default_docx_template
       label: DOCX 样式
+      default: 'true'
+      applies_when: {field: output_format, equals: docx}
+      boolean_labels: {'yes': 使用默认投标样式, 'no': 使用基础样式}
+      value_aliases: {'__ask_user_yes__': 'true', '__ask_user_no__': 'false', 使用默认投标样式: 'true', 使用基础样式: 'false'}
       question: 是否使用默认投标 DOCX 样式模板？
       type: boolean
       choices: [是, 否]
+    - id: effect_image_count
+      label: 效果图数量
+      question: 希望生成多少张功能效果图？
+      reason: 未指定时根据正文长度和实际功能自动规划，不额外询问。
+      type: text
+      patterns: ['([0-9]+)\s*张(?:功能)?效果图']
+      validation: {format: positive_integer, min: 1, max: 10, example: '例如：5'}
 
 tool_scripts:
   - path: scripts/pipeline_tools.py
@@ -125,6 +159,14 @@ slots:
     label: 已确认生成参数
     type: json
     cardinality: single
+    exposed: false
+
+  - id: effect_image_count
+    user_visible: false
+    label: 效果图数量
+    type: text
+    cardinality: single
+    external: true
     exposed: false
 
   - id: raw_bid_text

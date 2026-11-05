@@ -5,7 +5,8 @@ export { WriterProviderChoice } from "./DocumentProviderChoice";
 import { DocumentArtifactEditor } from "./DocumentArtifactEditor";
 import { useState, useCallback, useLayoutEffect, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
-import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig } from "@/modules/chat/store/workflowPanel";
+import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig, WorkflowSession } from "@/modules/chat/store/workflowPanel";
+import { PaperExpansionArtifactView, canDisplayPaperExpansion, isPaperExpansionSlot, parsePaperExpansionArtifact } from './PaperExpansionArtifactView';
 import { useWorkflowStore, draftStore } from "@/modules/chat/store/workflowPanel";
 import {
   resolveCoreAssetUrl,
@@ -78,77 +79,6 @@ function tr(key: string, options?: Record<string, unknown>): string {
 }
 
 export const SlotDownloadContext = createContext(true);
-
-/**
- * Reveal exactly one backend delta per paint when several SSE frames arrive in
- * the same browser callback. Individual deltas are never split or rewritten.
- */
-function useArtifactStreamContent(
-  streamId: string,
-  deltas: string[] | undefined,
-  fallbackContent: string,
-): string {
-  const [visibleContent, setVisibleContent] = useState(
-    () => deltas?.[0] ?? fallbackContent,
-  );
-  const streamIdRef = useRef(streamId);
-  const deltasRef = useRef(deltas);
-  const displayedCountRef = useRef(deltas?.length ? 1 : 0);
-  const frameRef = useRef<number>();
-
-  const cancelFrame = useCallback(() => {
-    if (frameRef.current === undefined) return;
-    window.cancelAnimationFrame(frameRef.current);
-    frameRef.current = undefined;
-  }, []);
-
-  const drainNext = useCallback(function drainNext() {
-    frameRef.current = undefined;
-    const currentDeltas = deltasRef.current;
-    if (!currentDeltas) return;
-
-    const index = displayedCountRef.current;
-    if (index >= currentDeltas.length) return;
-    displayedCountRef.current = index + 1;
-    setVisibleContent((current) => current + currentDeltas[index]);
-
-    if (displayedCountRef.current < currentDeltas.length) {
-      frameRef.current = window.requestAnimationFrame(drainNext);
-    }
-  }, []);
-
-  useLayoutEffect(() => {
-    if (streamIdRef.current !== streamId) {
-      cancelFrame();
-      streamIdRef.current = streamId;
-      displayedCountRef.current = 0;
-      setVisibleContent('');
-    }
-
-    deltasRef.current = deltas;
-    if (!deltas) {
-      cancelFrame();
-      displayedCountRef.current = 0;
-      setVisibleContent(fallbackContent);
-      return;
-    }
-
-    if (displayedCountRef.current > deltas.length) {
-      displayedCountRef.current = 0;
-      setVisibleContent('');
-    }
-
-    // Apply the first pending backend delta before the next paint. Any further
-    // deltas from the same network batch are revealed on following frames.
-    if (frameRef.current === undefined && displayedCountRef.current < deltas.length) {
-      drainNext();
-    }
-  }, [cancelFrame, deltas, drainNext, fallbackContent, streamId]);
-
-  useLayoutEffect(() => cancelFrame, [cancelFrame]);
-
-  return visibleContent;
-}
 
 /**
  * Normalize the content_type returned by the Python backend.
@@ -4467,12 +4397,7 @@ interface SlotMarkdownFileProps {
 
 /** Displays the temporary Markdown emitted by a Writer Task SSE stream. */
 export function SlotMarkdownStream({ stream }: { stream: TaskArtifactStream }) {
-  const streamedContent = useArtifactStreamContent(
-    stream.stream_id,
-    stream.deltas,
-    stream.content,
-  );
-  const content = stream.final_content ?? streamedContent;
+  const content = stream.final_content ?? stream.content;
   const isAborted = stream.state === 'aborted';
   const showError = isAborted && !content;
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -5378,6 +5303,63 @@ function SlotHtmlFilePreview({
   );
 }
 
+function usePaperArtifactSource(slot?: SlotRevision) {
+  // Session updates recreate JSON objects even when the immutable artifact is
+  // unchanged. Keep its identity stable so refreshes do not unmount the view.
+  const valueKey = JSON.stringify(slot?.artifact_value);
+  const value = useMemo<unknown>(() => valueKey === undefined ? undefined : JSON.parse(valueKey), [valueKey]);
+  const revision = slot?.revision;
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{ value: unknown; revision?: number; source: string; failed: boolean }>();
+  useEffect(() => {
+    if (value == null) return;
+    let cancelled = false;
+    void resolveSnapshotDiffText(value).then(source => {
+      if (!cancelled) setLoaded({ value, revision, source, failed: false });
+    }).catch(() => {
+      if (!cancelled) setLoaded({ value, revision, source: '', failed: true });
+    });
+    return () => { cancelled = true; };
+  }, [value, revision, attempt]);
+  const current = loaded?.value === value && loaded?.revision === revision ? loaded : undefined;
+  return { source: current?.source, failed: current?.failed, pending: value != null && !current,
+    retry: () => { setLoaded(undefined); setAttempt(count => count + 1); } };
+}
+
+function SlotPaperExpansion({ slot, session, slotId, revisionCount, onRefresh, readOnly }: {
+  slot: SlotRevision; session: WorkflowSession; slotId: string;
+  revisionCount?: number; onRefresh?: () => void; readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const artifact = usePaperArtifactSource(slot);
+  const data = useMemo(() => parsePaperExpansionArtifact(artifact.source), [artifact.source]);
+  // Older screening outputs have no saved diff. Only compare an upstream
+  // snapshot that predates this output, never a replacement from a later run.
+  const baselineSlot = slotId === 'screened_candidates' && data && !data.selection
+    ? session.slots?.find(item => item.slot === 'candidate_set' && item.selected && item.created_at <= slot.created_at)
+    : undefined;
+  const baselineArtifact = usePaperArtifactSource(baselineSlot);
+  const baseline = useMemo(() => parsePaperExpansionArtifact(baselineArtifact.source), [baselineArtifact.source]);
+  if (artifact.pending) return <SlotPending type='text' />;
+  if (artifact.failed) return <div className='workflow-slot workflow-slot--paper-expansion' role='alert'>
+    {t('chat.slots.contentLoadFailed')} <button type='button' onClick={artifact.retry}>{t('common.retry')}</button>
+  </div>;
+  return <div className='workflow-slot workflow-slot--paper-expansion'>
+    {data && canDisplayPaperExpansion(slotId, data)
+      ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} baseline={baseline} />
+      : <pre className='workflow-slot__text'>{artifact.source}</pre>}
+    <div className='workflow-slot__text-meta'>
+      <ArtifactSourceButton value={slotId === 'expansion_report' && typeof data?.narrative === 'string' ? data.narrative : artifact.source} />
+      {revisionCount !== undefined && revisionCount > 0 && <SlotVersionPopover
+        sessionId={session.session_id} slotId={slotId} listIndex={slot.list_index ?? -1}
+        revisionCount={revisionCount} currentRevision={slot.revision} currentVersionNumber={slot.version_number}
+        currentValue={slot.artifact_value} currentChangeSource={slot.change_source}
+        contentType={slot.content_type ?? 'json'} readOnly={readOnly} onRollbackDone={onRefresh}
+      />}
+    </div>
+  </div>;
+}
+
 /**
  * SlotRenderer dispatches to the correct slot component based on the artifact
  * content_type returned by the backend.
@@ -5399,8 +5381,10 @@ export function SlotRenderer({
   readOnly,
   hideImageMutationActions,
   slideNavigation,
+  workflowSession,
 }: {
   slot: SlotRevision;
+  workflowSession?: WorkflowSession;
   slideNavigation?: SlideNavigation;
   widget?: SlotWidgetConfig;
   originalFileSlot?: SlotRevision;
@@ -5426,6 +5410,10 @@ export function SlotRenderer({
   }
   const effectiveReadOnly = readOnly || widget?.readOnly;
   const resolvedWidgetSlotId = slotId ?? slot.slot;
+  if (workflowSession?.workflow_id === 'paper_expansion' && isPaperExpansionSlot(resolvedWidgetSlotId)) {
+    return <SlotPaperExpansion slot={slot} session={workflowSession} slotId={resolvedWidgetSlotId}
+      revisionCount={revisionCount} onRefresh={onRefresh} readOnly={effectiveReadOnly} />;
+  }
   if (
     sessionId
     && (slot.list_index ?? -1) === -1

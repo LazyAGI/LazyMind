@@ -2083,5 +2083,18 @@
   "2005148": {"en-US": "Save the document before queuing processing", "zh-CN": "请先保存文档，再提交处理任务"},
   "2005150": { "en-US": "Online metadata conflicts with the imported paper identity", "zh-CN": "在线元信息与导入文献标识不一致" },
   "2005151": { "en-US": "Paper metadata was saved; add a DOI or arXiv ID to identify its PDF reliably", "zh-CN": "文献信息已保存，请补充 DOI 或 arXiv 编号以准确查找 PDF" },
-  "2005152": { "en-US": "Crossref bibliography matching failed", "zh-CN": "Crossref 文献信息匹配失败" }
+  "2005152": { "en-US": "Crossref bibliography matching failed", "zh-CN": "Crossref 文献信息匹配失败" },
+  "2005153": {"en-US": "OpenAlex hosted full text requires a valid API key", "zh-CN": "OpenAlex 托管全文需要有效的 API Key"},
+  "2005154": {"en-US": "OpenAlex has no record of this paper", "zh-CN": "OpenAlex 未收录该论文"},
+  "2005155": {"en-US": "The paper has no identifier available for citation lookup", "zh-CN": "该论文尚无可用的引用索引身份"},
+  "2005156": {"en-US": "The full-text acquisition budget for this paper is exhausted", "zh-CN": "单篇取文预算已用尽"},
+  "2005157": {"en-US": "The PDF parser service version is incompatible; update the parser service", "zh-CN": "PDF 解析服务版本不一致，请同步更新解析服务"},
+  "2005158": {"en-US": "The PDF was downloaded but could not be parsed", "zh-CN": "PDF 已获取，但解析失败"},
+  "2005159": {"en-US": "Failed to download the paper PDF", "zh-CN": "论文 PDF 下载失败"},
+  "2005160": {"en-US": "Research preparation is incomplete or invalid; supplement the scope and retry", "zh-CN": "初步调研内容不完整或无效，请补充范围后重试"},
+  "2005161": {"en-US": "Complete the pending research questions and confirm the directions first", "zh-CN": "请先完成待补充问题并确认研究方向"},
+  "2005162": {"en-US": "The research preparation operation is invalid for the current state", "zh-CN": "当前调研状态不支持该操作"},
+  "2005163": {"en-US": "There are no failed import items to retry", "zh-CN": "没有可重试的失败项"},
+  "2005164": {"en-US": "This import is still being processed", "zh-CN": "本次导入正在处理中"},
+  "2005165": {"en-US": "The report must preserve the research analysis and its actual research outcome", "zh-CN": "报告必须保留同一版本的研究分析及真实研究完成情况"}
 }

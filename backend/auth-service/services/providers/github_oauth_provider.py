@@ -161,6 +161,39 @@ class GitHubOAuthProvider(CloudOAuthProvider):
             method='GET',
             access_token=access_token,
         )
+        return self._account_profile(user)
+
+    def verify_cli_access_token(self, *, access_token: str) -> tuple[CloudAccountProfile, str]:
+        if not access_token or len(access_token) > 4096 or any(c.isspace() for c in access_token):
+            raise CloudProviderError('Invalid GitHub credential', requires_reauth=True)
+        req = request.Request(_GITHUB_USER_URL, headers={
+            'Accept': 'application/json', 'User-Agent': 'LazyMind-GitHub-OAuth',
+            'Authorization': f'Bearer {access_token}', 'X-GitHub-Api-Version': '2022-11-28',
+        })
+        try:
+            with request.urlopen(req, timeout=30) as response:
+                user = json.loads(response.read())
+                scope_header = response.headers.get('X-OAuth-Scopes')
+        except HTTPError as exc:
+            raise CloudProviderError(
+                'GitHub rejected credential verification', provider_code=str(exc.code),
+                retryable=exc.code in (408, 429) or exc.code >= 500, requires_reauth=exc.code == 401,
+            ) from None
+        except OSError:
+            raise CloudProviderError('GitHub verification is temporarily unavailable', retryable=True) from None
+        except ValueError:
+            raise CloudProviderError('Invalid GitHub identity response') from None
+        if not isinstance(user, dict) or type(user.get('id')) is not int or user['id'] <= 0:
+            raise CloudProviderError('GitHub identity has no stable user ID')
+        if scope_header is None:
+            raise CloudProviderError('GitHub permissions could not be verified', provider_code='GITHUB_SCOPE_UNVERIFIED')
+        scopes = set(scope_header.replace(',', ' ').split())
+        if not scopes.intersection({'repo', 'public_repo'}):
+            raise CloudProviderError('GitHub repository permission is missing', provider_code='GITHUB_SCOPE_MISSING')
+        return self._account_profile(user), ', '.join(sorted(scopes))
+
+    @staticmethod
+    def _account_profile(user: dict) -> CloudAccountProfile:
         account_id = str(user.get('id') or '').strip()
         login = str(user.get('login') or '').strip()
         return CloudAccountProfile(

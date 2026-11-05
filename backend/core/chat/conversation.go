@@ -436,17 +436,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "load conversation history failed", http.StatusInternalServerError)
 		return
 	}
-	var workspaceBindingCount int64
 	if _, submitted := raw["ask_answers_structured"]; submitted {
-		if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", convID).Count(&workspaceBindingCount).Error; err != nil {
-			common.ReplyErr(w, "validate workspace question failed", http.StatusInternalServerError)
+		if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
+			common.ReplyErr(w, "invalid request", http.StatusBadRequest)
 			return
-		}
-		if workspaceBindingCount > 0 {
-			if err := validateWorkspaceAskSubmission(histories, raw); err != nil {
-				common.ReplyErr(w, "invalid request", http.StatusBadRequest)
-				return
-			}
 		}
 	}
 	if isSidechat {
@@ -551,6 +544,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
+	if !target.IsRegeneration {
+		if continuation := workflowAskContinuation(histories, askAnswersStructuredFromRaw(raw)); continuation != nil {
+			reqBody["workflow_clarification"] = continuation
+		}
+	}
 	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
 	if !validExecutor {
 		common.ReplyErr(w, "conversation has an unsupported chat executor", http.StatusConflict)
@@ -1107,7 +1105,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 func withHistoryAskState(payload map[string]any, ext json.RawMessage) map[string]any {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(ext, &fields) == nil {
-		for _, key := range []string{"ask_pending", "ask_answered", "ask_saved_answers"} {
+		for _, key := range []string{"ask_pending", "ask_answered", "ask_saved_answers", "knowledge_confirmations"} {
 			if value, ok := fields[key]; ok {
 				payload[key] = value
 			}
@@ -1852,6 +1850,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var mentions any
 	var mailConfirmation map[string]any
 	var askPending any
+	var knowledgeConfirmations json.RawMessage
 	var askAnswered bool
 	var askSavedAnswers any
 	var envInputResult any
@@ -1862,25 +1861,27 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var modelSwitches []ModelSwitchRecord
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input                 any                 `json:"input"`
-			Mentions              any                 `json:"mentions"`
-			KnowledgeOperations   []map[string]any    `json:"knowledge_operations"`
-			MailConfirmation      map[string]any      `json:"mail_confirmation"`
-			AskPending            any                 `json:"ask_pending"`
-			AskAnswered           bool                `json:"ask_answered"`
-			AskSavedAnswers       any                 `json:"ask_saved_answers"`
-			EnvInputResult        any                 `json:"env_input_result"`
-			IntentUpdated         any                 `json:"intent_updated"`
-			ExternalAgentActivity any                 `json:"external_agent_activity"`
-			ModelRoute            *chatModelRoute     `json:"model_route"`
-			ModelSwitches         []ModelSwitchRecord `json:"model_switches"`
-			FailedAttempts        []failedRunAttempt  `json:"failed_run_attempts"`
+			Input                  any                 `json:"input"`
+			Mentions               any                 `json:"mentions"`
+			KnowledgeOperations    []map[string]any    `json:"knowledge_operations"`
+			MailConfirmation       map[string]any      `json:"mail_confirmation"`
+			AskPending             any                 `json:"ask_pending"`
+			KnowledgeConfirmations json.RawMessage     `json:"knowledge_confirmations"`
+			AskAnswered            bool                `json:"ask_answered"`
+			AskSavedAnswers        any                 `json:"ask_saved_answers"`
+			EnvInputResult         any                 `json:"env_input_result"`
+			IntentUpdated          any                 `json:"intent_updated"`
+			ExternalAgentActivity  any                 `json:"external_agent_activity"`
+			ModelRoute             *chatModelRoute     `json:"model_route"`
+			ModelSwitches          []ModelSwitchRecord `json:"model_switches"`
+			FailedAttempts         []failedRunAttempt  `json:"failed_run_attempts"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
 			mentions = ext.Mentions
 			mailConfirmation = mailConfirmationHistoryMetadata(ext.MailConfirmation)
 			askPending = ext.AskPending
+			knowledgeConfirmations = ext.KnowledgeConfirmations
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
 			envInputResult = ext.EnvInputResult
@@ -1910,6 +1911,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"run_status":        h.RunStatus,
 	}
 	hydrateSteeringTimeline(h, item)
+	if len(knowledgeConfirmations) > 0 {
+		item["knowledge_confirmations"] = knowledgeConfirmations
+	}
 	var forkFlags struct {
 		ReadOnly bool `json:"fork_read_only"`
 	}

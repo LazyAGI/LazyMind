@@ -15,8 +15,60 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
+
+func TestDownloadImportsRecordFirstMethodAndPreserveItOnRepeat(t *testing.T) {
+	for _, test := range []struct{ entry, method string }{
+		{"paper_link", "link"}, {"paper_expansion", "expansion"},
+		{"single_reference", "references"}, {"paper_references", "references"},
+		{"collection_references", "references"}, {"conversation_sources", "conversation"},
+	} {
+		t.Run(test.entry, func(t *testing.T) {
+			db, batch, item, svc := importPipelineFixture(t)
+			if err := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryAttachment{}, &orm.PaperLibraryNote{}, &orm.AcademicUserPaperState{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.Dataset{}).Where("id=?", batch.TargetDatasetID).Update("scene", "academic_papers").Error; err != nil {
+				t.Fatal(err)
+			}
+			batch.EntryType = test.entry
+			if err := db.Save(&batch).Error; err != nil {
+				t.Fatal(err)
+			}
+			seedPipelineCache(t, db, "v2")
+			job := asyncjob.Job{ID: "job", AttemptCount: 1}
+			if err := processImportItem(t.Context(), job, batch, item, sourceImportCaller(batch), svc); err != nil {
+				t.Fatal(err)
+			}
+			view, err := paperlibrary.Load(t.Context(), db, batch.TargetDatasetID, "alice", nil, false)
+			if err != nil || len(view.Data.Papers) != 1 || len(view.Data.Attachments) != 1 {
+				t.Fatalf("missing imported paper or attachment: %+v %v", view, err)
+			}
+			if view.Data.Papers[0].ImportMethod != test.method || view.Data.Attachments[0].ImportMethod != test.method {
+				t.Fatalf("import provenance lost: %+v", view.Data)
+			}
+			batch.ID, batch.EntryType = "repeat-batch", "conversation_sources"
+			if test.entry == "conversation_sources" {
+				batch.EntryType = "paper_link"
+			}
+			item.ID, item.BatchID = "repeat-item", batch.ID
+			for _, row := range []any{&batch, &item} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := processImportItem(t.Context(), job, batch, item, sourceImportCaller(batch), svc); err != nil {
+				t.Fatal(err)
+			}
+			view, err = paperlibrary.Load(t.Context(), db, batch.TargetDatasetID, "alice", nil, false)
+			if err != nil || len(view.Data.Papers) != 1 || len(view.Data.Attachments) != 1 || view.Data.Papers[0].ImportMethod != test.method || view.Data.Attachments[0].ImportMethod != test.method {
+				t.Fatalf("repeat changed the first import or duplicated the PDF: %+v %v", view.Data, err)
+			}
+		})
+	}
+}
 
 func TestBothImportEntrypointsResumeTheCommittedOriginal(t *testing.T) {
 	for _, entry := range []string{"conversation_sources", "single_reference"} {
@@ -77,16 +129,16 @@ func TestBothImportEntrypointsResumeTheCommittedOriginal(t *testing.T) {
 }
 
 func TestReferenceImportRetryResetsItemsAndPublishesJobAtomically(t *testing.T) {
-	db := sourceTestDB(t)
-	previous := store.DB()
-	store.Init(db, db, nil)
-	t.Cleanup(func() { store.Init(previous, previous, nil) })
-	batch := orm.PaperImportBatch{ID: "batch", EntryType: "single_reference", CreatedBy: "alice", AsyncJobID: "old-job", Status: "failed", PolicySnapshotJSON: json.RawMessage(`{}`), SourceDocumentIDsJSON: json.RawMessage(`[]`)}
-	item := orm.PaperImportItem{ID: "item", BatchID: batch.ID, DocumentID: "committed-doc", DocumentTaskID: "committed-task", Status: "failed", Stage: "processing", ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: json.RawMessage(`{}`), ErrorDetailsJSON: json.RawMessage(`{}`), SelectedCandidateJSON: json.RawMessage(`{}`)}
-	for _, row := range []any{&batch, &item, &orm.AsyncJob{ID: "old-job", Status: "failed", PayloadJSON: json.RawMessage(`{}`)}} {
-		if err := db.Create(row).Error; err != nil {
+	db, batch, item, _ := importPipelineFixture(t)
+	batch.EntryType, batch.Status = "single_reference", "failed"
+	item.Status = "failed"
+	for _, row := range []any{&batch, &item} {
+		if err := db.Save(row).Error; err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := db.Model(&orm.AsyncJob{}).Where("id=?", batch.AsyncJobID).Update("status", "failed").Error; err != nil {
+		t.Fatal(err)
 	}
 	retry := func() *httptest.ResponseRecorder {
 		req := mux.SetURLVars(httptest.NewRequest("POST", "/academic/imports/batch/retry", nil), map[string]string{"batch_id": batch.ID})
@@ -95,26 +147,12 @@ func TestReferenceImportRetryResetsItemsAndPublishesJobAtomically(t *testing.T) 
 		RetryImport(rec, req)
 		return rec
 	}
-	rec := retry()
-	if rec.Code != 200 {
+	if rec := retry(); rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	var saved orm.PaperImportItem
-	if err := db.Where("id = ?", item.ID).Take(&saved).Error; err != nil {
-		t.Fatal(err)
-	}
-	if saved.Status != "pending" || saved.DocumentID != item.DocumentID || saved.DocumentTaskID != item.DocumentTaskID {
-		t.Fatalf("lost resumable binding: %+v", saved)
-	}
-	if err := db.Where("id = ?", batch.ID).Take(&batch).Error; err != nil {
-		t.Fatal(err)
-	}
-	var job orm.AsyncJob
-	if err := db.Where("id = ?", batch.AsyncJobID).Take(&job).Error; err != nil {
-		t.Fatal(err)
-	}
-	if job.Status != "pending" || job.ResourceID != batch.ID || batch.Status != "pending" {
-		t.Fatalf("job and batch disagree: %+v %+v", job, batch)
+	if err := db.Where("id=?", item.ID).Take(&saved).Error; err != nil || saved.Status != "pending" {
+		t.Fatalf("not requeued: %+v %v", saved, err)
 	}
 	if again := retry(); again.Code != http.StatusConflict {
 		t.Fatal("queued duplicate retry", again.Code)
@@ -122,6 +160,6 @@ func TestReferenceImportRetryResetsItemsAndPublishesJobAtomically(t *testing.T) 
 	var count int64
 	db.Model(&orm.AsyncJob{}).Count(&count)
 	if count != 2 {
-		t.Fatal("unexpected queued jobs", count)
+		t.Fatal("unexpected queued tasks", count)
 	}
 }

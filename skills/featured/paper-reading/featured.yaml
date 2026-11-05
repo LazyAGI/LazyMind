@@ -1,0 +1,38 @@
+schema_version: 2
+id: paper-reading
+type: page
+page_action: open_paper_library
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+placement:
+  home: true
+  hot: false
+  gallery: true
+  order: 1
+
+classification:
+  category: 信息分析
+  tags:
+    - 论文阅读
+    - 论文集
+    - 文献阅读
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 论文阅读
+    description: 选择已有论文集和论文，打开全文阅读
+    output_type: document
+    output_label: 论文集与全文
+    cover_asset: cover
+    result_summary: 从已有论文集进入论文阅读页面
+  detail:
+    title: 论文阅读
+    description: 打开你有权访问的论文集，选择论文进入已有阅读页面。

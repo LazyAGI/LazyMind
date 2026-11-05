@@ -1,7 +1,7 @@
 import type { DocumentDirectoryBatch } from './api';
 
-// Routing batches summarize their children; only the latest leaf result per
-// directory is actionable, consistently on the page and in the sidebar.
+// Routing batches summarize their children. Only the latest leaf result per
+// directory is actionable.
 export function latestDirectoryBatches(batches: DocumentDirectoryBatch[], directoryId?: string) {
   const parents = new Set(batches.map(b => b.parent_id).filter(Boolean));
   const latest = new Map<string, DocumentDirectoryBatch>();
@@ -11,8 +11,4 @@ export function latestDirectoryBatches(batches: DocumentDirectoryBatch[], direct
     if (!latest.has(key)) latest.set(key, batch);
   }
   return [...latest.values()].filter(b => !b.acknowledged && !batches.find(parent => parent.id === b.parent_id)?.acknowledged);
-}
-
-export function hasUnreadDirectoryResults(batches: DocumentDirectoryBatch[]) {
-  return latestDirectoryBatches(batches).some(b => ['succeeded', 'failed', 'canceled'].includes(b.status));
 }

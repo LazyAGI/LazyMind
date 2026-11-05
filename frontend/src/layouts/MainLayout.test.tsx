@@ -22,14 +22,12 @@ const mocks = vi.hoisted(() => ({
   refreshRecordList: vi.fn(),
   getDataset: vi.fn(),
   fetchPreferences: vi.fn().mockResolvedValue({ document_directories_enabled: true }),
-  listDirectoryBatches: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
  fetchUserUiPreferences: mocks.fetchPreferences,
  USER_UI_PREFERENCES_CHANGED_EVENT: "lazymind:user-ui-preferences-changed",
 }));
-vi.mock("@/modules/documentDirectories/api", () => ({ listBatches: mocks.listDirectoryBatches }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceGetDataset: mocks.getDataset }) }));
 
 beforeEach(() => {
@@ -667,9 +665,8 @@ describe("MainLayout resizable navigation", () => {
 });
 
 describe("MainLayout document directory feature control", () => {
-  it("hides navigation, stops polling and redirects an open directory when disabled", async () => {
+  it("hides navigation and redirects an open directory when disabled", async () => {
     mocks.fetchPreferences.mockResolvedValue({ document_directories_enabled: true });
-    mocks.listDirectoryBatches.mockClear();
     render(<MemoryRouter initialEntries={["/document-directories"]}>
       <Routes><Route element={<MainLayout />}>
         <Route path="/document-directories" element={<div>Directory content</div>} />
@@ -679,19 +676,15 @@ describe("MainLayout document directory feature control", () => {
     expect(await screen.findByText("Directory content")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "layout.resourceLib" }));
     expect(await screen.findByText("directories.title")).toBeInTheDocument();
-    await waitFor(() => expect(mocks.listDirectoryBatches).toHaveBeenCalled());
-    const calls = mocks.listDirectoryBatches.mock.calls.length;
     act(() => window.dispatchEvent(new CustomEvent("lazymind:user-ui-preferences-changed", { detail: { document_directories_enabled: false } })));
     expect(await screen.findByText("Knowledge settings")).toBeInTheDocument();
     expect(screen.queryByText("Directory content")).not.toBeInTheDocument();
     expect(screen.queryByText("directories.title")).not.toBeInTheDocument();
-    expect(mocks.listDirectoryBatches).toHaveBeenCalledTimes(calls);
     act(() => window.dispatchEvent(new CustomEvent("lazymind:user-ui-preferences-changed", { detail: { document_directories_enabled: true } })));
     expect(await screen.findByText("directories.title")).toBeInTheDocument();
   });
-  it.each([undefined, false])("does not load directory content or batches when the preference is %s", async (enabled) => {
+  it.each([undefined, false])("does not load directory content when the preference is %s", async (enabled) => {
     mocks.fetchPreferences.mockResolvedValueOnce({ document_directories_enabled: enabled });
-    mocks.listDirectoryBatches.mockClear();
     render(<MemoryRouter initialEntries={["/document-directories/example"]}>
       <Routes><Route element={<MainLayout />}>
         <Route path="/document-directories/:id" element={<div>Directory content</div>} />
@@ -700,6 +693,5 @@ describe("MainLayout document directory feature control", () => {
     </MemoryRouter>);
     expect(await screen.findByText("Knowledge settings")).toBeInTheDocument();
     expect(screen.queryByText("Directory content")).not.toBeInTheDocument();
-    expect(mocks.listDirectoryBatches).not.toHaveBeenCalled();
   });
 });

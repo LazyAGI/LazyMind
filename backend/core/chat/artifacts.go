@@ -144,29 +144,12 @@ func legacyConversationArtifactConversationRoot(userID, conversationID string) s
 	)
 }
 
-func conversationAgentWorkspaceRoots(userID, conversationID string) []string {
-	root := strings.TrimSpace(os.Getenv("LAZYMIND_AGENTIC_WORKSPACE"))
-	if root == "" {
-		return nil
-	}
-	return []string{
-		filepath.Join(
-			root, conversationArtifactFileDirectory,
-			artifactScopeHash(userID), artifactScopeHash(conversationID),
-		),
-		filepath.Join(
-			root, conversationArtifactFileDirectory,
-			legacyArtifactScopeHash(userID), legacyArtifactScopeHash(conversationID),
-		),
-	}
-}
-
 func conversationArtifactRoots(userID, conversationID string) []string {
 	roots := []string{
 		conversationArtifactConversationRoot(userID, conversationID),
 		legacyConversationArtifactConversationRoot(userID, conversationID),
 	}
-	roots = append(roots, conversationAgentWorkspaceRoots(userID, conversationID)...)
+	roots = append(roots, artifact.ConversationAgentWorkspaceRoots(userID, conversationID)...)
 	seen := make(map[string]struct{}, len(roots))
 	unique := make([]string, 0, len(roots))
 	for _, root := range roots {

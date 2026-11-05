@@ -31,8 +31,8 @@ describe('Workflow Panel live update surface', () => {
   it('coalesces Workflow invalidations before reading authoritative state', () => {
     const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
     expect(taskStore).toContain('workflowRefreshTimer');
-    expect(taskStore).toContain('scheduleWorkflowSessionRefresh(conversationId');
-    expect(taskStore).toContain("type === 'workflow_completed' ? 800 : 100");
+    expect(taskStore).toMatch(/scheduleWorkflowSessionRefresh\(\s*conversationId/);
+    expect(taskStore).toMatch(/scheduleWorkflowSessionRefresh\(\s*conversationId,\s*100,?\s*\)/);
     expect(taskStore).not.toContain('window.setTimeout(refreshActiveWorkflowSession');
   });
 

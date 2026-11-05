@@ -19,7 +19,9 @@ class ScriptedMockModel:
 
 
 def _tool(tools, name):
-    return next(tool for tool in tools if tool.__name__ == name)
+    return next(tool for entry in tools
+                for tool in (entry['tools'] if isinstance(entry, dict) else [entry])
+                if tool.__name__ == name)
 
 
 def test_mock_model_runs_prepare_start_projection_and_advance_end_to_end(monkeypatch):

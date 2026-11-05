@@ -15,6 +15,14 @@ import (
 	workflowstore "lazymind/core/workflow/store"
 )
 
+type mockHandoffResult struct {
+	Kind               string          `json:"kind"`
+	Input              json.RawMessage `json:"input"`
+	Status             string          `json:"status"`
+	Feedback           string          `json:"feedback"`
+	ReflectionMarkdown string          `json:"reflection_markdown,omitempty"`
+}
+
 // SubmitMockHandoff is the downstream adapter for this release. It freezes the
 // actual request from the owned handoff; a model cannot rewrite the paper set.
 func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +42,7 @@ func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 404, "NOT_FOUND", "handoff not found")
 		return
 	}
-	var output json.RawMessage
+	var output mockHandoffResult
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var handoff orm.AcademicHandoff
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=?", mux.Vars(r)["handoff_id"], user).Take(&handoff).Error; err != nil {
@@ -45,11 +53,9 @@ func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if len(handoff.MockResultJSON) > 2 {
-			output = handoff.MockResultJSON
-			return nil
+			return json.Unmarshal(handoff.MockResultJSON, &output)
 		}
-		papers, err := handoffPapers(handoff)
-		if err != nil {
+		if _, err := handoffPapers(handoff); err != nil {
 			return err
 		}
 		reflection := ""
@@ -90,17 +96,16 @@ func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
 				return errors.New("心得与已保存的上一步产物不一致")
 			}
 		}
-		result := map[string]any{"kind": handoff.Kind, "input": json.RawMessage(handoff.InputJSON), "status": "awaiting_downstream", "feedback": "材料已接收，生成能力待对接。"}
-		if handoff.Kind == "ppt" {
-			result["papers"] = papers
-			result["reflection_markdown"] = reflection
+		output = mockHandoffResult{
+			Kind: handoff.Kind, Input: handoff.InputJSON,
+			Status: "awaiting_downstream", Feedback: "材料已接收，生成能力待对接。",
+			ReflectionMarkdown: reflection,
 		}
-		output = marshal(result)
-		return tx.Model(&handoff).Update("mock_result_json", output).Error
+		return tx.Model(&handoff).Update("mock_result_json", marshal(output)).Error
 	})
 	if err != nil {
 		replyError(w, 422, "MOCK_NOT_READY", err.Error())
 		return
 	}
-	common.ReplyJSON(w, json.RawMessage(output))
+	common.ReplyJSON(w, output)
 }

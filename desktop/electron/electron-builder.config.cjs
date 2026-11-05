@@ -298,6 +298,10 @@ async function signAndStageEmbeddedRuntime(context) {
       }
     });
     await Promise.all(workers);
+    const ghPath = path.join(runtimeRoot, "bin", "gh");
+    if (fs.existsSync(ghPath)) {
+      fs.writeFileSync(`${ghPath}.sha256`, `${createHash("sha256").update(fs.readFileSync(ghPath)).digest("hex")}\n`);
+    }
     const internalElectron = path.join(appPath, "Contents", "MacOS", "LazyMindApp");
     if (fs.existsSync(internalElectron)) {
       const args = [

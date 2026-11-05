@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -44,7 +45,44 @@ func humanCheckpoint(t *testing.T, final bool) (*orm.DB, string) {
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("status", "waiting").Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("controller_host", "lazymind").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentTask{InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), ID: "review-task", ConversationID: "batch-conversation", Params: json.RawMessage(`{"hand_off":true,"workflow_mode":"dynamic","session_id":"batch-session","step_id":"branch_b"}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
 	return db, hash
+}
+
+func TestDynamicNextStepDoesNotRequireApproval(t *testing.T) {
+	for _, action := range []string{"execute", "continuation"} {
+		t.Run(action, func(t *testing.T) {
+			db, hash := humanCheckpoint(t, false)
+			if err := db.Create(&orm.WorkflowApprovalPreference{UserID: "batch-user", WorkflowID: "batch-plugin", StepID: "*", ApprovalRequired: false}).Error; err != nil {
+				t.Fatal(err)
+			}
+			session, err := GetSession(t.Context(), db.DB, "batch-session")
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, err := projectSession(t.Context(), db.DB, session)
+			if err != nil || projected.Display.Status != "waiting" || projected.Display.Reason != "next_step_required" || projected.Display.ApprovalStepID != "" {
+				t.Fatalf("successful yield misreported: %+v %v", projected.Display, err)
+			}
+			if action == "execute" {
+				rec, _ := runBatchTransition(t, db, hash, "execute", []map[string]any{{"target_step_id": "branch_c", "task_id": "next-task"}})
+				if rec.Code != http.StatusOK {
+					t.Fatalf("next step rejected: %d %s", rec.Code, rec.Body.String())
+				}
+				step, err := GetLatestStep(t.Context(), db.DB, session.ID, "branch_c")
+				if err != nil || step.TaskID != "next-task" || step.Status != "queued" {
+					t.Fatalf("next step not dispatched: %+v %v", step, err)
+				}
+			} else if admitted, err := prepareContinuation(t.Context(), db.DB, session.ID); err != nil || !admitted {
+				t.Fatalf("continuation rejected: %v %v", admitted, err)
+			}
+		})
+	}
 }
 
 func TestNativeApprovalRequiresVersionedUserDecision(t *testing.T) {
@@ -198,6 +236,20 @@ func TestChatPauseScopesWorkflowAndProtectsLateDriverCallbacks(t *testing.T) {
 
 func TestPauseWaitsForEveryExecutorAndRejectsWrongReceipt(t *testing.T) {
 	db := newTestDB(t)
+	old := OnAcademicRuntimeChanged
+	t.Cleanup(func() { OnAcademicRuntimeChanged = old })
+	var observed []string
+	OnAcademicRuntimeChanged = func(ctx context.Context, db *gorm.DB, sessionID string) {
+		session, err := GetSession(ctx, db, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := displaystate.Read(db, *session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed = append(observed, view.Status)
+	}
 	if err := db.AutoMigrate(&orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}); err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +315,9 @@ func TestPauseWaitsForEveryExecutorAndRejectsWrongReceipt(t *testing.T) {
 	}
 	assertStatus("pausing")
 	assertClock(false)
+	if len(observed) != 1 || observed[0] != "running" {
+		t.Fatalf("partial stop published a pause: %v", observed)
+	}
 	if err := ConfirmNativeStop(ctx, db.DB, "b", "lease-b"); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +328,9 @@ func TestPauseWaitsForEveryExecutorAndRejectsWrongReceipt(t *testing.T) {
 	}
 	if assertClock(true) != frozenElapsed {
 		t.Fatal("duplicate stop acknowledgement advanced the clock")
+	}
+	if len(observed) != 2 || observed[1] != "paused" {
+		t.Fatalf("final stop must publish once after every executor exits: %v", observed)
 	}
 	s, _ = GetSession(ctx, db.DB, "pause")
 	view, err := displaystate.Read(db.DB, *s)

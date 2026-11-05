@@ -62,7 +62,8 @@ import {
 import { SlideThumb } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
-import { findWriterArtifactStream } from './writerArtifactStream';
+import { findWriterArtifactStream, shouldShowArtifactStream } from './writerArtifactStream';
+import { PaperAnalysisProgress } from './PaperAnalysisProgress';
 import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import type { WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
@@ -75,6 +76,7 @@ import { PreviewContent } from '../ArtifactPreview';
 import { useArtifactPreview } from '../ArtifactPreview/context';
 import { useWorkflowViewState } from './useWorkflowViewState';
 import { resolveWorkflowActiveTabIndex, resolveWorkflowRealTabIndex } from './workflowFollowMode';
+import { PaperAnalysisCharts } from './PaperAnalysisCharts';
 import './WorkflowPanel.scss';
 
 const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
@@ -237,19 +239,25 @@ function AutoSlotGrid({
     <div className='workflow-panel__auto-grid'>
       {Object.entries(bySlot).map(([slotId, revisions]) => (
         <div key={slotId} className='workflow-panel__slot-group'>
-          <span className='workflow-panel__slot-label'>{slotId}</span>
+          {revisions.every(revision => revision.content_type === 'image') && <span className='workflow-panel__slot-label'>{slotId}</span>}
           <div className='workflow-panel__slot-items'>
             {revisions.map((rev) => (
-              <SlotRenderer
+              <DocumentActionScope
                 key={`${rev.slot_id}-${rev.list_index ?? -1}`}
-                slot={rev}
-                sessionId={session.session_id}
-                slotId={slotId}
-                revisionCount={rev.revision_count}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                readOnly={readOnly}
-              />
+                inline={rev.content_type !== 'image'}
+                label={rev.caption || slotId}
+              >
+                <SlotRenderer
+                  slot={rev}
+                  workflowSession={session}
+                  sessionId={session.session_id}
+                  slotId={slotId}
+                  revisionCount={rev.revision_count}
+                  onRefresh={onRefresh}
+                  onReference={onReference}
+                  readOnly={readOnly}
+                />
+              </DocumentActionScope>
             ))}
           </div>
         </div>
@@ -593,18 +601,21 @@ function InnerTabsCell({
         return (
           <div key={slotId} role='tabpanel' hidden={i !== activeIdx}>
             {rev ? (
-              <SlotRenderer
-                slot={rev}
-                widget={def?.widget}
-                expectedType={def?.type}
-                sessionId={session.session_id}
-                slotId={slotId}
-                revisionCount={rev.revision_count}
-                onRefresh={onRefresh}
-                onReference={onReference}
-                hideImageMutationActions={hideImageMutationActions}
-                readOnly={readOnly}
-              />
+              <DocumentActionScope inline={def?.type !== 'image' && def?.widget?.widgetType !== 'html-slide'} showTitle={false} label={def?.label ?? slotId}>
+                <SlotRenderer
+                  slot={rev}
+                  workflowSession={session}
+                  widget={def?.widget}
+                  expectedType={def?.type}
+                  sessionId={session.session_id}
+                  slotId={slotId}
+                  revisionCount={rev.revision_count}
+                  onRefresh={onRefresh}
+                  onReference={onReference}
+                  hideImageMutationActions={hideImageMutationActions}
+                  readOnly={readOnly}
+                />
+              </DocumentActionScope>
             ) : (
               <div className='composite-cell__empty'>—</div>
             )}
@@ -937,32 +948,36 @@ function CompositeSlotGrid({
   ) => {
     const def = tab.slots.find((slot) => slot.id === slotId);
     const rev = findSlotRevision(session, tab, def?.id ?? slotId, sortOrder);
+    const documentActions = def?.type !== 'image' && def?.widget?.widgetType !== 'html-slide';
     if (!rev && hideEmptyCells) return null;
     return (
       <div key={key} className='composite-grid__cell' style={style}>
-        {def?.label && <span className='composite-grid__cell-label'>{def.label}</span>}
+        {def?.label && (!documentActions || !rev) && <span className='composite-grid__cell-label'>{def.label}</span>}
         {rev ? (
-          <SlotRenderer
-            slot={rev}
-            widget={def?.widget}
-            slideNavigation={paged ? {
-              index: rows.indexOf(activePage),
-              total: rows.length,
-              expanded: slideExpanded,
-              onExpandedChange: setSlideExpanded,
-              onChange: (index) => {
-                if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
-              },
-            } : undefined}
-            expectedType={def?.type}
-            sessionId={session.session_id}
-            slotId={slotId}
-            revisionCount={rev.revision_count}
-            onRefresh={onRefresh}
-            onReference={onReference}
-            hideImageMutationActions={hideImageMutationActions}
-            readOnly={readOnly}
-          />
+          <DocumentActionScope inline={documentActions} label={def?.label ?? slotId}>
+            <SlotRenderer
+              slot={rev}
+              workflowSession={session}
+              widget={def?.widget}
+              slideNavigation={paged ? {
+                index: rows.indexOf(activePage),
+                total: rows.length,
+                expanded: slideExpanded,
+                onExpandedChange: setSlideExpanded,
+                onChange: (index) => {
+                  if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
+                },
+              } : undefined}
+              expectedType={def?.type}
+              sessionId={session.session_id}
+              slotId={slotId}
+              revisionCount={rev.revision_count}
+              onRefresh={onRefresh}
+              onReference={onReference}
+              hideImageMutationActions={hideImageMutationActions}
+              readOnly={readOnly}
+            />
+          </DocumentActionScope>
         ) : (
           <div className='composite-grid__cell-empty'>—</div>
         )}
@@ -1058,10 +1073,14 @@ function CompositeSlotGrid({
       hideEmptyCells,
     );
     const rowTotalWeight = rowColumns.reduce((sum, column) => sum + column.weight, 0) || totalWeight;
+    const documentRow = rowColumns.every(column => {
+      const def = tab.slots.find(slot => slot.id === column.slotId);
+      return def && def.type !== 'image' && def.widget?.widgetType !== 'html-slide';
+    });
     return (
         <div
           key={sortOrder}
-          className={`composite-grid__row${formatCLayout && hasNestedContainer(formatCLayout) ? ' composite-grid__row--tree' : stackCompositeCells ? ' composite-grid__row--stack' : ''}`}
+          className={`composite-grid__row${documentRow ? ' composite-grid__row--documents' : ''}${formatCLayout && hasNestedContainer(formatCLayout) ? ' composite-grid__row--tree' : stackCompositeCells ? ' composite-grid__row--stack' : ''}`}
           onClick={() => onFocusSortOrder?.(sortOrder)}
           role='button'
           tabIndex={0}
@@ -1340,6 +1359,7 @@ function SortableImageList({
             >
               <SlotRenderer
                 slot={rev}
+                workflowSession={session}
                 cardMode
                 widget={slotDef.widget}
                 expectedType={slotDef.type}
@@ -1388,9 +1408,7 @@ function NamedTabSlot({
   readOnly,
   hideLabel = false,
   slotStepId,
-  primaryDocumentKey,
 }: {
-  primaryDocumentKey?: string;
   slotDef: SlotDef;
   hideLabel?: boolean;
   slotStepId?: string;
@@ -1407,6 +1425,7 @@ function NamedTabSlot({
   const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
+  const isPaperAnalysisCharts = session.workflow_id === 'paper-writing' && slotDef.id === 'analysis_chart';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
   const [nativeCollapsed, setContentCollapsed] = useState(slotDef.widget?.collapsed === true);
   const collapseWhenEmpty = compactEmptyStates && slotDef.widget?.collapseWhenEmpty !== false;
@@ -1414,24 +1433,36 @@ function NamedTabSlot({
     revisions.length > 0 || Boolean(artifactStream), collapseWhenEmpty, slotDef.widget?.collapsed === true,
   );
   const contentCollapsed = compactEmptyStates ? externalCollapsed : nativeCollapsed;
-  const prefersFullGridRow = slotDef.type === 'text' || slotDef.type === 'json'
+  const prefersFullGridRow = isPaperAnalysisCharts || slotDef.type === 'text' || slotDef.type === 'json'
     || slotDef.widget?.itemLayout === 'grid'
     || (slotDef.widget?.itemWidth ?? 0) >= 600
     || slotDef.widget?.collapsed === true;
   const isWriterDocument = slotDef.widget?.widgetType === 'writer-document';
-  const showStream = Boolean(artifactStream && (
-    revisions.length === 0 || artifactStream.state === 'streaming'
-  ));
+  const documentActions = slotDef.type !== 'image' && slotDef.widget?.widgetType !== 'html-slide';
+  const cardTitle = documentActions && !collapseWhenEmpty && slotDef.widget?.collapsed === undefined;
+  const showStream = shouldShowArtifactStream(artifactStream, revisions);
+
+  const paperPendingKey = session.workflow_id === 'paper_expansion'
+    ? ({ candidate_set: 'chat.paperSearching', screened_candidates: 'chat.paperScreening', relation_analysis: 'chat.paperVerifying',
+      expansion_report: 'chat.paperComposing' } as Record<string, string>)[slotDef.id]
+    : undefined;
+  const emptyStateKey = compactEmptyStates || paperPendingKey
+    ? workflowEmptyStateKey(session, slotStepId) : undefined;
+
+  const pendingMessageKey = emptyStateKey === 'chat.workflowEmptyRunning' && paperPendingKey
+    ? paperPendingKey : emptyStateKey;
 
   const content = showStream && artifactStream ? (
     <SlotMarkdownStream stream={artifactStream} />
   ) : revisions.length === 0 ? (
     <div
-      className='workflow-panel__slot-placeholder'
+      className={`workflow-panel__slot-placeholder${paperPendingKey ? ' workflow-panel__slot-placeholder--paper-status' : ''}`}
       aria-label={`${slotLabel} pending`}
     >
-      <span>{compactEmptyStates ? t(workflowEmptyStateKey(session, slotStepId)) : '—'}</span>
+      <span>{pendingMessageKey ? t(pendingMessageKey) : '—'}</span>
     </div>
+  ) : isPaperAnalysisCharts ? (
+    <PaperAnalysisCharts revisions={revisions} metadataSlots={session.slots ?? []} />
   ) : isImageList ? (
     <SortableImageList
       revisions={revisions}
@@ -1454,11 +1485,13 @@ function NamedTabSlot({
         aria-label={t('chat.workflowContentItemAria', { index: rev.sort_order ?? '' })}
       >
         <DocumentActionScope
-          inline={Boolean(rev.document) && `${rev.slot_id}:${rev.list_index ?? -1}` !== primaryDocumentKey}
+          inline={documentActions}
+          showTitle={cardTitle && !hideLabel}
           label={slotDef.cardinality === 'list' ? `${slotLabel} · ${(rev.list_index ?? 0) + 1}` : slotLabel}
         >
           <SlotRenderer
             slot={rev}
+            workflowSession={session}
             widget={slotDef.widget}
             originalFileSlot={
               slotDef.id === 'delivered_markdown'
@@ -1480,7 +1513,7 @@ function NamedTabSlot({
 
   return (
     <div className={`workflow-panel__named-slot${prefersFullGridRow ? ' workflow-panel__named-slot--full-grid-row' : ''}${isWriterDocument ? ' workflow-panel__named-slot--writer-document' : ''}`}>
-      {(!hideLabel || collapseWhenEmpty) && <div className='workflow-panel__slot-heading'>
+      {(!hideLabel || collapseWhenEmpty) && !cardTitle && <div className='workflow-panel__slot-heading'>
         {(slotDef.label || slotDef.id) && (
           <span className='workflow-panel__slot-label'>{slotLabel}</span>
         )}
@@ -1572,14 +1605,15 @@ function TabSlotGrid({
       tasks,
     )));
   };
-  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session));
-  const documents = visibleSlots.flatMap(slotDef => getTabSlotRevisions(session, tab, slotDef.id)
-    .filter(revision => revision.document)
-    .map(revision => ({ slotDef, revision })));
-  const primaryDocument = documents.find(({ slotDef, revision }) =>
-    !readOnly && !slotDef.widget?.readOnly && revision.document?.editable) ?? documents[0];
-  const primaryDocumentKey = primaryDocument
-    ? `${primaryDocument.revision.slot_id}:${primaryDocument.revision.list_index ?? -1}` : undefined;
+  const isPaperReportTab = session.workflow_id === 'paper_expansion'
+    && tab.slots.some(slot => slot.id === 'expansion_report');
+  const paperReportReady = isPaperReportTab
+    && getTabSlotRevisions(session, tab, 'expansion_report').some(revision => revision.selected);
+  const paperResultReady = isPaperReportTab
+    && getTabSlotRevisions(session, tab, 'expansion_result').some(revision => revision.selected);
+  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session))
+    .filter(slot => !isPaperReportTab || slot.id !== 'relation_analysis')
+    .filter(slot => slot.id !== 'expansion_result' || !isPaperReportTab || (!paperReportReady && paperResultReady));
   const process = tab.layout === 'list' ? tab.generation_process : undefined;
   const producerRunning = session.steps?.some(step => step.step_id === getTabStepId(tab)
     && step.validity !== 'stale' && (step.status === 'running' || step.status === 'pending'));
@@ -1609,10 +1643,9 @@ function TabSlotGrid({
     return (
       <NamedTabSlot
         key={slotDef.id}
-        primaryDocumentKey={primaryDocumentKey}
         slotDef={slotDef}
         slotStepId={resolveWorkflowTabStepId(tab, session.steps)}
-        hideLabel={visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
+        hideLabel={session.workflow_id === 'paper_expansion' || visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
           && slotDef.widget?.collapsed === undefined && slotDef.label === tab.label}
         revisions={revisions}
         artifactStream={artifactStream}
@@ -1700,7 +1733,8 @@ export function WorkflowPanel({
   const activeTabId = view.tabId;
   const followingEnabled = Boolean(ui.follow_mode?.default);
   const tabs = useMemo(() => filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material,
-    { steps: session?.steps, projection: session?.projection }), [ui, session?.slots, session?.steps, session?.projection]);
+    { steps: session?.steps, projection: session?.projection }, ui.hide_skipped_steps,
+    ui.hide_unstarted_steps && session?.workflow_mode === 'dynamic'), [ui, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
   const visibleActiveTabIdx = resolveWorkflowActiveTabIndex(tabs, activeTabId);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
@@ -1993,7 +2027,7 @@ export function WorkflowPanel({
   // transports the selected action; host delivery is not workflow execution.
   const sessionBusy = displayStatus === 'active' || displayStatus === 'loading';
   const approvalStepId = display?.status === 'waiting' ? display.approval_step_id : undefined;
-  const displayStatusKey = workflowDisplayLabel(display?.status);
+  const displayStatusKey = workflowDisplayLabel(display?.status, display?.reason);
   // A native Chat submission can outlive this panel (it moves to the new reply).
   // Keep controls locked until that turn ends, even before workflow events arrive.
   // Dirty editors do not disable retry — click flushes saves first, then proceeds.
@@ -2024,6 +2058,7 @@ export function WorkflowPanel({
       : undefined);
   const effectivePast = new Set(session.projection?.past ?? []);
   const rollbackSteps = showStepRollback ? session.steps!.filter((step, index, all) => effectivePast.has(step.step_id)
+    && !ui.task_presentation?.hidden_steps?.includes(step.step_id)
     && step.validity !== 'stale'
     && all.findIndex((candidate) => candidate.step_id === step.step_id && candidate.validity !== 'stale') === index) : [];
   const stepLabel = (stepId: string) => tabs.find(tab => getTabStepId(tab) === stepId)?.label
@@ -2198,7 +2233,7 @@ export function WorkflowPanel({
       actionPending,
     }}>
     <div
-      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded ? ' workflow-panel--embedded' : ''}${externalPresentation ? ' workflow-panel--external-presentation' : ''}`}
+      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded ? ' workflow-panel--embedded' : ''}${externalPresentation ? ' workflow-panel--external-presentation' : ''}${session.workflow_id === 'paper_expansion' ? ' workflow-panel--paper-expansion' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.workflowPanelTitle')}
     >
@@ -2428,15 +2463,20 @@ export function WorkflowPanel({
             tabs.map((tab, idx) => {
               const preview = externalPresentation && !anySlotEditing ? executionPreview(session, tab, activities) : session;
               const previewing = preview !== session;
+              const isPaperAnalysis = session.workflow_id === 'paper-writing'
+                && resolveWorkflowTabStepId(tab, session.steps) === 'data_analysis';
               return <div
                 key={tab.id}
                 id={`workflow-tab-panel-${tab.id}`}
                 role='tabpanel'
+                className={isPaperAnalysis ? 'workflow-panel__f4-tab' : undefined}
+                tabIndex={isPaperAnalysis ? 0 : undefined}
                 aria-labelledby={`workflow-tab-${session.session_id}-${tab.id}`}
                 hidden={Boolean(previewTarget) || idx !== visibleActiveTabIdx}
               >
                 <WorkflowPanelTabActiveContext.Provider value={idx === visibleActiveTabIdx}>
                 <SlotDownloadContext.Provider value={!previewing && workflowTabAllowsDownload(tab, idx, tabs.length)}>
+                  {isPaperAnalysis && <PaperAnalysisProgress session={session} active={idx === visibleActiveTabIdx} />}
                   {previewing && <div className="workflow-panel__preview-label" role="status">{t('chat.workflowGeneratingPreview')}</div>}
                   <TabSlotGrid
                     tab={executionPreviewTab(tab, session, preview)}

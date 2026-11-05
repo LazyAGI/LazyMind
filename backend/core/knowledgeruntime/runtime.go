@@ -52,6 +52,8 @@ func New(st state.Store, validate ValidateFunc, snapshot SnapshotFunc) (*Runtime
 
 const ttl = 5 * time.Minute
 
+var errConfirmationExpired = errors.New("confirmation expired")
+
 type PrepareRequest struct {
 	Execution       Execution       `json:"execution"`
 	WireName        string          `json:"wire_name"`
@@ -61,6 +63,7 @@ type PrepareRequest struct {
 	ArgumentsDigest string          `json:"arguments_digest,omitempty"`
 	Snapshot        string          `json:"snapshot,omitempty"`
 	ConfirmationID  string          `json:"confirmation_id,omitempty"`
+	Segment         int             `json:"steering_segment,omitempty"`
 }
 type Prepared struct {
 	OperationKey         string         `json:"operation_key"`
@@ -70,7 +73,23 @@ type Prepared struct {
 	ConfirmationID       string         `json:"confirmation_id"`
 	Status               string         `json:"status"`
 	Preview              map[string]any `json:"preview"`
+	Action               string         `json:"action"`
+	Segment              int            `json:"steering_segment"`
+	ExpiresAt            int64          `json:"expires_at"`
 }
+
+// Confirmation is the public transcript card for an operation prepared by Core.
+type Confirmation struct {
+	ID              string         `json:"confirmation_id"`
+	ArgumentsDigest string         `json:"arguments_digest"`
+	Snapshot        string         `json:"snapshot"`
+	Action          string         `json:"action"`
+	Status          string         `json:"status"`
+	Preview         map[string]any `json:"preview"`
+	Segment         int            `json:"steering_segment"`
+	ExpiresAt       int64          `json:"expires_at,omitempty"`
+}
+
 type pending struct {
 	Request          PrepareRequest
 	Prepared         Prepared
@@ -198,6 +217,9 @@ func canonicalArgs(raw json.RawMessage) (json.RawMessage, error) {
 	return bytes.TrimSpace(out.Bytes()), nil
 }
 func (r *Runtime) Prepare(ctx context.Context, req PrepareRequest) (Prepared, error) {
+	if req.Segment < 0 {
+		return Prepared{}, errors.New("invalid steering segment")
+	}
 	if readOnlyTool(req.WireName) {
 		return Prepared{}, errors.New("read-only tools do not create operations")
 	}
@@ -255,11 +277,11 @@ func (r *Runtime) Prepare(ctx context.Context, req PrepareRequest) (Prepared, er
 		title = "确认跨知识库移动"
 		impact = "每个独立根目录分别提交。成功项的源资源将不可见，目标获得新 ID 并按目标策略处理；未成功项保留源资源。"
 	}
-	out := Prepared{OperationKey: key, ArgumentsDigest: argsDigest, Snapshot: snapshot.Digest, RequiresConfirmation: risk, ConfirmationID: key, Status: status, Preview: map[string]any{"title": title, "description": description, "impact": impact, "resources": snapshot.PreviewResources, "destination": snapshot.Destination, "document_count": snapshot.DocumentCount, "folder_count": snapshot.FolderCount, "total_bytes": snapshot.TotalBytes}}
+	out := Prepared{OperationKey: key, ArgumentsDigest: argsDigest, Snapshot: snapshot.Digest, RequiresConfirmation: risk, ConfirmationID: key, Status: status, Action: req.WireName, Segment: req.Segment, ExpiresAt: r.now().Add(ttl).Unix(), Preview: map[string]any{"title": title, "description": description, "impact": impact, "resources": snapshot.PreviewResources, "destination": snapshot.Destination, "document_count": snapshot.DocumentCount, "folder_count": snapshot.FolderCount, "total_bytes": snapshot.TotalBytes}}
 	if snapshot.Creation != nil {
 		out.Preview["creation"] = snapshot.Creation
 	}
-	saved := pending{Request: req, Prepared: out, Expires: r.now().Add(ttl).Unix(), UserID: id.Principal.UserID, TenantID: id.Principal.TenantID}
+	saved := pending{Request: req, Prepared: out, Expires: out.ExpiresAt, UserID: id.Principal.UserID, TenantID: id.Principal.TenantID}
 	raw, _ := json.Marshal(saved)
 	created, err := r.state.SetNX(ctx, "knowledge/prepare/"+key, raw, ttl)
 	if err != nil {
@@ -278,7 +300,7 @@ func (r *Runtime) load(ctx context.Context, id string) (pending, error) {
 	}
 	e = json.Unmarshal(raw, &p)
 	if e == nil && p.Expires <= r.now().Unix() {
-		e = errors.New("confirmation expired")
+		e = errConfirmationExpired
 	}
 	return p, e
 }
@@ -307,10 +329,11 @@ func (r *Runtime) statusForIdentity(ctx context.Context, e Execution, id string,
 		if err != nil && !state.IsMissing(err) {
 			return Prepared{}, err
 		}
-		if string(decision) == "approved" {
+		switch string(decision) {
+		case "approved":
 			out.Status = "allowed"
-		} else if string(decision) == "rejected" {
-			out.Status = "rejected"
+		case "rejected", "superseded":
+			out.Status = string(decision)
 		}
 	}
 	return out, nil
@@ -329,41 +352,70 @@ func (r *Runtime) Decide(ctx context.Context, user, tenant, id, decision, argsDi
 	if !p.Prepared.RequiresConfirmation {
 		return errors.New("operation does not require confirmation")
 	}
-	previous, readErr := r.state.Get(ctx, "knowledge/decision/"+id)
-	if readErr != nil && !state.IsMissing(readErr) {
-		return readErr
+	recorded, err := r.recordDecision(ctx, p, decision)
+	if err != nil {
+		return err
 	}
-	if readErr == nil {
-		if string(previous) != decision {
-			return errors.New("decision already made")
+	if recorded != decision {
+		if recorded == "superseded" {
+			return errors.New("confirmation superseded by guidance")
 		}
-	} else {
-		if _, err = r.validate(ctx, p.Request.Execution); err != nil {
-			return err
-		}
-		won, err := r.state.SetNX(ctx, "knowledge/decision/"+id, []byte(decision), time.Until(time.Unix(p.Expires, 0)))
-		if err != nil {
-			return err
-		}
-		if !won {
-			old, err := r.state.Get(ctx, "knowledge/decision/"+id)
-			if err != nil {
-				return err
-			}
-			if string(old) != decision {
-				return errors.New("decision already made")
-			}
-		}
-	}
-	// A recorded decision is immutable. Retry its history projection even if
-	// the operation has completed since the first response was lost.
-	if r.decisionHook != nil {
-		return r.decisionHook(ctx, p.Request.Execution, p.Prepared, decision)
+		return errors.New("decision already made")
 	}
 	return nil
 }
+
+// Supersede competes with approval for the same immutable decision slot. An
+// approval already recorded remains authorized, even if its tool has yet to run.
+func (r *Runtime) Supersede(ctx context.Context, e Execution, id string) (string, error) {
+	p, err := r.load(ctx, id)
+	if err != nil {
+		if state.IsMissing(err) || errors.Is(err, errConfirmationExpired) {
+			return "expired", nil
+		}
+		return "", err
+	}
+	if p.Request.Execution != e || e.TaskID != "" || !p.Prepared.RequiresConfirmation {
+		return "", errors.New("confirmation does not belong to this chat run")
+	}
+	return r.recordDecision(ctx, p, "superseded")
+}
+
+func (r *Runtime) recordDecision(ctx context.Context, p pending, decision string) (string, error) {
+	key := "knowledge/decision/" + p.Prepared.ConfirmationID
+	previous, err := r.state.Get(ctx, key)
+	if state.IsMissing(err) {
+		if _, err := r.validate(ctx, p.Request.Execution); err != nil {
+			return "", err
+		}
+		remaining := time.Unix(p.Expires, 0).Sub(r.now())
+		if remaining <= 0 {
+			return "", errConfirmationExpired
+		}
+		won, err := r.state.SetNX(ctx, key, []byte(decision), remaining)
+		if err != nil {
+			return "", err
+		}
+		if won {
+			previous = []byte(decision)
+		} else if previous, err = r.state.Get(ctx, key); err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
+	}
+	recorded := string(previous)
+	// Retry the projection if the first response was lost after recording.
+	if recorded == decision && r.decisionHook != nil {
+		if err := r.decisionHook(ctx, p.Request.Execution, p.Prepared, recorded); err != nil {
+			return "", err
+		}
+	}
+	return recorded, nil
+}
+
 func readOnlyTool(name string) bool {
-	return name == "knowledge.list" || name == "knowledge.document.list" || name == "knowledge.document.aggregate"
+	return name == "knowledge.list" || name == "knowledge.document.list" || name == "knowledge.document.aggregate" || name == capability.PaperSourcesTool
 }
 
 // authorizeOperation checks a write without issuing another credential.
@@ -437,7 +489,7 @@ func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, na
 		return capability.InvocationContext{}, errors.New("tool not allowed")
 	}
 	if readOnlyTool(name) {
-		return capability.InvocationContext{Principal: id.Principal, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
+		return capability.InvocationContext{Principal: id.Principal, AllowedDatasetIDs: id.AllowedDatasetIDs, ConversationID: execution.ConversationID, HistoryID: execution.HistoryID}, nil
 	}
 	token, _ := metadata["dispatch_token"].(string)
 	claims, err := r.verify(token, "knowledge-dispatch")
@@ -458,7 +510,7 @@ func (r *Runtime) AuthorizeDispatch(ctx context.Context, execution Execution, na
 	if _, _, err = r.authorizeOperation(ctx, req, id); err != nil {
 		return capability.InvocationContext{}, err
 	}
-	return capability.InvocationContext{ExecutionKey: claims.ConfirmationID, Principal: id.Principal, OperationKey: p.Prepared.OperationKey, ExpectedSnapshot: p.Prepared.Snapshot, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
+	return capability.InvocationContext{ConversationID: execution.ConversationID, HistoryID: execution.HistoryID, ExecutionKey: claims.ConfirmationID, Principal: id.Principal, OperationKey: p.Prepared.OperationKey, ExpectedSnapshot: p.Prepared.Snapshot, AllowedDatasetIDs: id.AllowedDatasetIDs}, nil
 }
 
 func argumentsDigest(args []byte) string {

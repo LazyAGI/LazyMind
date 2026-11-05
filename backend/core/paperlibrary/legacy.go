@@ -431,7 +431,7 @@ func convertSnapshot(ctx context.Context, tx *gorm.DB, ds orm.Dataset, user stri
 				return errors.New("paper folder does not exist")
 			}
 		}
-		row = orm.PaperLibraryEntry{DatasetID: ds.ID, ID: p.ID, AcademicWorkID: work.ID, FolderID: folder, Status: p.Status, TagsJSON: rawJSON(p.Tags), MetadataJSON: rawJSON(p.Metadata), Source: p.Source, ImportMethod: defaultText(p.ImportMethod, "zotero"), SourceURL: p.SourceURL, ArxivVersion: p.ArxivVersion, Revision: 1, CreatedAt: now, UpdatedAt: now}
+		row = orm.PaperLibraryEntry{DatasetID: ds.ID, ID: p.ID, AcademicWorkID: work.ID, FolderID: folder, TagsJSON: rawJSON(p.Tags), MetadataJSON: rawJSON(p.Metadata), Source: p.Source, ImportMethod: defaultText(p.ImportMethod, "zotero"), SourceURL: p.SourceURL, ArxivVersion: p.ArxivVersion, Revision: 1, CreatedAt: now, UpdatedAt: now}
 		if hiddenIDs[p.ID] {
 			row.RemovedAt = &now
 		}
@@ -440,8 +440,8 @@ func convertSnapshot(ctx context.Context, tx *gorm.DB, ds orm.Dataset, user stri
 		}
 		aliases[p.ID] = p.ID
 		workIDs[p.ID] = work.ID
-		if p.Important && user != "" {
-			mark := orm.AcademicUserPaperState{UserID: user, DatasetID: ds.ID, PaperID: work.ID, IsImportant: true, UpdatedAt: now}
+		if user != "" && (p.Important || p.Status == "reading" || p.Status == "read") {
+			mark := orm.AcademicUserPaperState{UserID: user, DatasetID: ds.ID, PaperID: work.ID, IsImportant: p.Important, ReadingStatus: p.Status, UpdatedAt: now}
 			if err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&mark).Error; err != nil {
 				return err
 			}

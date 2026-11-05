@@ -47,8 +47,8 @@ export interface RecoverySkillPage extends RecoveryPage<RecoverySkillItem> {
   categories: string[];
 }
 
-export async function listArchiveFolders(signal?: AbortSignal): Promise<ArchiveFolderList> {
-  const response = await coreApi.apiCoreConversationArchiveFoldersGet({ signal });
+export async function listArchiveFolders(signal?: AbortSignal, kind?: RecoveryKind): Promise<ArchiveFolderList> {
+  const response = await coreApi.apiCoreConversationArchiveFoldersGet({ kind }, { signal });
   return {
     folders: response.data.folders || [],
     unfiledDialogCount: response.data.unfiled_dialog_count || 0,
@@ -57,9 +57,9 @@ export async function listArchiveFolders(signal?: AbortSignal): Promise<ArchiveF
   };
 }
 
-export async function createArchiveFolder(name: string): Promise<ConversationArchiveFolder> {
+export async function createArchiveFolder(name: string, kind: RecoveryKind = "dialog"): Promise<ConversationArchiveFolder> {
   const response = await coreApi.apiCoreConversationArchiveFoldersPost({
-    conversationArchiveFolderRequest: { name },
+    conversationArchiveFolderRequest: { name, kind },
   }, { silentError: true } as never);
   return response.data.folder;
 }

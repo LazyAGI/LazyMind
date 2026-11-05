@@ -58,10 +58,11 @@ export default function ArchiveConversationModal({
     setFolderId("unfiled");
     setFolderError(false);
     setFolderLoading(true);
-    void listArchiveFolders(controller.signal)
+    void listArchiveFolders(controller.signal, itemKind)
       .then((result) => {
+        if (controller.signal.aborted) return;
         setFolders(result.folders);
-        setUnfiledTotalCount(result.unfiledTotalCount);
+        setUnfiledTotalCount(itemKind === "task" ? result.unfiledTaskCount : result.unfiledDialogCount);
       })
       .catch((error) => {
         if (error?.name !== "CanceledError" && error?.name !== "AbortError") {
@@ -72,7 +73,7 @@ export default function ArchiveConversationModal({
         if (!controller.signal.aborted) setFolderLoading(false);
       });
     return () => controller.abort();
-  }, [open, revision]);
+  }, [itemKind, open, revision]);
 
   const handleFolderCreated = (folder: ConversationArchiveFolder) => {
     setFolders((current) => current.some((item) => item.id === folder.id)
@@ -142,7 +143,7 @@ export default function ArchiveConversationModal({
       folderLoadError={folderError}
       submitting={loading}
       submitDisabled={!ids.length || submitDisabled}
-      createFolder={createArchiveFolder}
+      createFolder={(name) => createArchiveFolder(name, itemKind)}
       onFolderCreated={handleFolderCreated}
       onSelectFolder={setFolderId}
       onRetry={() => setRevision((value) => value + 1)}

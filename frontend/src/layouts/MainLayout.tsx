@@ -41,8 +41,6 @@ import {
 import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
-import { hasUnreadDirectoryResults } from "@/modules/documentDirectories/batches";
-import { listBatches as listDirectoryBatches } from "@/modules/documentDirectories/api";
 import { fetchUserUiPreferences, USER_UI_PREFERENCES_CHANGED_EVENT } from "@/modules/user/uiPreferencesApi";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { isVocabularyEnabled } from "@/runtime/mode";
@@ -171,21 +169,6 @@ export default function MainLayout() {
     window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed);
     return () => { disposed = true; window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed); };
   }, [isLoggedIn, directoryUser]);
-  const [directoryUnread, setDirectoryUnread] = useState(false);
-  useEffect(() => {
-    let disposed = false;
-    setDirectoryUnread(false);
-    if (!directoriesEnabled) return;
-    const refresh = async () => {
-      try {
-        const batches = await listDirectoryBatches();
-        if (!disposed) setDirectoryUnread(hasUnreadDirectoryResults(batches));
-      } catch { /* Existing request layer handles connectivity; keep saved results unread. */ }
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 30000);
-    return () => { disposed = true; window.clearInterval(timer); };
-  }, [directoriesEnabled, directoryUser, pathname]);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
@@ -309,7 +292,7 @@ export default function MainLayout() {
   const showSettingsTrigger =
     settingsMenuItems.length > 0 || !hideLocalUserControls;
   const resourceNavItems = [
-    ...(directoriesEnabled ? [{ key: "/document-directories", label: t("directories.title") + (directoryUnread ? " •" : ""), icon: <BookOutlined /> }] : []),
+    ...(directoriesEnabled ? [{ key: "/document-directories", label: t("directories.title"), icon: <BookOutlined /> }] : []),
     {
       key: "/lib/knowledge",
       label: t("layout.knowledgeBase"),

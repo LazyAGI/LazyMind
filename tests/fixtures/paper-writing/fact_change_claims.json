@@ -1,0 +1,75 @@
+{
+  "origin": "Unchanged individual proposals from actual MiniMax response; only source excerpts retained for portable unit tests.",
+  "claims": [
+    {
+      "category": "numbers",
+      "location": "第2段",
+      "quote": "P04 正文从 113.395 秒变为 137.286 秒，增加 23.891 秒，约慢 21.07%。",
+      "asserted_text": "21.07%",
+      "operation": "percentage",
+      "sources": [
+        {
+          "path": "/evidence",
+          "quote": "| P04 | 113.395，其中失败77.086 | 137.286，其中失败60.884 | 218.316，其中失败81.318 | 212.588，其中失败62.108 |",
+          "value_text": "137.286",
+          "column": null,
+          "where": {}
+        },
+        {
+          "path": "/evidence",
+          "quote": "| P04 | 113.395，其中失败77.086 | 137.286，其中失败60.884 | 218.316，其中失败81.318 | 212.588，其中失败62.108 |",
+          "value_text": "113.395",
+          "column": null,
+          "where": {}
+        }
+      ]
+    },
+    {
+      "category": "numbers",
+      "location": "第3段",
+      "quote": "平均耗时从 22.33 秒降到 19.25 秒，而总 token 从 31,576 增到 34,840，增加 3,264，约 10.34%。",
+      "asserted_text": "10.34%",
+      "operation": "percentage",
+      "sources": [
+        {
+          "path": "/evidence",
+          "quote": "| 全部题目总token，含失败、补齐和回退 | 31,576 | 34,840 |",
+          "value_text": "34,840",
+          "column": null,
+          "where": {}
+        },
+        {
+          "path": "/evidence",
+          "quote": "| 全部题目总token，含失败、补齐和回退 | 31,576 | 34,840 |",
+          "value_text": "31,576",
+          "column": null,
+          "where": {}
+        }
+      ]
+    },
+    {
+      "category": "numbers",
+      "location": "第4段",
+      "quote": "S04 缓存命中率从 39.0% 变为 50.4%，提高 11.4 个百分点，相对增加约 29.23%。",
+      "asserted_text": "29.23%",
+      "operation": "percentage",
+      "sources": [
+        {
+          "path": "/evidence",
+          "quote": "| 缓存命中率 | 39.0%→50.4%，增加11.4个百分点 |",
+          "value_text": "50.4%",
+          "column": null,
+          "where": {}
+        },
+        {
+          "path": "/evidence",
+          "quote": "| 缓存命中率 | 39.0%→50.4%，增加11.4个百分点 |",
+          "value_text": "39.0%",
+          "column": null,
+          "where": {}
+        }
+      ]
+    }
+  ],
+  "evidence": "| P04 | 113.395，其中失败77.086 | 137.286，其中失败60.884 | 218.316，其中失败81.318 | 212.588，其中失败62.108 |\n| 全部题目总token，含失败、补齐和回退 | 31,576 | 34,840 |\n| 缓存命中率 | 39.0%→50.4%，增加11.4个百分点 |"
+}

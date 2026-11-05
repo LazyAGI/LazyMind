@@ -635,10 +635,11 @@ CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     user_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     normalized_name VARCHAR(255) NOT NULL,
+    is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    CONSTRAINT uk_conversation_archive_folders_user_name
-        UNIQUE (user_id, normalized_name)
+    CONSTRAINT uk_conversation_archive_folders_user_kind_name
+        UNIQUE (user_id, is_task_conv, normalized_name)
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
     ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
@@ -716,10 +717,11 @@ CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     user_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     normalized_name VARCHAR(255) NOT NULL,
+    is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    CONSTRAINT uk_conversation_archive_folders_user_name
-        UNIQUE (user_id, normalized_name)
+    CONSTRAINT uk_conversation_archive_folders_user_kind_name
+        UNIQUE (user_id, is_task_conv, normalized_name)
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
     ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
@@ -2885,6 +2887,9 @@ CREATE TABLE user_notification_preferences (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 CREATE TABLE task_notifications (
+ target_json JSON NOT NULL DEFAULT '{}',
+ read_at TIMESTAMP,
+
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     task_id VARCHAR(36) NOT NULL,
@@ -2930,6 +2935,9 @@ CREATE TABLE user_notification_preferences (
     updated_at DATETIME NOT NULL
 );
 CREATE TABLE task_notifications (
+ target_json JSON NOT NULL DEFAULT '{}',
+ read_at TIMESTAMP,
+
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     task_id VARCHAR(36) NOT NULL,
@@ -3370,9 +3378,16 @@ CREATE TABLE academic_user_paper_states (
   dataset_id varchar(255) NOT NULL,
   paper_id varchar(36) NOT NULL,
   is_important BOOLEAN NOT NULL DEFAULT false,
+  reading_status VARCHAR(16) NOT NULL DEFAULT 'unread',
   PRIMARY KEY (user_id, dataset_id, paper_id)
 );
 CREATE TABLE academic_expansions (
+ preparation_json JSON NOT NULL DEFAULT '{}',
+ preparation_revision BIGINT NOT NULL DEFAULT 0,
+ budget_mode VARCHAR(16) NOT NULL DEFAULT 'balanced',
+ reading_json JSON NOT NULL DEFAULT '{}',
+ report_json JSON NOT NULL DEFAULT '{}',
+
  discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
  seed_snapshot_json JSON NOT NULL DEFAULT '[]',
  discovery_json JSON NOT NULL DEFAULT '[]',
@@ -3380,7 +3395,7 @@ CREATE TABLE academic_expansions (
   id varchar(36) NOT NULL,
   user_id varchar(255) NOT NULL,
   dataset_id varchar(255) NOT NULL,
-  conversation_id varchar(36) NOT NULL,
+  conversation_id varchar(36) DEFAULT NULL,
   request_key varchar(128) NOT NULL,
   request_owner varchar(255) NOT NULL,
   title text NOT NULL,
@@ -3400,6 +3415,8 @@ CREATE UNIQUE INDEX idx_academic_expansions_conversation_id ON academic_expansio
 CREATE UNIQUE INDEX uk_academic_expansion_request ON academic_expansions(request_key, request_owner);
 CREATE INDEX idx_academic_expansions_deleted_at ON academic_expansions(deleted_at);
 CREATE TABLE academic_expansion_rounds (
+ report_json JSON NOT NULL DEFAULT '{}',
+
  discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
   id varchar(36) NOT NULL,
   expansion_id varchar(36) NOT NULL,
@@ -3434,6 +3451,8 @@ CREATE TABLE academic_handoffs (
 CREATE UNIQUE INDEX uk_academic_handoff ON academic_handoffs(user_id, request_key);
 CREATE INDEX idx_academic_handoffs_expansion_id ON academic_handoffs(expansion_id);
 CREATE TABLE academic_paper_contents (
+ quality_json JSON NOT NULL DEFAULT '{}',
+
  source_provider VARCHAR(64) NOT NULL DEFAULT '',
  source_kind VARCHAR(16) NOT NULL DEFAULT 'legacy',
  source_version VARCHAR(64) NOT NULL DEFAULT '',
@@ -3472,7 +3491,7 @@ CREATE TABLE paper_library_folders (
 CREATE INDEX idx_library_folder_parent ON paper_library_folders(dataset_id,parent_id);
 CREATE TABLE paper_library_entries (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, academic_work_id VARCHAR(36) NOT NULL,
- folder_id VARCHAR(255) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'unread',
+ folder_id VARCHAR(255) NOT NULL DEFAULT '',
  tags_json JSON NOT NULL, metadata_json JSON NOT NULL, source VARCHAR(32) NOT NULL DEFAULT 'unknown',
  import_method VARCHAR(32) NOT NULL DEFAULT '', source_url TEXT NOT NULL DEFAULT '', arxiv_version VARCHAR(64) NOT NULL DEFAULT '',
  revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0), removed_at TIMESTAMP,

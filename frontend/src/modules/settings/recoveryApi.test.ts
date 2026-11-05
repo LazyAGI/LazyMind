@@ -1,6 +1,6 @@
 import type { InternalAxiosRequestConfig } from "axios";
 import { beforeEach, expect, it, vi } from "vitest";
-import { archiveConversation, unarchiveConversation } from "./recoveryApi";
+import { archiveConversation, unarchiveConversation, listArchiveFolders, createArchiveFolder } from "./recoveryApi";
 
 const mocks = vi.hoisted(() => ({ adapter: vi.fn() }));
 vi.mock("@/components/request", async () => {
@@ -37,4 +37,11 @@ it("adds a silent conditional undo body while preserving ordinary manual restore
   expect(manual.silentError).toBeUndefined();
   await archiveConversation("c", null);
   expect(JSON.parse(mocks.adapter.mock.calls[2][0].data)).toEqual({ folder_id: null });
+});
+
+it("sends the archive kind for folder listing and creation", async () => {
+  await listArchiveFolders(undefined, "task");
+  expect(mocks.adapter.mock.calls[0][0].url).toContain("kind=task");
+  await createArchiveFolder("Research", "task");
+  expect(JSON.parse(mocks.adapter.mock.calls[1][0].data)).toEqual({ name: "Research", kind: "task" });
 });

@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import CaseCard from "./CaseCard";
-import { matchesShowcaseEntryType, type ShowcaseCase, type ShowcaseEntryType } from "./api";
+import type { ShowcaseCase } from "./api";
+import { matchesShowcaseEntryType, type ShowcaseEntryType } from "./classification";
 import "./index.scss";
 
 interface FeaturedCasesProps {
@@ -21,7 +22,7 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
     return items
       .filter((item) => item.featured && matchesShowcaseEntryType(item.type, type))
       .sort((left, right) => left.featured_order - right.featured_order)
-      .slice(0, type === "chat" ? undefined : FEATURED_HOME_LIMIT);
+      .slice(0, FEATURED_HOME_LIMIT);
   }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {
@@ -32,7 +33,7 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
     <section className="showcase-featured" aria-labelledby="showcase-featured-title">
       <div className="showcase-featured-heading">
         <h2 id="showcase-featured-title">{t("showcase.featuredTitle")}</h2>
-        <Link className="showcase-more-link" to="/agent/chat/cases">
+        <Link className="showcase-more-link" to={`/agent/chat/cases?showcase_entry=${type}`}>
           {t("showcase.viewMore")} <span aria-hidden="true">→</span>
         </Link>
       </div>
@@ -43,7 +44,7 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
       ) : (
         <div className="showcase-grid showcase-featured-grid">
           {featuredItems.map((item) => (
-            <CaseCard key={item.id} item={item} onTry={onTry} />
+            <CaseCard key={item.id} item={item} onTry={onTry} entryType={type} />
           ))}
         </div>
       )}

@@ -1,0 +1,76 @@
+{
+  "step": "reading_reflection",
+  "input": {
+    "topic": "方法得分比较",
+    "request": "",
+    "constraints": {
+      "paper_language": "zh-CN",
+      "word_target": null,
+      "paper_type": "research",
+      "citation_style": "GB/T 7714",
+      "focus": []
+    },
+    "papers": [
+      {
+        "id": "P1",
+        "title": "方法比较示例",
+        "text": "比较方法时应报告评价指标与实验条件。",
+        "url": null,
+        "authors": [],
+        "year": null,
+        "doi": null,
+        "content_type": "excerpt",
+        "source": "upload",
+        "truncated": false
+      }
+    ],
+    "evidence": {
+      "summary": "评价方法需要说明指标及实验条件。",
+      "items": [
+        {
+          "id": "E1",
+          "paper_id": "P1",
+          "claim": "方法比较应明确指标和实验条件。",
+          "quote": "比较方法时应报告评价指标与实验条件。",
+          "locator": null,
+          "relation": "background"
+        }
+      ],
+      "gaps": [
+        "现有材料未给出重复实验结果。"
+      ],
+      "limitations": [
+        "仅提供一段节选。"
+      ]
+    }
+  },
+  "output": {
+    "is_demo": true,
+    "reflection": {
+      "summary": "评价方法时要同时关注指标与实验条件。",
+      "paper_ids": [
+        "P1"
+      ],
+      "key_points": [
+        {
+          "statement": "报告结果时说明指标及条件。",
+          "source_refs": [
+            "P1"
+          ]
+        }
+      ],
+      "comparisons": [],
+      "inspirations": [
+        {
+          "statement": "本研究应补充重复实验。",
+          "source_refs": [
+            "P1"
+          ]
+        }
+      ],
+      "limitations": [
+        "单篇节选，不代表完整论文内容。"
+      ]
+    }
+  }
+}

@@ -18,6 +18,8 @@ const DefaultMaxRequestBodyBytes = 64 << 10
 
 type HandlerConfig struct {
 	ManagementOnly      bool
+	PaperSources        func(context.Context, capability.InvocationContext, capability.PaperSourcesInput) (capability.PaperSourcesResult, error)
+	ImportPapers        func(context.Context, capability.InvocationContext, capability.PaperImportInput) (capability.PaperImportResult, error)
 	AuthorizeCall       func(context.Context, *mcp.CallToolRequest) (capability.InvocationContext, error)
 	Verifier            auth.TokenVerifier
 	MaxRequestBodyBytes int64
@@ -44,7 +46,7 @@ func NewHandler(service *capability.Service, config HandlerConfig) (http.Handler
 	}
 	server := newServer(service)
 	if config.ManagementOnly {
-		server = newManagementServer(service)
+		server = newManagementServer(service, config)
 	}
 	if config.AuthorizeCall != nil {
 		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {

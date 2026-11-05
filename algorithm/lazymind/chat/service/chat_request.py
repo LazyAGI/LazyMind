@@ -80,6 +80,7 @@ class ChatAgentOptions(BaseModel):
 
 
 class ChatWorkflowOptions(BaseModel):
+    clarification: Optional[Dict[str, Any]] = None
     enable_workflow: Optional[bool] = None
     workflow_context: Optional[Dict[str, Any]] = None
     catalog: List[Dict[str, Any]] = Field(default_factory=list)

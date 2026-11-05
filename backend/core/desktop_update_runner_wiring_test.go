@@ -21,7 +21,7 @@ func TestDesktopUpdateRegistersBackgroundRunnerOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"runner =", "paperChatRunner :=", "directoryRunner :="} {
+	for _, name := range []string{"runner =", "paperChatRunner :=", "paperPreparationRunner :=", "directoryRunner :="} {
 		if !strings.Contains(string(data), name+" updateControl.startRunner(") {
 			t.Errorf("%s must start through the update-aware owner registration", name)
 		}

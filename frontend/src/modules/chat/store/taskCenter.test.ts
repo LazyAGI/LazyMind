@@ -433,6 +433,17 @@ describe("task center workflow events", () => {
       store.unsubscribeTask("model-task");
     }
   });
+
+  it("keeps actual progress and the waiting phase when revision requests input", () => {
+    const store = useTaskCenterStore.getState();
+    store.upsertTask("conversation-1", { task_id: "revision", status: "running", progress_pct: 7 });
+    store.applyTaskEvent("conversation-1", "revision", {
+      type: "done", status: "interrupted", current_phase: "awaiting_input", summary: "请选择意见",
+    });
+    expect(store.getTasks("conversation-1")[0]).toMatchObject({
+      status: "interrupted", progress_pct: 7, current_phase: "awaiting_input", summary: "请选择意见",
+    });
+  });
   it.each(["ordinary", "developer"] as const)("keeps logical panel identity separate from each turn's immutable delivery in %s mode", async (viewMode) => {
     useTaskCenterStore.setState({ viewMode });
     const base = { artifact_id: "receipt", v2_artifact_id: "logical", conversation_id: "conv", history_id: "h1", producer_type: "main_agent", slot: "a", content_type: "text", seq: 1, value: { text: "one" } };
@@ -484,6 +495,102 @@ describe("task center workflow events", () => {
     }
     vi.useRealTimers();
   });
+
+  it("keeps live artifact previews across task refreshes and stale snapshots", async () => {
+    const store = useTaskCenterStore.getState();
+    store.upsertTask("conversation-1", { task_id: "stream-task", status: "running" });
+    store.applyTaskEvent("conversation-1", "stream-task", {
+      type: "artifact_stream_start", slot: "experiment_code", content_type: "text/markdown",
+      stream_id: "code-preview", chunk_index: 1,
+    });
+    store.applyTaskEvent("conversation-1", "stream-task", {
+      type: "artifact_stream", stream_id: "code-preview", chunk_index: 2, delta: "partial code",
+    });
+    requestHarness.listConversationTasks.mockResolvedValue({ data: { tasks: [
+      { task_id: "stream-task", status: "running", steps: [] },
+    ] } });
+    await store.loadConversationTasks("conversation-1");
+    store.upsertTask("conversation-1", { task_id: "stream-task", artifact_streams: [] });
+    let stream = store.getTasks("conversation-1")[0].artifact_streams[0];
+    expect(stream.content).toBe("partial code");
+    store.upsertTask("conversation-1", { task_id: "stream-task", artifact_streams: [
+      { ...stream, chunk_index: 1, content: "stale" },
+    ] });
+    store.applyTaskEvent("conversation-1", "stream-task", {
+      type: "artifact_stream", stream_id: "code-preview", chunk_index: 3, delta: " continued",
+    });
+    stream = store.getTasks("conversation-1")[0].artifact_streams[0];
+    expect(stream.content).toBe("partial code continued");
+    expect(stream.chunk_index).toBe(3);
+  });
+
+  it.each(["ended", "aborted", "ready"] as const)("never reopens a %s preview on late chunks or replayed starts", (state) => {
+    const store = useTaskCenterStore.getState();
+    const stream = { task_id: "paper", slot: "revise_document_document", content_type: "text/markdown",
+      stream_id: "preview", chunk_index: 10, content: "完整", deltas: ["完", "整"], state,
+      final_content: state === "ready" ? "已发布正文" : undefined };
+    store.upsertTask("conversation-1", { task_id: "paper", status: "running", artifact_streams: [stream] });
+    store.applyTaskEvent("conversation-1", "paper", { type: "artifact_stream_start", ...stream, chunk_index: 1 });
+    store.applyTaskEvent("conversation-1", "paper", {
+      type: "artifact_stream", stream_id: "preview", chunk_index: 11, delta: "迟到块",
+    });
+    let current = store.getTasks("conversation-1")[0].artifact_streams[0];
+    expect(current.state).toBe(state);
+    expect(current.content).toBe("完整迟到块");
+    store.applyTaskEvent("conversation-1", "paper", { type: "artifact_stream_end", stream_id: "preview", chunk_index: 12 });
+    expect(store.getTasks("conversation-1")[0].artifact_streams[0].state).toBe(state);
+    store.upsertTask("conversation-1", { task_id: "paper", artifact_streams: [{ ...stream, chunk_index: 13, state: "streaming" }] });
+    current = store.getTasks("conversation-1")[0].artifact_streams[0];
+    expect(current.state).toBe(state);
+    expect(current.final_content).toBe(stream.final_content);
+  });
+
+  it.each(["succeeded", "failed", "interrupted", "canceled"] as const)(
+    "keeps a %s task settled across delayed progress, stale REST and a new retry", async (status) => {
+      const store = useTaskCenterStore.getState();
+      store.upsertTask("conversation-1", { task_id: "paper", status, progress_pct: 100 });
+      store.applyTaskEvent("conversation-1", "paper", { type: "task_start" });
+      store.applyTaskEvent("conversation-1", "paper", { type: "progress", progress: 50 });
+      store.upsertTask("conversation-1", { task_id: "paper", status: "running", progress_pct: 30 });
+      expect(store.getTasks("conversation-1")[0]).toMatchObject({ status, progress_pct: 100 });
+      requestHarness.listConversationTasks.mockResolvedValueOnce({ data: { tasks: [
+        { task_id: "paper", status: "running", progress_pct: 20, steps: [] },
+      ] } });
+      await store.loadConversationTasks("conversation-1");
+      expect(store.getTasks("conversation-1")[0]).toMatchObject({ status, progress_pct: 100 });
+      store.upsertTask("conversation-1", { task_id: "retry", status: "running", progress_pct: 10 });
+      store.applyTaskEvent("conversation-1", "retry", {
+        type: "artifact_stream_start", stream_id: "retry-preview", slot: "revise_document_document", content_type: "text/markdown",
+      });
+      expect(store.getTasks("conversation-1")[1]).toMatchObject({ status: "running", progress_pct: 10,
+        artifact_streams: [{ state: "streaming" }] });
+    },
+  );
+
+  it.each(["write_document_document", "revise_document_document"])(
+    "loads materialized %s directly without restarting its full-text preview", async (slot) => {
+      const store = useTaskCenterStore.getState();
+      store.upsertTask("conversation-1", { task_id: "paper", status: "running" });
+      store.applyTaskEvent("conversation-1", "paper", {
+        type: "artifact_stream_start", slot, content_type: "text/markdown",
+        stream_id: "paper-preview", chunk_index: 1,
+      });
+      store.applyTaskEvent("conversation-1", "paper", {
+        type: "artifact_stream", stream_id: "paper-preview", chunk_index: 2,
+        delta: "# 稿件\n正文[文献:SRC-1]",
+      });
+      const artifact = { slot, content_type: "file", seq: 1, value: { url: "/final.md" } };
+      store.applyTaskEvent("conversation-1", "paper", { type: "artifact", ...artifact });
+      const { axiosInstance } = await import("@/components/request");
+      vi.mocked(axiosInstance.get).mockResolvedValueOnce({ data: "# 稿件\n最终编号与图表" });
+      await store.loadArtifactStreamContent("conversation-1", "paper", artifact);
+      const streams = store.getTasks("conversation-1")[0].artifact_streams;
+      expect(streams).toHaveLength(1);
+      expect(streams[0].stream_id).toBe("paper-preview");
+      expect(streams[0].final_content).toBe("# 稿件\n最终编号与图表");
+      expect(streams[0].deltas).toEqual(["# 稿件\n正文[文献:SRC-1]"]);
+    },
+  );
 
   it("uses public snapshots in ordinary mode and rejects raw execution events", async () => {
     useTaskCenterStore.setState({ viewMode: "ordinary" });
@@ -1133,4 +1240,13 @@ describe("task center workflow events", () => {
     expect(received.map(item => item.detail)).toEqual(Array(2).fill({ conversationId: "conversation-1", historyId: "history", confirmationId: "confirm" }));
     window.removeEventListener("lazymind:chat-knowledge-confirmation", listener);
   });
+});
+
+it.each(['实验代码.zip', '实验结果.json'])('does not decode %s as Markdown', async (filename) => {
+  const { axiosInstance } = await import('@/components/request');
+  vi.mocked(axiosInstance.get).mockClear();
+  await useTaskCenterStore.getState().loadArtifactStreamContent('conversation-1', 'task', {
+    slot: 'experiment_code', content_type: 'file', seq: 1, value: { filename, url: '/download' },
+  });
+  expect(axiosInstance.get).not.toHaveBeenCalled();
 });

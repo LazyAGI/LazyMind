@@ -1,6 +1,6 @@
 # Update-format fixtures
 
-These are schema-only captures from isolated databases created by the actual owners at source commit `70b5b4835c4e01fce60e87b91ba86b613893df41` and pinned LazyLLM `d53007dd95ce5f9180399a095cf81fb0b643093a`. They contain no user rows, credentials or runtime paths. Core migration version/history is retained because it is part of the compatibility contract.
+These are schema-only captures from isolated databases created by the actual owners. The original baseline was captured at source commit `70b5b4835c4e01fce60e87b91ba86b613893df41` and LazyLLM `d53007dd95ce5f9180399a095cf81fb0b643093a`. The Core family is refreshed from the actual merged `upstream/main` schema owner at `db4d6bd6b4e288871cc8e9cf0234c99bce16dde6` (migrations plus `episode.Initialize`); other family captures retain their original provenance and remain subject to their owner conformance tests. No user rows, credentials or runtime paths are captured. Core migration version/history is retained because it is part of the compatibility contract.
 
 | Family | Actual producer |
 | --- | --- |
