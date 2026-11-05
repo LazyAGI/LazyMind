@@ -28,6 +28,7 @@ interface PdfTemporaryChatProps {
   documentId: string;
   fileName: string;
   paperMode?: boolean;
+  newConversationInToolbar?: boolean;
   selection?: DocumentChatSelection;
   conversationToLoad?: string;
   translationRequest?: DocumentTranslationRequest | null;
@@ -92,6 +93,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   documentId,
   fileName,
   paperMode = false,
+  newConversationInToolbar = false,
   selection,
   conversationToLoad,
   translationRequest,
@@ -420,14 +422,14 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           <strong>{isPaper ? copy.assistant : t("knowledge.pdfChatPanelLabel")}</strong>
           <span>{isPaper ? copy.hint : t("knowledge.pdfChatTemporaryHint")}</span>
         </div>
-        {isPaper && <Button type="text" icon={<PlusOutlined />} aria-label={t("knowledge.pdfChatNew")} title={t("knowledge.pdfChatNew")} onClick={() => void startNewConversation()} />}
+        {isPaper && !newConversationInToolbar && <Button type="text" icon={<PlusOutlined />} aria-label={t("knowledge.pdfChatNew")} title={t("knowledge.pdfChatNew")} onClick={() => void startNewConversation()} />}
         <Button type="text" icon={<CloseOutlined />} aria-label={t("common.close")} onClick={onClose} />
       </header>
       {isPaper && parseState === "parsed" && <div className="paper-assistant-ready" role="status"><span />{copy.ready}<span className="paper-assistant-ready__scope">{copy.scope}</span></div>}
       {!isPaper && <div className="pdf-temporary-chat__actions">
-        <Button size="small" icon={<PlusOutlined />} onClick={() => void startNewConversation()}>
+        {!newConversationInToolbar && <Button size="small" icon={<PlusOutlined />} onClick={() => void startNewConversation()}>
           {t("knowledge.pdfChatNew")}
-        </Button>
+        </Button>}
         <Button
           size="small"
           type="primary"

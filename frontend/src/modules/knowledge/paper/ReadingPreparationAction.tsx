@@ -1,3 +1,4 @@
+import { StudySparkle } from "@/components/ui/PdfStudyActivation";
 import PaperPreparationStatus from './PaperPreparationStatus';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Checkbox, Modal, Progress, Space, Typography } from 'antd';
@@ -41,7 +42,7 @@ export default function ReadingPreparationAction({ target, onPrepared }: { targe
     void poll(); return () => { stale = true; clearTimeout(timer); };
   }, [open, target.dataset, target.document, revision]);
   const running = state?.status === 'pending' || state?.status === 'running';
-  return <><button className="paper-preparation-trigger" type="button" title="查看当前论文的解析与研读准备进度" onClick={() => setOpen(true)}>准备进度</button>
+  return <><button className="paper-preparation-trigger pdf-study-ai-button" type="button" aria-label="研读论文" title="研读论文 · 查看解析与研读准备进度" onClick={() => setOpen(true)}><StudySparkle/><span>研读论文</span></button>
     <Modal forceRender className="paper-preparation-modal" width={600} centered title="当前论文 · 准备进度" open={open} onCancel={() => { if (!submitting) setOpen(false); }} closable={!submitting} maskClosable={!submitting} keyboard={!submitting} cancelButtonProps={{ disabled: submitting }} okText="开始准备" cancelText="关闭" confirmLoading={submitting} okButtonProps={{ disabled: !state || !scopes.length || running || target.canWrite === false }} onOk={async () => {
       setSubmitting(true); setError('');
       try {
