@@ -199,7 +199,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
   const rows = (inDrawer = false) =>
     props.keys.map((key, index) => (
       <div
-        className={`provider-workspace-key provider-key-row${inDrawer ? " in-drawer" : ""}`}
+        className={`provider-workspace-key provider-key-row${inDrawer ? " in-drawer" : ""}${visibleSecrets[key.id] ? " is-revealed" : ""}`}
         key={key.id}
       >
         <code>{visibleSecrets[key.id] || `****${key.masked.replace(/^\*+(?:\.\.\.)?/, "").slice(-4)}`}</code>
