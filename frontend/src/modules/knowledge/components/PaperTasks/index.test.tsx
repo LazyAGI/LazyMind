@@ -8,6 +8,7 @@ import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import zhCN from '@/i18n/locales/zh-CN';
 import enUS from '@/i18n/locales/en-US';
+import { useConversationRunningStore } from '@/modules/chat/store/conversationRunning';
 import PaperTasks from './index';
 import PaperImportanceButton from './PaperImportanceButton';
 import { confirmExpansion, deleteExpansion, getExpansion, launchPaperTask, listResearchRecords, resolvePaperSelection, retryPaperContent, setPaperImportance, type ExpansionDetail, type ExpansionReport, type PaperTask } from '../../api/paperWorkflows';
@@ -34,6 +35,7 @@ function mount(selected?: string[], query = '', canImport = true, options: { sel
 }
 beforeEach(() => {
     vi.clearAllMocks();
+    useConversationRunningStore.setState({ entries: {}, watchers: {} });
     vi.mocked(retryPaperContent).mockReset().mockResolvedValue(undefined);
     void i18n.changeLanguage('zh-CN');
     vi.mocked(launchPaperTask).mockResolvedValue({ conversation_id: 'new-chat' });
@@ -258,22 +260,28 @@ describe('paper task startup routes', () => {
         if (direction) fireEvent.change(screen.getByLabelText('研究主题与要求'), { target: { value: 'agents' } });
         else fireEvent.click(screen.getByRole('switch', { name: '开启论文扩展' }));
         expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
-        const modes = within(screen.getByRole('radiogroup', { name: '扩展方式' }));
+        const modes = within(screen.getByRole('radiogroup', { name: '扩展档位' }));
         expect(modes.queryByRole('radio', { name: '深入研究' })).not.toBeInTheDocument();
         const standard = within(modes.getByRole('radiogroup', { name: '标准扩展 · 研究方向' }));
         expect(standard.getByRole('radio', { name: '默认全选' })).toBeChecked();
-        const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
+        const flow = within(screen.getByRole('region', { name: '综述流程' }));
         const first = direction ? '确认综述主题' : '确认论文与主题';
         const steps = flow.getAllByRole('listitem');
-        expect(steps).toHaveLength(6);
+        expect(steps).toHaveLength(3);
         await waitFor(() => [
-            first, '初调与确定方向', '检索论文', '筛选与补充', '补齐论文正文', '交接综述材料',
+            first, '论文扩展', '生成综述',
         ].forEach((stage, index) => expect(within(steps[index]).getByText(stage)).toBeVisible()));
+        const standardCard = within(modes.getByRole('radio', { name: '标准扩展' }).closest<HTMLElement>('.paper-research-depth-option')!);
+        expect(standardCard.getAllByRole('listitem')).toHaveLength(3);
+        for (const label of ['初调与确定方向', '按方向检索论文', '筛选与补充']) expect(standardCard.getByText(label)).toBeVisible();
+        expect(screen.queryByText('补齐论文正文')).not.toBeInTheDocument();
         fireEvent.click(standard.getByRole('radio', { name: '人工选择' }));
         if (budgetMode === 'fast') {
             fireEvent.click(modes.getByRole('radio', { name: '快速扩展' }));
-            expect(flow.getByText('4 步')).toBeVisible();
-            expect(flow.getByText('定向检索核心论文')).toBeVisible();
+            expect(flow.getByText('3 步')).toBeVisible();
+            const fastCard = within(modes.getByRole('radio', { name: '快速扩展' }).closest<HTMLElement>('.paper-research-depth-option')!);
+            expect(fastCard.getAllByRole('listitem')).toHaveLength(2);
+            expect(fastCard.getByText('筛选相关论文')).toBeVisible();
             expect(flow.queryByText('筛选与补充')).not.toBeInTheDocument();
             expect(standard.getByRole('radio', { name: '人工选择' })).toBeDisabled();
         }
@@ -294,18 +302,18 @@ describe('paper task startup routes', () => {
         expect(await screen.findByRole('menuitem', { name: '指定方向生成' })).toHaveAttribute('aria-disabled', 'true');
         fireEvent.click(screen.getByText('基于选中论文生成综述'));
         expect(screen.getByRole('switch', { name: '开启论文扩展' })).not.toBeChecked();
-        const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
+        const flow = within(screen.getByRole('region', { name: '综述流程' }));
         expect(flow.getAllByRole('listitem')).toHaveLength(2);
         const selectedPapers = within(screen.getByRole('region', { name: '已选论文' }));
         await waitFor(() => expect(selectedPapers.getByText('全文解析失败')).toBeVisible());
         expect(flow.getByText('确认论文与主题')).toBeVisible();
-        expect(flow.getByText('交接综述材料')).toBeVisible();
+        expect(flow.getByText('生成综述')).toBeVisible();
         expect(selectedPapers.getAllByText('全文可用')).toHaveLength(2);
         expect(selectedPapers.getByText('已选 3 篇 · 2 篇全文可用')).toBeVisible();
         expect(screen.queryByText('扩展深度')).not.toBeInTheDocument();
         expect(screen.queryByText('文献范围')).not.toBeInTheDocument();
         fireEvent.change(screen.getByRole('textbox', { name: /综述主题/ }), { target: { value: '工具学习方法比较' } });
-        fireEvent.click(screen.getByRole('button', { name: '确认并继续' }));
+        fireEvent.click(screen.getByRole('button', { name: '生成综述' }));
         await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ skip_expansion: true, review_scope: 'selected', paper_ids: ['a', 'b'], document_ids: ['a', 'b', 'c'], user_instruction: '综述主题：工具学习方法比较' }), false));
         expect(vi.mocked(launchPaperTask).mock.calls[0][0]).not.toHaveProperty('budget_mode');
     });
@@ -322,7 +330,7 @@ describe('paper task startup routes', () => {
         await waitFor(() => expect(screen.getByText('D', { selector: '.ant-list-item-meta-title' })).toBeVisible());
         fireEvent.click(screen.getByRole('button', { name: /收\s*起/ }));
         expect(screen.queryByText('D', { selector: '.ant-list-item-meta-title' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '确认并继续' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '生成综述' })).toBeEnabled();
     });
     it('preserves the selection on a failed material check and lets the user retry', async () => {
         vi.mocked(resolvePaperSelection).mockRejectedValueOnce(new Error('offline'));
@@ -332,13 +340,13 @@ describe('paper task startup routes', () => {
         await screen.findByText('论文状态加载失败，请重试');
         await waitFor(() => expect(screen.getByText('已选 2 项，论文状态待确认。')).toBeVisible());
         expect(screen.getByText('A', { selector: '.ant-list-item-meta-title' })).toBeVisible();
-        expect(screen.getByRole('button', { name: '确认并继续' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '生成综述' })).toBeDisabled();
         fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
-        await waitFor(() => expect(screen.getByRole('button', { name: '确认并继续' })).toBeEnabled());
+        await waitFor(() => expect(screen.getByRole('button', { name: '生成综述' })).toBeEnabled());
         expect(screen.queryByText('论文状态加载失败，请重试')).not.toBeInTheDocument();
         fireEvent.change(screen.getByRole('textbox', { name: /综述主题/ }), { target: { value: '工具学习' } });
         fireEvent.change(screen.getByRole('textbox', { name: '补充要求（选填）' }), { target: { value: '比较训练方法' } });
-        fireEvent.click(screen.getByRole('button', { name: '确认并继续' }));
+        fireEvent.click(screen.getByRole('button', { name: '生成综述' }));
         await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ user_instruction: '综述主题：工具学习\n\n补充要求：比较训练方法' }), false));
     });
     it('disables both direction entries while library papers are selected', async () => {
@@ -356,7 +364,7 @@ describe('paper task startup routes', () => {
         fireEvent.click(screen.getByRole('button', { name: /论文综述/ }));
         fireEvent.click(await screen.findByText('基于选中论文生成综述'));
         await waitFor(() => expect(screen.getByText('全文不可用')).toBeVisible());
-        expect(screen.getByRole('button', { name: '确认并继续' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '生成综述' })).toBeDisabled();
         expect(launchPaperTask).not.toHaveBeenCalled();
     });
     it('keeps the review goal and flow when preparing, reopening and confirming directions', async () => {
@@ -373,9 +381,9 @@ describe('paper task startup routes', () => {
         fireEvent.click(screen.getByRole('switch', { name: '开启论文扩展' }));
         fireEvent.click(screen.getByRole('button', { name: '开始扩展' }));
         const drawer = (await screen.findByText('论文综述 · 资料准备')).closest('[role=dialog]') as HTMLElement;
-        const flow = within(within(drawer).getByRole('region', { name: '综述材料准备与交接' }));
-        for (const stage of ['确认论文与主题', '初调与确定方向', '检索论文', '筛选与补充', '补齐论文正文', '交接综述材料']) expect(flow.getByText(stage)).toBeVisible();
-        expect(flow.getByText('初调与确定方向').closest('li')).toHaveAttribute('aria-current', 'step');
+        const flow = within(within(drawer).getByRole('region', { name: '综述流程' }));
+        for (const stage of ['确认论文与主题', '论文扩展', '生成综述']) expect(flow.getByText(stage)).toBeVisible();
+        expect(flow.getByText('论文扩展').closest('li')).toHaveAttribute('aria-current', 'step');
         expect(flow.getByText('待确认方向')).toBeVisible();
         expect(within(drawer).getByText('选择综述关注的方向')).toBeVisible();
         expect(within(drawer).queryByText('正式拓展')).not.toBeInTheDocument();
@@ -596,15 +604,16 @@ describe('result list actions', () => {
         expect(expansionRow).toHaveTextContent('已完成');
         expect(reviewRow).toHaveTextContent('待补充正文');
         await act(async () => { window.dispatchEvent(new Event('focus')); });
-        expect(reviewRow).toHaveTextContent('待交接');
+        expect(reviewRow).toHaveTextContent('等待生成');
         await act(async () => { vi.advanceTimersByTime(12000); });
-        expect(reviewRow).toHaveTextContent('已完成');
+        expect(reviewRow).not.toHaveTextContent('已完成');
+        expect(reviewRow).toHaveTextContent(zhCN.chat.conversationStatusUnavailable);
         const calls = vi.mocked(listResearchRecords).mock.calls.length;
         await act(async () => { vi.advanceTimersByTime(12000); });
         expect(listResearchRecords).toHaveBeenCalledTimes(calls);
     });
 
-    it('advances a review from screening through full text to the saved handoff', async () => {
+    it('keeps review generation unfinished after material preparation and tracks its execution status', async () => {
         const review = { ...record, goal: 'review', status: 'running', preparation: {
             confirmed_at: '2026-11-04T00:00:00Z', user_instruction: '', summary: '', questions: [], directions: [], selected_directions: ['tools'],
         } };
@@ -615,9 +624,9 @@ describe('result list actions', () => {
         const view = { ...detail, record: review, workflow_steps: workflow };
         vi.mocked(getExpansion).mockResolvedValue(view);
         mount(undefined, '?expansion_id=r');
-        const flow = within(await screen.findByRole('region', { name: '综述材料准备与交接' }));
+        const flow = within(await screen.findByRole('region', { name: '综述流程' }));
         const current = (label: string) => expect(flow.getByText(label).closest('li')).toHaveAttribute('aria-current', 'step');
-        current('筛选与补充');
+        current('论文扩展');
 
         const published = { ...view, record: { ...review, status: 'completed' },
             workflow_steps: workflow.map(step => ({ ...step, status: 'succeeded' })) };
@@ -625,19 +634,26 @@ describe('result list actions', () => {
             { id: 'cc', paper_id: 'c', content_hash: '', status: 'processing' },
         ] });
         await act(async () => { window.dispatchEvent(new Event('focus')); });
-        current('补齐论文正文');
+        current('论文扩展');
         expect(flow.getByText(/1 篇全文处理中/)).toBeVisible();
         expect(flow.queryByText('材料已交接')).not.toBeInTheDocument();
 
         vi.mocked(getExpansion).mockResolvedValue(published);
         await act(async () => { window.dispatchEvent(new Event('focus')); });
-        current('交接综述材料');
-        expect(flow.getByText('待交接')).toBeVisible();
+        current('生成综述');
+        expect(within(flow.getAllByRole('listitem')[2]).getByText('排队中')).toBeVisible();
 
-        vi.mocked(getExpansion).mockResolvedValue({ ...published, record: { ...published.record, auto_review_id: 'review' } });
+        vi.mocked(getExpansion).mockResolvedValue({ ...published, record: { ...published.record, auto_review_id: 'review' }, handoffs: [{ id: 'review', kind: 'review', conversation_id: 'review-chat', version: 1 }] });
         await act(async () => { window.dispatchEvent(new Event('focus')); });
-        expect(flow.getByText('材料已交接')).toBeVisible();
-        expect(flow.getAllByRole('listitem')).toHaveLength(6);
+        expect(flow.getAllByRole('listitem')).toHaveLength(3);
+        const generation = within(flow.getAllByRole('listitem')[2]);
+        expect(generation.getByText('状态待确认')).toBeVisible();
+        act(() => useConversationRunningStore.setState({ entries: { 'review-chat': { status: 'running', confirmedAt: Date.now() } } }));
+        current('生成综述');
+        expect(generation.getByText('进行中')).toBeVisible();
+        expect(generation.queryByText('已完成')).not.toBeInTheDocument();
+        act(() => useConversationRunningStore.setState({ entries: { 'review-chat': { status: 'idle', terminalStatus: 'completed', confirmedAt: Date.now() } } }));
+        expect(generation.getByText('已完成')).toBeVisible();
     });
 
     it('shows research details above the papers after completion while keeping the process collapsed', async () => {
@@ -649,9 +665,9 @@ describe('result list actions', () => {
         expect(reading).toHaveAttribute('open');
         expect(process).toHaveAttribute('aria-expanded', 'false');
         expect(process.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(screen.getByRole('region', { name: '综述材料准备与交接' })).toBeVisible();
+        expect(screen.getByRole('region', { name: '综述流程' })).toBeVisible();
         fireEvent.click(process);
-        expect(screen.getByRole('region', { name: '综述材料准备与交接' })).toBeVisible();
+        expect(screen.getByRole('region', { name: '综述流程' })).toBeVisible();
         expect(screen.getByText('研究解读正文')).toBeVisible();
         expect(screen.queryByText('旧版待查事项')).not.toBeInTheDocument();
         expect(screen.queryByText('建议阅读顺序')).not.toBeInTheDocument();

@@ -626,7 +626,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         status: selectionFailure ? 'unchecked' : 'checking', description: undefined }));
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' || launch?.kind === 'review' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
+        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.reviewFlow.writing') : launch?.kind === 'expansion' || launch?.kind === 'review' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy} onCancel={() => !busy && !topicBusy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}

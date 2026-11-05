@@ -1,20 +1,15 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ConfigProvider } from 'antd';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import zhCN from '@/i18n/locales/zh-CN';
+import { useConversationRunningStore } from '@/modules/chat/store/conversationRunning';
 import { getExpansion, getReviewRecordContext, type Expansion, type ReviewRecord } from '../../api/paperWorkflows';
 import ResearchRecords from './ResearchRecords';
 import ReviewRecordDrawer from './ReviewRecordDrawer';
 
 vi.mock('../../api/paperWorkflows', () => ({ getExpansion: vi.fn(), getReviewRecordContext: vi.fn() }));
-const running = vi.hoisted(() => ({ entries: {} as Record<string, { status: 'running' }> }));
-vi.mock('@/modules/chat/store/conversationRunning', () => ({
-    useConversationRunningStore: Object.assign((select: (state: typeof running) => unknown) => select(running), {
-        getState: () => ({ watch: vi.fn(), unwatch: vi.fn() }),
-    }),
-}));
 const i18n = createInstance();
 void i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN } }, initImmediate: false });
 const papers = ['A', 'B', 'C'].map(id => ({ paper: { paper_id: id, title: id, abstract: null }, is_seed: false, is_important: false }));
@@ -26,7 +21,7 @@ function mount(ui: React.ReactNode) {
 }
 beforeEach(() => {
     vi.resetAllMocks();
-    running.entries = {};
+    useConversationRunningStore.setState({ entries: {}, watchers: {} });
     vi.mocked(getReviewRecordContext).mockResolvedValue({ kind: 'review', expansion_id: 'source', source_available: true, input: { ...expansion.result, user_instruction: '综述主题：工具学习\n\n补充要求：比较方法', papers: papers.slice(0, 2) } });
     vi.mocked(getExpansion).mockResolvedValue({ record: expansion, rounds: [], chat_status: 'available', paper_importance: {}, handoffs: [], contents: papers.map(item => ({ id: item.paper.paper_id, paper_id: item.paper.paper_id, status: 'ready', content_hash: item.paper.paper_id, quality: { eligible: true, downloaded: true, parsed: true, identity: 'matched', text: 'usable', material: 'main' } })) });
 });
@@ -54,13 +49,15 @@ it('shows independent reviews with expansions and filters without changing the r
 
 it('keeps the frozen list separate from current source counts and opens its source or conversation', async () => {
     const onSource = vi.fn(), onChat = vi.fn();
-    running.entries[review.conversation_id] = { status: 'running' };
+    useConversationRunningStore.setState({ entries: { [review.conversation_id]: { status: 'running', confirmedAt: Date.now() } } });
     mount(<ReviewRecordDrawer record={review} onClose={vi.fn()} onSource={onSource} onChat={onChat} />);
     await screen.findByText('本次纳入 2 篇');
     await screen.findByText('扩展结果 3 篇 · 扩展当前全文可用 3 篇');
     expect(screen.getByText('综述会话 · 运行中')).toBeVisible();
-    const flow = within(screen.getByRole('region', { name: '综述材料准备与交接' }));
+    const flow = within(screen.getByRole('region', { name: '综述流程' }));
     expect(flow.getAllByText('已完成')).toHaveLength(2);
+    expect(flow.getAllByRole('listitem')).toHaveLength(3);
+    expect(within(flow.getAllByRole('listitem')[2]).getByText('进行中')).toBeVisible();
     fireEvent.click(screen.getByText('查看本次论文清单'));
     const list = within(screen.getByText('查看本次论文清单').closest('details')!).getByRole('list');
     expect(within(list).getAllByRole('listitem')).toHaveLength(2);
@@ -88,4 +85,39 @@ it('does not label intermediate papers as expansion results in history', () => {
     mount(<ResearchRecords expansions={[{ ...expansion, status: 'running' }, { ...expansion, id: 'completed', title: '已完成的扩展' }]} reviews={[]} open loading={false} error={false} statusLabel={status => status === 'completed' ? '已完成' : '进行中'} onExpansion={vi.fn()} onReview={vi.fn()} />);
     expect(screen.getByRole('button', { name: '查看扩展成果: 工具学习扩展' })).not.toHaveTextContent('扩展结果');
     expect(screen.getByRole('button', { name: '查看扩展成果: 已完成的扩展' })).toHaveTextContent('扩展结果 3 篇');
+});
+
+it('uses two steps for a direct review and only completes generation after a confirmed terminal success', async () => {
+    vi.mocked(getReviewRecordContext).mockResolvedValue({ kind: 'review', input: { ...expansion.result, papers: papers.slice(0, 2) } });
+    mount(<ReviewRecordDrawer record={direct} onClose={vi.fn()} onSource={vi.fn()} onChat={vi.fn()} />);
+    const flow = within(await screen.findByRole('region', { name: '综述流程' }));
+    expect(flow.getAllByRole('listitem')).toHaveLength(2);
+    expect(flow.queryByText('论文扩展')).not.toBeInTheDocument();
+    const generation = within(flow.getAllByRole('listitem')[1]);
+    expect(generation.getByText('状态待确认')).toBeVisible();
+    for (const [entry, label] of [
+        [{ status: 'running' }, '进行中'],
+        [{ status: 'idle' }, '等待继续'],
+        [{ status: 'unknown' }, '状态待确认'],
+        [{ status: 'idle', terminalStatus: 'failed' }, '失败'],
+        [{ status: 'idle', terminalStatus: 'canceled' }, '已取消'],
+        [{ status: 'idle', terminalStatus: 'completed' }, '已完成'],
+    ] as const) {
+        act(() => useConversationRunningStore.setState({ entries: { [direct.conversation_id]: { ...entry, confirmedAt: Date.now() } } }));
+        expect(generation.getByText(label)).toBeVisible();
+        if (label !== '已完成') expect(generation.queryByText('已完成')).not.toBeInTheDocument();
+    }
+});
+
+it('keeps an automatic review active in expansion history until the review workflow finishes', () => {
+    const preparing = { ...expansion, goal: 'review', auto_review_id: review.id };
+    useConversationRunningStore.setState({ entries: { [review.conversation_id]: { status: 'running', confirmedAt: Date.now() } } });
+    mount(<ResearchRecords expansions={[preparing]} reviews={[review]} open loading={false} error={false} statusLabel={() => '已完成'} onExpansion={vi.fn()} onReview={vi.fn()} />);
+    fireEvent.click(screen.getByRole('tab', { name: '论文扩展 1' }));
+    const row = screen.getByRole('button', { name: '查看扩展成果: 工具学习扩展' });
+    expect(row).toHaveTextContent('综述会话 · 运行中');
+    expect(row).not.toHaveTextContent('已完成');
+    expect(Object.values(useConversationRunningStore.getState().watchers).flat()).toContain(review.conversation_id);
+    act(() => useConversationRunningStore.setState({ entries: { [review.conversation_id]: { status: 'idle', terminalStatus: 'completed', confirmedAt: Date.now() } } }));
+    expect(row).toHaveTextContent(`综述会话 · ${zhCN.chat.conversationCompleted}`);
 });
