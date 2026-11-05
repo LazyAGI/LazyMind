@@ -34,9 +34,7 @@ func DeleteLibraryPapers(w http.ResponseWriter, r *http.Request) {
 	}
 	db := store.DB().WithContext(r.Context())
 	// Include previously detached duplicates: otherwise their names remain occupied.
-	var documents []orm.Document
-	err := db.Where("dataset_id = ? AND deleted_at IS NULL AND id IN (?)", dataset,
-		db.Model(&orm.PaperLibraryAttachment{}).Select("document_id").Where("dataset_id = ? AND paper_id IN ? AND document_id <> ''", dataset, ids)).Find(&documents).Error
+	documents, err := liveLibraryOriginals(db, dataset, ids)
 	if err != nil {
 		replyLibraryError(w, err)
 		return
@@ -60,6 +58,16 @@ func DeleteLibraryPapers(w http.ResponseWriter, r *http.Request) {
 				return e
 			}
 			entries = append(entries, entry)
+		}
+		// A concurrent PDF confirmation can add a detached duplicate without
+		// incrementing the paper revision. Recheck the complete document set after
+		// locking the entries; abort instead of leaving an untracked original.
+		currentDocuments, e := liveLibraryOriginals(tx, dataset, ids)
+		if e != nil {
+			return e
+		}
+		if !sameLibraryOriginals(documents, currentDocuments) {
+			return invalidLibraryMutation("PAPER_ATTACHMENT_CHANGED", "论文附件发生变化，请重新加载后重试")
 		}
 		// Never delete a document still owned by a different paper. A conflict is
 		// preferable to silently deleting another entry's attachment.
@@ -134,4 +142,27 @@ func DeleteLibraryPapers(w http.ResponseWriter, r *http.Request) {
 		libraryChanges
 		CleanupPending bool `json:"cleanupPending,omitempty"`
 	}{libraryChanges{Data: paperlibrary.EmptyData(), RemovedPaperIDs: ids}, cleanupPending})
+}
+
+func liveLibraryOriginals(tx *gorm.DB, dataset string, paperIDs []string) ([]orm.Document, error) {
+	var documents []orm.Document
+	err := tx.Where("dataset_id = ? AND deleted_at IS NULL AND id IN (?)", dataset,
+		tx.Model(&orm.PaperLibraryAttachment{}).Select("document_id").Where("dataset_id = ? AND paper_id IN ? AND document_id <> ''", dataset, paperIDs)).Find(&documents).Error
+	return documents, err
+}
+
+func sameLibraryOriginals(before, after []orm.Document) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	ids := make(map[string]bool, len(before))
+	for _, document := range before {
+		ids[document.ID] = true
+	}
+	for _, document := range after {
+		if !ids[document.ID] {
+			return false
+		}
+	}
+	return true
 }

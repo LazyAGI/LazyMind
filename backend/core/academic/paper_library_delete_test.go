@@ -48,6 +48,26 @@ func TestLibraryPermanentDeleteAndReimport(t *testing.T) {
 	}
 }
 
+func TestLibraryDeletionDetectsNewDetachedOriginal(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	paper := importDraft(t, "papers", "originals-race", libraryDraft("a", "A", "10.1234/a")).Data.Papers[0]
+	before, err := liveLibraryOriginals(db, "papers", []string{paper.ID})
+	if err != nil || len(before) != 0 {
+		t.Fatalf("initial originals: %v, %+v", err, before)
+	}
+	if err := db.Create(&orm.Document{ID: "later-original", DatasetID: "papers", DisplayName: "later.pdf", Ext: []byte(`{}`), Tags: []byte(`[]`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.PaperLibraryAttachment{DatasetID: "papers", ID: "detached-later", PaperID: paper.ID, DocumentID: "later-original", DetachedAt: &now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	after, err := liveLibraryOriginals(db, "papers", []string{paper.ID})
+	if err != nil || sameLibraryOriginals(before, after) {
+		t.Fatalf("new detached original must conflict with deletion: %v, %+v", err, after)
+	}
+}
+
 func TestLibraryPermanentDeleteOriginalsAndAtomicConflict(t *testing.T) {
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
