@@ -65,6 +65,43 @@ func importPipelineFixture(t *testing.T) (*gorm.DB, orm.PaperImportBatch, orm.Pa
 	}
 	return db, b, item, svc
 }
+
+func TestSourceItemUpdateRechecksAttemptAfterSQLiteWriteConflict(t *testing.T) {
+	t.Setenv("TEST_DB_DRIVER", "sqlite")
+	db, batch, item, _ := importPipelineFixture(t)
+	job := asyncjob.Job{ID: batch.AsyncJobID, AttemptCount: 1}
+	const callback = "test:advance-import-attempt"
+	advanced := false
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if advanced || tx.Statement.Table != "paper_import_items" {
+			return
+		}
+		advanced = true
+		// Use a second connection to commit after the first attempt read its snapshot.
+		if err := db.WithContext(tx.Statement.Context).Model(&orm.AsyncJob{}).
+			Where("id = ?", job.ID).Update("attempt_count", 2).Error; err != nil {
+			tx.AddError(err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
+
+	if err := sourceItemUpdate(t.Context(), job, batch, item.ID, map[string]any{"stage": "validate"}); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("superseded attempt should be rejected after the write conflict, got %v", err)
+	}
+	if !advanced {
+		t.Fatal("the attempt was rejected before the concurrent write")
+	}
+	var current orm.PaperImportItem
+	if err := db.Take(&current, "id = ?", item.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if current.Stage != item.Stage {
+		t.Fatalf("superseded attempt changed stage from %q to %q", item.Stage, current.Stage)
+	}
+}
+
 func seedPipelineCache(t *testing.T, db *gorm.DB, version string) {
 	t.Helper()
 	ref := testVerifiedPaper()
@@ -84,6 +121,39 @@ func seedPipelineCache(t *testing.T, db *gorm.DB, version string) {
 		t.Fatal(err)
 	}
 }
+
+func TestSourceItemUpdateSurvivesConcurrentWrite(t *testing.T) {
+	db, batch, item, _ := importPipelineFixture(t)
+	wrote := false
+	if err := db.Callback().Update().Before("gorm:update").Register("test:concurrent_import_write", func(tx *gorm.DB) {
+		if tx.Statement.Table != "paper_import_items" || wrote || tx.Error != nil {
+			return
+		}
+		wrote = true
+		// Another importer can commit after the job fence is read, invalidating
+		// this transaction's SQLite snapshot before the item update.
+		tx.AddError(db.Create(&orm.AsyncJob{ID: "concurrent-job", JobType: "test.import", IdempotencyKey: "writer",
+			Status: "pending", PayloadJSON: marshal(map[string]any{})}).Error)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := sourceItemUpdate(t.Context(), asyncjob.Job{ID: batch.AsyncJobID, AttemptCount: 1}, batch, item.ID,
+		map[string]any{"stage": "download", "attempt_count": gorm.Expr("attempt_count + 1")})
+	if !wrote {
+		t.Fatal("concurrent write did not run")
+	}
+	if err != nil {
+		t.Fatalf("import update failed after a concurrent write: %v", err)
+	}
+	var actual orm.PaperImportItem
+	if err := db.Where("id = ?", item.ID).Take(&actual).Error; err != nil {
+		t.Fatal(err)
+	}
+	if actual.Stage != "download" || actual.AttemptCount != item.AttemptCount+1 {
+		t.Fatalf("import update must commit once: %+v", actual)
+	}
+}
+
 func TestUnifiedPaperImportReusesCacheAndKeepsDifferentVersions(t *testing.T) {
 	db, b, item, svc := importPipelineFixture(t)
 	job := asyncjob.Job{ID: "job", AttemptCount: 1}
@@ -193,7 +263,7 @@ func TestUnifiedImportAssociationFailureRollsBackDocumentAndReceipt(t *testing.T
 func TestUnifiedBatchInterruptionPersistsRetryableFailure(t *testing.T) {
 	db, b, _, _ := importPipelineFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
-	_, err := handleImportBatchJob(ctx, asyncjob.Job{ID: "job", AttemptCount: 1}, cancelImportReporter{cancel: cancel}, b)
+	_, err := handleImportBatchJob(ctx, asyncjob.Job{ID: "job", AttemptCount: 1}, cancelImportReporter{cancel: cancel}, b, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}

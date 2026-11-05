@@ -655,6 +655,7 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 		"image-workflow",
 		"image-workflow-v2",
 		"test-workflow",
+		"paper-writing",
 		"ppt-workflow",
 		"bid_tech_proposal_writer",
 		"academic_research_pipeline",
@@ -709,11 +710,6 @@ func TestPaperExpansionEndsAtThePublishedList(t *testing.T) {
 		MaterialValue{MaterialID: "analysis_not_required", RevisionID: "skip-analysis", Valid: true})
 	if projected := Project(compiled.Graph, fast); !projected.Completed || len(projected.Bypassed) != 2 {
 		t.Fatalf("fast should finish at search: %#v", projected)
-	}
-	review := fast
-	review.Materials = review.Materials[:len(review.Materials)-1]
-	if projected := Project(compiled.Graph, review); !reflect.DeepEqual(projected.Ready, []string{"analyze_relations"}) {
-		t.Fatalf("review should continue directly to analysis: %#v", projected)
 	}
 	failedScreen := snapshot
 	failedScreen.Attempts = append(append([]AttemptFact(nil), snapshot.Attempts...),

@@ -13,7 +13,14 @@ import (
 )
 
 func probePublicPDFCandidate(ctx context.Context, client *http.Client, candidate FulltextCandidate, doi string) (string, error) {
-	if candidate.SourceType != "open_access_landing" {
+	strictPublication := candidate.SourceType == "published_landing"
+	if officialArxivID(candidate.URL) != "" {
+		if strictPublication {
+			return "", fmt.Errorf("arXiv 预印本不能替代正式发表版")
+		}
+		return withArxivSource(ctx, func() (string, error) { return probePaperPDF(ctx, client, candidate.URL) })
+	}
+	if candidate.SourceType != "open_access_landing" && !strictPublication {
 		return probePaperPDF(ctx, client, candidate.URL)
 	}
 	resp, err := fetchPaperSource(ctx, client, candidate.URL, false)
@@ -25,7 +32,7 @@ func probePublicPDFCandidate(ctx context.Context, client *http.Client, candidate
 	if err != nil {
 		return "", err
 	}
-	if bytes.HasPrefix(bytes.TrimSpace(prefix), []byte("%PDF-")) {
+	if !strictPublication && bytes.HasPrefix(bytes.TrimSpace(prefix), []byte("%PDF-")) {
 		return resp.Request.URL.String(), nil
 	}
 	body, err := io.ReadAll(io.LimitReader(io.MultiReader(bytes.NewReader(prefix), resp.Body), (2<<20)+1))
@@ -35,11 +42,21 @@ func probePublicPDFCandidate(ctx context.Context, client *http.Client, candidate
 	if len(body) > 2<<20 {
 		return "", pdfLookupError("论文页面超过大小限制")
 	}
-	address, err := publicLandingPDFURL(body, resp.Request.URL, doi)
+	links, err := publicLandingPDFURLs(body, resp.Request.URL, doi, false, strictPublication)
 	if err != nil {
 		return "", err
 	}
-	return probePaperPDF(ctx, client, address)
+	if len(links) == 0 {
+		return "", fmt.Errorf("论文页面未提供可用 PDF 地址")
+	}
+	address, err := probePaperPDF(ctx, client, links[0])
+	if err == nil && strictPublication {
+		u, err := url.Parse(address)
+		if err != nil || u.Hostname() != resp.Request.URL.Hostname() {
+			return "", fmt.Errorf("出版社 PDF 地址转向了其他来源")
+		}
+	}
+	return address, err
 }
 
 func publicLandingPDFURL(body []byte, base *url.URL, doi string) (string, error) {
@@ -55,14 +72,15 @@ func publicLandingPDFURL(body []byte, base *url.URL, doi string) (string, error)
 
 // Import probes accept publisher metadata; research can additionally inspect
 // ordinary PDF links, whose downloaded bodies still require identity validation.
-func publicLandingPDFURLs(body []byte, base *url.URL, doi string, includeLinks bool) ([]string, error) {
+func publicLandingPDFURLs(body []byte, base *url.URL, doi string, includeLinks bool, requireDOI ...bool) ([]string, error) {
 	tree, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	links := []string{}
 	seen := map[string]bool{}
-	mismatch := false
+	strict := len(requireDOI) > 0 && requireDOI[0]
+	mismatch, verified := false, false
 	var visit func(*html.Node)
 	visit = func(n *html.Node) {
 		if n.Type == html.ElementNode && (n.Data == "meta" || includeLinks && n.Data == "a") {
@@ -72,8 +90,9 @@ func publicLandingPDFURLs(body []byte, base *url.URL, doi string, includeLinks b
 			}
 			name := strings.ToLower(firstNonEmpty(attrs["name"], attrs["property"]))
 			if n.Data == "meta" && (name == "citation_doi" || name == "dc.identifier.doi") {
-				if found := NormalizeDOI(attrs["content"]); doi != "" && found != "" && found != NormalizeDOI(doi) {
-					mismatch = true
+				if found := NormalizeDOI(attrs["content"]); doi != "" && found != "" {
+					verified = verified || found == NormalizeDOI(doi)
+					mismatch = mismatch || found != NormalizeDOI(doi)
 				}
 			}
 			address := ""
@@ -87,7 +106,7 @@ func publicLandingPDFURLs(body []byte, base *url.URL, doi string, includeLinks b
 				if u, err := url.Parse(address); err == nil {
 					u = base.ResolveReference(u)
 					u.Fragment = ""
-					if zoteroAllowedURL(u, false) && !seen[u.String()] && len(links) < 5 {
+					if zoteroAllowedURL(u, false) && (!strict || u.Hostname() == base.Hostname()) && !seen[u.String()] && len(links) < 5 {
 						seen[u.String()] = true
 						links = append(links, u.String())
 					}
@@ -101,6 +120,9 @@ func publicLandingPDFURLs(body []byte, base *url.URL, doi string, includeLinks b
 	visit(tree)
 	if mismatch {
 		return nil, fmt.Errorf("论文页面 DOI 与目标文献不一致")
+	}
+	if strict && !verified {
+		return nil, fmt.Errorf("论文页面未声明目标 DOI")
 	}
 	return links, nil
 }

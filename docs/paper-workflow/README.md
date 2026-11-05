@@ -2,11 +2,12 @@
 
 面向接入综述、阅读心得和科研 PPT 的同事。基于 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863) 的论文能力，增加准备确认、多阶段拓展与独立报告。
 
-论文流程提供主题/种子初步调研、按选定方向开展多来源拓展、分层阅读与质量检查、版本化材料交接和全文读取。**论文库 PPT 已接正式 `ppt-workflow`，支持单篇或多篇论文及先心得再 PPT。综述与独立心得仍接 Mock，只返回材料接收结果。**
+论文流程提供主题/种子初步调研、按选定方向开展多来源拓展、分层阅读与质量检查、版本化材料交接和全文读取。**综述已接入 `paper-writing` 的 F2，独立心得已接入 F7；论文库 PPT 已接正式 `ppt-workflow`，支持单篇或多篇论文。**
 
 ## 1. 接入流程
 
 ```text
+论文集选文 → 新 Chat 的 paper-writing F2 生成综述
 论文集选文 / 输入研究方向 → 后台初步调研 → 回答必要问题 → 按启动设置全选方向或人工选择 → 论文拓展 → 冻结所选轮次 → 新 Chat 接收综述任务
 论文集选文 → 新 Chat 接收阅读心得 / PPT 任务
 PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT 步骤
@@ -15,8 +16,8 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 | 任务 | 当前 Workflow | 交接输入 |
 | --- | --- | --- |
 | 论文拓展 | `paper_expansion` | `expansion_id` |
-| 综述 | `paper_workflow_mock` | `ReviewWorkflowInput` |
-| 独立心得 | `paper_workflow_mock` | `PaperTaskInput` |
+| 综述 | `paper-writing` → `literature_review` | `ReviewWorkflowInput` |
+| 独立心得 | `paper-writing` → `reading_reflection` | `PaperTaskInput` |
 | 直接 PPT | `ppt-workflow` | `PaperTaskInput` |
 | 心得接续 PPT | `ppt-workflow` 内的阅读心得阶段 | `PaperTaskInput`，后续追加已保存的 `reflection_markdown` |
 
@@ -165,9 +166,12 @@ HTTP 200 也可能处于 `processing`，应同时检查 `status`。读取正文�
 
 ## 4. 接正式生成能力时改哪里
 
-- **正式 PPT**：`kind=ppt` 的直接和先心得入口均启动 `ppt-workflow`。Host 按当前 Chat 鉴权读取完整交接，自动绑定隐藏 `task_context` 并取消重复科研附件上传问题；不能由模型替换原论文身份。`ppt_cache_library_papers` 按每篇 `next_cursor` 读取全文到结束，再由共用缓存读取器支持分析、公式/图表及逐页生成。`processing / failed / unavailable`、权限失败、版本变化或游标不前进会阻止完整素材交付，不用摘要冒充全文。
-- **先心得再 PPT**：目前没有独立正式心得 Workflow；正式 PPT 内按需生成实质性 `reflection_markdown`，保留原论文清单与用户笔记，并将已保存正文传递给大纲和逐页规划。心得失败停在该阶段重试，不传空稿。独立心得和综述开发边界保持不变，旧 Mock 包仍保留给历史任务。
-- **启动路由**：[workflows.go](../../backend/core/academic/workflows.go) 的 `createPaperHandoff` 对 PPT 选择正式 Workflow，其他任务保留现有路由。
+- **正式 PPT**：`kind=ppt` 启动 `ppt-workflow`，将选定论文转为普通附件并保留用户要求。PPT 使用附件全文读取与缓存链路，已有阅读心得作为补充材料。
+- **启动路由**：[workflows.go](../../backend/core/academic/workflows.go) 的 `createPaperHandoff` 将综述交给新 Chat 的 `paper-writing`，独立心得交给 F7，PPT 交给 `ppt-workflow`。
+- **综述材料**：`paper-writing` 在 F2 前通过 `review/materials.py` 读取冻结选文和全文，整理为已有 `papers` 业务输入。论文不必入库；选文、题录、关系和正文版本继续保留。普通 F2 保留附件与上游材料，按主题通过 Sciverse 和所选知识库扩充、筛选并去重文献；用户指定来源、年份、数量、重点或仅用附件时，按本轮要求选材。冻结选文默认不扩充，明确要求补充文献时才检索；不另外启动 `paper_expansion`。检索或读取部分失败时保留可读材料并展示限制，缺少可用论文时提示补材料，不以模型知识概述冒充文献综述。
+- **综述数量**：默认范围为 12–20 篇，由 `LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT=12` 和 `LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT=20` 配置。按相关性与主题覆盖选择范围内的合适数量，20 是上限，不要求凑满。范围包含已保留的论文，背景材料不占名额。Sciverse 和知识库共享候选检索预算，题录候选允许超取以供去重和相关性筛选；低于下限时最多补检三轮，仍不足时在执行提示和材料记录中披露。用户明确指定数量时优先遵循；用户上传论文超过默认上限时保留，不继续自动扩充；历史检索文献按本轮范围重新筛选。Compose 部署调整这两个参数后重新创建 `chat` 服务。
+- **正文与引用**：综述开头不插入逐篇检索、全文缺失或论文数量提醒。选材及阅读笔记都按内容区分学术论文和背景材料；背景/创新点说明、实验数据和内部测试报告仅作上下文，上传的真实学术论文可正常引用。Runtime 按论文清单生成连续编号的参考文献有序列表，正文使用对应数字引用，材料池保留原始 ID 和背景材料供后续步骤使用。
+- **实验输入预算**：实验生成、设计修复与模拟预览修复使用当前模型输入预算，并计入结构化输出约束；不再固定限制为 16K/8K。实验只接收当前研究问题、综述证据及可选数据，不序列化历史材料池；超过当前模型预算时明确报错，不静默删除或截断材料。
 - **下游步骤**：参考 [通用交接包](../../workflows/paper_workflow_mock) 和 [心得接续 PPT 包](../../workflows/paper_ppt_with_reflection_mock)，保留输入绑定与上述读取工具，替换 Mock 步骤的生成逻辑。
 - **输出**：正式成果沿用现有 Workflow artifact 发布机制。当前 `academic_handoff_submit()` 只确认冻结输入并发布 `handoff_receipt / ppt_request`，返回 `awaiting_downstream`，不代表正式成果完成。
 - **历史 Mock 心得接续 PPT**：旧包仍只返回占位内容，不代表正式生成；新发起的 PPT 使用上述正式入口。

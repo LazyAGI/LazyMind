@@ -321,6 +321,30 @@ afterEach(() => {
 });
 
 describe('MarkdownArtifactEditor MDX compatibility', () => {
+  it('shows shared figure numbering without changing canonical image alt', async () => {
+    const props = {
+      markdown: '<a id="block-chart-001"></a>\n![比较](/static-files/paper-charts/test.svg)',
+      sourceRevision: 1,
+      onSave: vi.fn(async () => 2),
+    };
+    const { rerender } = render(<MarkdownArtifactEditor {...props}
+      numbering={{ entries: { 'chart-001': { label: '图1' } } }} />);
+    const block = document.createElement('div');
+    block.dataset.editorBlockType = 'image';
+    const image = document.createElement('img');
+    image.alt = '比较';
+    block.append(image);
+    screen.getByTestId('markdown-editable').append(block);
+    await waitFor(() => expect(block.dataset.writerImageCaption).toBe('图1 比较'));
+    expect(image.alt).toBe('比较');
+    expect(image.id).toBe('block-chart-001');
+    rerender(<MarkdownArtifactEditor {...props}
+      numbering={{ entries: { 'chart-001': { label: '图2' } } }} />);
+    await waitFor(() => expect(block.dataset.writerImageCaption).toBe('图2 比较'));
+    expect(image.alt).toBe('比较');
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
   it('provides a labeled numbering button only for editable unordered headings', async () => {
     const props = {
       markdown: '<a id="block-sec-1"></a>\n## Heading',

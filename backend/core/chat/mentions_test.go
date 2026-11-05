@@ -115,7 +115,18 @@ func TestApplyChatMentionsRejectsWorkflowWhenWorkflowControlIsPaused(t *testing.
 }
 
 func TestMergeMentionedWorkflowsAllowsManualAndRejectsPaused(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
+	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{}, &orm.WorkflowResource{}, &orm.WorkflowRevision{})
+	resource := orm.WorkflowResource{
+		ID: "image-resource", WorkflowRef: "builtin:image-workflow", WorkflowID: "image-workflow",
+		OwnerScope: "builtin", SourceType: "builtin", Name: "Images", Status: "active",
+		HeadRevisionID: "image-revision", Description: "Image generation", WhenToUse: "Generate images, then acknowledge briefly",
+	}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevision{ID: "image-revision", CompiledGraph: json.RawMessage(`{}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
 	setting := orm.UserWorkflowSetting{
 		UserID: "user-1", WorkflowRef: "builtin:image-workflow", Enabled: true,
 		CallMode: workflow.WorkflowCallModeManual, UpdatedAt: time.Now().UTC(),
@@ -126,8 +137,14 @@ func TestMergeMentionedWorkflowsAllowsManualAndRejectsPaused(t *testing.T) {
 	selected, builtins, err := mergeMentionedWorkflows(
 		context.Background(), db.DB, "user-1", []string{"builtin:image-workflow"}, nil,
 	)
-	if err != nil || len(selected) != 0 || len(builtins) != 1 || builtins[0] != "image-workflow" {
+	if err != nil || len(selected) != 1 || len(builtins) != 1 || builtins[0] != "image-workflow" {
 		t.Fatalf("manual mention selected=%#v builtins=%#v err=%v", selected, builtins, err)
+	}
+	activation := buildWorkflowActivation(selected[0], resource.WorkflowRef)
+	if selected[0]["revision_id"] != resource.HeadRevisionID ||
+		!strings.Contains(activation["tool_description"].(string), resource.WhenToUse) ||
+		!strings.Contains(activation["tool_description"].(string), resource.Description) {
+		t.Fatalf("manual builtin lost revision or instructions: %#v", activation)
 	}
 	if err := db.Model(&orm.UserWorkflowSetting{}).
 		Where("user_id=? AND plugin_ref=?", "user-1", "builtin:image-workflow"). // workflow-naming: persistence

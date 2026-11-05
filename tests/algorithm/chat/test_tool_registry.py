@@ -677,15 +677,15 @@ def test_all_real_project_factories_remain_admitted_with_known_dependencies(tmp_
         assert all(item.host_file_access is not HostFileAccess.UNDECLARED for item in metadata.values())
 
 
-@pytest.mark.parametrize('callback_position', ['initialize_session', 'user_input', 'handoff_session', 'handoff_user_input'])
+@pytest.mark.parametrize('callback_position', ['session', 'user_input', 'handoff_session', 'handoff_user_input'])
 def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.workflow import workflow_manager as workflows
     toolkit = workflows.HostWorkflowToolkit(workflows._client)
     def unreviewed():
         pytest.fail('an unreviewed callback must not execute')
-    if callback_position == 'initialize_session':
-        tool = workflows._safe_session_tools(toolkit, '', initialize_session=unreviewed)[0]
+    if callback_position == 'session':
+        tool = workflows._safe_session_tools(toolkit, unreviewed)[0]
     elif callback_position == 'user_input':
         tool = workflows._safe_session_tools(toolkit, 'session', user_input=unreviewed)[2]
     elif callback_position == 'handoff_session':

@@ -101,7 +101,7 @@ export function markdownBlockText(element: HTMLElement): string {
 }
 
 function closestInternalReference(container: HTMLElement, node: Node): HTMLAnchorElement | null {
-  const link = closestElement(node)?.closest<HTMLAnchorElement>('a[href^="#block-"]') ?? null;
+  const link = closestElement(node)?.closest<HTMLAnchorElement>('a[href^="#block-"], a[href^="#paper-ref-"]') ?? null;
   return link && container.contains(link) ? link : null;
 }
 
@@ -114,11 +114,11 @@ function adjacentBoundaryInternalReference(
   if (!(node instanceof Element) || !container.contains(node)) return null;
   const child = node.childNodes.item(edge === 'start' ? offset : offset - 1);
   if (!(child instanceof Element)) return null;
-  const link = child.matches('a[href^="#block-"]')
+  const link = child.matches('a[href^="#block-"], a[href^="#paper-ref-"]')
     ? child as HTMLAnchorElement
     : edge === 'start'
-      ? child.querySelector<HTMLAnchorElement>('a[href^="#block-"]')
-      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]')).slice(-1)[0] ?? null;
+      ? child.querySelector<HTMLAnchorElement>('a[href^="#block-"], a[href^="#paper-ref-"]')
+      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"], a[href^="#paper-ref-"]')).slice(-1)[0] ?? null;
   return link && container.contains(link) ? link : null;
 }
 
@@ -143,9 +143,9 @@ function selectedInternalReference(
   if (!startLink || startLink !== endLink) return undefined;
 
   const href = startLink.getAttribute('href') ?? '';
-  if (!href.startsWith('#block-')) return undefined;
+  if (!href.startsWith('#block-') && !href.startsWith('#paper-ref-')) return undefined;
   const matchingLinks = Array.from(
-    container.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]'),
+    container.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"], a[href^="#paper-ref-"]'),
   ).filter((candidate) => candidate.getAttribute('href') === href);
   const occurrence = matchingLinks.indexOf(startLink);
   if (occurrence < 0) return undefined;

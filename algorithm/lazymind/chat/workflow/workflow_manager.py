@@ -7,6 +7,7 @@ public Workflow SDK into ChatAgent tools and applies LazyMind's handoff rule.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -73,6 +74,17 @@ _SERIAL_WORKFLOW_EXECUTION_POLICY = (
     'starting the next Workflow SubAgent. '
 )
 
+_USER_BOUNDARY_HANDOFF_POLICY = (
+    'When the user explicitly asks to stop after a particular step or to show its result before '
+    'continuing, execute that last requested target with advance_step_and_hand_off, including '
+    'retryable and rewindable targets. This explicit boundary takes precedence over default '
+    'approval settings. For earlier steps of a requested multi-step path, use advance_step and '
+    'continue serially; do not hand off early. The Host publishes the result and owns the checkpoint. '
+    'Do not reread successfully published artifacts merely to confirm or summarize completion. '
+    'If the user explicitly requests analysis or explanation of the result in Chat, use advance_step '
+    'and provide that requested response instead of handing off. '
+)
+
 
 @dataclass
 class WorkflowAgentContribution:
@@ -85,6 +97,18 @@ class WorkflowAgentContribution:
     # This callback is never exposed as a model tool.
     bind_successor: Optional[Callable[[Dict[str, Any]], None]] = None
     pending_ask: Optional[Dict[str, Any]] = None
+
+    @property
+    def required_tool_names(self) -> tuple[str, ...]:
+        """Keep execution capabilities preloaded, including temporarily hidden ones."""
+        def names(tools):
+            for tool in tools:
+                if isinstance(tool, dict):
+                    if not tool.get('lazy', True):
+                        yield from names(tool.get('tools', []))
+                else:
+                    yield tool.__name__
+        return tuple(names(self.tools))
 
 
 @dataclass(frozen=True)
@@ -188,7 +212,7 @@ def _handoff_tool(
                                 for value in (session, user_input)) else 'UNDECLARED')
 
     @_register_host_file(capability)
-    def advance_step_and_hand_off(step_id: str) -> str:
+    def advance_step_and_hand_off(step_id: str) -> Union[str, Dict[str, Any]]:
         """Execute one Ready Workflow step, then hand off for result approval."""
         selected_session_id = session() if callable(session) else session
         selected_session_id = str(selected_session_id or '').strip()
@@ -233,6 +257,11 @@ def _handoff_tool(
                 current_user_input, recovery_instruction = _step_request_input(
                     bound_user_input, selected_session_id,
                 )
+                if step_id in (frontier.get('retryable_steps') or []):
+                    pending = _input_required_result(client.get_state(
+                        selected_session_id), [step_id], current_user_input)
+                    if pending:
+                        return pending
                 if recovery_instruction:
                     focus_hints.append(recovery_instruction)
                 response = client.advance(AdvanceRequest(
@@ -253,10 +282,23 @@ def _handoff_tool(
                     ),
                 ))
                 result = dict(response.result)
+                if result.get('accepted') is True:
+                    cfg.pop('user_authorized_workflow_retry', None)
                 if state_refreshed:
                     result.update(_state_refresh_notice())
                 if step_id in rewindable:
                     result = _compact_transition_result(result)
+                if result.get('accepted') is True:
+                    # Structured tool results are consumed by the executor before
+                    # another model call, including sessions created in this turn.
+                    return {
+                        **result,
+                        '_agent_control': {
+                            'stop': True,
+                            'reason': 'workflow_handoff',
+                            'final_text': '已交由工作流执行，请在工作流中查看进度和结果。',
+                        },
+                    }
                 return _result_text(result)
             except WorkflowClientError as exc:
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
@@ -265,8 +307,12 @@ def _handoff_tool(
         raise AssertionError('unreachable')
 
     advance_step_and_hand_off.__doc__ = (
-        'Execute a Ready Workflow step and end this LazyMind turn only after the '
-        'Host acknowledges durable ownership of the post-execution approval checkpoint.'
+        'Execute one exact Runtime-returned ready, retryable, rewindable, or continue target '
+        'and end this Chat turn after the Host accepts the post-execution checkpoint. '
+        'Use for the LAST step the user asks to run before stopping or viewing results, '
+        'including reruns and regardless of automatic approval defaults. Use advance_step '
+        'for earlier steps in a requested multi-step path or when the user requests a Chat '
+        'explanation afterward. Results and failures remain visible in the Workflow.'
     )
     return advance_step_and_hand_off
 
@@ -372,6 +418,18 @@ def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
+    pending = _input_required_result(result)
+    if pending:
+        return {**result, **pending}
+    # A material boundary needs a user-visible result, not guessed replacement input.
+    reasons = result.get('failure_reasons') or {}
+    if (result.get('status') == 'failed' and result.get('outcome') == 'step_failed'
+            and isinstance(reasons, dict)
+            and any('MISSING_MATERIAL:' in str(reason) for reason in reasons.values())):
+        return {**result, '_agent_control': {
+            'stop': True, 'reason': 'workflow_material_check_failed',
+            'final_text': '本步骤的材料检查未通过，已停止自动推进并保留原输入。请在工作流查看失败原因；检查材料或修复后可重试。',
+        }}
     workflow_state = result.get('workflow_state')
     workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
     projection = result.get('projection')
@@ -395,10 +453,41 @@ def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _input_required_result(
+    result: Dict[str, Any], requested: Optional[List[str]] = None, current_input: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """A paused attempt resumes on an answer, never on an identical automatic retry."""
+    state = result.get('workflow_state') or result
+    projection = state.get('projection') or {}
+    if state.get('status') == 'completed' or projection.get('completed') is True:
+        return None
+    for step_id, attempts in (state.get('attempt_history') or {}).items():
+        if requested is not None and step_id not in requested:
+            continue
+        retryable = projection.get('retryable', projection.get('retryable_steps'))
+        if isinstance(retryable, list) and step_id not in retryable:
+            continue
+        effective = [item for item in attempts if item.get('validity') in {None, '', 'effective'}]
+        if not effective:
+            continue
+        latest = max(effective, key=lambda item: item.get('attempt', 0))
+        pending = latest.get('input_required')
+        if latest.get('status') != 'cancelled' or not isinstance(pending, dict) or not pending.get('question'):
+            continue
+        text = str(current_input or '').strip()
+        retry_only = text.rstrip('。.!！').lower() in {'重试', '重新执行', 'retry', 're-run', 'rerun', 'try again'}
+        changed_input = hashlib.sha256(text.encode()).hexdigest() != pending.get('request_sha256')
+        if current_input is not None and text and not retry_only and changed_input:
+            continue
+        question = pending['question']
+        return {'status': 'waiting', 'outcome': 'workflow_input_required', 'user_notice': question,
+                '_agent_control': {'stop': True, 'reason': 'workflow_input_required', 'final_text': question}}
+    return None
+
+
 def _safe_session_tools(
     toolkit: HostWorkflowToolkit,
     session: Union[str, Callable[[], str]],
-    initialize_session: Optional[Callable[[], Any]] = None,
     user_input: Optional[Union[str, Callable[[], str]]] = None,
     checkpoint: Optional[InputCheckpoint] = None,
 ) -> List[Any]:
@@ -406,20 +495,14 @@ def _safe_session_tools(
     capability = (
         'NONE' if _trusted_workflow_toolkit(toolkit)
         and all(_declared_workflow_callback(value)
-                for value in (session, initialize_session, user_input)) else 'UNDECLARED'
+                for value in (session, user_input)) else 'UNDECLARED'
     )
 
     def session_id() -> str:
         value = session() if callable(session) else session
         selected = str(value or '').strip()
-        if not selected and initialize_session is not None:
-            # Explicit Workflow mentions already authorize initialization.  Be
-            # tolerant when the model reaches for a Session tool before the
-            # bound trigger: initialize the sole selected Workflow from the
-            # current text request, then continue the requested operation.
-            initialize_session()
-            value = session() if callable(session) else session
-            selected = str(value or '').strip()
+        # A query must never initialize a session: that would discard the
+        # trigger's not-yet-supplied input bindings and make recovery ambiguous.
         if not selected:
             raise WorkflowClientError(
                 'WORKFLOW_SESSION_NOT_INITIALIZED',
@@ -487,8 +570,14 @@ def _safe_session_tools(
                 current_user_input, recovery_instruction = _step_request_input(
                     bound_user_input, selected_session_id,
                 )
+                if any(value in (frontier.get('retryable_steps') or []) for value in requested):
+                    pending = _input_required_result(toolkit.get_workflow_state(
+                        selected_session_id), requested, current_user_input)
+                    if pending:
+                        return pending
                 if recovery_instruction:
                     focus_hints.append(recovery_instruction)
+                user_retry = bool(cfg.get('user_authorized_workflow_retry'))
                 result = toolkit.advance_step(
                     selected_session_id, int(frontier.get('state_version') or 0),
                     [
@@ -514,6 +603,13 @@ def _safe_session_tools(
                     if waiting:
                         return waiting
                 result = _with_terminal_agent_control(result)
+                if user_retry:
+                    # One user retry must not authorize further model-initiated attempts.
+                    cfg.pop('user_authorized_workflow_retry', None)
+                    result.setdefault('_agent_control', {
+                        'stop': True, 'reason': 'workflow_retry_completed',
+                        'final_text': '本次重试已执行，请在工作流中查看结果。',
+                    })
                 if any(value in rewindable for value in requested):
                     result = _compact_transition_result(result)
                 return _compact_model_frontier(result)
@@ -922,15 +1018,27 @@ def _tool_call_arguments(tool_call: Any) -> Dict[str, Any]:
     if not isinstance(function, dict) or str(function.get('name') or '') != 'ask_user':
         return {}
     arguments = function.get('arguments')
-    if isinstance(arguments, dict):
-        return arguments
     if isinstance(arguments, str):
         try:
-            parsed = json.loads(arguments)
+            arguments = json.loads(arguments)
         except json.JSONDecodeError:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
+    if not isinstance(arguments, dict):
+        return {}
+    from lazymind.chat.engine.tools.ask_user import AskUserQuestion
+
+    # History keeps the original model arguments, not the validated tool input.
+    # Recognize the same accepted question format when restoring the user's goal.
+    questions = arguments.get('questions')
+    if not isinstance(questions, list):
+        return {}
+    try:
+        return {**arguments, 'questions': [
+            AskUserQuestion.model_validate(question).model_dump(exclude_none=True, exclude_unset=True)
+            for question in questions
+        ]}
+    except ValueError:
+        return {}
 
 
 def _question_fingerprint(value: Any) -> str:
@@ -1087,6 +1195,24 @@ def _history_startup_ask_index(
         for call in message.get('tool_calls') or []:
             arguments = _tool_call_arguments(call)
             if not arguments:
+                continue
+            # A failed invocation never displayed a card. In particular, old
+            # validation failures must not suppress clarification after recovery.
+            failed = False
+            for reply in history[index + 1:]:
+                if (not isinstance(reply, dict) or reply.get('role') != 'tool'
+                        or reply.get('tool_call_id') != call.get('id')):
+                    continue
+                result = reply.get('content')
+                if isinstance(result, str):
+                    try:
+                        result = json.loads(result)
+                    except (TypeError, ValueError):
+                        continue
+                if isinstance(result, dict) and result.get('ok') is False:
+                    failed = True
+                    break
+            if failed:
                 continue
             for question in arguments.get('questions') or []:
                 if not isinstance(question, dict):
@@ -1563,20 +1689,26 @@ def _workflow_trigger_tools(
                     if _is_explicit_merged_request_context(supplied_context)
                     else bound_query or supplied_context
                 )
-                if session_holder is not None:
-                    # Keep the immutable launch brief available to the first
-                    # Ready steps in this same Chat turn. In particular, an Ask
-                    # answer is supplemental context; it must not become the
-                    # step's answer-only ``user_input`` and erase the original
-                    # topic, page count, or other supplied constraints.
-                    session_holder['request_context'] = effective_context
+                if bound_id == 'paper-writing':
+                    from lazymind.document_tools.paper.analysis.attachments import workflow_input_bindings
+                    input_bindings = workflow_input_bindings(input_bindings, effective_context)
                 existing_session_id = str(
                     (session_holder or {}).get('session_id') or '',
                 ).strip()
                 if existing_session_id:
-                    # Session tools may have initialized the sole explicitly
-                    # selected Workflow as a recovery path. Keep a later model
-                    # call to the advertised trigger idempotent within this turn.
+                    previous = (session_holder or {}).get('launch_bindings', {})
+                    if ((session_holder or {}).get('workflow_id', bound_id) != bound_id or any(
+                        key in previous and previous[key] != value.strip()
+                        for key, value in input_bindings.items() if value.strip()
+                    )):
+                        raise WorkflowClientError(
+                            'WORKFLOW_INPUT_BINDINGS_CONFLICT',
+                            'A Workflow has already started with different inputs; '
+                            'use explicit input revision recovery.',
+                        )
+                if existing_session_id and not input_bindings:
+                    # Repeated launches without new bindings are idempotent;
+                    # calls that supply inputs must continue through recovery.
                     return {
                         'status': 'prepared',
                         'outcome': 'already_initialized',
@@ -1682,18 +1814,45 @@ def _workflow_trigger_tools(
                         if path and not error and material_type in {'', 'file', 'image'}
                         else _import_text_binding(str(material_id), binding)
                     )
+                model_bindings = resolved_bindings
+                if bound_id == 'paper-writing':
+                    from lazymind.document_tools.paper.analysis.attachments import describe_input_bindings
+                    model_bindings = describe_input_bindings(resolved_bindings, input_bindings)
                 toolkit = HostWorkflowToolkit(
                     _client,
                     allowed_workflow_ids=[bound_id],
                     origin_ref=conversation_id,
                 )
-                prepared = toolkit.prepare_workflow(
-                    bound_id, input_bindings=resolved_bindings,
-                    request_context=effective_context,
-                    workflow_mode=workflow_mode,
-                    **({'clarification_values': semantic_values,
-                        'revision_id': str(package.get('revision_id') or bound_revision)} if managed(runtime) else {}),
-                )
+                if existing_session_id:
+                    # Recovery may supply inputs after an earlier empty launch.
+                    # Reuse the session, but never silently replace its inputs.
+                    existing = {
+                        str(item.get('material_id') or item.get('MaterialID')): item
+                        for item in (toolkit.list_workflow_inputs(existing_session_id).get('inputs') or [])
+                    }
+                    for material_id, resource in resolved_bindings.items():
+                        previous = existing.get(material_id)
+                        previous_hash = (previous.get('content_hash') or previous.get(
+                            'ContentHash')) if previous else None
+                        if previous and previous_hash != resource.get('content_hash'):
+                            raise WorkflowClientError(
+                                'WORKFLOW_INPUT_CONFLICT',
+                                f'{material_id} is already bound to different content; '
+                                'use explicit input revision recovery.',
+                            )
+                    for material_id, resource in resolved_bindings.items():
+                        if material_id not in existing:
+                            toolkit.bind_workflow_input(existing_session_id, material_id, resource)
+                    prepared = {'session_id': existing_session_id}
+                else:
+                    prepared = toolkit.prepare_workflow(
+                        bound_id, input_bindings=resolved_bindings,
+                        request_context=effective_context,
+                        workflow_mode=workflow_mode,
+                        **({'clarification_values': semantic_values,
+                            'revision_id': str(package.get('revision_id') or bound_revision)}
+                           if managed(runtime) else {}),
+                    )
                 session_id = str(prepared.get('session_id') or '')
                 if not session_id:
                     if prepared.get('questions'):
@@ -1716,10 +1875,15 @@ def _workflow_trigger_tools(
                         'workflow_id': bound_id,
                         'revision_id': str(package.get('revision_id') or bound_revision),
                         'request_context': effective_context,
-                        'input_bindings': resolved_bindings,
+                        'input_bindings': model_bindings,
                     }
                 if session_holder is not None:
                     session_holder['session_id'] = session_id
+                    session_holder['workflow_id'] = bound_id
+                    session_holder['launch_bindings'] = {
+                        key: value.strip() for key, value in input_bindings.items() if value.strip()
+                    }
+                    session_holder['request_context'] = effective_context
                 state = client.get_state(session_id)
                 projection = state.get('projection') if isinstance(state.get('projection'), dict) else state
 
@@ -1765,7 +1929,7 @@ def _workflow_trigger_tools(
                     'workflow_id': bound_id,
                     'revision_id': str(package.get('revision_id') or bound_revision),
                     'request_context': effective_context,
-                    'input_bindings': resolved_bindings,
+                    'input_bindings': model_bindings,
                     'session_id': session_id,
                     'state_version': int(state.get('state_version') or prepared.get('state_version') or 0),
                     'projection': projection,
@@ -1843,14 +2007,34 @@ def _workflow_trigger_tools(
             ' No user attachments are available: do not bind file materials, but pass literal '
             'values for required text/json input_bindings.'
         )
+        if workflow_id == 'paper-writing':
+            if attachments_available:
+                attachment_guidance = (
+                    ' For paper analysis or writing, paper_input accepts the exact JSON attachment filename. '
+                    'The Host reads the complete original file. Never transcribe, summarize, repair, '
+                    'or embed the uploaded JSON in tool arguments; pass only its filename, or omit '
+                    'paper_input when the request unambiguously selects one JSON attachment.'
+                )
         trigger_workflow.__doc__ = (
-            description + input_contract + attachment_guidance
+            'Initialize this Workflow. The only argument names are input_bindings and request_context. '
+            'Never pass input_type, inputBindings, step_id, or session_id. '
+            + description + input_contract + attachment_guidance
             + ' Omit inputs whose values were not supplied; do not invent values or '
             'fill absent inputs with empty placeholders. Pass explicitly supplied '
             'optional scalar preferences as well as required inputs.'
             + ' If this turn follows startup clarification, request_context must merge the '
             'original request with every clarification answer; otherwise omit it. The Host '
             'forwards the exact current_query and ignores model-authored paraphrases.'
+            '\n\nArgs:\n'
+            '    input_bindings: Object mapping external material IDs to string values. '
+            'The exact argument name is input_bindings (snake_case), not inputBindings. '
+            + ('For uploaded paper JSON, pass its exact attachment filename; the Host reads it, preserving all fields. '
+               'Literal JSON remains supported for programmatic inputs. '
+               if workflow_id == 'paper-writing' and attachments_available else
+               'For JSON materials, the value is the complete JSON text, preserving all fields. ')
+            + 'Example call: {"input_bindings": {"material_id": "complete value"}}. '
+            'On argument validation errors, correct the field name and retain the input content; do not drop bindings.\n'
+            '    request_context: Optional merged original request and clarification answers.\n'
         )
         tools.append(trigger_workflow)
     return tools
@@ -1999,6 +2183,22 @@ def resolve_workflow_injection(
         activations, allowed_refs, current_query, conversation_id, session_holder,
         conversation_history, mode, clarification,
     )
+    if session_id:
+        # Recovery in a later Chat turn must also be able to supply missing
+        # inputs. Bind this capability to the existing session's pinned package,
+        # never to another activation selected in the same request.
+        repair_tools = _workflow_trigger_tools([{
+            'workflow_id': workflow_id,
+            'workflow_ref': str(context.get('workflow_ref') or f'builtin:{workflow_id}'),
+            'revision_id': revision_id,
+            'tool_name': 'trigger_existing_workflow',
+            'tool_description': ('Supply missing inputs to the existing Workflow Session; '
+                                 'conflicting inputs are rejected.'),
+        }], {str(context.get('workflow_ref') or f'builtin:{workflow_id}')},
+            current_query, conversation_id, session_holder, conversation_history, mode)
+        for tool in repair_tools:
+            tool.__name__ = 'supply_workflow_inputs'
+        trigger_tools = repair_tools
     toolkit = HostWorkflowToolkit(
         _client, allowed_workflow_ids=allowed_ids, origin_ref=conversation_id,
     )
@@ -2023,6 +2223,7 @@ def resolve_workflow_injection(
         'list_workflow_inputs', 'get_workflow_command',
         'list_artifacts', 'read_artifact', 'patch_artifact', 'delete_artifact',
         'reorder_artifact_pages', 'patch_artifact_text',
+        'supply_workflow_inputs',
     }
     if allowed_refs or session_id:
         tools = [
@@ -2034,14 +2235,6 @@ def resolve_workflow_injection(
         # A ChatAgent tool set is fixed for the duration of one model turn. Expose
         # Host-bound Session tools up front and resolve their Session id only after
         # trigger_<workflow> creates it, so trigger -> advance works in the same turn.
-        from lazymind.chat.workflow.clarification import managed
-        if len(trigger_tools) == 1 and not managed(runtime_policy) and not session_holder.get('startup_managed'):
-            @fc_register(host_file='NONE')
-            def initialize_selected_session():
-                return trigger_tools[0]()
-        else:
-            initialize_selected_session = None
-
         @fc_register(host_file='NONE')
         def launch_user_input() -> str:
             return session_holder.get('request_context', '')
@@ -2056,7 +2249,6 @@ def resolve_workflow_injection(
             *_safe_session_tools(
                 toolkit,
                 selected_session_id,
-                initialize_session=initialize_selected_session,
                 user_input=launch_user_input,
                 checkpoint=checkpoint,
             ),
@@ -2074,10 +2266,8 @@ def resolve_workflow_injection(
             authoring_tools,
         )
         if trigger_entry_tools:
-            # Discovery mode: expose triggers directly so the model can route
-            # from the injected catalog without a gateway hop. The tool set is
-            # fixed for the model turn, so Session tools must also be available
-            # for trigger -> advance execution in that same turn.
+            # Register both phases once; their schemas are exposed according to
+            # the live Session state below, without another discovery round.
             tools = [
                 *trigger_entry_tools,
                 *_safe_session_tools(
@@ -2095,10 +2285,27 @@ def resolve_workflow_injection(
             ]
         else:
             tools = [authoring_group]
+    if not session_id and trigger_tools:
+        # LazyLLM refreshes conditional tool schemas before each model round.
+        # Reading state must never create a Session; only a successful trigger
+        # can switch from launch capabilities to execution capabilities.
+        launch_tools = [tool for tool in tools if not isinstance(tool, dict)
+                        and _is_bound_workflow_trigger(tool.__name__)]
+        execution_tools = [tool for tool in tools if not isinstance(tool, dict)
+                           and not _is_bound_workflow_trigger(tool.__name__)]
+        tools = [
+            {**_workflow_tool_group('workflow_launch', 'Initialize the selected Workflow.',
+                                    launch_tools, lazy=False),
+             'key_source': lambda: not selected_session_id()},
+            {**_workflow_tool_group('workflow_session', 'Operate the initialized Workflow Session.',
+                                    execution_tools, lazy=False),
+             'key_source': selected_session_id},
+            *[tool for tool in tools if isinstance(tool, dict)],
+        ]
     if session_id:
-        tools = _safe_session_tools(
+        tools = [*trigger_tools, *_safe_session_tools(
             toolkit, selected_session_id, user_input=current_query, checkpoint=checkpoint,
-        )
+        )]
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,
@@ -2179,6 +2386,7 @@ def resolve_workflow_injection(
             + 'state_version or expected_state_version. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
             + _WORKFLOW_EDIT_SCOPE_POLICY
+            + _USER_BOUNDARY_HANDOFF_POLICY
             + 'If a Workflow tool returns user_notice, explicitly relay that notice to the '
             + 'user. advance_step waits for '
             + 'terminal execution. A failed result never means success and never permits a '
@@ -2206,15 +2414,22 @@ def resolve_workflow_injection(
             + 'The Host can accept exact allowlisted continuation text at a valid checkpoint; '
             + 'that does not authorize ignoring failed steps or changing approval preferences. Otherwise use '
             + 'the effective requires_approval flag from ready_step_details or projection.nodes[step_id]. '
-            + 'requires_approval=false overrides a package mode=human: use advance_step and continue. '
+            + 'Absent an explicit user boundary, requires_approval=false overrides a package '
+            + 'mode=human: use advance_step and continue. '
             + 'Only when that flag is absent, fall back to the step mode/default_approval. '
             + 'mode=human/default_approval=required '
             + 'means execute that Ready step with advance_step_and_hand_off so the Host stops '
             + 'after execution for human review of its outputs. mode=auto/default_approval=not_required '
-            + 'means execute with advance_step and continue. Never ask whether to execute a Ready '
+            + 'means execute with advance_step and continue unless an explicit user boundary '
+            + 'requires advance_step_and_hand_off. Never ask whether to execute a Ready '
             + 'step merely because it requires approval; the approval checkpoint belongs to its result. '
             + 'Do not replace continued execution with a promise that later steps will run. '
             + completed_followup
+            + ('\nDeclared clarification fields remain available through ask_user. '
+               'Ask for unanswered fields before continuing; a default input binding is not a user answer. '
+               'Preserve explicit answers and never overwrite existing input bindings silently.\n'
+               + json.dumps(_runtime_clarification_fields(runtime_policy), ensure_ascii=False)
+               if _runtime_clarification_fields(runtime_policy) else '')
             + '\n'
             + 'Artifact-mutation guard: when the user asks to change an Artifact already '
             + ('owned by this Workflow, the declared scoped completed-output actions '
@@ -2230,9 +2445,9 @@ def resolve_workflow_injection(
         return WorkflowAgentContribution(
             # advance_step is synchronous: its terminal result and refreshed
             # Ready frontier must be returned to the same ChatAgent turn so a
-            # user-requested continuous run can keep advancing.  Only the
-            # explicit hand-off variant transfers ownership and ends the turn.
-            tools, ['advance_step_and_hand_off', *[action.tool.__name__ for action in completed_actions]],
+            # user-requested continuous run can keep advancing. Handoff stops
+            # through its accepted structured result, never merely by tool name.
+            tools, [action.tool.__name__ for action in completed_actions],
             patch, runtime_context, runtime_policy, bind_successor,
         )
 
@@ -2259,6 +2474,7 @@ def resolve_workflow_injection(
             + 'selected and authorized this exact procedure. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
             + _WORKFLOW_EDIT_SCOPE_POLICY
+            + _USER_BOUNDARY_HANDOFF_POLICY
             + entry_instruction
             + checkpoint_guidance
             + 'Conversation attachments are optional unless the selected Workflow Runtime '
@@ -2275,7 +2491,8 @@ def resolve_workflow_injection(
             + 'Explicit user approval instructions override step defaults; otherwise use '
             + 'the effective requires_approval flag in ready_step_details/projection.nodes, '
             + 'falling back to mode only when the flag is absent. requires_approval=false '
-            + 'overrides a package mode=human: use advance_step and continue. If a Ready '
+            + 'overrides a package mode=human unless the user explicitly asks to stop at this '
+            + 'target: then use advance_step_and_hand_off. Otherwise use advance_step and continue. If a Ready '
             + 'Workflow step requires human approval, execute it with advance_step_and_hand_off so '
             + 'the Host stops after execution for output review. Do not ask whether to execute it, '
             + 'and do not merely announce that later steps will run. For recovery, '

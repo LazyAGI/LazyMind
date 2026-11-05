@@ -61,3 +61,34 @@ func TestCompletionFailureCannotOverwriteUserStop(t *testing.T) {
 		})
 	}
 }
+
+func TestInputRequiredKeepsActualProgressInCacheAndDatabase(t *testing.T) {
+	db := newSubagentHTTPTestDB(t)
+	ss, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ss.Close()
+	store.Init(db.DB, nil, ss)
+	seedSubagentTask(t, db, "waiting", "conversation", "owner", StatusRunning)
+	for _, ev := range []TaskEvent{
+		{Type: "progress", TaskID: "waiting", Progress: 7, CurrentPhase: "正在确定修订范围"},
+		{Type: "done", TaskID: "waiting", Status: StatusInterrupted, CurrentPhase: "awaiting_input", Summary: "请选择意见"},
+	} {
+		if err := routeEventWithWorkflowHooks(t.Context(), db.DB, ss, ev, false, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, cached := range []bool{true, false} {
+		if !cached {
+			store.Init(db.DB, nil, nil)
+		}
+		req := mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/waiting", nil), map[string]string{"task_id": "waiting"})
+		rec := httptest.NewRecorder()
+		InternalGetTaskStatus(rec, req)
+		data := getData(rec.Body.Bytes())
+		if data["status"] != StatusInterrupted || data["current_phase"] != "awaiting_input" || (data["progress"] != "7" && data["progress"] != float64(7)) {
+			t.Fatalf("cached=%v: misleading waiting state: %s", cached, rec.Body.String())
+		}
+	}
+}

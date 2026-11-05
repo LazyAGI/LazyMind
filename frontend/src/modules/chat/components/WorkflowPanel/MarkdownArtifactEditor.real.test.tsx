@@ -204,3 +204,17 @@ it('shows outline prose without labels and keeps it out of editable Markdown acr
   await waitFor(() => expect(container.querySelectorAll('[data-writer-outline-description]')).toHaveLength(1));
   expect(container.querySelector('[data-writer-outline-description]')).toHaveAttribute('data-writer-outline-description', displayed);
 });
+
+it('renders a paper outline and preserves chart ownership after a heading edit', async () => {
+  const charts = '<!-- paper-charts: ["accuracy", "cost"] -->';
+  const original = '# Paper\n\n<a id="block-sec-1"></a>\n## Results\n' + charts;
+  const onSave = vi.fn(async (markdown: string) => ({markdown, revision: 2}));
+  const {container} = render(<MarkdownArtifactEditor markdown={original} sourceRevision={1} onSave={onSave} />);
+  await waitFor(() => expect(container.querySelector('[contenteditable=true]')).toHaveTextContent('Results'));
+  expect(container.querySelector('.writer-markdown-editor__parse-fallback')).toBeNull();
+  expect(capture.editor!.getMarkdown()).not.toContain('paper-charts');
+  await act(async () => capture.editor!.setMarkdown(capture.editor!.getMarkdown().replace('Results', 'Verified results')));
+  await act(async () => capture.change?.(capture.editor!.getMarkdown(), false));
+  await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), {timeout: 2500});
+  expect(onSave.mock.calls[0][0]).toContain('## Verified results\n' + charts);
+});

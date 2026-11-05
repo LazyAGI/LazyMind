@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -347,6 +348,12 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 		t.Fatalf("step: %v", err)
 	}
 
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "ps-1").Update("controller_host", "lazymind").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentTask{InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), ID: "task-1", ConversationID: "conv-1", Params: json.RawMessage(`{"hand_off":true,"workflow_mode":"dynamic","session_id":"ps-1","step_id":"analyze_subject"}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
 	// workflow_mode=dynamic in pctx → step_waiting with reason=dynamic_pause
 	pctx := &WorkflowChatContext{
 		SessionID:    "ps-1",
@@ -378,6 +385,14 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	}
 	if gotPayload["reason"] != "dynamic_pause" {
 		t.Fatalf("expected reason=dynamic_pause, got %v", gotPayload["reason"])
+	}
+	session, err := GetSession(ctx, db.DB, "ps-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := displaystate.Read(db.DB, *session)
+	if err != nil || view.Status != "waiting" || view.Reason != "next_step_required" || view.ApprovalStepID != "" {
+		t.Fatalf("successful image workflow misreported: %+v %v", view, err)
 	}
 	if feedbackPayload["task_id"] != "task-1" ||
 		!strings.Contains(fmt.Sprint(feedbackPayload["message"]), "Analyze Subject") ||
@@ -574,6 +589,9 @@ func TestOnSubAgentDone_ExplicitNoHandOffWaitsForChatAgent(t *testing.T) {
 
 	if gotEvent != "step_waiting" || gotReason != "inline_complete" {
 		t.Fatalf("expected inline_complete step_waiting, got event=%q reason=%v", gotEvent, gotReason)
+	}
+	if admitted, err := prepareContinuation(ctx, db.DB, "ps-inline"); err != nil || !admitted {
+		t.Fatalf("inline Chat continuation blocked: admitted=%v err=%v", admitted, err)
 	}
 }
 

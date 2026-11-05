@@ -117,10 +117,11 @@ type slotDTO struct {
 	OrderVersion  *int   `json:"order_version,omitempty"`
 
 	// Internal fields — used by enrichSlots, never serialised to the client.
-	ArtifactSeq     *int            `json:"-"`
-	HumanArtifactID *string         `json:"-"`
-	Attempt         int             `json:"-"`
-	ContentSnapshot json.RawMessage `json:"-"`
+	ArtifactSeq       *int            `json:"-"`
+	HumanArtifactID   *string         `json:"-"`
+	Attempt           int             `json:"attempt"`
+	ProducerAttemptID string          `json:"producer_attempt_id,omitempty"`
+	ContentSnapshot   json.RawMessage `json:"-"`
 }
 
 func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
@@ -169,19 +170,20 @@ func buildStepIntentMap(ctx context.Context, db *gorm.DB, sessionID string) map[
 
 func toSlotDTO(r *orm.WorkflowSlotRevision) slotDTO {
 	return slotDTO{
-		ArtifactID:      r.ID,
-		SlotID:          r.SlotID,
-		Revision:        r.Revision,
-		ListIndex:       r.ListIndex,
-		Selected:        r.Selected,
-		Slot:            r.Slot,
-		ArtifactSeq:     r.ArtifactSeq,
-		HumanArtifactID: r.HumanArtifactID,
-		StepID:          r.StepID,
-		Attempt:         r.Attempt,
-		CreatedAt:       r.CreatedAt,
-		ChangeSource:    r.ChangeSource,
-		ContentSnapshot: r.ContentSnapshot,
+		ArtifactID:        r.ID,
+		SlotID:            r.SlotID,
+		Revision:          r.Revision,
+		ListIndex:         r.ListIndex,
+		Selected:          r.Selected,
+		Slot:              r.Slot,
+		ArtifactSeq:       r.ArtifactSeq,
+		HumanArtifactID:   r.HumanArtifactID,
+		StepID:            r.StepID,
+		Attempt:           r.Attempt,
+		ProducerAttemptID: r.ProducerAttemptID,
+		CreatedAt:         r.CreatedAt,
+		ChangeSource:      r.ChangeSource,
+		ContentSnapshot:   r.ContentSnapshot,
 	}
 }
 

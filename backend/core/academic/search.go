@@ -187,6 +187,14 @@ func saveSearchPages(ctx context.Context, user string, record orm.AcademicExpans
 
 // Provider failures are observable partial results; state-store failures remain errors.
 func fetchPaperPage(ctx context.Context, record orm.AcademicExpansion, source string, request paperSearchRequest) (discoveredPage, searchOutcome, error) {
+	if source == "arxiv" {
+		select {
+		case arxivSourceAdmission <- struct{}{}:
+			defer func() { <-arxivSourceAdmission }()
+		case <-ctx.Done():
+			return discoveredPage{}, searchOutcome{}, ctx.Err()
+		}
+	}
 	failure, err := searchCooldown(ctx, request.scope)
 	if err != nil {
 		return discoveredPage{}, searchOutcome{}, err

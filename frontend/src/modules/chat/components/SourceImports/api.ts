@@ -5,8 +5,8 @@ export interface InspectedSource { source_id: string; url: string; title: string
 export interface ImportItem {
   item_id: string; batch_id: string; title: string; paper_key: string;
   target_dataset_id: string; target_name: string; created_library: boolean;
-  status: string; stage: string; state_unavailable?: boolean; processing_status?: string; document_id?: string;
-  error_message?: string; retryable: boolean; retry_batch_id?: string; retry_item_id?: string;
+  status: string; stage: string; state_unavailable?: boolean; processing_status?: string; processing_level?: string; document_id?: string;
+  error_message?: string; retry_at?: string; retryable: boolean; retry_batch_id?: string; retry_item_id?: string;
 }
 export interface NewLibrary { name: string; tags: string[]; description?: string; scene: string; processing_level: string; algo_id?: string }
 export interface SourceImportRequest { source_context: SourceContext; source_ids: string[]; target_dataset_id?: string; new_knowledge_base?: NewLibrary; idempotency_key: string }
@@ -33,14 +33,4 @@ export async function submitSourceImport(request: SourceImportRequest) {
 }
 export async function retrySourceImport(batch: string, items: string[], key: string) {
   await axiosInstance.post(`${root}/imports/${encodeURIComponent(batch)}:retry`, { item_ids: items, idempotency_key: key }, options);
-}
-
-export async function submitKnowledgeDecision(
-  confirmation: { confirmation_id: string; arguments_digest: string; snapshot: string },
-  approved: boolean,
-) {
-  await axiosInstance.post(
-    `${BASE_URL}/api/core/knowledge-management/confirmations/${encodeURIComponent(confirmation.confirmation_id)}/decision`,
-    { decision: approved ? "approved" : "rejected", arguments_digest: confirmation.arguments_digest, snapshot: confirmation.snapshot },
-  );
 }

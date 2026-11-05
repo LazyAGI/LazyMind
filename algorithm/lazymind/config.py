@@ -187,6 +187,12 @@ config.add(
     'WORKFLOWS_DIR',
     description='Directory containing workflow packages. Each sub-directory is one workflow.',
 )
+config.add('paper_review_min_paper_count', int, 12, 'PAPER_REVIEW_MIN_PAPER_COUNT',
+           description='Default lower bound for F2 papers; explicit user counts take precedence.',
+           post_action=_require_positive_config_value('LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT'))
+config.add('paper_review_max_paper_count', int, 20, 'PAPER_REVIEW_MAX_PAPER_COUNT',
+           description='Default upper bound for F2 papers, not a count to fill.',
+           post_action=_require_positive_config_value('LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT'))
 config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={

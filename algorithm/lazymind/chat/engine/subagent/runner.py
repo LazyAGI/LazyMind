@@ -131,6 +131,8 @@ DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream_end',
     'artifact_stream_abort',
     'progress',
+    'text',
+    'think',
 })
 
 # Model runtimes commonly deliver one token (and sometimes one character) per
@@ -1061,7 +1063,8 @@ def _build_subagent_plan(
             skill_search=None if not inherited_skills else core_skill_search,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
-            extra_stop_condition=make_cancel_stop_condition(),
+            extra_stop_condition=_workflow_stop_condition(
+                terminal_tool_names if str(ctx.agent_type or '') == 'workflow_step' else set()),
             max_retries=(execution_policy.rounds - 1 if execution_policy else
                          max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)),
             expanded_round_limit=execution_policy.rounds if execution_policy else None,
@@ -1191,11 +1194,11 @@ def _persist_step(
 
 def _workflow_control_from_tool_results(
     event: Dict[str, Any], declared_tool_names: set[str],
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """Extract a control envelope returned by a declared Workflow tool."""
     if event.get('tag') != 'tool_results':
         return {}
-    selected: Dict[str, str] = {}
+    selected: Dict[str, Any] = {}
     for result in event.get('tool_results') or []:
         if not isinstance(result, dict):
             continue
@@ -1213,6 +1216,15 @@ def _workflow_control_from_tool_results(
         if isinstance(payload, dict) and payload.get('ok') is True:
             payload = payload.get('value')
         if not isinstance(payload, dict) or not isinstance(payload.get('control'), dict):
+            continue
+        pending = payload['control'].get('awaiting_input')
+        if (isinstance(pending, dict) and isinstance(pending.get('question'), str)
+                and pending['question'].strip()
+                and re.fullmatch(r'[0-9a-f]{64}', str(pending.get('request_sha256', '')))):
+            candidate = {'awaiting_input': pending}
+            if selected and selected != candidate:
+                raise ValueError('Workflow tools returned conflicting control decisions.')
+            selected = candidate
             continue
         next_step = str(payload['control'].get('next_step') or '').strip()
         if not next_step:
@@ -1241,7 +1253,29 @@ def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str])
                 return f'{name} failed: {payload}'
         if not isinstance(payload, dict):
             return f'{name} failed without a structured result: {payload!r}'
+        if payload.get('ok') is False:
+            reason = payload.get('value') or payload.get('msg') or payload.get('error') or 'tool returned ok=false'
+            return f'{name} failed: {reason}'
     return ''
+
+
+def _workflow_stop_condition(terminal_names: set[str]):
+    """Check terminal failures in the producer thread, before another ReAct model round."""
+    cancelled = make_cancel_stop_condition()
+
+    def check(output):
+        cancelled(output)
+        if not terminal_names:
+            return False
+        trace = lazyllm.locals['_lazyllm_agent'].get('workspace', {}).get('tool_call_trace', [])
+        results = [{'name': (item.get('function') or {}).get('name') or item.get('name', ''),
+                    'result': item.get('tool_call_result')} for item in trace if isinstance(item, dict)]
+        error = _terminal_tool_failure({'tag': 'tool_results', 'tool_results': results}, terminal_names)
+        if error:
+            raise RuntimeError(error)
+        return False
+
+    return check
 
 
 def _signal_task_cancel(task_id: str) -> bool:
@@ -1642,7 +1676,7 @@ async def run_subagent_stream(
         # translator unifies text/think output with ChatAgent frame semantics.
         translator = AgentEventFrameTranslator(query=ctx.objective, run_id=str(task.get('execution_id') or task_id))
         final_result: Any = None
-        workflow_control: Dict[str, str] = {}
+        workflow_control: Dict[str, Any] = {}
         declared_workflow_tools = set(_coerce_str_list(ctx.params.get('legacy_tools')))
         terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
         workflow_terminal_completed = False
@@ -1678,6 +1712,12 @@ async def run_subagent_stream(
                     if stream_event.get('type') == 'progress':
                         progress = max(progress, int(stream_event.get('progress') or 0))
                         stream_event['progress'] = progress
+                    if stream_event.get('type') in ('text', 'think'):
+                        kind = stream_event['type']
+                        content = stream_event.get(kind) or ''
+                        if content:
+                            ctx.db.append_step(task_id, step_seq, kind, {'content': content})
+                            step_seq += 1
                     yield _sse(stream_event)
                     continue
 
@@ -1833,6 +1873,14 @@ async def run_subagent_stream(
         cancel_check = plan.execution_options.extra_stop_condition
         if cancel_check is not None:
             cancel_check(None)
+
+        if workflow_control.get('awaiting_input'):
+            pending = workflow_control['awaiting_input']
+            yield _sse({'type': 'done', 'task_id': task_id, 'status': 'interrupted',
+                        'current_phase': 'awaiting_input', 'summary': pending['question'],
+                        'control': workflow_control, 'cost': round(time.time() - start_time, 3)})
+            yield 'data: [DONE]\n\n'
+            return
 
         # Commit valid required drafts before enforcing the delivery contract.
         if required_output_keys:

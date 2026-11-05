@@ -187,6 +187,10 @@ def configure_tool_retrieval(agent, plan, *, budget_provider=None, initializatio
                 if options.preload_all_tools or name in BASE_TOOLS or name in options.required_tool_names
                 or required_groups.intersection(entry['groups'])]
     required.extend(name for name in plan.stop_tools if name in catalog)
+    # Explicit capabilities may become available later in this same run (for
+    # example after Workflow initialization). Reconciliation still filters out
+    # unavailable tools; do not forget their required status at construction.
+    required = list(dict.fromkeys([*options.required_tool_names, *required]))
     skill_manager = agent._skill_manager
 
     def skill_dependencies(name):

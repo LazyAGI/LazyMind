@@ -57,7 +57,7 @@ export const allowedFileTypes = [
 // Keep this list aligned with algorithm CHAT_TEXT_EXTENSIONS and core common textFileExtensions.
 export const allowedTextTypes = [
   ".txt", ".md", ".markdown", ".lmd", ".json", ".jsonl", ".ndjson",
-  ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".log", ".sql",
+  ".xml", ".svg", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".log", ".sql",
   ".html", ".htm", ".css", ".scss", ".sass", ".less",
   ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx",
   ".java", ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".cs",

@@ -250,7 +250,7 @@ func TestRemoveConversationArtifactFilesAlsoRemovesAgentWorkspace(t *testing.T) 
 	conversationID := "conversation-1"
 	roots := []string{
 		conversationArtifactConversationRoot(userID, conversationID),
-		conversationAgentWorkspaceRoots(userID, conversationID)[0],
+		artifact.ConversationAgentWorkspaceRoots(userID, conversationID)[0],
 	}
 	for _, root := range roots {
 		if err := os.MkdirAll(root, 0o755); err != nil {

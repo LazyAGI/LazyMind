@@ -39,6 +39,7 @@ type academicChatSummary struct {
 	SourceConversationID string `json:"source_conversation_id,omitempty"`
 	SourceAvailable      bool   `json:"source_available,omitempty"`
 	ReadyCount           int    `json:"ready_count,omitempty"`
+	ProcessingCount      int    `json:"processing_count,omitempty"`
 	PaperCount           int    `json:"paper_count,omitempty"`
 }
 

@@ -7,7 +7,7 @@ import (
 
 var textFileExtensions = map[string]struct{}{
 	"txt": {}, "md": {}, "markdown": {}, "lmd": {}, "csv": {}, "tsv": {},
-	"json": {}, "jsonl": {}, "ndjson": {}, "xml": {},
+	"json": {}, "jsonl": {}, "ndjson": {}, "xml": {}, "svg": {},
 	"yaml": {}, "yml": {}, "toml": {}, "ini": {}, "cfg": {}, "conf": {},
 	"log": {}, "sql": {}, "html": {}, "htm": {},
 	"css": {}, "scss": {}, "sass": {}, "less": {},

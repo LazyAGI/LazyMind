@@ -34,7 +34,7 @@ function ContentRow({ item, number, onOpen, onReview }: { item: Handoff; number:
             description={<Space wrap size={[12, 4]}>
                 {paperCount !== undefined && <span>{t('paperTasks.contentPaperCount', { count: paperCount })}</span>}
                 {created?.isValid() && <time dateTime={conversation?.create_time}>{created.format('MM-DD HH:mm')}</time>}
-                <ReviewRecordStatus conversationId={item.conversation_id} />
+                <ReviewRecordStatus conversationId={item.conversation_id} kind={item.kind} />
             </Space>} />
     </List.Item>;
 }

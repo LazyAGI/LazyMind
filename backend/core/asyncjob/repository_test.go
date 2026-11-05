@@ -401,3 +401,47 @@ func TestEnqueueSurvivesConcurrentWriter(t *testing.T) {
 		t.Fatalf("expected one projection and one competing write, got %d: %v", count, err)
 	}
 }
+
+func TestEnqueueSurvivesConcurrentDatabaseWrite(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.AsyncJob{}).DB
+	wrote := false
+	if err := db.Callback().Create().Before("gorm:create").Register("test:concurrent_enqueue_write", func(tx *gorm.DB) {
+		row, ok := tx.Statement.Dest.(*orm.AsyncJob)
+		if !ok || row.JobType != "test.enqueue" || wrote {
+			return
+		}
+		wrote = true
+		// Advance SQLite's WAL after Enqueue has read its idempotency snapshot,
+		// as the background job runner can do before the pending row is inserted.
+		now := time.Now().UTC()
+		tx.AddError(db.Create(&orm.AsyncJob{
+			ID: "concurrent-writer", JobType: "test.other", Status: string(StatusPending),
+			IdempotencyKey: "other", PayloadJSON: json.RawMessage(`{}`), MaxAttempts: 1,
+			NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+		}).Error)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := EnqueueRequest{JobType: "test.enqueue", IdempotencyKey: "projection", Payload: map[string]string{"session": "paused"}}
+	job, err := Enqueue(t.Context(), db, req)
+	if !wrote {
+		t.Fatal("concurrent write did not run")
+	}
+	if err != nil {
+		t.Fatalf("enqueue lost the job after a concurrent write: %v", err)
+	}
+	replayed, err := Enqueue(t.Context(), db, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.ID != job.ID || job.Status != string(StatusPending) {
+		t.Fatalf("enqueue must persist one pending job and reuse it: first=%+v replayed=%+v", job, replayed)
+	}
+	var count int64
+	if err := db.Model(&orm.AsyncJob{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected one projection and one independent writer, got %d jobs", count)
+	}
+}

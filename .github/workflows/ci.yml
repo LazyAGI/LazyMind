@@ -432,7 +432,11 @@ jobs:
         run: bash scripts/test_migration_upgrade.sh
 
       - name: Test backend core (SQLite) with coverage
-        run: cd backend/core && go test ./... -v -timeout 40m -coverprofile=coverage-core.out
+        working-directory: backend/core
+        run: |
+          # Workflow files outside the Go module do not invalidate cached test results.
+          go clean -testcache
+          go test ./... -v -timeout 40m -coverprofile=coverage-core.out
 
       - name: Test backend core (PostgreSQL)
         env:
@@ -630,6 +634,7 @@ jobs:
         shell: python
         env:
           LAZYLLM_INIT_DOC: "1"
+          PYTHONUTF8: "1"
         run: |
           import subprocess
           import sys

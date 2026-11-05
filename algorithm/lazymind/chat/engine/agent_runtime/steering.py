@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 import threading
 import time
 from types import MethodType
-from typing import Deque
+from typing import Callable, Deque
 
 from .models import AgentRunPlan
 
@@ -24,6 +24,8 @@ class _ActiveRun:
     pending: Deque[SteeringInput] = field(default_factory=deque)
     known_ids: set[str] = field(default_factory=set)
     accepting: bool = True
+    confirmation_gate: threading.Lock = field(default_factory=threading.Lock)
+    confirmations: dict[str, Callable[[str], None]] = field(default_factory=dict)
 
 
 class SteeringInterruptedError(BaseException):
@@ -112,13 +114,49 @@ class SteeringRegistry:
     ) -> tuple[bool, str]:
         with self._lock:
             active = self._runs.get(run_id)
-            if active is None or not active.accepting or active.conversation_id != conversation_id:
-                return False, 'response_not_active'
-            if steer_id in active.known_ids:
+        if active is None or active.conversation_id != conversation_id:
+            return False, 'response_not_active'
+        # Keep approval arbitration and publishing to the inbox ordered for this
+        # run, without holding the registry lock over a Core request.
+        with active.confirmation_gate:
+            with self._lock:
+                if not active.accepting or self._runs.get(run_id) is not active:
+                    return False, 'response_not_active'
+                if steer_id in active.known_ids:
+                    return True, ''
+            for confirmation_id, supersede in active.confirmations.items():
+                supersede(confirmation_id)
+            with self._lock:
+                if not active.accepting or self._runs.get(run_id) is not active:
+                    return False, 'response_not_active'
+                active.known_ids.add(steer_id)
+                active.pending.append(SteeringInput(steer_id, content, time.time()))
                 return True, ''
-            active.known_ids.add(steer_id)
-            active.pending.append(SteeringInput(steer_id, content, time.time()))
-            return True, ''
+
+    def prepare_confirmation(self, run_id: str, prepare, supersede) -> dict:
+        with self._lock:
+            active = self._runs.get(run_id)
+        if active is None:
+            return prepare()
+        with active.confirmation_gate:
+            with self._lock:
+                if active.pending:
+                    raise SteeringInterruptedError('Guidance arrived before the knowledge operation was prepared')
+            prepared = prepare()
+            if prepared.get('status') == 'pending':
+                active.confirmations[prepared['confirmation_id']] = supersede
+            return prepared
+
+    def finish_confirmation(self, run_id: str, confirmation_id: str) -> bool:
+        """Join in-flight guidance before leaving a superseded tool wait."""
+        with self._lock:
+            active = self._runs.get(run_id)
+        if active is None:
+            return False
+        with active.confirmation_gate:
+            active.confirmations.pop(confirmation_id, None)
+            with self._lock:
+                return bool(active.pending)
 
     def drain_or_close(self, run_id: str) -> list[SteeringInput]:
         """The continuation loop's single consumer and atomic completion boundary."""

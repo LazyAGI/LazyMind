@@ -7,9 +7,8 @@ import type { ConversationArtifact } from '../../store/taskCenter';
 import { useWorkflowStore } from '../../store/workflowPanel';
 import type { SourceContext } from '../SourceImports/api';
 import type { ChatSource } from '../../utils/sourceAdapter';
-import type { KnowledgeOperation } from '../../utils/knowledgeOperations';
 
-export type ArtifactSourceContext = { context: SourceContext; sources: ChatSource[]; operations?: KnowledgeOperation[] };
+export type ArtifactSourceContext = { context: SourceContext; sources: ChatSource[] };
 
 export interface WorkflowPreviewOrigin {
   sessionId: string;

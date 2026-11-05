@@ -598,7 +598,7 @@ const MessageList: React.FC<MessageListProps> = ({
           if (item.role === RoleTypes.ASSISTANT && next?.steering_pending
             && next.history_id === item.history_id
             && !String(item.display_delta || item.delta || "").trim()
-            && !item.ask_pending && !item.answers?.length && !item.images?.length && !item.files?.length) return null;
+            && !item.ask_pending && !item.knowledge_confirmations?.length && !item.answers?.length && !item.images?.length && !item.files?.length) return null;
           const historyId = item.history_id || item.id;
           const pending = item.ask_pending;
           const hasMailDraft = Boolean(

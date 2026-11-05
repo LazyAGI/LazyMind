@@ -69,7 +69,7 @@ def test_candidates_publish_authoritative_papers_once(publisher, monkeypatch):
     source['papers'] = []
     resolved['papers'][0]['is_seed'] = False
     monkeypatch.setattr(module, '_read_expansion_context', lambda _: {'record': {
-        'result': source, 'preparation': {
+        'result': source, 'budget_mode': 'balanced', 'preparation': {
             'directions': [{'name': 'agents', 'question': 'How do agents coordinate?'},
                            {'name': 'unselected', 'question': 'Other question'}],
             'research_questions': [{'direction': 'agents', 'question': 'Internal predecessor investigation'}]}}})
@@ -98,7 +98,7 @@ def test_invalid_task_papers_reports_context_error_without_publishing(publisher,
 
 
 @pytest.mark.parametrize(('goal', 'mode', 'ends_with_list'), [
-    ('expansion', 'fast', True), ('review', 'balanced', False),
+    ('expansion', 'fast', True), ('review', 'fast', True), ('review', 'balanced', False),
 ])
 def test_paper_list_marker_is_only_published_for_lightweight_expansion(
         publisher, monkeypatch, goal, mode, ends_with_list):
@@ -111,29 +111,30 @@ def test_paper_list_marker_is_only_published_for_lightweight_expansion(
         'preparation': {'directions': [{'name': 'agents', 'question': 'How do they coordinate?'}]},
     }})
     recommendation = {'paper_id': 'b', 'reason': 'Directly studies coordination', 'direction': 'agents'}
-    if goal == 'expansion':
+    if ends_with_list:
         with pytest.raises(ToolExecutionError, match='cover all non-seed papers'):
             module.academic_publish_stage(['a', 'b'], [], [])
         assert events == []
     result = module.academic_publish_stage(
-        ['a', 'b'], [], [], recommendations=[recommendation] if goal == 'expansion' else None)
+        ['a', 'b'], [], [], recommendations=[recommendation] if ends_with_list else None)
     assert result['status'] == 'ok'
     expected_slots = ['candidate_set']
     if ends_with_list:
         expected_slots.append('expansion_list_ready')
     assert [event['slot'] for event in events] == expected_slots
-    if goal == 'expansion':
+    if ends_with_list:
         assert events[0]['value']['data']['recommendations'] == [recommendation]
 
 
 @pytest.mark.parametrize('mode', ['balanced', 'deep'])
-def test_standard_and_deep_publish_the_list_only_after_screening(publisher, monkeypatch, mode):
+@pytest.mark.parametrize('goal', ['expansion', 'review'])
+def test_standard_and_deep_publish_the_list_only_after_screening(publisher, monkeypatch, mode, goal):
     module, ctx, events, resolved = publisher
     ctx.params['step_id'] = 'expand_and_screen'
     ctx.output_slots[:] = ['candidate_set', 'expansion_list_ready']
     resolved['papers'].append({'paper': {'paper_id': 'b', 'title': 'Related'}, 'is_seed': False, 'is_important': False})
     monkeypatch.setattr(module, '_read_expansion_context', lambda _: {'record': {
-        'goal': 'expansion', 'budget_mode': mode, 'result': ctx.params['remote_inputs']['candidate_set'],
+        'goal': goal, 'budget_mode': mode, 'result': ctx.params['remote_inputs']['candidate_set'],
     }})
     module.academic_publish_stage(['a', 'b'], [], [])
     assert [event['slot'] for event in events] == ['candidate_set']

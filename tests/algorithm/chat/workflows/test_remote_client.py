@@ -61,6 +61,22 @@ def test_remote_executor_client_rejects_http_errors():
 
 
 @pytest.mark.asyncio
+async def test_remote_executor_pause_preserves_question_in_cancelled_attempt():
+    requests = []
+    async def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={'data': {'accepted': True}})
+    pending = {'question': '请确认修订范围', 'request_sha256': 'a' * 64}
+    runtime = RemoteExecutorClient('http://core', 'executor-1', 'lazymind')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        await runtime.cancel(client, 'attempt', 'lease', input_required=pending)
+    assert json.loads(requests[0].content) == {
+        'lease_token': 'lease', 'error_code': 'WORKFLOW_INPUT_REQUIRED',
+        'result': {'input_required': pending},
+    }
+
+
+@pytest.mark.asyncio
 async def test_remote_executor_failure_persists_checkpoint_with_error():
     checkpoint = {
         'workflow_revision': 'revision-1',

@@ -633,6 +633,27 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			graph.SkipExpansions = append(graph.SkipExpansions, CompiledBypass{NodeID: id, From: reverse[id], To: adj[id]})
 		}
 	}
+	for step, bindings := range graph.Runtime.RecoveryInputs {
+		node, exists := graph.Nodes[step]
+		if !exists {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RECOVERY_STEP_UNKNOWN", "error", "workflow.yaml.runtime.recovery_inputs", step, "recovery target must be a declared step"))
+		}
+		inputs := map[string]bool{}
+		for _, material := range expressionMaterials(node.Input) {
+			inputs[material] = true
+		}
+		for _, ref := range node.OptionalInputs {
+			inputs[ref.Material] = true
+		}
+		for target, source := range bindings {
+			if !inputs[target] || graph.MaterialProducers[target].Kind != "external" ||
+				graph.MaterialProducers[source].Kind != "step" || (graph.MaterialTypes[target] != "json" && graph.MaterialTypes[target] != "text" && graph.MaterialTypes[target] != "file") ||
+				graph.MaterialTypes[source] != graph.MaterialTypes[target] || graph.MaterialCardinalities[target] != "single" ||
+				graph.MaterialCardinalities[source] != "single" {
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_RECOVERY_INPUT_INVALID", "error", "workflow.yaml.runtime.recovery_inputs", step, target, "recovery inputs must bind a consumed external slot to a single step output of the same JSON/text/file type"))
+			}
+		}
+	}
 	for step, limit := range graph.Runtime.ExecutionLimits {
 		_, exists := graph.Nodes[step]
 		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 0 && limit.Timeout <= 3600

@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import lazyllm
 import pytest
-from lazyllm.tools.agent.toolsManager import ModuleTool
+from lazyllm.tools.agent.toolsManager import ModuleTool, ToolManager
+from lazyllm.module.llms.onlinemodule.supplier.minimax import MinimaxChat
 
 from lazymind.chat.workflow.workflow_manager import (
+    _workflow_trigger_tools,
     enforce_startup_clarification_policy,
     resolve_workflow_injection,
     _merge_startup_clarification_context,
@@ -62,6 +64,54 @@ def _tool_names(contribution):
     return names
 
 
+@pytest.mark.parametrize('handoff', [False, True])
+@pytest.mark.parametrize('user_input,should_resume', [
+    ('继续，修订论文', False), ('重试', False), ('', False), ('只采用R1，其余暂缓', True),
+])
+def test_revision_waits_for_new_answer_instead_of_repeating_automatic_retry(handoff, user_input, should_resume):
+    import hashlib
+    from lazymind.chat.workflow import workflow_manager as workflows
+
+    pending = {'question': '请确认修订范围',
+               'request_sha256': hashlib.sha256('继续，修订论文'.encode()).hexdigest()}
+    state = {'attempt_history': {'revise_document': [{
+        'attempt': 1, 'status': 'cancelled', 'validity': 'effective', 'input_required': pending,
+    }]}}
+    frontier = {'state_version': 7, 'retryable_steps': ['revise_document']}
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = frontier
+    toolkit.get_workflow_state.return_value = state
+    toolkit.advance_step.return_value = {'status': 'active'}
+    with patch.object(workflows, '_client') as factory:
+        client = factory.return_value
+        client.get_ready_steps.return_value = frontier
+        client.get_state.return_value = state
+        client.advance.return_value.result = {'status': 'active'}
+        tool = (workflows._handoff_tool('session-1', user_input=user_input) if handoff else
+                next(tool for tool in workflows._safe_session_tools(toolkit, 'session-1', user_input=user_input)
+                     if tool.__name__ == 'advance_step'))
+        result = tool('revise_document' if handoff else ['revise_document'])
+        advance = client.advance if handoff else toolkit.advance_step
+        if should_resume:
+            advance.assert_called_once()
+        else:
+            advance.assert_not_called()
+            assert result['outcome'] == 'workflow_input_required'
+            assert result['_agent_control']['stop'] is True
+            assert result['user_notice'] == pending['question']
+
+
+def test_obsolete_pause_does_not_block_newer_completed_attempt():
+    from lazymind.chat.workflow.workflow_manager import _input_required_result
+    pending = {'question': '旧问题', 'request_sha256': 'a' * 64}
+    state = {'attempt_history': {'revise_document': [
+        {'attempt': 1, 'status': 'cancelled', 'input_required': pending},
+        {'attempt': 2, 'status': 'succeeded'},
+        {'attempt': 3, 'status': 'cancelled', 'validity': 'stale', 'input_required': pending},
+    ]}}
+    assert _input_required_result(state) is None
+
+
 @pytest.mark.parametrize('workflow_id', [
     'writer-workflow', 'image-workflow', 'ppt-workflow', 'product_solution_delivery',
 ])
@@ -109,6 +159,11 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     assert 'builtin:image-workflow' in contribution.runtime_context
     assert 'revision-1' in contribution.runtime_context
     assert '"current_query": "run it now"' in contribution.runtime_context
+    assert 'including retryable and rewindable targets' in contribution.runtime_context
+    assert 'do not hand off early' in contribution.runtime_context
+    assert 'explanation of the result in Chat' in contribution.runtime_context
+    assert 'rewindable' in _tool(contribution, 'advance_step_and_hand_off').__doc__
+    assert 'LAST step' in _tool(contribution, 'advance_step_and_hand_off').__doc__
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
     ).parameters) == ['request_context']
@@ -393,6 +448,21 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
     assert '"allow_other": false' in contribution.runtime_context
 
 
+def test_active_workflow_retains_missing_preference_clarification():
+    runtime = {'clarification_fields': [{
+        'id': 'experiment_execution', 'question': '是否允许运行实验？',
+        'type': 'single', 'choices': ['不允许', '允许'], 'choice_policy': 'fixed',
+    }]}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory:
+        factory.return_value.get_state.return_value = {'session_id': 'session', 'status': 'active'}
+        contribution = resolve_workflow_injection({
+            'session_id': 'session', 'workflow_id': 'paper-writing', 'runtime': runtime,
+        }, current_query='进入实验')
+    assert contribution.runtime_policy == runtime
+    assert 'default input binding is not a user answer' in contribution.runtime_context
+    assert 'experiment_execution' in contribution.runtime_context
+
+
 def test_fixed_startup_choice_policy_overrides_model_other_option():
     runtime = {
         'clarification_fields': [{
@@ -675,7 +745,7 @@ def test_dynamic_trigger_activates_advance_step_in_the_same_agent_turn():
     assert toolkit.advance_step.call_args.args[1] == 1
 
 
-def test_selected_workflow_session_tool_auto_initializes_without_attachments():
+def test_selected_workflow_queries_do_not_auto_initialize_without_attachments():
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
         'session_id': 'session-1', 'state_version': 1,
@@ -717,6 +787,11 @@ def test_selected_workflow_session_tool_auto_initializes_without_attachments():
             }],
         )
 
+        for name in ('get_ready_steps', 'get_workflow_state', 'list_workflow_inputs', 'list_artifacts'):
+            with pytest.raises(WorkflowClientError, match='Call the selected trigger'):
+                _tool(contribution, name)()
+        toolkit.prepare_workflow.assert_not_called()
+        _tool(contribution, 'trigger_ppt_workflow')()
         result = _tool(contribution, 'get_ready_steps')()
         repeated_trigger = _tool(contribution, 'trigger_ppt_workflow')()
 
@@ -728,6 +803,50 @@ def test_selected_workflow_session_tool_auto_initializes_without_attachments():
         request_context='生成三页关于加减法数学题的PPT',
         workflow_mode='dynamic',
     )
+
+
+def test_startup_validation_and_input_binding_are_atomic():
+    """Replay wrong arguments and early inspection without consuming the launch."""
+    from pydantic import ValidationError
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'state_version': 1}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value={
+        'resource_id': 'resource-1', 'revision': 1, 'content_hash': 'sha256:test',
+    }) as import_text:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'report', 'runtime': {'trigger_inputs': ['source']},
+            'compiled_graph': {
+                'material_types': {'source': 'text'},
+                'material_producers': {'source': {'kind': 'external'}},
+            },
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1, 'projection': {'ready': ['review']},
+        }
+        contribution = resolve_workflow_injection(
+            None, current_query='review the supplied text', conversation_id='conversation-1',
+            allowed_workflow_refs=['builtin:report'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'tool_name': 'trigger_report_workflow',
+            }],
+        )
+        manager = ToolManager(contribution.tools)
+        trigger = _tool(contribution, 'trigger_report_workflow')
+        with pytest.raises(ValidationError):
+            manager.tools_info['trigger_report_workflow']._validate_input({'input': 'text'})
+        with pytest.raises(WorkflowClientError, match='Call the selected trigger'):
+            _tool(contribution, 'list_workflow_inputs')()
+        toolkit.prepare_workflow.assert_not_called()
+        trigger(input_bindings={'source': 'manuscript'})
+        import_text.assert_called_once_with('source', 'manuscript')
+        assert toolkit.prepare_workflow.call_args.kwargs['input_bindings']['source']['resource_id'] == 'resource-1'
+        with pytest.raises(WorkflowClientError, match='different inputs'):
+            trigger(input_bindings={'source': 'different manuscript'})
+        assert import_text.call_count == 1
+        assert toolkit.prepare_workflow.call_count == 1
 
 
 def test_dynamic_trigger_exposes_handoff_after_session_is_created_in_same_turn():
@@ -826,6 +945,9 @@ def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
             ],
         )
         # resolve_workflow_injection's patch is applied to agentic_config by ChatService.
+        assert 'including retryable and rewindable targets' in contribution.runtime_context
+        assert 'do not hand off early' in contribution.runtime_context
+        assert 'explanation of the result in Chat' in contribution.runtime_context
         lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
         lazyllm.globals['agentic_config']['workflow_current_query'] = '过期的原始深色生成要求'
         result = _tool(contribution, 'advance_step')(['generate_ppt'])
@@ -1194,7 +1316,7 @@ def test_advance_step_refreshes_state_version_once_on_conflict():
     assert [call.args[1] for call in toolkit.advance_step.call_args_list] == [7, 8]
 
 
-def test_only_handoff_advance_stops_an_active_workflow_turn():
+def test_handoff_stop_is_controlled_by_result_not_static_tool_name():
     toolkit = MagicMock()
     with patch('lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
                return_value=toolkit), patch(
@@ -1208,7 +1330,8 @@ def test_only_handoff_advance_stops_an_active_workflow_turn():
             conversation_id='conversation-1',
         )
 
-    assert contribution.stop_tools == ['advance_step_and_hand_off']
+    # PR #79 stops only on accepted handoff results; a rejected call must not end the turn.
+    assert contribution.stop_tools == []
 
 
 def test_advance_step_returns_user_notice_when_target_changes_after_conflict():
@@ -1540,3 +1663,111 @@ def test_paper_budget_ask_keeps_concrete_counts_and_merges_user_override():
     merged = _merge_startup_clarification_context('保留 5 页，压缩内容', history, runtime)
     assert '三篇论文' in merged
     assert '保留 5 页，压缩内容' in merged
+
+
+@pytest.fixture
+def workflow_input_runtime():
+    client, toolkit = MagicMock(), MagicMock()
+    client.get_workflow.return_value.result = {
+        'workflow_id': 'paper-writing', 'revision_id': 'pinned',
+        'compiled_graph': {
+            'material_types': {'paper_input': 'json'},
+            'material_producers': {'paper_input': {'kind': 'external'}},
+        },
+    }
+    client.get_state.return_value = {
+        'session_id': 'session', 'state_version': 1,
+        'projection': {'ready': ['write_document']},
+    }
+    toolkit.prepare_workflow.return_value = {'session_id': 'session'}
+    toolkit.list_workflow_inputs.return_value = {'inputs': []}
+    holder = {}
+    resource = {'resource_id': 'resource', 'revision': 1, 'content_hash': 'sha256:materials'}
+    with patch('lazymind.chat.workflow.workflow_manager._client', return_value=client), patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value=resource) as importer:
+        trigger = _workflow_trigger_tools([{
+            'workflow_id': 'paper-writing', 'workflow_ref': 'builtin:paper-writing',
+            'revision_id': 'pinned', 'tool_name': 'trigger_paper_writing_workflow',
+        }], {'builtin:paper-writing'}, 'Write from the attachment', 'conversation', holder)[0]
+        yield trigger, toolkit, holder, importer, resource
+
+
+def test_minimax_wire_schema_and_correction_preserve_input(workflow_input_runtime):
+    trigger, toolkit, holder, importer, resource = workflow_input_runtime
+    manager = ToolManager(tools=[trigger])
+    captured = {}
+
+    class Captured(Exception):
+        pass
+
+    def capture(self, data, **kwargs):
+        captured.update(data)
+        raise Captured()
+
+    with patch.object(MinimaxChat, '_forward_with_retry', capture), pytest.raises(Captured):
+        MinimaxChat(api_key='no-network', model='MiniMax-M3').forward(
+            'Write the paper', tools=manager.tools_description,
+        )
+    schema = captured['tools'][0]['function']['parameters']
+    assert set(schema['properties']) == {'input_bindings', 'request_context'}
+    assert schema['additionalProperties'] is False
+    bindings = {'paper_input': json.dumps({'topic': 'Synthetic', 'request': 'Write', 'charts': []})}
+    _, failure = manager._validate_tool(trigger.__name__, {'inputBindings': bindings})
+    assert failure is not None
+    assert holder == {}
+    toolkit.prepare_workflow.assert_not_called()
+    arguments, failure = manager._validate_tool(trigger.__name__, {'input_bindings': bindings})
+    assert failure is None
+    trigger(**arguments)
+    importer.assert_called_once_with('paper_input', bindings['paper_input'])
+    assert toolkit.prepare_workflow.call_args.kwargs['input_bindings'] == {'paper_input': resource}
+
+
+def test_paper_reference_explanation_does_not_change_runtime_binding(workflow_input_runtime):
+    trigger, toolkit, holder, importer, resource = workflow_input_runtime
+    source = '/uploads/materials.json'
+    with patch('lazymind.document_tools.paper.analysis.attachments.workflow_input_bindings',
+               return_value={'paper_input': source}):
+        result = trigger({'paper_input': 'materials.json'})
+    importer.assert_called_once_with('paper_input', source)
+    assert toolkit.prepare_workflow.call_args.kwargs['input_bindings'] == {'paper_input': resource}
+    described = result['input_bindings']['paper_input']
+    assert described['binding_kind'] == 'conversation_attachment_reference'
+    assert described['source_filename'] == 'materials.json'
+    assert described['validation_status'] == 'pending_step_execution'
+    assert 'binding_kind' not in resource
+
+
+
+
+def test_existing_empty_session_accepts_inputs_and_repeated_input_is_idempotent(workflow_input_runtime):
+    trigger, toolkit, holder, _, resource = workflow_input_runtime
+    holder['session_id'] = 'session'
+    bindings = {'paper_input': '{"topic":"Synthetic","request":"Write"}'}
+    trigger(bindings)
+    toolkit.prepare_workflow.assert_not_called()
+    toolkit.bind_workflow_input.assert_called_once_with('session', 'paper_input', resource)
+    # The public API currently serializes ORM binding fields using Go names.
+    toolkit.list_workflow_inputs.return_value = {'inputs': [
+        {'MaterialID': 'paper_input', 'ContentHash': resource['content_hash']},
+    ]}
+    trigger(bindings)
+    assert toolkit.bind_workflow_input.call_count == 1
+    toolkit.list_workflow_inputs.return_value['inputs'][0]['ContentHash'] = 'sha256:other'
+    with pytest.raises(WorkflowClientError, match='different content'):
+        trigger(bindings)
+    assert toolkit.bind_workflow_input.call_count == 1
+
+
+def test_later_chat_turn_can_supply_inputs_to_pinned_session(workflow_input_runtime):
+    from lazymind.chat.workflow.workflow_manager import resolve_workflow_injection
+    _, toolkit, _, importer, resource = workflow_input_runtime
+    contribution = resolve_workflow_injection(
+        {'session_id': 'session', 'workflow_id': 'paper-writing', 'revision_id': 'pinned'},
+        conversation_id='conversation', current_query='Retry from the attachment',
+    )
+    repair = next(tool for tool in contribution.tools if getattr(tool, '__name__', '') == 'supply_workflow_inputs')
+    repair({'paper_input': '{"topic":"Synthetic","request":"Write"}'})
+    toolkit.bind_workflow_input.assert_called_once_with('session', 'paper_input', resource)
+    toolkit.prepare_workflow.assert_not_called()

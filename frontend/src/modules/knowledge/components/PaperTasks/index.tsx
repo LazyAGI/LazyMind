@@ -13,12 +13,15 @@ import ExpansionDetails from './ExpansionDetails';
 import GeneratedContents from './GeneratedContents';
 import ResearchRecords from './ResearchRecords';
 import ReviewRecordDrawer from './ReviewRecordDrawer';
-import ReviewFlow from './ReviewFlow';
+import { ReviewEntryFlow } from './ReviewFlow';
+import { expansionRecordIsActive, paperMaterialPhase, reviewMaterialCounts } from './paperFlowModel';
 import ReviewTopic from './ReviewTopic';
 import ResearchDepth from './ResearchDepth';
 import PaperTaskStatus from './PaperTaskStatus';
 import { getExpansionCapabilities, type BudgetMode, type DirectionSelection } from '../../api/paperWorkflows';
 import type { PaperNotification } from '../../paper/usePaperNotifications';
+
+const pendingReviewMaterialStatuses = new Set(['preparing', 'processing', 'pending']);
 
 interface Props {
     dataset: string;
@@ -89,7 +92,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [reviewSelection, setReviewSelection] = useState<PaperSelection>();
     const [selectionLoading, setSelectionLoading] = useState(false);
     const [selectionFailure, setSelectionFailure] = useState('');
-    const directReview = launch?.kind === 'review' && !launch.direction && !expansionEnabled;
+    const selectedReview = launch?.kind === 'review' && !launch.direction;
+    const directReview = selectedReview && !expansionEnabled;
+    const launchesExpansion = launch?.kind === 'expansion' || (launch?.kind === 'review' && !directReview);
     const eligibleReviewPapers = reviewSelection?.papers.filter(paper => reviewSelection.materials?.some(material => material.paper_id === paper.paper.paper_id && material.eligible)) || [];
     useEffect(() => {
         if (!directReview) { setReviewSelection(undefined); setSelectionLoading(false); return; }
@@ -104,7 +109,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 if (!active) return;
                 setReviewSelection(result);
                 setSelectionFailure('');
-                if (result.materials?.some(item => ['preparing', 'processing', 'pending'].includes(item.status))) timer = setTimeout(() => void refresh(), 4000);
+                if (result.materials?.some(item => pendingReviewMaterialStatuses.has(item.status))) timer = setTimeout(() => void refresh(), 4000);
             } catch (error) {
                 if (active) setSelectionFailure(axios.isAxiosError(error) && typeof error.response?.data?.message === 'string' ? error.response.data.message : t('paperTasks.reviewSelectionFailed'));
             } finally { if (active) setSelectionLoading(false); }
@@ -113,6 +118,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         return () => { active = false; clearTimeout(timer); };
     }, [directReview, dataset, JSON.stringify(selected), selectionRetry, t]);
     const [budgetMode, setBudgetMode] = useState<BudgetMode>('balanced');
+    const reviewBudgetMode = budgetMode === 'fast' ? 'fast' : 'balanced';
+    const launchBudgetMode = launch?.kind === 'review' ? reviewBudgetMode : budgetMode;
     const [directionSelection, setDirectionSelection] = useState<DirectionSelection>('all');
     const [capabilities, setCapabilities] = useState<{openalex_key: boolean; sciverse: boolean; web_search: boolean}>();
     useEffect(() => { if (launch) void getExpansionCapabilities().then(setCapabilities).catch(() => setCapabilities(undefined)); }, [launch]);
@@ -140,6 +147,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const previewRequest = useRef(0);
     const pendingPreview = useRef<{ key: string; promise: Promise<ImportPreviewItem[]> }>();
     const pendingDetail = useRef<{ id: string; promise: Promise<ExpansionDetail> }>();
+    const pendingHistory = useRef<{ dataset: string }>();
     const detailRequest = useRef(0);
     const detailTarget = useRef<string>();
     const taskLabel = (kind: string) => t(`paperTasks.task.${kind}`, { defaultValue: kind });
@@ -161,21 +169,38 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
     }, [selectedPaperTaskError, selected.length, selectedTitles]);
-    const refreshHistory = async () => {
-        setHistoryLoading(true);
+    const refreshHistory = useCallback(async (background = false) => {
+        if (background && pendingHistory.current?.dataset === dataset) return;
+        const request = { dataset };
+        pendingHistory.current = request;
+        if (!background) setHistoryLoading(true);
         try {
-            const result = await listResearchRecords(dataset, !!onNotification);
+            const result = await listResearchRecords(dataset, background || !!onNotification);
+            if (pendingHistory.current !== request) return;
             setRecords(result.items || []);
             setReviewRecords(result.reviews || []);
             setHistoryError(false);
             onNotificationResolved?.('expansion-history');
         } catch (error) {
+            if (pendingHistory.current !== request || background) return;
             setHistoryError(true);
-            onNotification?.({ id: 'expansion-history', title: t('paperTasks.recordsLoadFailed'), message: error instanceof Error ? error.message : '记录加载失败，请重试', action: { label: '重新加载', onClick: refreshHistory } });
+            onNotification?.({ id: 'expansion-history', title: t('paperTasks.recordsLoadFailed'), message: error instanceof Error ? error.message : '记录加载失败，请重试', action: { label: '重新加载', onClick: () => refreshHistory() } });
         } finally {
-            setHistoryLoading(false);
+            if (pendingHistory.current === request) {
+                pendingHistory.current = undefined;
+                setHistoryLoading(false);
+            }
         }
-    };
+    }, [dataset, onNotification, onNotificationResolved, t]);
+    const historyActive = records.some(expansionRecordIsActive);
+    useEffect(() => {
+        if (!history) return;
+        const refresh = () => { void refreshHistory(true); };
+        window.addEventListener('focus', refresh);
+        const timer = historyActive ? window.setInterval(refresh, 12000) : undefined;
+        return () => { window.removeEventListener('focus', refresh); window.clearInterval(timer); };
+    }, [history, historyActive, refreshHistory]);
+    useEffect(() => () => { pendingHistory.current = undefined; }, [dataset]);
     const openHistory = () => {
         setHistory(true);
         void refreshHistory().catch(() => {});
@@ -210,6 +235,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     previewRequest.current += 1;
                 }
                 setDetail(result);
+                if (result.material_progress) {
+                    setRecords(previous => previous.map(record => record.id === id
+                        ? { ...result.record, material_progress: result.material_progress } : record));
+                }
                 setParams(current => { if (current.get('expansion_id') === id) return current; const next = new URLSearchParams(current); next.set('expansion_id', id); return next; }, { replace: true });
                 onNotificationResolved?.(`expansion-detail:${id}`);
                 for (const content of result.record.status === 'completed' ? result.contents : []) {
@@ -239,7 +268,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         if (expansionID && detailTarget.current !== expansionID) void openDetail(expansionID).catch(() => {});
     }, [expansionID]);
     const resultReady = detail?.record.status === 'completed';
-    const detailActive = !!detail && (['pending', 'running', 'active', 'preparing'].includes(detail.record.status)
+    const detailMaterialCounts = detail && reviewMaterialCounts(detail);
+    const detailPhase = detail && detailMaterialCounts && paperMaterialPhase(detail.record,
+        { processing_count: detailMaterialCounts.processing, distinct_ready_count: detailMaterialCounts.distinctReady });
+    const detailActive = !!detail && (detailPhase === 'waitingHandoff' || expansionRecordIsActive(detail.record)
         || detail.contents.some(content => ['pending', 'processing'].includes(content.status))
         || detail.presence?.some(item => item.importing));
     useEffect(() => {
@@ -313,8 +345,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const body = {
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
-                user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: false, budget_mode: budgetMode,
-                ...(launch.kind === 'expansion' && budgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
+                user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: false,
+                ...(launchesExpansion ? { budget_mode: launchBudgetMode } : {}),
+                ...(launchesExpansion && launchBudgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
                 ...(directReview ? { skip_expansion: true, review_scope: 'selected' as const, paper_ids: eligibleReviewPapers.map(item => item.paper.paper_id) } : {}),
             };
             const fingerprint = JSON.stringify(body);
@@ -324,7 +357,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             onNotificationResolved?.('paper-task-launch');
             setLaunch(undefined);
             if (result.expansion_id && ['expansion', 'review'].includes(launch.kind)) await openDetail(result.expansion_id);
-            else if (result.conversation_id) goChat(result.conversation_id, launch.kind === 'review');
+            else if (result.conversation_id) goChat(result.conversation_id);
             else throw new Error('任务未返回有效记录，请重试');
         } catch (error) {
             if (onNotification) {
@@ -348,8 +381,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const source = detail && selection?.source.record.id === detail.record.id
         ? (detail.record.version === selection.source.record.version ? { ...detail, record: selection.source.record } : selection.source) : detail;
     const listMode = source?.record.report?.list_mode;
-    const groupedList = listMode === 'balanced' || (source?.record.goal === 'expansion'
-        && source.record.budget_mode === 'deep' && Array.isArray(source.record.report?.recommendations));
+    const groupedList = listMode === 'balanced' || (source?.record.budget_mode === 'deep' && Array.isArray(source.record.report?.recommendations));
     const recommendations = new Map(source?.record.report?.recommendations?.map(item => [item.paper_id, item]));
     const papers = source ? distinctPapers(source.record.result.papers || []) : [];
     const paperDirections = source?.record.result.selected_directions || [];
@@ -375,10 +407,13 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 }
             });
             setActionError(!onNotification && failedTitles.length ? t('paperTasks.retryContentsFailed', { titles: failedTitles.join('、') }) : '');
-            await openDetail(target.record.id);
+            if (detailTarget.current === target.record.id) await openDetail(target.record.id);
         } catch (error) {
             if (!onNotification) setActionError(error instanceof Error ? error.message : t('paperTasks.retryContentFailed'));
-        } finally { setRetryingContents(false); }
+        } finally {
+            if (history && detailTarget.current !== target.record.id) void refreshHistory(true);
+            setRetryingContents(false);
+        }
     };
     const refreshImportPreview = async (target: ExpansionDetail) => {
         if (!canImport || !resultReady || target.record.status !== 'completed') return;
@@ -541,6 +576,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         }
     };
     const available = source ? papers.filter(item => contentReady(source, item.paper.paper_id)).length : 0;
+    const processing = source?.contents.filter(content => ['pending', 'processing'].includes(content.status)).length ?? 0;
     const confirmationPapers = confirmation ? distinctPapers(confirmation.source.record.result.papers || []).filter(item => confirmation.selected.includes(item.paper.paper_id)) : [];
     const confirmationEligible = confirmation ? confirmationPapers.filter(item => confirmation.kind === 'review'
         ? contentReady(confirmation.source, item.paper.paper_id) : !importReason(confirmation.source, item)) : [];
@@ -575,36 +611,47 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             },
         });
     };
-    const reviewPaperRows = reviewSelection ? [
+    const reviewSelectedCount = reviewSelection ? reviewSelection.papers.length + reviewSelection.invalid.length : selected.length;
+    const reviewPaperRows = directReview && reviewSelection ? [
         ...reviewSelection.papers.map(item => {
             const material = reviewSelection.materials?.find(value => value.paper_id === item.paper.paper_id);
-            return { id: item.paper.paper_id, title: item.paper.title || item.paper.paper_id,
-                description: material?.eligible ? t('paperTasks.reviewIncluded') : material?.reason || t('paperTasks.reviewPreparing') };
+            const status = material?.eligible ? 'ready' : material && pendingReviewMaterialStatuses.has(material.status) ? 'processing' : 'unavailable';
+            return { id: item.paper.paper_id, title: item.paper.title || item.paper.paper_id, status, description: material?.reason };
         }),
-        ...reviewSelection.invalid.map(item => ({ id: item.document_id, title: item.document_id, description: item.reason })),
+        ...reviewSelection.invalid.map(item => ({ id: item.document_id, title: item.document_id, status: 'unavailable', description: item.reason })),
     ] : selected.map((id, index) => ({ id, title: selectedTitles[index] || id,
-        description: t(selectionFailure ? 'paperTasks.materialPending' : 'paperTasks.reviewPreparing') }));
+        status: selectionFailure ? 'unchecked' : 'checking', description: undefined }));
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' ? t('paperTasks.expansionDepth.start') : launch?.kind === 'review' ? t('paperTasks.expansionDepth.startResearch') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
+        <Modal okButtonProps={{ disabled: topicBusy || (directReview && (selectionLoading || !!selectionFailure || eligibleReviewPapers.length < 2)) }} okText={directReview ? t('paperTasks.confirmAndContinue') : launch?.kind === 'expansion' || launch?.kind === 'review' ? t('paperTasks.expansionDepth.start') : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy} onCancel={() => !busy && !topicBusy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
-            {launch?.kind === 'review' && <ReviewFlow entry direct={directReview} />}
-            {directReview && <>
-                <List id="review-selected-papers" loading={selectionLoading} rowKey="id"
+            {launch?.kind === 'review' && <ReviewEntryFlow mode={directReview ? 'direct' : reviewBudgetMode} directionOnly={launch.direction} />}
+            {selectedReview && <section className="paper-review-selected" aria-label={t('paperTasks.reviewSelectionTitle')}>
+                <div className="paper-review-selected-heading">
+                    <h3>{t('paperTasks.reviewSelectionTitle')}</h3>
+                    {!directReview && <Typography.Text type="secondary">{t('paperTasks.reviewExpansionSeeds', { count: selected.length })}</Typography.Text>}
+                    {directReview && reviewSelection && <Typography.Text type="secondary">{t('paperTasks.reviewLaunchSummary', { selected: reviewSelectedCount, count: eligibleReviewPapers.length })}</Typography.Text>}
+                </div>
+                <List id="review-selected-papers" size="small" loading={directReview && selectionLoading} rowKey="id"
                     dataSource={reviewPapersExpanded ? reviewPaperRows : reviewPaperRows.slice(0, 3)}
-                    renderItem={item => <List.Item><List.Item.Meta title={item.title} description={item.description} /></List.Item>} />
+                    renderItem={item => {
+                        const statusLabel = t(`paperTasks.reviewMaterialStatus.${item.status}`);
+                        const statusColor = item.status === 'ready' ? 'success' : item.status === 'processing' ? 'processing' : 'default';
+                        return <List.Item extra={directReview && <Tag color={statusColor}>{statusLabel}</Tag>}>
+                            <List.Item.Meta title={item.title} description={item.description !== statusLabel ? item.description : undefined} />
+                        </List.Item>;
+                    }} />
                 {reviewPaperRows.length > 3 && <Button type="link" aria-expanded={reviewPapersExpanded} aria-controls="review-selected-papers"
                     onClick={() => setReviewPapersExpanded(value => !value)}>
                     {t(reviewPapersExpanded ? 'paperTasks.collapseSelectedPapers' : 'paperTasks.expandSelectedPapers', { count: reviewPaperRows.length })}
                 </Button>}
-                {!reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
-                {selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
-                {!selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
-                {reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.reviewSummary', { count: eligibleReviewPapers.length, selected: (reviewSelection?.papers.length || 0) + (reviewSelection?.invalid.length || 0), skipped: (reviewSelection?.papers.length || 0) + (reviewSelection?.invalid.length || 0) - eligibleReviewPapers.length })}</Typography.Paragraph>}
-            </>}
-            {launch && !launch.direction && !directReview && <div className="paper-task-launch-selection">
+                {directReview && !reviewSelection && <Typography.Paragraph type="secondary">{t('paperTasks.selectionPending', { count: selected.length })}</Typography.Paragraph>}
+                {directReview && selectionFailure && <Alert type="error" showIcon message={selectionFailure} action={<Button onClick={() => setSelectionRetry(value => value + 1)}>{t('paperTasks.retry')}</Button>} />}
+                {directReview && !selectionLoading && !selectionFailure && eligibleReviewPapers.length < 2 && <Alert type="warning" message={t('paperTasks.reviewMinimumFulltext')} />}
+            </section>}
+            {launch && !launch.direction && !selectedReview && <div className="paper-task-launch-selection">
                 <Typography.Text type="secondary">{t('paperTasks.selectedLibraryPapers', { count: selected.length })}</Typography.Text>
                 {selectedTitles.length > 0 && <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: true }}>{selectedTitles.join(' · ')}</Typography.Paragraph>}
             </div>}
@@ -615,10 +662,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <div><Typography.Text>{t('paperTasks.enableExpansion')}</Typography.Text><div><Typography.Text type="secondary">{t(expansionEnabled ? 'paperTasks.enableExpansionHint' : 'paperTasks.noExpansionHint')}</Typography.Text></div></div>
                 <Switch checked={expansionEnabled} onChange={setExpansionEnabled} disabled={busy || topicBusy} aria-label={t('paperTasks.enableExpansion')} />
             </div>}
-            {launch && !directReview && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <ResearchDepth value={budgetMode} onChange={setBudgetMode} expansion={launch.kind === 'expansion'}
-                    directionSelection={directionSelection} onDirectionSelectionChange={setDirectionSelection} disabled={busy} />
-                {launch.kind === 'review' && <p className="paper-task-launch-flow-hint"><BranchesOutlined />{t('paperTasks.reviewFlow.directionsHint')}</p>}
+            {launchesExpansion && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
+                <ResearchDepth value={launchBudgetMode} onChange={setBudgetMode} forReview={launch?.kind === 'review'}
+                    directionSelection={directionSelection} onDirectionSelectionChange={setDirectionSelection} disabled={busy || topicBusy} />
                 {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message={t(capabilities.openalex_key ? 'paperTasks.expansionDepth.searchConfiguration' : 'paperTasks.expansionDepth.basicSearch')} description={<>
                   {!capabilities.openalex_key && <div>{t('paperTasks.expansionDepth.openalexBenefits')} <Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">{t('paperTasks.expansionDepth.configureOpenalex')}</Link></div>}
                   {!capabilities.sciverse && <div>Sciverse 检索未启用。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=sciverse">配置 Sciverse</Link></div>}
@@ -643,7 +689,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     <div className="paper-expansion-result-heading">
                         <div className="paper-expansion-title-group">
                             <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
-                            {!reviewDetail && detail.record.budget_mode && <Tag color="blue">{t(`paperTasks.expansionDepth.${detail.record.budget_mode}.label`)}</Tag>}
+                            {detail.record.budget_mode && (!reviewDetail || detail.record.preparation?.direction_selection || detail.record.preparation?.skipped || detail.record.report?.list_mode) && <Tag color="blue">{t(`paperTasks.expansionDepth.${detail.record.budget_mode}.label`)}</Tag>}
                         </div>
                         {['preparing', 'awaiting_info', 'awaiting_confirmation', 'preparation_failed'].includes(detail.record.status) && <PaperTaskStatus status={detail.record.status}>{statusLabel(detail.record.status)}</PaperTaskStatus>}
                     </div>
@@ -651,18 +697,15 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     <div className="paper-expansion-navigation">
                         <Button type="link" disabled={detail.chat_status !== 'available'} onClick={() => goChat(detail.record.conversation_id, reviewDetail)}>{t(reviewDetail ? 'paperTasks.reviewFlow.openChat' : 'paperTasks.overview.openChat')}</Button>
                     </div>
-                    <ExpansionDetails key={`details-${detail.record.id}`} detail={detail} statusLabel={statusLabel} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')}>
-                        {reviewDetail && <ReviewFlow status={detail.record.status} reviewStarted={!!detail.record.auto_review_id}
-                        readyCount={detail.record.result.papers.filter(item => contentReady(detail, item.paper.paper_id)).length} />}
-                    </ExpansionDetails>
+                    <ExpansionDetails key={`details-${detail.record.id}`} detail={detail} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')} />
                     {resultReady && <GeneratedContents key={detail.record.id} items={detail.handoffs} onOpen={goChat} onReview={openReviewRecord} />}
                     {resultReady && source && <>
-                    <div className="paper-expansion-papers-summary"><Typography.Text strong>{t('paperTasks.paperCount', { count: papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.downloadedCount', { count: papers.filter(item => source.contents.some(content => content.paper_id === item.paper.paper_id && content.quality?.downloaded)).length })} · {t('paperTasks.availableCount', { count: available })}</Typography.Text></div>
+                    <div className="paper-expansion-papers-summary"><Typography.Text strong>{t('paperTasks.paperCount', { count: papers.length })}</Typography.Text><Typography.Text type="secondary">{t('paperTasks.downloadedCount', { count: papers.filter(item => source.contents.some(content => content.paper_id === item.paper.paper_id && content.quality?.downloaded)).length })} · {t('paperTasks.availableCount', { count: available })}{processing > 0 && <> · {t('paperTasks.processingFulltextCount', { count: processing })}</>}</Typography.Text></div>
                     <div className="paper-expansion-result-toolbar">
                         <Tooltip title={reviewReason} trigger={['hover', 'focus']}><span tabIndex={reviewReason ? 0 : undefined}><Button type="primary" disabled={!!reviewReason} onClick={() => openConfirmation('review')}>{t('paperTasks.generateReview')}</Button></span></Tooltip>
                         <Tooltip title={bulkImportReason} trigger={['hover', 'focus']}><span tabIndex={bulkImportReason ? 0 : undefined}><Button disabled={!!bulkImportReason} onClick={() => openConfirmation('import')}>{t('paperTasks.bulkImport', { count: importable.length })}</Button></span></Tooltip>
                         {!!retryableContents.length && <Button loading={retryingContents} disabled={busy || !!confirmation || source.record.version !== detail.record.version}
-                            onClick={() => void retryContents(source, retryableContents.map(item => item.paper.paper_id))}>{t(listMode ? 'paperTasks.prepareMissingContents' : 'paperTasks.retryMissingContents', { count: retryableContents.length })}</Button>}
+                            onClick={() => void retryContents(source, retryableContents.map(item => item.paper.paper_id))}>{t(retryableContents.some(item => !source.contents.some(content => content.paper_id === item.paper.paper_id)) ? 'paperTasks.prepareMissingContents' : 'paperTasks.retryMissingContents', { count: retryableContents.length })}</Button>}
                         <span className="paper-expansion-result-selection" aria-live="polite">{t('paperTasks.selectedCount', { count: selection?.selected.length || 0 })}</span>
                     </div>
 
@@ -782,6 +825,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     cancelText={t('paperTasks.cancel')} confirmLoading={busy} closable={!busy && !topicBusy} maskClosable={!busy && !topicBusy} keyboard={!busy && !topicBusy}
                     okText={t(confirmation?.kind === 'review' ? 'paperTasks.confirmReview' : 'paperTasks.confirmImport', { count: confirmationEligible.length })}
                     okButtonProps={{ disabled: !!confirmationReason || topicBusy }}>
+                    {confirmation?.kind === 'review' && <ReviewEntryFlow mode="direct" />}
                     {confirmation?.kind === 'review' && <Typography.Paragraph type="secondary">{t('paperTasks.newReviewHint')}</Typography.Paragraph>}
                     <Alert type="info" message={t(confirmation?.kind === 'review' ? 'paperTasks.reviewSummary' : 'paperTasks.importSummary', { count: confirmationEligible.length, selected: confirmationPapers.length, skipped: confirmationPapers.length - confirmationEligible.length })} />
                     {actionError && (onNotification ? <p role="status">{actionError}</p> : <Alert type="error" showIcon message={actionError} style={{ marginTop: 12 }} />)}

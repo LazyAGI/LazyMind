@@ -177,12 +177,15 @@ type RuntimePolicy struct {
 	AttachmentClarification   *AttachmentClarification  `json:"attachment_clarification,omitempty" yaml:"attachment_clarification,omitempty"`
 	InputCheckpoint           *InputCheckpoint          `json:"input_checkpoint,omitempty" yaml:"input_checkpoint,omitempty"`
 	PostStepChecks            []PostStepCheck           `json:"post_step_checks,omitempty" yaml:"post_step_checks,omitempty"`
+	// RecoveryInputs maps a rerun step's external inputs to feedback output slots.
+	// Core snapshots selected feedback before rewind invalidates its producer.
+	RecoveryInputs map[string]map[string]string `json:"recovery_inputs,omitempty" yaml:"recovery_inputs,omitempty"`
 }
 
 func (p RuntimePolicy) IsZero() bool {
 	return p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
 		p.CompletedEditStep == "" && p.CompletedEditRouting == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0 &&
-		p.AttachmentClarification == nil && p.InputCheckpoint == nil && len(p.PostStepChecks) == 0
+		p.AttachmentClarification == nil && p.InputCheckpoint == nil && len(p.PostStepChecks) == 0 && len(p.RecoveryInputs) == 0
 }
 
 type ExecutionLimit struct {

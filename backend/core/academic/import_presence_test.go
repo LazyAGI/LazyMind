@@ -31,24 +31,42 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	d := orm.Document{ID: "deleted-doc", DatasetID: "target", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})}
+	d := orm.Document{ID: "deleted-doc", DatasetID: "target", DocumentType: "PDF", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})}
 	link := orm.AcademicWorkDocument{AcademicWorkID: "work", DatasetID: "target", DocumentID: d.ID}
 	for _, row := range []any{&work, &d, &link} {
 		if e := db.Create(row).Error; e != nil {
 			t.Fatal(e)
 		}
 	}
-	_, p, presenceErr := findEquivalentPresentWork(context.Background(), work.ID, "target")
+	_, p, presenceErr := findEquivalentPresentWork(context.Background(), work.ID, "target", false)
 	if presenceErr != nil || p.DocumentID != d.ID {
 		t.Fatal("control presence failed")
 	}
-	if _, e := sourcePresentDocument(db, "target", work.ID, ""); e != nil {
+	if _, e := sourcePresentDocument(db, "target", work.ID, "", false); e != nil {
 		t.Fatal("control active-document query failed", e)
+	}
+	if _, _, err := findEquivalentPresentWork(t.Context(), work.ID, "target", true); err != nil {
+		t.Fatalf("an existing PDF must satisfy paper import: %v", err)
+	}
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	if err := os.WriteFile(summaryPath, []byte("# Repro\nBibliography summary"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Updates(map[string]any{
+		"document_type": "MARKDOWN", "display_name": "summary.md", "ext": marshal(map[string]string{"stored_path": summaryPath}),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := findEquivalentPresentWork(t.Context(), work.ID, "target", true); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("bibliography markdown satisfied PDF presence: %v", err)
+	}
+	if _, err := sourcePresentDocument(db, "target", work.ID, "", true); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("bibliography markdown satisfied PDF deduplication: %v", err)
 	}
 	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("dataset_id", "other").Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target"); !errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target", false); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("association to document in another library counted as present: %v", err)
 	}
 	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("dataset_id", "target").Error; err != nil {
@@ -59,8 +77,8 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	if e := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("deleted_at", time.Now().UTC()).Error; e != nil {
 		t.Fatal(e)
 	}
-	_, p, presenceErr = findEquivalentPresentWork(context.Background(), work.ID, "target")
-	_, activeErr := sourcePresentDocument(db, "target", work.ID, "")
+	_, p, presenceErr = findEquivalentPresentWork(context.Background(), work.ID, "target", false)
+	_, activeErr := sourcePresentDocument(db, "target", work.ID, "", false)
 	t.Logf("after deletion: presence_error=%v document=%s active_query=%v", presenceErr, p.DocumentID, activeErr)
 	if !errors.Is(presenceErr, gorm.ErrRecordNotFound) || !errors.Is(activeErr, gorm.ErrRecordNotFound) {
 		t.Fatal("review not reproduced")
@@ -111,7 +129,7 @@ func TestEquivalentPresencePropagatesDatabaseFailure(t *testing.T) {
 	if err := db.Migrator().DropTable(&orm.AcademicWorkDocument{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target"); err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target", false); err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("database failure treated as absence: %v", err)
 	}
 }

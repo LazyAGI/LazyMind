@@ -22,7 +22,10 @@ func init() {
 	for _, source := range []string{"document status unavailable", "retry service unavailable", "tool visibility unavailable", "task steps unavailable", "missing reparse receipt", "target unavailable", "source task unavailable", "source conversation unavailable", "source answer unavailable", "verified identity missing", "document reparse failed", "document processing submission failed"} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
-	for _, source := range []string{"import attempt superseded", "document already bound by a newer attempt"} {
+	for _, source := range []string{
+		"import attempt superseded", "document already bound by a newer attempt",
+		"confirmation superseded by guidance", "confirmation does not belong to this chat run",
+	} {
 		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
 	}
 	registerAdditionalErrorPattern("folder %s metadata", "Internal server error", http.StatusInternalServerError, 2000000)
