@@ -315,6 +315,42 @@ func TestConversationPreflightMustBeReadyAndIsConsumed(t *testing.T) {
 	}
 }
 
+func TestOnSubAgentDoneIgnoresSupersededAttempt(t *testing.T) {
+	for _, status := range []string{subagent.StatusSucceeded, subagent.StatusFailed} {
+		t.Run(status, func(t *testing.T) {
+			db := newTestDB(t)
+			hash, schema := seedEventLoopRevision(t, db, "rewound-revision")
+			_, err := CreateSession(t.Context(), db.DB, CreateSessionInput{
+				SessionID: "rewound", ConversationID: "rewound-chat", WorkflowID: "image-workflow",
+				WorkflowRevisionID: "rewound-revision", GraphHash: hash, GraphSchemaVersion: schema,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for attempt, task := range []string{"old-task", "current-task"} {
+				if _, err := CreateSessionStep(t.Context(), db.DB, "rewound", "analyze_subject", task, attempt+1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Model(&orm.WorkflowSessionStep{}).Where("task_id = ?", "old-task").
+				Updates(map[string]any{"validity": "stale", "status": StepStatusRunning}).Error; err != nil {
+				t.Fatal(err)
+			}
+			OnSubAgentDone(t.Context(), db.DB, nil, "old-task", status, "late completion",
+				func(kind string, _ map[string]any) { t.Errorf("stale attempt emitted %s", kind) },
+				&WorkflowChatContext{SessionID: "rewound", StepID: "analyze_subject", ConvID: "rewound-chat", WorkflowMode: "dynamic"})
+			current, err := GetStepByTaskID(t.Context(), db.DB, "current-task")
+			if err != nil || current.Status != StepStatusPending || current.Validity == "stale" {
+				t.Fatalf("current attempt changed: %+v %v", current, err)
+			}
+			var routes int64
+			if err := db.Model(&orm.WorkflowRouteDecision{}).Where("session_id = ?", "rewound").Count(&routes).Error; err != nil || routes != 0 {
+				t.Fatalf("stale callback froze a route: count=%d err=%v", routes, err)
+			}
+		})
+	}
+}
+
 func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

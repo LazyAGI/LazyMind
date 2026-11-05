@@ -375,6 +375,8 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	flags := flag.NewFlagSet("assistant "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	address := flags.String("listen", "", "Assistant Bridge loopback address")
+	clientID := flags.String("client-id", "", "deployment identity for shared service ownership")
+	serverURL := flags.String("server-url", "", "deployment origin (credentials remain isolated)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -393,7 +395,7 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	case "serve":
 		return serveAssistant(ctx, *address, stderr)
 	case "start":
-		status, err := assistantbridge.Start(ctx, *address)
+		status, err := assistantbridge.StartWithClient(ctx, *address, assistantbridge.ClientOptions{ID: *clientID, ServerURL: *serverURL})
 		if err != nil {
 			return err
 		}
@@ -405,17 +407,18 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		}
 		return printJSON(stdout, status)
 	case "stop":
-		if err := assistantbridge.Stop(ctx, *address); err != nil {
+		if err := assistantbridge.ReleaseClient(ctx, assistantbridge.ClientOptions{ID: *clientID, ServerURL: *serverURL}); err != nil {
 			return err
 		}
-		return printJSON(stdout, map[string]any{"ok": true, "running": false})
+		return printJSON(stdout, map[string]any{"ok": true, "released": true})
 	default:
 		return fmt.Errorf("unsupported Assistant Bridge action %q", action)
 	}
 }
 
 func serveAssistant(ctx context.Context, address string, stderr io.Writer) error {
-	store, err := credentials.NewStore("", "")
+	home := os.Getenv("LAZYMIND_HOME")
+	store, err := credentials.NewStore(home, "")
 	if err != nil {
 		return err
 	}
@@ -423,7 +426,7 @@ func serveAssistant(ctx context.Context, address string, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	policy, err := newExecutorPolicy()
+	policy, err := executorpolicy.New(store.Directory())
 	if err != nil {
 		return err
 	}
@@ -504,6 +507,15 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			return err
 		}
 		defer stopOwnerWatch()
+		if *ownerPID > 0 {
+			defer func() {
+				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := assistantbridge.ReleaseClient(releaseCtx, assistantbridge.ClientOptions{}); err != nil {
+					_, _ = fmt.Fprintln(stderr, "Assistant Bridge release:", err)
+				}
+			}()
+		}
 		if *ownerPID > 0 {
 			for _, provider := range providers {
 				if provider == "workbuddy" || provider == "codex" {

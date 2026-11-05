@@ -177,10 +177,7 @@ func InstallEditablePPT(ctx context.Context, runtimeRoot string) (EditablePPTSta
 		return stagedStatus, fmt.Errorf("editable PPTX dependency validation failed: %s", stagedStatus.Message)
 	}
 	installDir := EditablePPTInstallDir(runtimeRoot)
-	if err := os.RemoveAll(installDir); err != nil {
-		return EditablePPTStatus{}, err
-	}
-	if err := os.Rename(extractedDir, installDir); err != nil {
+	if err := replaceEditablePPTInstall(extractedDir, installDir); err != nil {
 		return EditablePPTStatus{}, err
 	}
 
@@ -204,13 +201,55 @@ func InstallEditablePPT(ctx context.Context, runtimeRoot string) (EditablePPTSta
 	return status, nil
 }
 
-// EnsureEditablePPTNodeModulesLink points the repo exporter's node_modules at
-// the installed deps ZIP. Safe to call when deps are missing (returns error).
-func EnsureEditablePPTNodeModulesLink(installDir string) error {
-	exportSrc := editablePPTExporterSourceDir()
-	if exportSrc == "" {
-		return errors.New("LAZYMIND_PPT_EXPORT_CLI / LAZYMIND_WORKFLOWS_DIR is not set")
+// Keep the content-addressed exporter copies used by running Desktop processes.
+// They are application code staged beside the dependencies, not part of the ZIP.
+func replaceEditablePPTInstall(extractedDir, installDir string) error {
+	backup, err := os.MkdirTemp(filepath.Dir(installDir), ".editable-ppt-previous-*")
+	if err != nil {
+		return err
 	}
+	previous := filepath.Join(backup, "payload")
+	hadPrevious := true
+	if err := os.Rename(installDir, previous); err != nil {
+		if !os.IsNotExist(err) {
+			_ = os.RemoveAll(backup)
+			return err
+		}
+		hadPrevious = false
+	}
+	oldRuntime := filepath.Join(previous, "export-runtime")
+	newRuntime := filepath.Join(extractedDir, "export-runtime")
+	movedRuntime := false
+	if hadPrevious {
+		err = os.Rename(oldRuntime, newRuntime)
+		movedRuntime = err == nil
+		if os.IsNotExist(err) {
+			err = nil
+		}
+	}
+	if err == nil {
+		err = os.Rename(extractedDir, installDir)
+	}
+	if err != nil {
+		if movedRuntime {
+			if restoreErr := os.Rename(newRuntime, oldRuntime); restoreErr != nil {
+				return fmt.Errorf("%w; restore exporter: %v (backup: %s)", err, restoreErr, backup)
+			}
+		}
+		if hadPrevious {
+			if restoreErr := os.Rename(previous, installDir); restoreErr != nil {
+				return fmt.Errorf("%w; restore dependencies: %v (backup: %s)", err, restoreErr, backup)
+			}
+		}
+		_ = os.RemoveAll(backup)
+		return err
+	}
+	return os.RemoveAll(backup)
+}
+
+// Link staged Desktop exporters as well as an explicitly configured local
+// exporter. Core need not know which immutable version Chat is still using.
+func EnsureEditablePPTNodeModulesLink(installDir string) error {
 	target := filepath.Join(installDir, "node_modules")
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		if err != nil {
@@ -218,6 +257,32 @@ func EnsureEditablePPTNodeModulesLink(installDir string) error {
 		}
 		return fmt.Errorf("editable PPT deps node_modules missing: %s", target)
 	}
+	var sources []string
+	if source := editablePPTExporterSourceDir(); source != "" {
+		sources = append(sources, source)
+	}
+	root := filepath.Join(installDir, "export-runtime")
+	entries, err := os.ReadDir(root)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			source := filepath.Join(root, entry.Name())
+			if info, err := os.Stat(filepath.Join(source, "html_to_pptx.mjs")); err == nil && info.Mode().IsRegular() {
+				sources = append(sources, source)
+			}
+		}
+	}
+	for _, source := range sources {
+		if err := linkEditablePPTNodeModules(source, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkEditablePPTNodeModules(exportSrc, target string) error {
 	link := filepath.Join(exportSrc, "node_modules")
 	if current, ok := readDirectorySymlink(link); ok {
 		if filepath.Clean(current) == filepath.Clean(target) {

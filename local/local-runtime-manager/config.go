@@ -950,7 +950,11 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		frontendBindCheckAddress = "0.0.0.0"
 	}
 	processComposePort := ports.resolvedPort("process-compose", []string{processComposePortEnvVar}, defaultProcessComposePort)
-	frontendPort := ports.resolvedPortOn("frontend", []string{frontendPortEnvVar}, defaultFrontendPort, frontendBindCheckAddress)
+	preferredFrontendPort := defaultFrontendPort
+	if profile == "desktop" {
+		preferredFrontendPort = 8091
+	}
+	frontendPort := ports.resolvedPortOn("frontend", []string{frontendPortEnvVar}, preferredFrontendPort, frontendBindCheckAddress)
 	localProxyPort := ports.resolvedPort("local-proxy", []string{localProxyPortEnvVar}, defaultLocalProxyPort)
 	authHostPort := ports.resolvedPort("auth-service", []string{localAuthPortEnvVar, localProxyAuthHostPortEnvVar, authServicePortEnvVar}, defaultLocalProxyAuthHostPort)
 	coreHostPort := ports.resolvedPort("core", []string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)

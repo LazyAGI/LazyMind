@@ -95,3 +95,62 @@ func TestResolveNodeExecutableFallsBackToPath(t *testing.T) {
 		t.Fatalf("resolveNodeExecutable() = %q, want %q", got, nodePath)
 	}
 }
+
+func TestEditablePPTInstallPreservesRunningExporterAndLinksNewDependencies(t *testing.T) {
+	t.Setenv("LAZYMIND_PPT_EXPORT_CLI", "")
+	t.Setenv("LAZYMIND_WORKFLOWS_DIR", "")
+	root := t.TempDir()
+	install := filepath.Join(root, "editable-ppt")
+	extracted := filepath.Join(root, "payload")
+	for _, version := range []string{"running-version", "upgraded-version"} {
+		source := filepath.Join(install, "export-runtime", version)
+		if err := os.MkdirAll(source, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(source, "html_to_pptx.mjs"), []byte(version), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(extracted, "node_modules", "pptxgenjs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extracted, "node_modules", "pptxgenjs", "package.json"), []byte(`{"version":"new"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceEditablePPTInstall(extracted, install); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureEditablePPTNodeModulesLink(install); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"running-version", "upgraded-version"} {
+		source := filepath.Join(install, "export-runtime", version)
+		code, err := os.ReadFile(filepath.Join(source, "html_to_pptx.mjs"))
+		if err != nil || string(code) != version {
+			t.Fatalf("running exporter changed: %s, %v", code, err)
+		}
+		data, err := os.ReadFile(filepath.Join(source, "node_modules", "pptxgenjs", "package.json"))
+		if err != nil || string(data) != `{"version":"new"}` {
+			t.Fatalf("exporter cannot resolve installed dependencies: %s, %v", data, err)
+		}
+	}
+}
+
+func TestEditablePPTInstallFailureRestoresPreviousRuntime(t *testing.T) {
+	root := t.TempDir()
+	install := filepath.Join(root, "editable-ppt")
+	source := filepath.Join(install, "export-runtime", "running")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(source, "html_to_pptx.mjs")
+	if err := os.WriteFile(marker, []byte("running"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceEditablePPTInstall(filepath.Join(root, "missing-payload"), install); err == nil {
+		t.Fatal("install with missing payload must fail")
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "running" {
+		t.Fatalf("failed install lost previous exporter: %s, %v", data, err)
+	}
+}

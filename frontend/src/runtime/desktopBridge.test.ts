@@ -25,10 +25,14 @@ import {
 
 describe("browser Assistant Bridge session synchronization", () => {
   beforeEach(() => {
+    // These tests cover session/action ordering; automatic discovery has its own suite.
+    vi.stubEnv("VITE_LAZYMIND_ASSISTANT_BRIDGE_URL", "http://127.0.0.1:19091");
     mocks.user.mockReset();
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, "lazymindDesktop");
   });
+
+  afterEach(() => { vi.unstubAllEnvs(); });
 
   it.each([
     { name: "slow DSH status", request: () => agentIntegrationStatuses(), delay: 20_000, ok: true },

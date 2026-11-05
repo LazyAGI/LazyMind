@@ -19,13 +19,16 @@ repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd -P)
 LAZYMIND_WSL_BRIDGE_SCRIPT=$(wslpath -w "$script_dir/assistant-bridge-win.ps1")
 LAZYMIND_WSL_BRIDGE_SOURCE=$(wslpath -w "$repo_root/local/build/bin/lazymind.exe")
 LAZYMIND_WSL_BRIDGE_ACTION=$action
+LAZYMIND_WSL_BRIDGE_PORT=${LAZYMIND_FRONTEND_PORT:-8090}
+LAZYMIND_WSL_BRIDGE_DEPLOYMENT=${LAZYMIND_ASSISTANT_DEPLOYMENT:-compose}
 if [ -z "$LAZYMIND_WSL_BRIDGE_SCRIPT" ] || [ -z "$LAZYMIND_WSL_BRIDGE_SOURCE" ]; then
     echo 'wslpath returned an empty Assistant Bridge path.' >&2
     exit 1
 fi
 export LAZYMIND_WSL_BRIDGE_SCRIPT LAZYMIND_WSL_BRIDGE_SOURCE LAZYMIND_WSL_BRIDGE_ACTION
+export LAZYMIND_WSL_BRIDGE_PORT LAZYMIND_WSL_BRIDGE_DEPLOYMENT
 # /w exports only towards Win32; no /p because paths are already converted.
-WSLENV="${WSLENV:+$WSLENV:}LAZYMIND_WSL_BRIDGE_SCRIPT/w:LAZYMIND_WSL_BRIDGE_SOURCE/w:LAZYMIND_WSL_BRIDGE_ACTION/w"
+WSLENV="${WSLENV:+$WSLENV:}LAZYMIND_WSL_BRIDGE_SCRIPT/w:LAZYMIND_WSL_BRIDGE_SOURCE/w:LAZYMIND_WSL_BRIDGE_ACTION/w:LAZYMIND_WSL_BRIDGE_PORT/w:LAZYMIND_WSL_BRIDGE_DEPLOYMENT/w"
 export WSLENV
 
 # -Command keeps script-load failures inside the Windows-side catch. Normalize

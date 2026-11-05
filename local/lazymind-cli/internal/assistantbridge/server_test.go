@@ -511,44 +511,6 @@ func TestBrowserHealthReportsBridgeIdentityAcrossPlatforms(t *testing.T) {
 	}
 }
 
-func TestValidateBridgeIdentityRequiresMatchingPlatformAndExecutable(t *testing.T) {
-	root := t.TempDir()
-	expected := filepath.Join(root, "lazymind")
-	foreign := filepath.Join(root, "other-lazymind")
-	if runtime.GOOS == "windows" {
-		expected += ".exe"
-		foreign += ".exe"
-	}
-	for _, path := range []string{expected, foreign} {
-		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := validateBridgeIdentity(map[string]any{
-		"platform": runtime.GOOS, "executable": expected,
-	}, expected); err != nil {
-		t.Fatalf("matching identity: %v", err)
-	}
-	if err := validateBridgeIdentity(map[string]any{
-		"platform": runtime.GOOS, "executable": foreign,
-	}, expected); err == nil || !strings.Contains(err.Error(), "another LazyMind executable") {
-		t.Fatalf("foreign executable error=%v", err)
-	}
-	otherPlatform := "windows"
-	if runtime.GOOS == "windows" {
-		otherPlatform = "linux"
-	}
-	if err := validateBridgeIdentity(map[string]any{
-		"platform": otherPlatform, "executable": expected,
-	}, expected); err == nil || !strings.Contains(err.Error(), "already running on") {
-		t.Fatalf("platform mismatch error=%v", err)
-	}
-	if err := validateBridgeIdentity(map[string]any{}, expected); err == nil ||
-		!strings.Contains(err.Error(), "does not report its platform") {
-		t.Fatalf("missing identity error=%v", err)
-	}
-}
-
 func TestBrowserPreflightAllowsClientPlatformHeader(t *testing.T) {
 	server := newTestServer(t, t.TempDir())
 	request := httptest.NewRequest(http.MethodOptions, "/v1/agents", nil)

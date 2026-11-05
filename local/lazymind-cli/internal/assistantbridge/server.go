@@ -23,7 +23,6 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/codexhost"
-	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -48,6 +47,8 @@ type Server struct {
 	policy              *executorpolicy.Store
 	mu                  sync.Mutex
 	stop                context.CancelFunc
+	shared              *sharedBridge
+	isolated            bool
 	loginMu             sync.Mutex
 	logins              map[string]agentLogin
 	loginID             uint64
@@ -79,114 +80,17 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 	}
 	return &Server{
 		address: address, bridge: bridge, executorProbe: bridge, store: store, policy: policy,
-		logins: make(map[string]agentLogin),
+		isolated: os.Getenv("LAZYMIND_BRIDGE_ISOLATED") == "true",
+		logins:   make(map[string]agentLogin),
 	}, nil
 }
 
 func Start(ctx context.Context, address string) (map[string]any, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	if status, healthErr := Health(ctx, address); healthErr == nil {
-		if err := validateBridgeIdentity(status, self); err != nil {
-			return nil, err
-		}
-		if status["version"] == "v8" {
-			return status, nil
-		}
-		if err := Stop(ctx, address); err != nil {
-			return nil, err
-		}
-	}
-	home, err := assistantHome()
-	if err != nil {
-		return nil, err
-	}
-	logDir := filepath.Join(home, "logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		return nil, err
-	}
-	logPath := filepath.Join(logDir, "assistant-bridge.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	command := exec.Command(self, "assistant", "serve", "--listen", address)
-	command.Env = connectorconfig.ServiceEnvironment(home)
-	command.SysProcAttr = detachedProcessAttributes()
-	command.Stdout = logFile
-	command.Stderr = logFile
-	if err := command.Start(); err != nil {
-		_ = logFile.Close()
-		return nil, err
-	}
-	_ = command.Process.Release()
-	_ = logFile.Close()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		status, healthErr := Health(ctx, address)
-		if healthErr == nil {
-			if err := validateBridgeIdentity(status, self); err != nil {
-				return nil, err
-			}
-			return status, nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("Assistant Bridge did not start; inspect %s", logPath)
-}
-
-func validateBridgeIdentity(status map[string]any, expectedExecutable string) error {
-	platform, _ := status["platform"].(string)
-	platform = strings.ToLower(strings.TrimSpace(platform))
-	if platform == "" {
-		return errors.New("the running Assistant Bridge does not report its platform; stop it before starting this version")
-	}
-	if platform != runtime.GOOS {
-		return fmt.Errorf(
-			"Assistant Bridge is already running on %s; stop it before starting the native %s bridge",
-			platform, runtime.GOOS,
-		)
-	}
-	executable, _ := status["executable"].(string)
-	executable = strings.TrimSpace(executable)
-	if executable == "" || !agentexec.SameExecutable(executable, expectedExecutable) {
-		return errors.New("the running Assistant Bridge belongs to another LazyMind executable; stop it before starting this version")
-	}
-	return nil
+	return StartWithClient(ctx, address, ClientOptions{})
 }
 
 func Stop(ctx context.Context, address string) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+address+"/v1/shutdown", nil)
-	if err != nil {
-		return err
-	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		if _, healthErr := Health(ctx, address); healthErr != nil {
-			return nil
-		}
-		return err
-	}
-	_ = response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("Assistant Bridge stop returned HTTP %d", response.StatusCode)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := Health(ctx, address); err != nil {
-			return nil
-		}
-		timer := time.NewTimer(50 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return errors.New("Assistant Bridge did not stop before the deadline")
+	return ReleaseClient(ctx, ClientOptions{})
 }
 
 func Health(ctx context.Context, address string) (map[string]any, error) {
@@ -208,24 +112,25 @@ func Health(ctx context.Context, address string) (map[string]any, error) {
 	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
 		return nil, err
 	}
+	if status == nil {
+		return nil, errors.New("Assistant Bridge returned an invalid health response")
+	}
 	status["running"] = true
 	return status, nil
-}
-
-func assistantHome() (string, error) {
-	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME")); configured != "" {
-		return filepath.Abs(configured)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".lazymind"), nil
 }
 
 func (s *Server) Serve(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.stop = cancel
+	if !s.isolated {
+		shared, err := newSharedBridge(s)
+		if err != nil {
+			cancel()
+			return err
+		}
+		s.shared = shared
+		go shared.watchOwners(runCtx)
+	}
 	defer cancel()
 	defer s.cancelAgentLogins()
 	workerDone := make(chan struct{})
@@ -278,8 +183,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
 		executable, _ := os.Executable()
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"ok": true, "pid": os.Getpid(), "version": "v8",
+			"ok": true, "pid": os.Getpid(), "version": bridgeProtocol,
 			"platform": runtime.GOOS, "executable": executable,
+			"service": bridgeProduct, "home": s.store.Directory(), "isolated": s.isolated,
 		})
 	})
 	mux.HandleFunc("POST /v1/workflow-runs/{session}/control", s.handleWorkflowControl)
@@ -314,11 +220,19 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /v1/bindings/{target}", s.handleExecutableBinding)
 	mux.HandleFunc("POST /v1/session", s.handleSession)
 	mux.HandleFunc("DELETE /v1/session", s.handleSession)
-	mux.HandleFunc("POST /v1/shutdown", func(writer http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /v1/shutdown", func(writer http.ResponseWriter, request *http.Request) {
+		if s.isolated && !s.validLifecycleRequest(request) {
+			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "shared bridge lifecycle credentials required"})
+			return
+		}
 		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 		go s.stop()
 	})
-	return s.allowLocalBrowser(mux)
+	handler := http.Handler(mux)
+	if s.shared != nil {
+		handler = s.shared.wrap(handler)
+	}
+	return s.allowLocalBrowser(handler)
 }
 
 func ankiExecutableCandidates() []string {
@@ -752,6 +666,10 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 		origin := strings.TrimSpace(request.Header.Get("Origin"))
 		if origin != "" && !localOrigin(origin) {
 			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "Assistant Bridge only accepts local LazyMind pages"})
+			return
+		}
+		if s.isolated && origin != "" && request.URL.Path != "/v1/health" && !s.originMatchesEnvironment(origin) {
+			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "Assistant Bridge belongs to another deployment"})
 			return
 		}
 		if origin != "" {

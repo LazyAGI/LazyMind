@@ -30,17 +30,31 @@ import { readFile, writeFile } from 'node:fs/promises';
  * @param {Array<{apply: (xml: string, name: string) => string}>} handlers
  */
 export async function postprocessPptx(pptxPath, handlers) {
-  if (!handlers || handlers.length === 0) return;
   const buf = await readFile(pptxPath);
   const zip = await JSZip.loadAsync(buf);
 
   let modifiedAny = false;
+  // PptxGenJS 4 declares one slide master per slide even though it only writes
+  // the real masters. Remove only those phantom declarations, preserving all
+  // existing masters and the slide/layout/notes relationships.
+  const contentTypes = zip.file('[Content_Types].xml');
+  if (contentTypes) {
+    const xml = await contentTypes.async('string');
+    const normalized = xml.replace(/<Override\b[^>]*\/>/g, (entry) => {
+      const part = entry.match(/\bPartName="\/(ppt\/slideMasters\/slideMaster\d+\.xml)"/);
+      return part && !zip.file(part[1]) ? '' : entry;
+    });
+    if (normalized !== xml) {
+      zip.file('[Content_Types].xml', normalized);
+      modifiedAny = true;
+    }
+  }
   for (const name of Object.keys(zip.files)) {
     if (zip.files[name].dir) continue;
     if (!/^ppt\/slides\/slide\d+\.xml$/.test(name)) continue;
     const xml = await zip.files[name].async('string');
     let cur = xml;
-    for (const h of handlers) {
+    for (const h of handlers || []) {
       cur = h.apply(cur, name);
     }
     if (cur !== xml) {

@@ -4141,6 +4141,7 @@ const zhCN = {
       versionAria: "版本 {{version}}",
       versionHistory: "版本历史",
       versionActionFailed: "版本操作失败，请重试",
+      staleVersionReadOnly: "此版本已失效，仅供查看。请使用当前版本继续修改。",
       versionHistoryCount: "版本历史（{{count}} 个版本）",
       versionList: "版本列表",
       versionSourceLabel: "{{version}} · {{source}}",

@@ -72,6 +72,24 @@ it('allows read-only history inspection but disables rollback', async () => {
   expect(api.rollbackSlotItem).not.toHaveBeenCalled();
 });
 
+it('keeps invalidated history readable without offering an apply action that Core rejects', async () => {
+  api.getSlotItemVersions.mockResolvedValueOnce({ data: { data: { versions: [
+    { revision: 1, selected: false, validity: 'stale', change_source: 'ai',
+      created_at: '2026-09-23T00:00:00Z', content_snapshot: slotFor(0, 1).artifact_value },
+    { revision: 2, selected: true, validity: 'effective', change_source: 'ai',
+      created_at: '2026-09-23T00:00:00Z', content_snapshot: slotFor().artifact_value },
+  ] } } });
+  render(<SlotRenderer {...props} slot={slotFor()} />);
+  fireEvent.click(screen.getByRole('button', { name: /版本历史/ }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('option', { name: /v1/ }));
+  expect(within(dialog).getByText(/此版本已失效/)).toBeInTheDocument();
+  const apply = within(dialog).getByRole('button', { name: /应用.*v1/ });
+  expect(apply).toBeDisabled();
+  fireEvent.click(apply);
+  expect(api.rollbackSlotItem).not.toHaveBeenCalled();
+});
+
 it('preserves the current slide when history fails and allows retry', async () => {
   api.getSlotItemVersions.mockRejectedValueOnce(new Error('fixture history unavailable'));
   render(<SlotRenderer {...props} slot={slotFor()} />);

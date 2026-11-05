@@ -9,35 +9,62 @@ const desktopOwnerPIDEnvVar = "LAZYMIND_DESKTOP_OWNER_PID"
 
 func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
 	text := strings.Join(parts, " ")
-	repo := filepath.Clean(paths.RepoRoot)
-	buildRoot := filepath.Clean(paths.BuildRoot)
-	runtimeRoot := filepath.Clean(paths.RuntimeRoot)
-	resourcesRoot := filepath.Clean(paths.ResourcesRoot)
-	if buildRoot != "." && strings.Contains(text, buildRoot) {
-		return true
+	root := filepath.Clean(paths.RuntimeRoot)
+	if root == "." || root == string(filepath.Separator) {
+		return false
 	}
-	if strings.Contains(text, runtimeRoot) {
-		return true
+	// Executable, source and dependency directories can be shared by several
+	// deployments. Only a reference to this runtime's private directory proves
+	// ownership; a sibling path with the same prefix does not.
+	for offset := 0; offset < len(text); {
+		index := strings.Index(text[offset:], root)
+		if index < 0 {
+			break
+		}
+		index += offset
+		end := index + len(root)
+		before := index == 0 || strings.ContainsRune(" \t\n\x00\"'=", rune(text[index-1]))
+		after := end == len(text) || strings.ContainsRune("/\\ \t\n\x00\"'", rune(text[end]))
+		if before && after {
+			return true
+		}
+		offset = end
 	}
-	if resourcesRoot != "." && strings.Contains(text, resourcesRoot) {
-		return true
+	return false
+}
+
+func processEnvironmentMatchesRuntime(paths RuntimePaths, executable string, args, environment []string) bool {
+	for _, value := range environment {
+		if value == runtimeProfileEnvVar+"=bridge" {
+			return false
+		}
 	}
-	if strings.Contains(text, repo) {
-		for _, marker := range []string{
-			"local-runtime-manager",
-			"process-compose",
-			"local-proxy",
-			"scan-control-plane",
-			"file-watcher",
-			"auth-service",
-			"channel-gateway",
-			"backend/core",
-			"algorithm/lazymind",
-			"algorithm/lazyllm",
-		} {
-			if strings.Contains(text, marker) {
-				return true
-			}
+	if isAssistantBridgeCommand(executable, args) {
+		return false
+	}
+	for _, value := range environment {
+		if root, ok := strings.CutPrefix(value, runtimeRootEnvVar+"="); ok {
+			return root != "" && filepath.Clean(root) == filepath.Clean(paths.RuntimeRoot)
+		}
+	}
+	for i, arg := range args {
+		if arg == "--runtime-root" && i+1 < len(args) {
+			return filepath.Clean(args[i+1]) == filepath.Clean(paths.RuntimeRoot)
+		}
+		if root, ok := strings.CutPrefix(arg, "--runtime-root="); ok {
+			return filepath.Clean(root) == filepath.Clean(paths.RuntimeRoot)
+		}
+	}
+	return processTextMatchesRuntime(paths, strings.Join(args, " "))
+}
+
+func isAssistantBridgeCommand(executable string, args []string) bool {
+	if !strings.HasPrefix(strings.ToLower(filepath.Base(executable)), "lazymind") {
+		return false
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "assistant" && args[i+1] == "serve" {
+			return true
 		}
 	}
 	return false

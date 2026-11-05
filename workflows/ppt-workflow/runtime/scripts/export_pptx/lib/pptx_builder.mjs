@@ -2343,10 +2343,10 @@ export async function buildPptx(pages, deckDir, outputPath) {
   await pptx.writeFile({ fileName: outputPath });
 
   // 后处理：将渐变 token 替换为真正的 <a:gradFill> OOXML
-  if (_currentGradientHandler && _currentGradientHandler._replacementsCount() > 0) {
-    const { postprocessPptx } = await import('./postprocess_pptx.mjs');
-    await postprocessPptx(outputPath, [_currentGradientHandler]);
-  }
+  const { postprocessPptx } = await import('./postprocess_pptx.mjs');
+  await postprocessPptx(outputPath,
+    _currentGradientHandler && _currentGradientHandler._replacementsCount() > 0
+      ? [_currentGradientHandler] : []);
   _currentGradientHandler = null;
 
   // Preserve web typography across machines. Preview HTML commonly imports

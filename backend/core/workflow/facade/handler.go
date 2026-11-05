@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -706,6 +707,25 @@ func legacyTransitionBody(body []byte) ([]byte, error) {
 	return json.Marshal(public)
 }
 
+// PostgreSQL JSONB rewrites whitespace and object key order. Compare decoded
+// values so a persisted preparation still recognizes the original request.
+// UseNumber keeps distinct large integer inputs from collapsing into float64.
+func samePreparationRequest(stored, incoming []byte) bool {
+	decode := func(raw []byte) (any, error) {
+		if !json.Valid(raw) {
+			return nil, errors.New("invalid preparation JSON")
+		}
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		err := decoder.Decode(&value)
+		return value, err
+	}
+	left, leftErr := decode(stored)
+	right, rightErr := decode(incoming)
+	return leftErr == nil && rightErr == nil && reflect.DeepEqual(left, right)
+}
+
 func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 	owner, ok := identityAndVersion(w, r)
 	if !ok {
@@ -729,7 +749,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		key = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	}
 	if existing, err := h.Store.PreparationByKey(r.Context(), owner, key); err == nil {
-		if !bytes.Equal(bytes.TrimSpace(existing.RequestJSON), bytes.TrimSpace(body)) {
+		if !samePreparationRequest(existing.RequestJSON, body) {
 			fail(w, http.StatusConflict, "IDEMPOTENCY_CONFLICT", "idempotency key was used with another payload", false)
 			return
 		}

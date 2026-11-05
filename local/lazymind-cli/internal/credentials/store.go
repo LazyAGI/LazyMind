@@ -70,14 +70,7 @@ func (e *apiError) Error() string {
 }
 
 func defaultHome() (string, error) {
-	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME")); configured != "" {
-		return filepath.Abs(configured)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve user home: %w", err)
-	}
-	return filepath.Join(home, ".lazymind"), nil
+	return connectorconfig.Home()
 }
 
 func NewStore(home, server string) (*Store, error) {
@@ -143,6 +136,9 @@ func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }
 
 func (s *Store) Save(value Credentials) error {
 	server := normalizeServerURL(value.ServerURL)
+	if err := s.validateEnvironmentServer(server); err != nil {
+		return err
+	}
 	parsed, err := url.Parse(server)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 		return errors.New("LazyMind server URL must be an HTTP(S) origin without embedded credentials")
@@ -190,6 +186,13 @@ func (s *Store) AccessToken(ctx context.Context) (string, error) {
 }
 
 func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials, error) {
+	identity, err := connectorconfig.EnvironmentIdentity(s.home)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Credentials{}, err
+	}
+	if strings.HasPrefix(identity, "origin:") {
+		return Credentials{}, ErrAuthenticationRequired
+	}
 	return s.bootstrapLocalSessionForServerUnlocked(ctx, "", false)
 }
 
@@ -269,10 +272,20 @@ func (s *Store) ServerURL(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if s.serverOverride != "" {
+		if err := s.validateEnvironmentServer(s.serverOverride); err != nil {
+			return "", err
+		}
 		return s.serverOverride, nil
 	}
 	if value, err := s.loadUnlocked(); err == nil && normalizeServerURL(value.ServerURL) != "" {
 		return normalizeServerURL(value.ServerURL), nil
+	}
+	identity, err := connectorconfig.EnvironmentIdentity(s.home)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if strings.HasPrefix(identity, "origin:") {
+		return strings.TrimPrefix(identity, "origin:"), nil
 	}
 	if configured := normalizeServerURL(connectorconfig.Value("LAZYMIND_SERVER_URL")); configured != "" {
 		return configured, nil
@@ -377,10 +390,30 @@ func (s *Store) loadUnlocked() (Credentials, error) {
 		return Credentials{}, fmt.Errorf("decode credentials: %w", err)
 	}
 	value.ServerURL = normalizeServerURL(value.ServerURL)
+	if err := s.validateEnvironmentServer(value.ServerURL); err != nil {
+		return Credentials{}, err
+	}
 	if value.ServerURL == "" || value.AccessToken == "" || value.RefreshToken == "" {
 		return Credentials{}, ErrAuthenticationRequired
 	}
 	return value, nil
+}
+
+func (s *Store) validateEnvironmentServer(server string) error {
+	identity, err := connectorconfig.EnvironmentIdentity(s.home)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(identity, "origin:") {
+		actual, err := connectorconfig.OriginIdentity(server)
+		if err != nil || actual != identity {
+			return errors.New("LazyMind credentials belong to another deployment")
+		}
+	}
+	return nil
 }
 
 func (s *Store) saveUnlocked(value Credentials) error {

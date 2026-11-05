@@ -57,6 +57,13 @@ func scanLocalRuntimeProcesses(paths RuntimePaths) ([]LocalProcessRecord, error)
 	if ownerPID > 0 {
 		excludeProcessTree(excluded, parents, ownerPID)
 	}
+	// Shared Assistant Bridge workers must survive the application's exit,
+	// including when they were originally started by its Agent Host.
+	for _, process := range processes {
+		if isAssistantBridgeCommand(nullableText(process.ExecutablePath), strings.Fields(nullableText(process.CommandLine))) {
+			excludeProcessTree(excluded, parents, int(process.ProcessID))
+		}
+	}
 	records := make([]LocalProcessRecord, 0, len(processes))
 	for _, process := range processes {
 		pid := int(process.ProcessID)
