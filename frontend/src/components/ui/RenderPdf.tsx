@@ -1230,7 +1230,7 @@ export default function RenderPdf({
       </div>
   );
   const readerTools = (
-    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
+    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={typeof pdfHeaderEnd !== "function" && !toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
 
         {!formulaDocument && !formulaBusy && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
@@ -1256,7 +1256,7 @@ export default function RenderPdf({
         {readerMode === "original" && <button type="button" className="pdf-reader-hand-trigger" aria-label={readerLabel("panPaper")} title={readerLabel("panPaper")} aria-pressed={handPan.active} disabled={!pdfLoaded} onClick={toggleHandPan}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 13.5V7a1.5 1.5 0 0 1 3 0v4.5-7a1.5 1.5 0 0 1 3 0v7-5a1.5 1.5 0 0 1 3 0v5-3a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-5-2.7l-3.3-4.8a1.6 1.6 0 0 1 2.6-1.8L8 13.5Z"/></svg></button>}
         {readerMode === "original" && <button type="button" className="pdf-reader-pin-trigger" aria-label={readerLabel("captureRegion")} title={readerLabel("captureRegion")} aria-pressed={pinCaptureActive} disabled={!pdfLoaded||!pinBoardReady} onClick={()=>{handPan.disable();setPinCaptureActive(active=>!active);}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg></button>}
         {readerMode === "original" && pdfIRTarget && <ReadingPreparationAction key={`${pdfIRTarget.dataset}/${pdfIRTarget.document}`} target={pdfIRTarget} onPrepared={pdfIR.refresh} />}
-        {readerMode === "original" && (typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(readerTools) : <>
+        {readerMode === "original" && (typeof pdfHeaderEnd === "function" ? pdfHeaderEnd(pdfIRTarget ? readerTools : null) : <>
           <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
             <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
             {readerTools}

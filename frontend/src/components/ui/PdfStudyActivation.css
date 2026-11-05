@@ -1,11 +1,13 @@
 @property --pdf-ai-angle{syntax:'<angle>';initial-value:0deg;inherits:false}
-.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button{position:relative;isolation:isolate;display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:7px 14px;border:1px solid transparent;border-radius:12px;background:linear-gradient(110deg,#2463d8,#7150d8 52%,#aa458f) padding-box,linear-gradient(110deg,#68caff,#9380f5,#f38cbf) border-box;color:#fff;font-size:13px;font-weight:650;box-shadow:0 3px 12px #7168db21;cursor:pointer;transition:box-shadow .18s,transform .18s}
-.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button span{color:inherit}
-.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button svg{color:#fff;filter:drop-shadow(0 0 4px #b9a9ff85)}
-.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button:hover{background:linear-gradient(110deg,#205bd1,#6845d0 52%,#a03c86) padding-box,linear-gradient(110deg,#4ebeff,#8464ec,#f076b2) border-box;box-shadow:0 4px 18px #8674df40;transform:translateY(-1px)}
-.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button:active{transform:translateY(0);box-shadow:0 1px 8px #8674df35}
-.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button:focus-visible{outline:2px solid #7562d8;outline-offset:3px}
+.pdf-reader-workspace button.pdf-study-ai-button{position:relative;isolation:isolate;display:inline-flex;align-items:center;gap:7px;min-height:30px;height:30px;width:auto;padding:4px 10px;border:1px solid transparent;border-radius:10px;background:linear-gradient(110deg,#2586f5,#846df4 52%,#e879bc) padding-box,linear-gradient(110deg,#68caff,#9380f5,#f38cbf) border-box;color:#fff;font-size:13px;font-weight:650;box-shadow:0 3px 12px #7168db21;cursor:pointer;transition:box-shadow .18s,transform .18s}
+.pdf-reader-workspace button.pdf-study-ai-button span{color:inherit}
+.pdf-reader-workspace button.pdf-study-ai-button svg{color:#fff;filter:drop-shadow(0 0 4px #b9a9ff85)}
+.pdf-reader-workspace button.pdf-study-ai-button:hover{background:linear-gradient(110deg,#187aec,#7960eb 52%,#db66ae) padding-box,linear-gradient(110deg,#4ebeff,#8464ec,#f076b2) border-box;box-shadow:0 4px 18px #8674df40;transform:translateY(-1px)}
+.pdf-reader-workspace button.pdf-study-ai-button:active{transform:translateY(0);box-shadow:0 1px 8px #8674df35}
+.pdf-reader-workspace button.pdf-study-ai-button:focus-visible{outline:2px solid #7562d8;outline-offset:3px}
 .pdf-study-activation{position:fixed;z-index:1449;pointer-events:none;box-sizing:border-box;border:4px solid transparent;border-radius:18px;background:conic-gradient(from var(--pdf-ai-angle),#55cfff,#7777ff,#c777f5,#ff93ba,#8ee8e0,#55cfff) border-box;mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);mask-composite:exclude;box-shadow:inset 0 0 8px #b2c5ff;animation:pdf-study-awaken 1800ms ease-in-out both}
 @keyframes pdf-study-awaken{0%{opacity:0;--pdf-ai-angle:0deg}16%{opacity:1}78%{opacity:1}100%{opacity:0;--pdf-ai-angle:360deg}}
-@media(prefers-reduced-motion:reduce){.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button{transition:none}.pdf-reader-workspace .pdf-formula-controls button.pdf-study-ai-button:hover{transform:none}.pdf-study-activation{animation:pdf-study-quiet 300ms ease-out both}}
+@media(prefers-reduced-motion:reduce){.pdf-reader-workspace button.pdf-study-ai-button{transition:none}.pdf-reader-workspace button.pdf-study-ai-button:hover{transform:none}.pdf-study-activation{animation:pdf-study-quiet 300ms ease-out both}}
 @keyframes pdf-study-quiet{from{opacity:.7}to{opacity:0}}
+
+.pdf-reader-workspace button.pdf-study-ai-button:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
