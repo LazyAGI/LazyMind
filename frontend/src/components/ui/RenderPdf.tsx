@@ -269,6 +269,7 @@ export default function RenderPdf({
   useEffect(()=>()=>{clearTimeout(positionIdleTimer.current);if(pendingPosition.current)reportPosition.current?.(pendingPosition.current);},[]);
   const [selectionAction, setSelectionAction] =
     useState<SelectionAction | null>(null);
+  const [selectionComposerMode,setSelectionComposerMode]=useState<'ask'|'note'>('ask');
   const [selectionHighlights, setSelectionHighlights] = useState<Array<{
     left: number;
     top: number;
@@ -1190,6 +1191,8 @@ export default function RenderPdf({
             selection={selectionAction.selection}
             onAsk={onAskSelection}
             onNote={onNoteSelection}
+            initialMode={selectionComposerMode}
+            onModeChange={setSelectionComposerMode}
             onHighlight={onNoteSelection ? commitNoteHighlight : undefined}
             onClose={()=>{window.getSelection()?.removeAllRanges();setSelectionAction(null);}}
             onTranslate={onTranslateSelection ? ()=>onTranslateSelection(selectionAction.selection) : undefined}

@@ -26,6 +26,20 @@ it('saves a note directly from the selection popup and closes only after success
  expect(close).not.toHaveBeenCalled();
  complete();await waitFor(()=>expect(close).toHaveBeenCalledOnce());
 });
+it('keeps note mode for the next text selection after switching modes',async()=>{
+ const note=vi.fn().mockResolvedValue(undefined),ask=vi.fn(),close=vi.fn();
+ let selectedMode:'ask'|'note'='ask';
+ const onModeChange=(mode:'ask'|'note')=>{selectedMode=mode;};
+ const {rerender}=render(<PdfSelectionComposer key="first" selection={{text:'First quote',page:1}} onAsk={ask} onNote={note} initialMode={selectedMode} onModeChange={onModeChange} onClose={close}/>);
+ fireEvent.click(screen.getByRole('button',{name:'笔记'}));
+ expect(selectedMode).toBe('note');
+ rerender(<PdfSelectionComposer key="second" selection={{text:'Second quote',page:2}} onAsk={ask} onNote={note} initialMode={selectedMode} onModeChange={onModeChange} onClose={close}/>);
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'Keep this insight'}});
+ expect(screen.getByRole('button',{name:'保存笔记'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ await waitFor(()=>expect(note).toHaveBeenCalledWith({text:'Second quote',page:2},'Keep this insight','yellow',expect.any(String)));
+ expect(ask).not.toHaveBeenCalled();
+});
 it('shows a color palette in note mode and can save a highlight without a note',()=>{
  const note=vi.fn(),highlight=vi.fn(),close=vi.fn();
  const selection={text:'Quoted evidence',page:1};

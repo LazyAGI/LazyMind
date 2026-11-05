@@ -10,6 +10,8 @@ interface Props {
  selection:PdfTextSelection;
  onAsk?:(selection:PdfTextSelection)=>void;
  onNote?:(selection:PdfTextSelection,note:string,color:PdfNoteColor,id:string)=>Promise<void>;
+ initialMode?:'ask'|'note';
+ onModeChange?:(mode:'ask'|'note')=>void;
  onHighlight?:(color:PdfNoteColor)=>void;
  onTranslate?:()=>void;
  translationDisabled?:boolean;
@@ -19,8 +21,9 @@ interface Props {
  onClose:()=>void;
 }
 /** Editing uses the captured PDF selection; textarea selection never replaces it. */
-export function PdfSelectionComposer({selection,onAsk,onNote,onHighlight,onTranslate,translationDisabled,translationTitle,translationHelp,actions=[],onClose}:Props){
- const [mode,setMode]=useState<'ask'|'note'>(onAsk?'ask':'note');
+export function PdfSelectionComposer({selection,onAsk,onNote,initialMode,onModeChange,onHighlight,onTranslate,translationDisabled,translationTitle,translationHelp,actions=[],onClose}:Props){
+ const [mode,setMode]=useState<'ask'|'note'>(()=>initialMode==='note'&&onNote?'note':onAsk?'ask':'note');
+ const chooseMode=(next:'ask'|'note')=>{setMode(next);onModeChange?.(next);};
  const [draft,setDraft]=useState('');
  const [noteColor,setNoteColor]=useState<PdfNoteColor>('yellow');
  const [saving,setSaving]=useState(false);
@@ -45,8 +48,8 @@ export function PdfSelectionComposer({selection,onAsk,onNote,onHighlight,onTrans
   {saveError&&<p className="pdf-selection-save-error" role="alert">{saveError}</p>}
   <div className="pdf-selection-composer-footer">
    <div className="pdf-selection-modes" aria-label="操作类型">
-    {onAsk&&<button type="button" aria-pressed={mode==='ask'} disabled={saving} onClick={()=>setMode('ask')}>问 AI</button>}
-    {onNote&&<button type="button" aria-pressed={mode==='note'} disabled={saving} onClick={()=>setMode('note')}>笔记</button>}
+    {onAsk&&<button type="button" aria-pressed={mode==='ask'} disabled={saving} onClick={()=>chooseMode('ask')}>问 AI</button>}
+    {onNote&&<button type="button" aria-pressed={mode==='note'} disabled={saving} onClick={()=>chooseMode('note')}>笔记</button>}
    </div>
    <div className="pdf-selection-icons">
     {mode==='note'&&onNote&&<div className="pdf-selection-colors" role="group" aria-label="高亮颜色">{PDF_NOTE_COLORS.map(color=><button type="button" key={color.key} className="pdf-selection-color" style={{background:color.swatch}} aria-label={color.label} data-tooltip={color.label} aria-pressed={noteColor===color.key} disabled={saving} onClick={()=>{if(saveError&&color.key!==noteColor){noteId.current=uuidv4();setSaveError('');}setNoteColor(color.key);}}/>)}</div>}
