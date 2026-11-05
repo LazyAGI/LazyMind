@@ -521,7 +521,9 @@ export function ProviderWorkspace(props: Props) {
       }
       message.success(label("supplierSaved"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      if ((error as { response?: { data?: { code?: number } } })?.response?.data?.code === 2005082) {
+        providerForm.setFields([{ name: "name", errors: [label("supplierNameDuplicate")] }]);
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       providerSavePending.current = false;
       setProviderSaving(false);
@@ -1171,6 +1173,15 @@ export function ProviderWorkspace(props: Props) {
                   new TextEncoder().encode(value?.trim() || "").length <= 255
                     ? Promise.resolve()
                     : Promise.reject(new Error(label("supplierNameBytes"))),
+              },
+              {
+                validator: (_, value?: string) => {
+                  const name = value?.trim().toLocaleLowerCase();
+                  return !name || !providers.some(item => item.id !== providerModalTarget.current?.id &&
+                    item.name.trim().toLocaleLowerCase() === name)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(label("supplierNameDuplicate")));
+                },
               },
             ]}
           >

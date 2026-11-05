@@ -857,6 +857,32 @@ describe("compact provider workspace", () => {
     }));
   });
 
+  it("rejects a new supplier name that matches an existing supplier", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), {
+      target: { value: "  openai  " },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    expect(await dialog.findByText("modelProvider.workspace.supplierNameDuplicate")).toBeInTheDocument();
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps the name editor open when the server reports a duplicate", async () => {
+    const custom = { ...provider, id: "custom", name: "Private proxy", isCustom: true };
+    mocks.updateProvider.mockRejectedValueOnce({ response: { data: { code: 2005082 } } });
+    setup({ providers: [custom], configuredProviders: [custom] });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.editSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), {
+      target: { value: "New proxy" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    expect(await dialog.findByText("modelProvider.workspace.supplierNameDuplicate")).toBeInTheDocument();
+    expect(dialog.getByLabelText("modelProvider.workspace.supplierName")).toHaveValue("New proxy");
+  });
+
   it.each(["custom", "default", "empty"] as const)(
     "keeps or updates a %s API address when changing supplier templates",
     async (mode) => {
