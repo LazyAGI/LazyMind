@@ -20,7 +20,7 @@ func callbackService(t *testing.T, provider, mode, scenario string) (*Service, *
 	t.Helper()
 	s, db := hostedTestService(t)
 	s.Completion = &execution.Service{DB: db, Store: s.Store, Attempts: s.Attempts, Contexts: s.Contexts}
-	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowTransitionCommand{}); err != nil {
+	if err := db.AutoMigrate(&orm.WorkflowResource{}, &orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowTransitionCommand{}); err != nil {
 		t.Fatal(err)
 	}
 	binding, _ := json.Marshal(map[string]any{"provider": provider, "connector_id": "connector", "driver_session_id": "driver"})

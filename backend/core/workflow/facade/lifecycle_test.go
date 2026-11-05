@@ -214,7 +214,7 @@ func TestMCPStopResumeSchedulesExactlyOneReplacement(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				must(db.AutoMigrate(&orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},
+				must(db.AutoMigrate(&orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},
 					&orm.WorkflowSlotRevision{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowInputBinding{},
 					&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowStepIntent{},
 					&orm.WorkflowTransitionCommand{}, &orm.WorkflowApprovalPreference{}, &orm.TaskCenterTask{},
