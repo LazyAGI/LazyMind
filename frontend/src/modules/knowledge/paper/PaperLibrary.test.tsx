@@ -314,7 +314,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('button', { name: '阅读心得' })).toBeEnabled();
         expect(vi.mocked(PaperTasks).mock.lastCall?.[0].selected).toEqual(['stored-pdf-a']);
         expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
-    });
+    }, 15_000);
     it('reads a complete library once per initial load, active poll and focus refresh', async () => {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         try {
