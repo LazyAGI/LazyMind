@@ -52,3 +52,11 @@ it('does not create a metadata-only citation when no PDF source was found', asyn
   await expect(addCitationToPaperLibrary('papers', 'ref-12')).rejects.toThrow('没有可导入的 PDF 来源');
   expect(axiosInstance.post).toHaveBeenCalledTimes(1);
 });
+
+it('treats an already present citation as added even when no new PDF candidate exists', async () => {
+  vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { preview_token: 'verified', items: [{
+    work_id: 'work-12', reference_ids: ['ref-12'], disposition: 'already_present', fulltext_candidates: [],
+  }] } });
+  await expect(addCitationToPaperLibrary('papers', 'ref-12')).resolves.toEqual({ status: 'already_present' });
+  expect(axiosInstance.post).toHaveBeenCalledTimes(1);
+});

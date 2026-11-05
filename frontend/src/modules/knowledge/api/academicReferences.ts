@@ -151,6 +151,7 @@ export async function addCitationToPaperLibrary(targetDatasetId: string, referen
   }, { silentError: true, timeout: 20000 } as never);
   const item = previewItems(response.data).find(candidate => candidate.reference_ids?.includes(referenceId));
   if (!item?.work_id || !item.preview_token) throw new Error('这条参考文献暂时无法识别为论文，请稍后重试');
+  if (item.disposition === 'already_present') return { status: 'already_present' };
   if (!item.fulltext_candidates.length) {
     throw new Error('已找到论文信息，但没有可导入的 PDF 来源');
   }

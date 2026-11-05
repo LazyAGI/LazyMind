@@ -55,6 +55,49 @@ func TestCitationImportReadsDOIFromRawReferenceWhenStoredFieldIsEmpty(t *testing
 	}
 }
 
+func TestCitationImportChecksInferredStoredIdentifiersAgainstOriginalReference(t *testing.T) {
+	t.Run("stale DOI title", func(t *testing.T) {
+		citationLookupTransport(t, func(r *http.Request) (int, string) {
+			if r.URL.Host != "api.crossref.org" {
+				t.Fatalf("unexpected provider lookup: %s", r.URL)
+			}
+			return 200, `{"message":{"DOI":"10.1234/stale","title":["A Different Paper"],"issued":{"date-parts":[[2024]]}}}`
+		})
+		ref := &orm.AcademicReference{
+			RawText:       "A. Author. 2024. The Actual Paper.",
+			Title:         "A Different Paper", // Older loose resolution may have overwritten this field.
+			DOINormalized: "10.1234/stale",
+		}
+		if _, err := verifiedCitationInput(t.Context(), ref); err == nil {
+			t.Fatal("stored DOI without a matching original title was accepted")
+		}
+	})
+	t.Run("stale DOI year", func(t *testing.T) {
+		citationLookupTransport(t, func(r *http.Request) (int, string) {
+			if r.URL.Host != "api.crossref.org" {
+				t.Fatalf("unexpected provider lookup: %s", r.URL)
+			}
+			return 200, `{"message":{"DOI":"10.1234/stale","title":["The Actual Paper"],"issued":{"date-parts":[[2018]]}}}`
+		})
+		ref := &orm.AcademicReference{RawText: "A. Author. 2024. The Actual Paper.", DOINormalized: "10.1234/stale"}
+		if _, err := verifiedCitationInput(t.Context(), ref); err == nil {
+			t.Fatal("stored DOI without a matching original year was accepted")
+		}
+	})
+	t.Run("stale arxiv title", func(t *testing.T) {
+		citationLookupTransport(t, func(r *http.Request) (int, string) {
+			if r.URL.Host != "export.arxiv.org" {
+				t.Fatalf("unexpected provider lookup: %s", r.URL)
+			}
+			return 200, fallbackArxivMatch
+		})
+		ref := &orm.AcademicReference{RawText: "A. Author. 2024. A Different Paper.", ArxivIDBase: "2404.06654"}
+		if _, err := verifiedCitationInput(t.Context(), ref); err == nil {
+			t.Fatal("stored arXiv ID without a matching original title was accepted")
+		}
+	})
+}
+
 func TestCitationImportReplacesUnattachedRawReferenceTitle(t *testing.T) {
 	db := importErrorDB(t)
 	citationLookupTransport(t, func(r *http.Request) (int, string) {

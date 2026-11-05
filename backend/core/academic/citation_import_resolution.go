@@ -27,8 +27,20 @@ func verifiedCitationInput(ctx context.Context, ref *orm.AcademicReference) (Wor
 	if doi == "" {
 		doi = rawDOI
 	}
+	// An explicit arXiv ID in the citation outranks a DOI carried over from
+	// an earlier permissive resolution of the same reference row.
+	if rawDOI == "" && rawArxiv != "" {
+		doi = ""
+	}
 	if doi != "" {
-		return lookupPaperLinkMetadata(ctx, doi)
+		input, err := lookupPaperLinkMetadata(ctx, doi)
+		if err != nil {
+			return WorkInput{}, err
+		}
+		if rawDOI == "" && !citationIdentityMatches(ref, input) {
+			return WorkInput{}, errors.New("已保存的 DOI 与原文题名或年份不符，请核对参考文献")
+		}
+		return input, nil
 	}
 	arxivID, _ := NormalizeArxivID(ref.ArxivIDBase)
 	if arxivID != "" && rawArxiv != "" && arxivID != rawArxiv {
@@ -41,7 +53,14 @@ func verifiedCitationInput(ctx context.Context, ref *orm.AcademicReference) (Wor
 		if rawArxiv == arxivID {
 			arxivID += rawVersion
 		}
-		return lookupPaperLinkMetadata(ctx, arxivID)
+		input, err := lookupPaperLinkMetadata(ctx, arxivID)
+		if err != nil {
+			return WorkInput{}, err
+		}
+		if rawArxiv == "" && !citationIdentityMatches(ref, input) {
+			return WorkInput{}, errors.New("已保存的 arXiv 编号与原文题名或年份不符，请核对参考文献")
+		}
+		return input, nil
 	}
 
 	openAlex, openAlexOK, openAlexErr := resolveWithOpenAlex(ctx, ref.RawText)
@@ -59,16 +78,16 @@ func verifiedCitationInput(ctx context.Context, ref *orm.AcademicReference) (Wor
 }
 
 func citationIdentityMatches(ref *orm.AcademicReference, found WorkInput) bool {
-	title := strings.TrimSpace(ref.Title)
+	title := citationTitle(ref.RawText)
 	if title == "" {
-		title = citationTitle(ref.RawText)
+		title = strings.TrimSpace(ref.Title)
 	}
 	if title == "" || NormalizeTitle(title) != NormalizeTitle(found.Title) {
 		return false
 	}
-	year := ref.PublicationYear
+	year := extractYear(ref.RawText)
 	if year == 0 {
-		year = extractYear(ref.RawText)
+		year = ref.PublicationYear
 	}
 	return year == 0 || found.Year == 0 || found.Year >= year-1 && found.Year <= year+1
 }
