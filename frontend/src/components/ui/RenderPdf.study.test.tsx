@@ -41,6 +41,21 @@ it('does not restore legacy highlights with an unknown account owner',async()=>{
  expect(view.container.querySelector('[data-pdf-note-highlight]')).toBeNull();
 });
 
+it('paints notes restored from the library without depending on browser session storage',async()=>{
+ const view=render(<RenderPdf fileData="persisted-note.pdf" pdfIRTarget={target} pdfSourceHash="hash" savedNoteHighlights={[{id:'server-note',page:1,color:'blue',rects:[[.1,.2,.4,.24]]}]}/>);
+ await act(async()=>{});
+ expect(view.container.querySelector('[data-pdf-note-highlight="blue"]')).not.toBeNull();
+});
+
+it('opens a saved note at its anchored position and offers return to the reading position',async()=>{
+ const props={fileData:'saved-location.pdf'};
+ const view=render(<RenderPdf {...props}/>);
+ await act(async()=>{});
+ view.rerender(<RenderPdf {...props} pdfNavigateToPosition={{page:2,progress:.35,requestId:1}}/>);
+ await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2));
+ expect(screen.getByRole('button',{name:'返回阅读位置'})).toBeInTheDocument();
+});
+
 it('isolates saved and mounted note highlights when the account changes',async()=>{
  const previous=localStorage.getItem('lazymind:user');
  const signIn=(userId:string)=>{localStorage.setItem('lazymind:user',JSON.stringify({userId,token:`token-${userId}`,tenantId:'tenant'}));window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));};

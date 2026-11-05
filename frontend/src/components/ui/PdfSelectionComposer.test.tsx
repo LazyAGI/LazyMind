@@ -1,4 +1,4 @@
-import {fireEvent,render,screen} from '@testing-library/react';
+import {fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {expect,it,vi} from 'vitest';
 import {PdfSelectionComposer} from './PdfSelectionComposer';
 
@@ -16,15 +16,17 @@ it('keeps the selected quote while editing and prepares a question without auto-
  expect(close).toHaveBeenCalledOnce();
  expect(screen.queryByRole('button',{name:'下载并加入知识库'})).toBeNull();
 });
-it('passes a note draft and quote without claiming it has been saved',()=>{
- const note=vi.fn();const selection={text:'Quoted evidence',page:1};
- render(<PdfSelectionComposer selection={selection} onNote={note} onClose={vi.fn()}/>);
+it('saves a note directly from the selection popup and closes only after success',async()=>{
+ let complete!:()=>void;
+ const note=vi.fn().mockImplementation(()=>new Promise<void>(resolve=>{complete=resolve;}));const close=vi.fn();const selection={text:'Quoted evidence',page:1};
+ render(<PdfSelectionComposer selection={selection} onNote={note} onClose={close}/>);
  fireEvent.change(screen.getByRole('textbox'),{target:{value:'My observation'}});
- fireEvent.click(screen.getByRole('button',{name:'添加笔记草稿'}));
- expect(note).toHaveBeenCalledWith(selection,'My observation');
- expect(screen.queryByText('已保存')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ expect(note).toHaveBeenCalledWith(selection,'My observation','yellow',expect.any(String));
+ expect(close).not.toHaveBeenCalled();
+ complete();await waitFor(()=>expect(close).toHaveBeenCalledOnce());
 });
-it('shows a color palette in note mode and applies the selected highlight before opening a note draft',()=>{
+it('shows a color palette in note mode and can save a highlight without a note',()=>{
  const note=vi.fn(),highlight=vi.fn(),close=vi.fn();
  const selection={text:'Quoted evidence',page:1};
  render(<PdfSelectionComposer selection={selection} onAsk={vi.fn()} onNote={note} onHighlight={highlight} onClose={close}/>);
@@ -35,17 +37,45 @@ it('shows a color palette in note mode and applies the selected highlight before
  expect(screen.getByRole('button',{name:'蓝色'})).toHaveAttribute('aria-pressed','true');
  fireEvent.click(screen.getByRole('button',{name:'高亮并记笔记'}));
  expect(highlight).toHaveBeenCalledWith('blue');
- expect(note).toHaveBeenCalledWith(selection,'');
+ expect(note).not.toHaveBeenCalled();
  expect(close).toHaveBeenCalledOnce();
 });
-it('replaces the note palette with a send action while composing',()=>{
- const note=vi.fn(),highlight=vi.fn();
- render(<PdfSelectionComposer selection={{text:'Quote',page:2}} onNote={note} onHighlight={highlight} onClose={vi.fn()}/>);
+it('keeps note colors available while composing and submits the chosen color',async()=>{
+ const note=vi.fn().mockResolvedValue(undefined),highlight=vi.fn(),close=vi.fn();
+ render(<PdfSelectionComposer selection={{text:'Quote',page:2}} onAsk={vi.fn()} onNote={note} onHighlight={highlight} onClose={close}/>);
+ fireEvent.click(screen.getByRole('button',{name:'笔记'}));
  fireEvent.change(screen.getByRole('textbox'),{target:{value:'My note'}});
- expect(screen.queryByRole('group',{name:'高亮颜色'})).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'添加笔记草稿'}));
- expect(highlight).toHaveBeenCalledWith('yellow');
- expect(note).toHaveBeenCalledWith({text:'Quote',page:2},'My note');
+ expect(screen.getByRole('group',{name:'高亮颜色'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'蓝色'}));
+ expect(screen.getByRole('button',{name:'蓝色'})).toHaveAttribute('aria-pressed','true');
+ expect(screen.queryByRole('button',{name:'高亮并记笔记'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ expect(highlight).not.toHaveBeenCalled();
+ expect(note).toHaveBeenCalledWith({text:'Quote',page:2},'My note','blue',expect.any(String));
+ await waitFor(()=>expect(close).toHaveBeenCalledOnce());
+});
+it('retains the draft, color, and request id when saving fails so retry is safe',async()=>{
+ const note=vi.fn().mockRejectedValueOnce(new Error('服务器暂时不可用')).mockResolvedValueOnce(undefined);const close=vi.fn();
+ render(<PdfSelectionComposer selection={{text:'Quote',page:2}} onNote={note} onClose={close}/>);
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'Important insight'}});
+ fireEvent.click(screen.getByRole('button',{name:'蓝色'}));
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('服务器暂时不可用');
+ expect(close).not.toHaveBeenCalled();expect(screen.getByRole('textbox')).toHaveValue('Important insight');
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ await waitFor(()=>expect(close).toHaveBeenCalledOnce());
+ expect(note.mock.calls[0][3]).toBe(note.mock.calls[1][3]);
+});
+it('uses a new note id if the draft changes after a failed save',async()=>{
+ const note=vi.fn().mockRejectedValueOnce(new Error('暂时不可用')).mockResolvedValueOnce(undefined);
+ const close=vi.fn();render(<PdfSelectionComposer selection={{text:'Quote',page:2}} onNote={note} onClose={close}/>);
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'First version'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ await screen.findByRole('alert');
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'Revised version'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存笔记'}));
+ await waitFor(()=>expect(close).toHaveBeenCalledOnce());
+ expect(note.mock.calls[0][3]).not.toBe(note.mock.calls[1][3]);
 });
 it('closes on Escape and exposes optional actions in a compact menu',()=>{
  const close=vi.fn(),action=vi.fn();render(<PdfSelectionComposer selection={{text:'quote',page:1}} onClose={close} actions={[{key:'reference',label:'打开链接',onClick:action}]}/>);
@@ -85,5 +115,5 @@ it('exposes a visible tooltip label for each compact icon in ask and note modes'
  expect(screen.getByRole('button',{name:'黄色'})).toHaveAttribute('data-tooltip','黄色');
  expect(screen.getByRole('button',{name:'高亮并记笔记'})).toHaveAttribute('data-tooltip','高亮并记笔记');
  fireEvent.change(screen.getByRole('textbox'),{target:{value:'A note'}});
- expect(screen.getByRole('button',{name:'添加笔记草稿'})).toHaveAttribute('data-tooltip','添加笔记草稿');
+ expect(screen.getByRole('button',{name:'保存笔记'})).toHaveAttribute('data-tooltip','保存笔记');
 });

@@ -52,6 +52,9 @@ import {
   isDeveloperModeActive,
 } from "@/utils/developerMode";
 import { DetailPageHeader, type PdfReferenceAction, type PdfTextSelection, type PdfViewPosition } from "@/components/ui";
+import type {PdfNoteColor,PdfNoteHighlight} from '@/components/ui/pdfNoteHighlights';
+import type {PdfNoteSource} from '@/modules/knowledge/paper/libraryModel';
+import {listPdfDocumentHighlights,savePdfSelectionNote} from '@/modules/knowledge/paper/selectionNotes';
 import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import type { PdfTemporaryChatHandle } from "@/modules/knowledge/components/PdfTemporaryChat";
@@ -194,7 +197,8 @@ const KnowledgeDocumentContent = () => {
   const [floatingPosition,setFloatingPosition]=useState({x:32,y:56});
   const panelRef=useRef<HTMLDivElement>(null);
   const panelDrag=useRef<{x:number;y:number;left:number;top:number}>();
-  const [noteDraftRequest,setNoteDraftRequest]=useState<{documentId:string;requestId:number;text:string}>();
+  const [notesRevision,setNotesRevision]=useState(0);
+  const [savedNotes,setSavedNotes]=useState<{key:string;highlights:PdfNoteHighlight[]}>();
   const [paperAssistantWidth, setPaperAssistantWidth] = useState(() => {
     try { const saved = Number(localStorage.getItem("paper-reader:assistant-width")); return saved >= 320 && saved <= 640 ? saved : 400; } catch { return 400; }
   });
@@ -205,6 +209,16 @@ const KnowledgeDocumentContent = () => {
   const [paperIR, setPaperIR] = useState<PdfIRDocument>();
   const [pdfNavigateTo, setPdfNavigateTo] = useState<{id:string;requestId:number}>();
   const [pdfNavigateToPage, setPdfNavigateToPage] = useState<{page:number;requestId:number}>();
+  const [pdfNavigateToPosition,setPdfNavigateToPosition]=useState<{page:number;progress:number;requestId:number}>();
+  useEffect(()=>{
+    if(!isPaperDocument)return;
+    const key=`${knowledgeBaseId}/${knowledgeId}`;
+    let cancelled=false;
+    void listPdfDocumentHighlights(knowledgeBaseId,knowledgeId).then(highlights=>{
+      if(!cancelled)setSavedNotes({key,highlights});
+    }).catch(()=>{/* Notes remain usable while the library request is unavailable. */});
+    return()=>{cancelled=true;};
+  },[isPaperDocument,knowledgeBaseId,knowledgeId,notesRevision]);
   const [nativePdfOutline,setNativePdfOutline]=useState<import('@/modules/knowledge/api/pdfOutline').PdfNativeOutlineItem[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const navigationSequence = useRef(0);
@@ -226,7 +240,7 @@ const KnowledgeDocumentContent = () => {
     const observer=new ResizeObserver(entries=>update(entries[0]?.contentRect.width||0));observer.observe(element);
     return()=>observer.disconnect();
   }, [documentReady]);
-  useEffect(()=>{setPaperDetailsOpened(false);setPanelLayout("right");setNoteDraftRequest(undefined);setPreviewSideTab("chat");setPaperIR(undefined);setNativePdfOutline([]);setPdfNavigateTo(undefined);setPdfNavigateToPage(undefined);setPaperNavTab("outline");},[knowledgeBaseId,knowledgeId]);
+  useEffect(()=>{setPaperDetailsOpened(false);setPanelLayout("right");setPreviewSideTab("chat");setPaperIR(undefined);setNativePdfOutline([]);setPdfNavigateTo(undefined);setPdfNavigateToPage(undefined);setPdfNavigateToPosition(undefined);setPaperNavTab("outline");},[knowledgeBaseId,knowledgeId]);
   const navigatePaperPage=useCallback((page:number)=>{setPdfNavigateToPage({page,requestId:++navigationSequence.current});setPdfSourceView("original");},[]);
   const navigatePaperBlock=useCallback((id:string)=>{
     setPdfNavigateTo({id,requestId:++navigationSequence.current});
@@ -453,12 +467,16 @@ const KnowledgeDocumentContent = () => {
     setPreviewSideCollapsed(false);
   }, [documentKey]);
 
-  const notePdfSelection = useCallback((selection:PdfTextSelection,note:string)=>{
-    const quote=selection.text.split('\n').map(line=>`> ${line}`).join('\n');
-    const page=selection.page?` (${i18n.language.startsWith("zh")?"第 "+selection.page+" 页":"page "+selection.page})`:"";
-    setNoteDraftRequest({documentId:knowledgeId,requestId:++navigationSequence.current,text:`${quote}${page}${note.trim()?"\n\n"+note.trim():""}`});
-    setPreviewSideTab("notes");setPreviewSideCollapsed(false);
-  },[knowledgeId,i18n.language]);
+  const notePdfSelection=useCallback(async(selection:PdfTextSelection,note:string,color:PdfNoteColor,id:string)=>{
+    const source:Omit<PdfNoteSource,'attachmentId'>={page:selection.page,color,quote:selection.text,
+      ...(selection.rects?.length?{rects:selection.rects}:{}),
+      ...(selection.bbox?{bbox:selection.bbox}:{})};
+    await savePdfSelectionNote(knowledgeBaseId,knowledgeId,note,source,id);
+    const key=`${knowledgeBaseId}/${knowledgeId}`;
+    if(selection.rects?.length)setSavedNotes(current=>({key,highlights:[...(current?.key===key?current.highlights.filter(item=>item.id!==id):[]),{id,page:selection.page,color,rects:selection.rects!}]}));
+    setNotesRevision(value=>value+1);
+    message.success(i18n.language.startsWith('zh')?'笔记已保存':'Note saved');
+  },[knowledgeBaseId,knowledgeId,i18n.language]);
   const choosePanelLayout=(mode:PaperPanelLayout)=>{
     setPanelLayout(mode);setPreviewSideCollapsed(false);
     if(mode==='floating')setFloatingPosition({x:Math.max(8,workspaceWidth-Math.min(paperAssistantWidth,workspaceWidth-72)-72),y:56});
@@ -1258,6 +1276,8 @@ const KnowledgeDocumentContent = () => {
               onPdfOutlineChange={setNativePdfOutline}
               pdfNavigateTo={pdfNavigateTo}
               pdfNavigateToPage={pdfNavigateToPage}
+              pdfNavigateToPosition={pdfNavigateToPosition}
+              pdfNoteHighlights={savedNotes?.key===`${knowledgeBaseId}/${knowledgeId}`?savedNotes.highlights:[]}
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
               segment={segmentDetail}
@@ -1307,7 +1327,7 @@ const KnowledgeDocumentContent = () => {
               <div className="paper-assistant-pane" hidden={previewSideTab !== "translation"}>
                 <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={defaultTranslationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} onRetranslateWithLLM={() => void retranslateSelectedTextWithLLM(translationSource)} />
               </div>
-              {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails documentVocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} draftRequest={noteDraftRequest} initialTab={previewSideTab==="notes"?"notes":"info"} onNavigatePage={page=>{setPdfSourceView("original");setPdfNavigateToPage({page,requestId:++navigationSequence.current});}}/></div>}
+              {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails documentVocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} refreshToken={notesRevision} initialTab={previewSideTab==="notes"?"notes":"info"} onNavigatePage={page=>{setPdfSourceView("original");setPdfNavigateToPage({page,requestId:++navigationSequence.current});}} onNavigateNote={source=>{setPdfSourceView('original');setPdfNavigateToPosition({page:source.page,progress:Math.max(0,(source.rects?.[0]?.[1]??0)-.12),requestId:++navigationSequence.current});}}/></div>}
               <div className="paper-assistant-pane" hidden={previewSideTab !== "chat"}>
               {(isPaperDocument || activatedDocumentChatKey===documentKey) && <PdfTemporaryChat ref={paperChatRef} key={`${knowledgeBaseId}:${knowledgeId}`} paperMode={isPaperDocument} onClearSelection={()=>setDocumentChatSelection(null)} onNavigateSelection={selection=>{if(selection.page){setPdfSourceView("original");handlePdfViewPositionChange({page:selection.page,progress:0});setPdfNavigateToPage({page:selection.page,requestId:++navigationSequence.current});}}} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} selection={documentChatSelection||undefined} conversationToLoad={selectedDocumentConversation} onConversationChange={setSelectedDocumentConversation} onHistoryChange={refreshDocumentChatHistory} onClose={()=>{setDocumentChatSelection(null);setPreviewSideCollapsed(true);}}/>}
               </div>

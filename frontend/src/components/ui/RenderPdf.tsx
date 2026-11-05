@@ -17,7 +17,7 @@ import { restorePdfLinkAnnotationBorders } from "./pdfNativeLinkBorders";
 import { groupPdfCitationTargets, type PdfCitationTarget } from "./pdfCitationReferences";
 import { createPdfCitationPreviewCache } from "./pdfCitationPreview";
 import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
-import {pdfNoteHighlightBackground,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
+import {pdfNoteHighlightBackground,pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights,type PdfNoteColor,type PdfNoteHighlight} from "./pdfNoteHighlights";
 import {ControlOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -55,6 +55,8 @@ interface RenderPdfProps {
   onPdfOutlineChange?: (outline: PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page:number;requestId:number};
+  pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
+  savedNoteHighlights?: PdfNoteHighlight[];
   pdfIRTarget?: PdfIRTarget;
   pdfSourceHash?: string;
   onPreviewError?: () => void;
@@ -68,7 +70,7 @@ interface RenderPdfProps {
   style?: React.CSSProperties;
   gapBackground?: string;
   onAskSelection?: (selection: PdfTextSelection) => void;
-  onNoteSelection?: (selection: PdfTextSelection, note: string) => void;
+  onNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
   askSelectionLabel?: string;
   onTranslateSelection?: (selection: PdfTextSelection) => void;
   onRetranslateSelection?: (selection: PdfTextSelection) => void;
@@ -101,6 +103,7 @@ export interface PdfTextSelection {
   context?: string;
   contextTranslation?: string;
   bbox?: [number, number, number, number];
+  rects?: Array<[number,number,number,number]>;
   referenceId?: string;
 }
 
@@ -141,6 +144,8 @@ export default function RenderPdf({
   onPdfOutlineChange,
   pdfNavigateTo,
   pdfNavigateToPage,
+  pdfNavigateToPosition,
+  savedNoteHighlights = [],
   pdfIRTarget,
   pdfSourceHash,
   paperTitle,
@@ -184,7 +189,9 @@ export default function RenderPdf({
   const noteHighlights = noteHighlightState.key === noteHighlightKey && noteHighlightState.session === readerSession ? noteHighlightState.highlights : [];
   useEffect(()=>setNoteHighlightState({key:noteHighlightKey,session:readerSession,highlights:readPdfNoteHighlights(noteHighlightKey)}),[noteHighlightKey,readerSession,fileData]);
   const [readerMode,setReaderMode] = useState<"overview" | "original">("original");
+  const [noteReturn,setNoteReturn]=useState<PdfViewPosition>();
   useEffect(()=>setReaderMode("original"),[fileData]);
+  useEffect(()=>setNoteReturn(undefined),[fileData]);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
   const pdfFile = useMemo(()=>fileData instanceof ArrayBuffer ? fileData.slice(0) : fileData,[fileData]);
   const currentSource = useRef(fileData);
@@ -463,6 +470,7 @@ export default function RenderPdf({
         page: selectedPageIndex + 1,
         context: normalizePdfSelectionText(extractPdfSelectionContext(pageElement?.innerText || "", rawText)),
         bbox,
+        rects:highlightRects,
       },
       left: containerRef.current.scrollLeft + Math.min(
         Math.max(selectionRect.left - containerRect.left + selectionRect.width / 2, 72),
@@ -610,6 +618,22 @@ export default function RenderPdf({
     setReaderMode("original");
     jumpPage(pdfNavigateToPage.page);
   }, [pdfNavigateToPage?.page,pdfNavigateToPage?.requestId,pdfLoaded,pageTops,numPages,fileData]);
+  const lastNoteNavigation=useRef('');
+  useEffect(()=>{
+    const request=pdfNavigateToPosition;
+    if(!request||!pdfLoaded||pdfDocument.current?.source!==fileData||!pageTops.length)return;
+    if(!Number.isInteger(request.page)||request.page<1||request.page>numPages||!Number.isFinite(request.progress))return;
+    const key=`${request.requestId}:${request.page}:${request.progress}`;
+    if(lastNoteNavigation.current===key)return;
+    lastNoteNavigation.current=key;
+    let originPage=0;
+    for(let index=0;index<pageTops.length;index++)if(pageTops[index]<=scrollTop+1)originPage=index;else break;
+    setNoteReturn({page:originPage+1,progress:Math.max(0,Math.min(1,(scrollTop-(pageTops[originPage]||0))/(pageHeightsPx[originPage]||1)))});
+    const page=request.page,progress=Math.max(0,Math.min(.999,request.progress));
+    const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*progress;
+    setReaderMode('original');containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);setSelectionAction(null);
+    onViewPositionChange?.({page,progress});
+  },[pdfNavigateToPosition,pdfLoaded,fileData,numPages,pageTops,pageHeightsPx,scrollTop,onViewPositionChange]);
   const changeZoom = (value: number) => {
     zoomPosition.current = {page:currentPage,progress:Math.max(0,(scrollTop-(pageTops[currentPage-1]||0))/(pageHeightsPx[currentPage-1]||1))};
     setZoom(Math.min(2, Math.max(.5, Math.round(value * 10) / 10)));
@@ -1028,7 +1052,7 @@ export default function RenderPdf({
           }}
         />
         </div>
-        {noteHighlights.filter(highlight=>highlight.page===index+1).flatMap(highlight=>highlight.rects.map((rect,rectIndex)=><span key={`${highlight.id}:${rectIndex}`} data-pdf-note-highlight={highlight.color} style={{position:'absolute',left:`${rect[0]*100}%`,top:`${rect[1]*100}%`,width:`${(rect[2]-rect[0])*100}%`,height:`${(rect[3]-rect[1])*100}%`,background:pdfNoteHighlightBackground(highlight.color),mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}/>))}
+        {pdfNoteHighlightPaths([...noteHighlights,...savedNoteHighlights],index+1).map(({color,path})=><svg key={color} data-pdf-note-highlight={color} aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none" style={{position:'absolute',inset:0,width:'100%',height:'100%',mixBlendMode:'multiply',pointerEvents:'none',zIndex:5}}><path d={path} fill={pdfNoteHighlightBackground(color)} fillRule="nonzero"/></svg>)}
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
@@ -1110,6 +1134,11 @@ export default function RenderPdf({
     {studyPulse>0&&<PdfStudyActivation key={studyPulse} frame={readerFrame}/>}
     {readerHeader}
     <div className="pdf-reader-stage">
+    {readerMode==='original'&&noteReturn&&<button type="button" className="pdf-reader-note-return" aria-label="返回阅读位置" onClick={()=>{
+      const page=Math.min(numPages,Math.max(1,noteReturn.page));
+      const top=(pageTops[page-1]||0)+(pageHeightsPx[page-1]||0)*noteReturn.progress;
+      containerRef.current?.scrollTo({top,behavior:'auto'});setScrollTop(top);onViewPositionChange?.(noteReturn);setNoteReturn(undefined);
+    }}>← {t('pdfReader.returnPosition',{defaultValue:'返回阅读位置'})}</button>}
     {pdfIRTarget && <div className="pdf-reader-overview-scroll" aria-hidden={readerMode!=="overview"} style={{visibility:readerMode==="overview"?"visible":"hidden",pointerEvents:readerMode==="overview"?"auto":"none"}}><PdfPaperOverview onAddVocabularySelection={onAddVocabularySelection} document={formulaDocument} paperTitle={paperTitle} onOpenSource={id=>{setReaderMode("original");if(id)requestAnimationFrame(()=>navigateSourceBlock(id));}}/></div>}
     <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" aria-hidden={readerMode!=="original"} style={{height:"100%",width:"100%",display:"flex",visibility:readerMode==="original"?"visible":"hidden"}}>
     <div

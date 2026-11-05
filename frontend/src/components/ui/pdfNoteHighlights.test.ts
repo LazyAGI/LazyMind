@@ -1,5 +1,5 @@
 import {beforeEach,expect,it} from 'vitest';
-import {readPdfNoteHighlights,writePdfNoteHighlights} from './pdfNoteHighlights';
+import {pdfNoteHighlightPaths,readPdfNoteHighlights,writePdfNoteHighlights} from './pdfNoteHighlights';
 
 beforeEach(()=>sessionStorage.clear());
 
@@ -14,4 +14,11 @@ it('keeps normalized colored highlights for a PDF source across a reload',()=>{
 it('ignores malformed stored geometry and unknown colors',()=>{
  sessionStorage.setItem('bad',JSON.stringify([{id:'bad',page:1,color:'orange',rects:[[0,0,2,1]]},{id:'good',page:2,color:'yellow',rects:[[.1,.1,.2,.2]]}]));
  expect(readPdfNoteHighlights('bad')).toEqual([{id:'good',page:2,color:'yellow',rects:[[.1,.1,.2,.2]]}]);
+});
+
+it('uses the saved note color when local and server highlights cover the same text',()=>{
+ const rect:[number,number,number,number]=[.1,.2,.3,.23];
+ const paths=pdfNoteHighlightPaths([{id:'old-local',page:1,color:'yellow',rects:[rect]},{id:'saved-note',page:1,color:'blue',rects:[rect]}],1);
+ expect(paths).toHaveLength(1);
+ expect(paths[0].color).toBe('blue');
 });

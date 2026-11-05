@@ -33,6 +33,7 @@ import {
   type PdfTextSelection,
   type PdfReferenceAction,
 } from "@/components/ui";
+import type {PdfNoteColor,PdfNoteHighlight} from '@/components/ui/pdfNoteHighlights';
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { paragraphSelectionsOverlap } from "./paragraphSelection";
@@ -50,7 +51,8 @@ export interface FileViewerRef {
 
 interface FileViewerProps {
   paperMode?: boolean;
-  onPdfNoteSelection?: (selection: PdfTextSelection, note: string) => void;
+  onPdfNoteSelection?: (selection: PdfTextSelection, note: string, color: PdfNoteColor, id: string) => Promise<void>;
+  pdfNoteHighlights?: PdfNoteHighlight[];
   pdfHeaderStart?: ReactNode;
   pdfHeaderEnd?: ReactNode;
   onPdfStudyOpenChange?: (open: boolean) => void;
@@ -58,6 +60,7 @@ interface FileViewerProps {
   onPdfOutlineChange?: (outline: import("@/modules/knowledge/api/pdfOutline").PdfNativeOutlineItem[]) => void;
   pdfNavigateTo?: {id: string; requestId: number};
   pdfNavigateToPage?: {page: number; requestId: number};
+  pdfNavigateToPosition?: {page:number;progress:number;requestId:number};
   pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
   renderMarkdown?: (markdown: string) => ReactNode;
   data?: ArrayBuffer;
@@ -418,6 +421,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             onPdfOutlineChange={props.onPdfOutlineChange}
             pdfNavigateTo={props.pdfNavigateTo}
             pdfNavigateToPage={props.pdfNavigateToPage}
+            pdfNavigateToPosition={props.pdfNavigateToPosition}
+            savedNoteHighlights={props.pdfNoteHighlights}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -539,6 +544,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.onPdfOutlineChange,
     props.pdfNavigateTo,
     props.pdfNavigateToPage,
+    props.pdfNavigateToPosition,
+    props.pdfNoteHighlights,
     props.pdfHeaderStart,
     props.pdfHeaderEnd,
     props.file,

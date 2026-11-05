@@ -11,6 +11,28 @@ export const PDF_NOTE_COLORS = [
 
 export type PdfNoteColor = typeof PDF_NOTE_COLORS[number]['key'];
 export type PdfNoteHighlight = {id:string;page:number;color:PdfNoteColor;rects:Array<[number,number,number,number]>};
+export type PdfHighlightRect = [number,number,number,number];
+
+// A single SVG path paints overlapping subpaths once. Separate translucent
+// elements would darken the same text each time their rectangles intersect.
+export function pdfHighlightPath(rects:readonly PdfHighlightRect[]):string {
+  return rects.map(([left,top,right,bottom])=>`M${left} ${top}H${right}V${bottom}H${left}Z`).join(' ');
+}
+
+export function pdfNoteHighlightPaths(highlights:readonly PdfNoteHighlight[],page:number):Array<{color:PdfNoteColor;path:string}> {
+  const latestColor=new Map<string,{color:PdfNoteColor;rect:PdfHighlightRect}>();
+  for(const highlight of highlights){
+    if(highlight.page!==page)continue;
+    for(const rect of highlight.rects)latestColor.set(rect.join(','),{color:highlight.color,rect});
+  }
+  const byColor=new Map<PdfNoteColor,Map<string,PdfHighlightRect>>();
+  for(const [key,{color,rect}] of latestColor){
+    let rects=byColor.get(color);
+    if(!rects){rects=new Map();byColor.set(color,rects);}
+    rects.set(key,rect);
+  }
+  return [...byColor].map(([color,rects])=>({color,path:pdfHighlightPath([...rects.values()])}));
+}
 
 const validColors = new Set<string>(PDF_NOTE_COLORS.map(item=>item.key));
 const validRect = (value:unknown):value is [number,number,number,number] =>

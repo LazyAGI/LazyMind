@@ -3504,7 +3504,7 @@ CREATE INDEX idx_library_entry_active ON paper_library_entries(dataset_id,remove
 CREATE TABLE paper_library_notes (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, paper_id VARCHAR(255) NOT NULL,
  title TEXT NOT NULL, content TEXT NOT NULL, kind VARCHAR(32) NOT NULL DEFAULT 'note',
- created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, source_json JSON NOT NULL DEFAULT '{}',
  PRIMARY KEY(dataset_id,id), FOREIGN KEY(dataset_id,paper_id) REFERENCES paper_library_entries(dataset_id,id)
 );
 CREATE INDEX idx_library_note_paper ON paper_library_notes(dataset_id,paper_id);
