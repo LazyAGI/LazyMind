@@ -510,6 +510,7 @@ services:
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
+      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent
       # Persistent artifact storage has its own setting, even when colocated.
       LAZYMIND_ARTIFACT_STORAGE_ROOT: /data/artifacts
       LAZYMIND_ARTIFACT_V2_ENABLED: ${LAZYMIND_ARTIFACT_V2_ENABLED:-false}
@@ -1136,6 +1137,7 @@ services:
     # Healthcheck disabled: newer MinIO images lack curl; use service_started in milvus depends_on
 
   milvus:
+    restart: unless-stopped
     profiles:
       - milvus
     image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.4.15}
@@ -1177,6 +1179,7 @@ services:
 
   # ---------- Segment store: OpenSearch single-node (profile: opensearch) ----------
   opensearch:
+    restart: unless-stopped
     profiles:
       - opensearch
     image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2.18.0}

@@ -2755,10 +2755,22 @@
   height: 100%;
   min-height: 0;
   background: #fff;
+  overflow: hidden;
 
   > .model-provider-layout-frame {
     height: 100%;
     min-height: 0;
+    overflow: hidden;
+  }
+
+  .model-provider-cloud-doc-hub {
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    > * { flex-shrink: 0; }
   }
 }
 

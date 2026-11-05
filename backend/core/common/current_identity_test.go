@@ -13,8 +13,8 @@ func TestGetCurrentIdentityUsesCurrentAuthenticatedAccount(t *testing.T) {
 		status     int
 		allowed    bool
 	}{
-		{"plain", `{"sub":"owner","tenant_id":"company","role":"user","permissions":["qa.read"]}`, 200, true},
-		{"envelope", `{"data":{"sub":"owner","tenant_id":"company","role":"user","permissions":["qa.read"]}}`, 200, true},
+		{"plain", `{"sub":"owner","username":"alice","tenant_id":"company","role":"user","permissions":["qa.read"]}`, 200, true},
+		{"envelope", `{"data":{"sub":"owner","username":"alice","tenant_id":"company","role":"user","permissions":["qa.read"]}}`, 200, true},
 		{"wrong owner", `{"sub":"another","tenant_id":"company"}`, 200, false},
 		{"empty", `{}`, 200, false},
 		{"disabled", `{}`, 403, false},
@@ -35,7 +35,7 @@ func TestGetCurrentIdentityUsesCurrentAuthenticatedAccount(t *testing.T) {
 			if (err == nil) != test.allowed {
 				t.Fatalf("identity=%+v error=%v", identity, err)
 			}
-			if test.allowed && (identity.Subject != "owner" || identity.TenantID != "company" || identity.Role != "user" || len(identity.Permissions) != 1 || identity.Permissions[0] != "qa.read") {
+			if test.allowed && (identity.Subject != "owner" || identity.Username != "alice" || identity.TenantID != "company" || identity.Role != "user" || len(identity.Permissions) != 1 || identity.Permissions[0] != "qa.read") {
 				t.Fatalf("incomplete account identity: %+v", identity)
 			}
 			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")

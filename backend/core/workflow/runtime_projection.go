@@ -211,6 +211,72 @@ type projectionResponse struct {
 	InputWitnesses map[string][]graphengine.Witness `json:"input_witnesses"`
 }
 
+type StepProgress struct {
+	StepID string `json:"step_id"`
+	Label  string `json:"label,omitempty"`
+	Status string `json:"status"`
+}
+
+// ReadStepProgress reads the pinned workflow's route and current attempts
+// without building the panel's artifact and attempt history.
+func ReadStepProgress(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) ([]StepProgress, error) {
+	if session.WorkflowRevisionID == "" || session.GraphSchemaVersion != "" && session.GraphSchemaVersion != graphengine.SchemaVersion {
+		return recordedStepProgress(ctx, db, session.ID)
+	}
+	graph, err := loadSessionGraph(ctx, db, session)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Some old revisions have been removed while their attempts remain.
+		return recordedStepProgress(ctx, db, session.ID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := loadRuntimeSnapshot(ctx, db, session.ID, graph)
+	if err != nil {
+		return nil, err
+	}
+	projection := graphengine.Project(graph, snapshot)
+	steps := make([]StepProgress, 0, len(graph.StaticOrder))
+	for _, id := range graph.StaticOrder {
+		if id == "__start__" || id == "__end__" {
+			continue
+		}
+		node, state := graph.Nodes[id], projection.Nodes[id]
+		if state.Execution == "none" && (state.Branch == "bypassed" || state.Branch == "pruned" ||
+			node.SkipIf != nil && graphengine.Evaluate(node.SkipIf, snapshot.Materials).Satisfied) {
+			continue
+		}
+		steps = append(steps, StepProgress{StepID: id, Label: node.Label, Status: state.Execution})
+	}
+	return steps, nil
+}
+
+func recordedStepProgress(ctx context.Context, db *gorm.DB, sessionID string) ([]StepProgress, error) {
+	attempts, err := ListSteps(ctx, db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var steps []StepProgress
+	index := make(map[string]int)
+	latest := make(map[string]int)
+	for _, attempt := range attempts {
+		if attempt.Validity == "stale" {
+			continue
+		}
+		if i, ok := index[attempt.StepID]; ok {
+			if attempt.Attempt >= latest[attempt.StepID] {
+				steps[i].Status = attempt.Status
+				latest[attempt.StepID] = attempt.Attempt
+			}
+			continue
+		}
+		index[attempt.StepID] = len(steps)
+		latest[attempt.StepID] = attempt.Attempt
+		steps = append(steps, StepProgress{StepID: attempt.StepID, Status: attempt.Status})
+	}
+	return steps, nil
+}
+
 type attemptHistoryDTO struct {
 	AttemptID     string          `json:"attempt_id"`
 	Attempt       int             `json:"attempt"`

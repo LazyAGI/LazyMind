@@ -1,5 +1,6 @@
-import { submitKnowledgeDecision } from "../SourceImports/api";
-import { ExecutionResults, SourceImportProvider } from "../SourceImports";
+import KnowledgeConfirmationCard from "../KnowledgeConfirmationCard";
+import type { KnowledgeConfirmation } from "@/modules/chat/types/knowledgeConfirmation";
+import { SourceImportProvider } from "../SourceImports";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
 export { ChatSourcePanel } from "../SourceImports/ReferenceSources";
 import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
@@ -932,7 +933,6 @@ const AssistantMessage = (props: any) => {
               </Tooltip>
             )}
             {renderSourceButton(answer.sources)}
-            <ExecutionResults operations={answer.knowledge_operations || (answerIndex === 0 ? item.knowledge_operations : [])} />
           </div>
           {showFullToolbar && (
             <Flex>
@@ -1044,7 +1044,6 @@ const AssistantMessage = (props: any) => {
               </Tooltip>
             )}
             {renderSourceButton(item.sources)}
-            <ExecutionResults operations={item.knowledge_operations} />
             {renderForkAction()}
           </div>
           <Flex>
@@ -1156,10 +1155,7 @@ const AssistantMessage = (props: any) => {
       const hasMailDrafts = Boolean(askPending.mail_draft || askPending.mail_drafts?.length);
       const independentQuestion = hasMailDrafts && askPending.mail_draft_only === false;
       let isReadOnly: boolean;
-      if (askPending.knowledge_management) {
-        // Work confirmations remain pending independently of later chat turns.
-        isReadOnly = Boolean(item.ask_answered);
-      } else if (independentQuestion) {
+      if (independentQuestion) {
         // A mail confirmation is a later user turn, but does not answer this question.
         isReadOnly = Boolean(item.ask_answered || props.supersededAskPending);
       } else {
@@ -1313,18 +1309,6 @@ const AssistantMessage = (props: any) => {
           }}
           onSubmit={async (payload) => {
             persistAskAnswersRef.current.cancel();
-            if (askPending.knowledge_management) {
-              const answer = payload.structured.questions[0]?.answer;
-              await submitKnowledgeDecision(askPending.knowledge_management,
-                answer?.type === "boolean" && answer.value === "__ask_user_yes__");
-              const current = currentItemRef.current;
-              if (current.ask_pending?.ask_id === payload.structured.ask_id) {
-                updateMessage({ ...current, ask_answered: true,
-                  ask_saved_answers: Object.fromEntries(payload.structured.questions.map((question, idx) => [idx, question.answer])),
-                });
-              }
-              return true;
-            }
             const started = await props.sendMessage?.(payload.text, undefined, {
               ask_answers_structured: payload.structured,
               ...(payload.files?.length ? { files: payload.files } : {}),
@@ -1346,6 +1330,7 @@ const AssistantMessage = (props: any) => {
         </>
       );
     }
+    if (item.knowledge_confirmations?.some((card: KnowledgeConfirmation) => card.status === "pending")) return null;
     // Show stop button while still streaming (no card present).
     if (runActive) {
       return (
@@ -1402,6 +1387,7 @@ const AssistantMessage = (props: any) => {
     );
 
   const shouldShowLoading =
+    !item.knowledge_confirmations?.length &&
     !item.model_retry &&
     !(item.delta && trim(item.delta)?.length > 0) &&
     !(item.reasoning_content && trim(item.reasoning_content)?.length > 0) &&
@@ -1428,6 +1414,10 @@ const AssistantMessage = (props: any) => {
     partial_output: item.run_terminal.partial_output && hasVisibleAnswer,
   } : undefined;
   const modalFeedbackRecord = getFeedbackRecord(feedbackState.targetHistoryId);
+
+  const knowledgeCards = item.knowledge_confirmations?.map((card: KnowledgeConfirmation) => (
+    <KnowledgeConfirmationCard key={card.confirmation_id} card={card} readOnly={Boolean(item.fork_read_only)} />
+  ));
 
   if (shouldUseMultiAnswerStyle) {
     return (
@@ -1492,7 +1482,7 @@ const AssistantMessage = (props: any) => {
               }}
               onSelectAnswer={onSelectAnswer}
               disabled={!runCompleted}
-              renderFooter={(answerIndex, full) => runCompleted ? renderAnswerFooter(answerIndex, full) : <div className="chat-assistant-msg-tool-actions">{renderSourceButton(item.answers[answerIndex]?.sources)}<ExecutionResults operations={item.answers[answerIndex]?.knowledge_operations || (answerIndex === 0 ? item.knowledge_operations : [])} /></div>}
+              renderFooter={(answerIndex, full) => runCompleted ? renderAnswerFooter(answerIndex, full) : <div className="chat-assistant-msg-tool-actions">{renderSourceButton(item.answers[answerIndex]?.sources)}</div>}
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
@@ -1508,6 +1498,7 @@ const AssistantMessage = (props: any) => {
             onContinue={configurationTaskEnded && index === length - 1 && props.sendMessage
               ? () => props.sendMessage?.(t("toolConfiguration.continueMessage")) : undefined}
           />}
+          {knowledgeCards}
           {!item.fork_read_only && (item.ask_pending || index === length - 1) && (
             <MessagePartBoundary fallback={<span>{t("chat.messageRenderFailed")}</span>}>
               <MessagePart render={() => renderBottom()} />
@@ -1574,7 +1565,7 @@ const AssistantMessage = (props: any) => {
 
           {}
           {runCompleted && !item.onboardingInfo && renderFooter()}
-          {!runCompleted && <div className="chat-assistant-msg-tool-actions">{renderSourceButton(item.sources)}<ExecutionResults operations={item.knowledge_operations} /></div>}
+          {!runCompleted && <div className="chat-assistant-msg-tool-actions">{renderSourceButton(item.sources)}</div>}
           {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
         {!item.fork_read_only && sessionId && item.history_id && <ToolConfigurationCard
@@ -1582,6 +1573,7 @@ const AssistantMessage = (props: any) => {
           onContinue={configurationTaskEnded && index === length - 1 && props.sendMessage
             ? () => props.sendMessage?.(t("toolConfiguration.continueMessage")) : undefined}
         />}
+        {knowledgeCards}
         {!item.fork_read_only && (item.ask_pending || index === length - 1) && (
           <MessagePartBoundary fallback={<span>{t("chat.messageRenderFailed")}</span>}>
             <MessagePart render={() => renderBottom()} />

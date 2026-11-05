@@ -2578,9 +2578,9 @@ describe("useChatConversation regeneration recovery", () => {
     const onResume = vi.fn(() => stream);
     const { result, unmount } = renderConversation({ onOpenResumeSSE: onResume });
     const history = { id: "work-history", seq: 1, query: "Manage", result: "live text" };
-    const pending = { ask_id: "confirmation", questions: [{ text: "Delete?", type: "boolean" }],
-      knowledge_management: { confirmation_id: "confirmation", arguments_digest: "digest", snapshot: "snapshot" } };
-    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, result: "stale persisted text", ask_pending: pending }] } });
+    const pending = { confirmation_id: "confirmation", arguments_digest: "digest", snapshot: "snapshot",
+      action: "knowledge.resource.delete", status: "pending", steering_segment: 0, preview: {} };
+    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, result: "stale persisted text", knowledge_confirmations: [pending] }] } });
     act(() => result.current.replaceMessageList(conv, buildChatMessageListFromHistory([history])));
     if (active) {
       Object.assign(stream, { readyState: 1 });
@@ -2590,26 +2590,75 @@ describe("useChatConversation regeneration recovery", () => {
       detail: { conversationId: conv, historyId: history.id, confirmationId: "confirmation" },
     }));
     await act(async () => { notify(); });
-    await waitFor(() => expect(result.current.messageList[result.current.messageList.length - 1]?.ask_pending?.ask_id).toBe("confirmation"));
+    await waitFor(() => expect(result.current.messageList[result.current.messageList.length - 1]?.knowledge_confirmations?.[0]?.confirmation_id).toBe("confirmation"));
     expect(getHistoryMock).toHaveBeenCalledWith({ name: conv, anchorHistoryId: history.id });
     expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("live text");
     expect(onResume).not.toHaveBeenCalled();
-    act(() => result.current.updateAssistantMessage({ ask_answered: true }, undefined, result.current.messageList.length - 1));
+    getHistoryMock.mockResolvedValue({ data: { history: [{ ...history, knowledge_confirmations: [{ ...pending, status: "approved" }] }] } });
     await act(async () => { notify(); });
-    expect(result.current.messageList[result.current.messageList.length - 1]?.ask_answered).toBe(true);
+    expect(result.current.messageList.at(-1)?.knowledge_confirmations?.[0]?.status).toBe("approved");
     expect(result.current.messageList).toHaveLength(2);
     unmount();
     streamManager.removeStreamEntry(conv);
   });
 
+  it.each([
+    { historyFirst: true, hadCard: true },
+    { historyFirst: false, hadCard: true },
+    { historyFirst: false, hadCard: false },
+  ])("keeps one confirmation before steering (history first: $historyFirst, card already visible: $hadCard)", async ({ historyFirst, hadCard }) => {
+    const conversationId = "steer-work";
+    const historyId = "delete-turn";
+    const guidance = { id: "cancel-delete", text: "取消删除" };
+    const pending = { confirmation_id: "delete-confirmation", arguments_digest: "digest", snapshot: "snapshot",
+      action: "knowledge.resource.delete" as const, status: "pending" as const, steering_segment: 0, preview: {} };
+    const superseded = { ...pending, status: "superseded" as const };
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList(conversationId, []));
+    await act(async () => { await result.current.sendMessage({ text: "删除测试库" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: conversationId, history_id: historyId, ...frame,
+    } }) });
+    act(() => emit({ delta: "" }));
+    const notify = () => window.dispatchEvent(new CustomEvent("lazymind:chat-knowledge-confirmation", {
+      detail: { conversationId, historyId, confirmationId: pending.confirmation_id },
+    }));
+    if (hadCard) {
+      getHistoryMock.mockResolvedValueOnce({ data: { history: [{
+        id: historyId, seq: 1, query: "删除测试库", result: "", knowledge_confirmations: [pending],
+      }] } });
+      await act(async () => { notify(); });
+      expect(result.current.messageList.at(-1)?.knowledge_confirmations).toEqual([pending]);
+    }
+    act(() => result.current.showAcceptedSteering({
+      ...guidance, conversation_id: conversationId, target_history_id: historyId,
+      status: "accepted", mode: "steer", content: { text: guidance.text }, sort_order: 1, revision: 1,
+      created_at: "2026-11-04T08:39:00Z", updated_at: "2026-11-04T08:39:00Z",
+    }));
+    getHistoryMock.mockResolvedValueOnce({ data: { history: [{
+      id: historyId, seq: 1, query: "删除测试库", result: "", assistant_remainder: "",
+      steering_messages: [{ ...guidance, assistant_segment: "" }], knowledge_confirmations: [superseded],
+    }] } });
+
+    if (historyFirst) await act(async () => { notify(); });
+    act(() => emit({ steering_applied: [guidance] }));
+    act(() => emit({ delta: "已取消删除" }));
+    if (!historyFirst) await act(async () => { notify(); });
+
+    expect(result.current.messageList.map(row => [row.delta, row.knowledge_confirmations ?? []])).toEqual([
+      ["删除测试库", []], ["", [superseded]], [guidance.text, []], ["已取消删除", []],
+    ]);
+  });
+
   it("loads an older Work confirmation without replacing the currently loaded turn", async () => {
     const { result, unmount } = renderConversation();
-    const pending = { ask_id: "old-confirm", questions: [{ text: "Create?", type: "boolean" }],
-      knowledge_management: { confirmation_id: "old-confirm", arguments_digest: "digest", snapshot: "snapshot" } };
+    const pending = { confirmation_id: "old-confirm", arguments_digest: "digest", snapshot: "snapshot",
+      action: "knowledge.create", status: "pending", steering_segment: 0, preview: {} };
     act(() => result.current.replaceMessageList("old-work", buildChatMessageListFromHistory([
       { id: "latest", seq: 8, query: "Latest", result: "latest live text" },
     ])));
-    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "older", seq: 1, query: "Earlier", result: "earlier text", ask_pending: pending }] } });
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "older", seq: 1, query: "Earlier", result: "earlier text", knowledge_confirmations: [pending] }] } });
     await act(async () => window.dispatchEvent(new CustomEvent("lazymind:chat-knowledge-confirmation", {
       detail: { conversationId: "old-work", historyId: "older", confirmationId: "old-confirm" },
     })));
@@ -2617,4 +2666,12 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("latest live text");
     unmount();
   });
+});
+
+it('forwards an explicit initial paper model binding to its stream request',async()=>{
+ const {stream}=createMockStream();
+ const onOpenSSE=vi.fn(()=>stream);const {result}=renderConversation({onOpenSSE});
+ const selection={mode:'fixed' as const,model_id:'paper-model',source:'own' as const};
+ await act(async()=>{await result.current.sendMessage({text:'Explain the paper',initial_model_selection:selection});});
+ expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array),expect.anything(),{},expect.objectContaining({initial_model_selection:selection}));
 });

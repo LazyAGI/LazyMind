@@ -2,6 +2,7 @@ import copy
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
@@ -324,6 +325,20 @@ def test_incomplete_report_preserves_actual_material_gap(lineage):
     assert ctx.report_requests[0].input.data['limitations'] == report['coverage_gaps']
 
 
+@pytest.mark.parametrize('status', ['excluded', 'resolved'])
+def test_question_limits_do_not_block_completion(lineage, status):
+    module, ctx, events, _, args = lineage
+    limit = '仅比较本次确认的两篇原文，第三方实现不单独取证。'
+    args['limitations'] = [limit]
+    args['investigation'][0].update(status=status, unresolved_clues=['第三方实现的原始依据'],
+                                   gaps=['未逐一比较范围外后续工作的附录和完整实验'])
+    module.academic_submit_relations(**args)
+    report = _artifact(events, 'expansion_report')
+    assert report['completion'] == {'status': 'complete', 'reason': 'scope_covered'}
+    assert report['coverage_gaps'] == []
+    assert ctx.report_requests[0].input.data['limitations'] == [{'reason': limit}]
+
+
 def test_unresolved_work_is_disclosed_without_exhausting_research_budget(lineage):
     module, ctx, events, _, args = lineage
     args['investigation'][0].update(status='open', gaps=['尚未读取原文方法章节，相关机制不作结论'])
@@ -353,12 +368,24 @@ def test_postcheck_rejects_forged_analysis(lineage):
         module.academic_validate_relations(analysis)
 
 
-def test_report_call_obeys_remaining_execution_time(lineage):
+def test_report_call_obeys_remaining_execution_time(lineage, monkeypatch):
+    from lazymind.chat.service import llm_task
+
     module, ctx, _, _, args = lineage
-    ctx.execution_deadline = time.monotonic() + 60
+    start = 1000.0
+    ctx.execution_deadline = start + 60
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: start + 15))
+    monkeypatch.setattr(llm_task, 'time', SimpleNamespace(monotonic=lambda: start + 16))
+    report_model = llm_task._call_model
+
+    def check_deadline(request, prompt, **kwargs):
+        assert kwargs['call_control'].deadline == ctx.execution_deadline
+        return report_model(request, prompt, **kwargs)
+
+    monkeypatch.setattr(llm_task, '_call_model', check_deadline)
     module.academic_submit_relations(**args)
-    request = ctx.report_requests[0]
-    assert 0 < request.options['wall_timeout_seconds'] <= 60
+    request, = ctx.report_requests
+    assert request.options['timeout_seconds'] == request.options['wall_timeout_seconds'] == 45
 
 
 @pytest.mark.asyncio

@@ -289,8 +289,14 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 	}
 	for _, n := range notes {
 		if p := paperByID[n.PaperID]; p != nil {
+			var source *NoteSource
+			if len(n.SourceJSON) > 0 && n.SourceJSON != "null" && n.SourceJSON != "{}" {
+				if err := json.Unmarshal([]byte(n.SourceJSON), &source); err != nil {
+					return view, fmt.Errorf("decode note %s source: %w", n.ID, err)
+				}
+			}
 			p.NoteIDs = append(p.NoteIDs, n.ID)
-			view.Data.Notes = append(view.Data.Notes, Note{ID: n.ID, PaperID: n.PaperID, Title: n.Title, Content: n.Content, Kind: n.Kind, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt})
+			view.Data.Notes = append(view.Data.Notes, Note{ID: n.ID, PaperID: n.PaperID, Title: n.Title, Content: n.Content, Kind: n.Kind, Source: source, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt})
 		}
 	}
 	for i := range view.Data.Papers {

@@ -18,7 +18,7 @@ export interface ChatImperativeProps {
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => Promise<boolean>;
   prepareMessage: (
-    params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
+    params: Partial<Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">> & {
       appendCitations?: boolean;
     },
   ) => void;
@@ -90,6 +90,8 @@ export interface ChatContainerProps {
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
   showModelSelector?: boolean;
+  composerVariant?: "default" | "paper";
+  modelSelectionDraft?: boolean;
   fixedThinkingDepth?: ThinkingDepth;
   /** Isolates this container's SSE lifecycle from the main conversation. */
   concurrentStream?: boolean;
@@ -201,7 +203,7 @@ export interface ChatMessage {
     intent_context: Record<string, unknown>;
     steering_segment_id?: string;
   };
-  knowledge_operations?: import("../../utils/knowledgeOperations").KnowledgeOperation[];
+  knowledge_confirmations?: import("@/modules/chat/types/knowledgeConfirmation").KnowledgeConfirmation[];
   ask_pending?: {
     env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;

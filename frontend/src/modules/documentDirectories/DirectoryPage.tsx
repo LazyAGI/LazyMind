@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react';
 import { ArrowLeftOutlined, FileTextOutlined, FolderOutlined, MoreOutlined, PushpinFilled, PushpinOutlined, SearchOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
+import { Alert, Badge, Button, Card, Collapse, Drawer, Dropdown, Empty, Form, Input, Modal, message, Pagination, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, theme } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { DocumentDirectoryCommand } from '@/api/generated/core-client';
@@ -174,6 +174,7 @@ export default function DirectoryPage() {
     { title: t('directories.actions'), key: 'actions', width: 80, render: (_: unknown, e: DocumentDirectoryEntry) => <Button type="text" onClick={() => setSelectedEntry(e.id)}>{t('directories.details')}</Button> },
   ];
   const visibleBatches = latestDirectoryBatches(batches, directoryId);
+  const unreadDirectoryIds = new Set(visibleBatches.filter(b => ['succeeded', 'failed', 'canceled'].includes(b.status)).map(b => b.directory_id));
   const statusBatches = visibleBatches.filter(b => ['pending', 'running', 'canceled'].includes(b.status));
   const failedBatches = visibleBatches.filter(b => b.status === 'failed');
   const acknowledging = useRef(new Set<string>());
@@ -183,10 +184,10 @@ export default function DirectoryPage() {
       if (batch.status !== 'succeeded' || !directoryId && batch.directory_id || acknowledging.current.has(batch.id)) continue;
       acknowledging.current.add(batch.id);
       void directoryAction({ operation: 'acknowledge', batch_id: batch.id }).then(() => {
-        if (activeOwner.current === owner) setBatches(previous => previous.map(b => b.id === batch.id ? { ...b, acknowledged: true } : b));
+        setBatches(previous => previous.map(b => b.id === batch.id ? { ...b, acknowledged: true } : b));
       }).catch(() => {}).finally(() => acknowledging.current.delete(batch.id));
     }
-  }, [batches, directoryId, detail, loading, owner]);
+  }, [batches, directoryId, detail, loading]);
   return <div ref={pageContainer} className="directory-page" style={{ '--directory-bg': token.colorBgLayout, '--directory-panel': token.colorBgContainer, '--directory-border': token.colorBorderSecondary, '--directory-muted': token.colorTextSecondary, '--directory-hover': token.controlItemBgHover, '--directory-selected': token.controlItemBgActive } as CSSProperties}>
     <div className="directory-page-inner">
       <header className="directory-header">
@@ -230,7 +231,13 @@ export default function DirectoryPage() {
         {[true, false].map(pinned => <section className="directory-list-section" key={String(pinned)}>
           <Typography.Title level={4}>{pinned ? t('directories.pinned') : t('directories.recent')} <Typography.Text type="secondary">{directories.filter(x => x.pinned === pinned).length}</Typography.Text></Typography.Title>
           {directories.filter(x => x.pinned === pinned).length === 0 ? <Typography.Paragraph type="secondary" className="directory-empty-section">{t(pinned ? 'directories.noPinned' : 'directories.noDirectories')}</Typography.Paragraph> : <div className="directory-card-grid">{directories.filter(x => x.pinned === pinned).map(x => <Card key={x.id} className="directory-overview-card">
-            <div className="directory-card-heading"><FolderOutlined /><Button type="link" onClick={() => navigate(`/document-directories/${x.id}`)}>{x.name}</Button><Tooltip title={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')}><Button type="text" className="directory-pin-button" aria-label={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')} aria-pressed={x.pinned} icon={x.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={saving} onClick={() => run({ operation: 'update', directory_id: x.id, version: x.version, pinned: !x.pinned })} /></Tooltip>
+            <div className="directory-card-heading">
+              <FolderOutlined />
+              <Button type="link" aria-description={unreadDirectoryIds.has(x.id) ? t('directories.unreadResult') : undefined} onClick={() => navigate(`/document-directories/${x.id}`)}>
+                <span>{x.name}</span>
+                {unreadDirectoryIds.has(x.id) && <Badge status="success" aria-hidden="true" />}
+              </Button>
+              <Tooltip title={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')}><Button type="text" className="directory-pin-button" aria-label={t(x.pinned ? 'directories.directoryUnpin' : 'directories.directoryPin')} aria-pressed={x.pinned} icon={x.pinned ? <PushpinFilled /> : <PushpinOutlined />} disabled={saving} onClick={() => run({ operation: 'update', directory_id: x.id, version: x.version, pinned: !x.pinned })} /></Tooltip>
               <Dropdown trigger={['click']} menu={{ items: [{ key: 'delete', label: t('directories.delete'), danger: true,
                 disabled: saving || batches.some(b => b.directory_id === x.id && ['pending', 'running'].includes(b.status)),
                 onClick: () => setDeleteTarget(x) }] }}><Button type="text" aria-label={`${x.name} ${t('directories.more')}`} icon={<MoreOutlined />} /></Dropdown>

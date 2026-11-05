@@ -451,10 +451,10 @@ func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncj
 	if err := store.DB().WithContext(ctx).Where("id = ?", payload.BatchID).Take(&batch).Error; err != nil {
 		return asyncjob.Result{Permanent: true, ErrorCode: "batch_not_found"}, err
 	}
-	return handleImportBatchJob(ctx, job, reporter, batch)
+	return handleImportBatchJob(ctx, job, reporter, batch, payload.ItemIDs)
 }
 
-func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, version ...string) (orm.AcademicWork, orm.AcademicWorkDocument, error) {
+func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, pdfOnly bool, version ...string) (orm.AcademicWork, orm.AcademicWorkDocument, error) {
 	var source orm.AcademicWork
 	if workID == "" {
 		return orm.AcademicWork{}, orm.AcademicWorkDocument{}, gorm.ErrRecordNotFound
@@ -470,7 +470,7 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, ve
 	if source.ArxivIDBase != "" {
 		conditions, args = append(conditions, "aw.arxiv_id_base = ?"), append(args, source.ArxivIDBase)
 	}
-	if source.NormalizedTitle != "" {
+	if !pdfOnly && source.NormalizedTitle != "" {
 		conditions, args = append(conditions, "(aw.normalized_title = ? AND aw.publication_year = ?)"), append(args, source.NormalizedTitle, source.PublicationYear)
 	}
 	var rows []struct {
@@ -485,6 +485,15 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, ve
 		Where("awd.dataset_id = ?", datasetID).
 		Where("("+strings.Join(conditions, " OR ")+")", args...).
 		Order("CASE WHEN aw.id = '" + strings.ReplaceAll(source.ID, "'", "''") + "' THEN 0 ELSE 1 END, awd.is_preferred_version DESC, awd.updated_at DESC")
+	if pdfOnly {
+		query = query.Where("d.document_type = ?", "PDF")
+		if source.ArxivIDBase != "" {
+			query = query.Where("(aw.arxiv_id_base='' OR aw.arxiv_id_base=?)", source.ArxivIDBase)
+		}
+		if source.DOINormalized != "" && source.ArxivIDBase == "" {
+			query = query.Where("aw.doi_normalized=?", source.DOINormalized)
+		}
+	}
 	if len(version) > 0 && version[0] != "" {
 		query = query.Where("awd.source_version = ?", version[0])
 		if len(version) > 1 && version[1] != "" {

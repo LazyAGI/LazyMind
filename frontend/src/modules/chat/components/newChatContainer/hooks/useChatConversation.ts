@@ -1,4 +1,3 @@
-import { mergeKnowledgeOperations } from "../../../utils/knowledgeOperations";
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -48,7 +47,7 @@ import {
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
-import { appendAcceptedSteering, applySteeringTimeline, assignSteeringIntent } from "@/modules/chat/utils/steeringTimeline";
+import { appendAcceptedSteering, applySteeringTimeline, assignKnowledgeConfirmations, assignSteeringIntent } from "@/modules/chat/utils/steeringTimeline";
 import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
 import {
   buildCitedMessageText,
@@ -1133,7 +1132,7 @@ export function useChatConversation({
 
     const updateMessageListInternal = (list: any[]) => {
       const newList = Array.isArray(result.steering_replay)
-        ? applySteeringTimeline(list, result.history_id, result.steering_replay, true, result.model_output)
+        ? applySteeringTimeline(list, result.history_id, result.steering_replay, true, result.model_output, result.knowledge_confirmations)
         : Array.isArray(result.steering_applied)
           ? applySteeringTimeline(list, result.history_id, result.steering_applied)
           : [...list];
@@ -1244,6 +1243,9 @@ export function useChatConversation({
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        ...(Array.isArray(result.steering_replay) && result.knowledge_confirmations
+          ? { knowledge_confirmations: assistantMessage.knowledge_confirmations }
+          : {}),
         ...(questionChanged ? {
           ask_answered: false,
           ask_saved_answers: undefined,
@@ -1275,7 +1277,6 @@ export function useChatConversation({
           fencedReplacement || result.sources?.length > 0
             ? result.sources
             : assistantMessage.sources,
-        knowledge_operations: mergeKnowledgeOperations(assistantMessage.knowledge_operations, (result as any).knowledge_operation_result),
         ask_pending: mergeAskPending(
           assistantMessage.ask_pending,
           result.ask_pending,
@@ -1712,23 +1713,25 @@ export function useChatConversation({
           const history = response.data.history?.find(row => row.id === detail.historyId);
           if (!history) return;
           const restored = buildChatMessageListFromHistory([history]);
-          const authoritative = restored.find(row => row.role === RoleTypes.ASSISTANT);
-          if (!authoritative?.ask_pending?.knowledge_management) return;
+          const cards = restored.flatMap(row => row.knowledge_confirmations ?? []);
+          if (!cards.some(card => card.confirmation_id === detail.confirmationId)) return;
           const base = currentConversationIdRef.current === detail.conversationId
             ? messageListRef.current : conversationMessagesCache.current.get(detail.conversationId);
           if (!base) return;
-          const found = base.some(row => row.role === RoleTypes.ASSISTANT && row.history_id === detail.historyId);
+          const found = base.some(row => row.role === RoleTypes.ASSISTANT &&
+            (row.history_id === detail.historyId || row.original_history_id === detail.historyId));
           let merged: any[];
           if (found) {
-            merged = base.map(row => {
-              if (row.role !== RoleTypes.ASSISTANT || row.history_id !== detail.historyId) return row;
-              const same = row.ask_pending?.ask_id === authoritative.ask_pending.ask_id;
-              return { ...row, ask_pending: authoritative.ask_pending,
-                ask_answered: Boolean(authoritative.ask_answered || (same && row.ask_answered)),
-                ask_saved_answers: same && row.ask_answered ? row.ask_saved_answers
-                  : authoritative.ask_saved_answers ?? (same ? row.ask_saved_answers : undefined),
-              };
-            });
+            merged = assignKnowledgeConfirmations(base, detail.historyId, cards);
+            // Only an applied boundary can own a restored segment. While the
+            // guidance is merely accepted, the stream will split the current row.
+            for (const row of restored) {
+              if (!row.steering_segment || !row.knowledge_confirmations?.length ||
+                merged.some(existing => existing.id === row.id)) continue;
+              const boundary = merged.findIndex(existing => existing.steering_message && !existing.steering_pending &&
+                existing.history_id === detail.historyId && existing.steering_follow_up_id === row.steering_follow_up_id);
+              if (boundary >= 0) merged.splice(boundary, 0, row);
+            }
           } else {
             // The target turn may be outside the loaded history window. Insert
             // only that turn, preserving every current (possibly streaming) row.
@@ -2033,6 +2036,7 @@ export function useChatConversation({
       inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
+        ...(params.initial_model_selection ? { initial_model_selection: params.initial_model_selection } : {}),
         ...(params.workflow_control ? { workflow_control: params.workflow_control } : {}),
         ...(params.run_in_background ? { run_in_background: true } : {}),
         ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),

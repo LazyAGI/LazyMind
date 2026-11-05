@@ -401,12 +401,17 @@
   max-width: calc(100vw - 24px);
   .ant-popover-inner { padding: 0; overflow: hidden; border-radius: 12px; }
   [role="dialog"] { width: min(420px, calc(100vw - 24px)); }
-  .chat-source-panel { height: auto; border: 0; width: 100%; }
+  .chat-source-panel { height: auto; max-height: calc(100dvh - 32px); border: 0; width: 100%; }
   .chat-source-panel-header { min-height: 48px; padding: 8px 14px; }
   .chat-source-panel-title { font-size: 13px; }
-  .chat-source-panel-body { max-height: min(460px, 60vh); background: #fff; padding: 8px; overscroll-behavior: contain; }
-  .chat-source-list { border: 0; border-radius: 6px; }
+  .chat-source-panel-body { max-height: min(460px, 60dvh); background: #fff; padding: 8px; overscroll-behavior: contain; }
+  .chat-source-page-body { max-height: none; padding: 0; }
+  .chat-source-list { border: 0; border-radius: 0; }
   .chat-source-detail { overflow-wrap: anywhere; }
+}
+
+.chat-reference-popover {
+  padding-block: 8px;
 }
 
 .chat-source-panel {
@@ -488,6 +493,7 @@
 }
 
 .chat-source-panel-body {
+  box-sizing: border-box;
   min-height: 0;
   padding: 12px;
   overflow-y: auto;
@@ -501,6 +507,23 @@
   border-radius: 12px;
   flex-direction: column;
   background: #ffffff;
+
+  .chat-source-item {
+    flex-shrink: 0;
+    height: 88px;
+    padding-block: 8px;
+    align-content: center;
+  }
+
+  @media (max-height: 520px) {
+    .chat-source-item { height: 68px; padding-block: 6px; }
+    .chat-source-item-content { height: 16px; -webkit-line-clamp: 1; }
+  }
+
+  @media (max-height: 400px) {
+    .chat-source-item { height: 54px; }
+    .chat-source-item-content { display: none; }
+  }
 }
 
 .chat-source-item {
@@ -546,9 +569,14 @@
 .chat-source-item-heading {
   display: flex;
   align-items: center;
+  gap: 6px;
   color: #8d9ab2;
   font-size: 12px;
   line-height: 18px;
+}
+
+.chat-source-item-domain {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -572,7 +600,7 @@
 }
 
 .chat-source-item-arrow {
-  margin-top: 10px;
+  align-self: center;
   color: #9aacbf;
   font-size: 12px;
 }
@@ -655,12 +683,14 @@
 
 .chat-source-item-content {
   display: -webkit-box;
+  height: 32px;
   overflow: hidden;
+  overflow-wrap: anywhere;
   color: #5f6b7e;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 16px;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
 }
 
 .chat-selection-actions {

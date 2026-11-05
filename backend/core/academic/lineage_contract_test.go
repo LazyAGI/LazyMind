@@ -193,6 +193,7 @@ func TestIncompleteExpansionKeepsCompletedVersionWithoutAutomaticReview(t *testi
 			outcome["source_versions"] = versions
 			artifacts := []workflowstore.Artifact{}
 			for slot, value := range map[string]any{"relation_analysis": outcome, "expansion_result": input, "expansion_report": outcome} {
+				saveResultArtifact(t, db, session, step, "partial-"+slot, slot, map[string]any{"data": value})
 				artifacts = append(artifacts, workflowstore.Artifact{ID: "partial-" + slot, Slot: slot, StepID: producer, Attempt: 1, Revision: 1, ProducerAttemptID: step.ID, CreatedAt: time.Now().UTC(), Validity: "effective", Selected: true, Value: marshal(map[string]any{"data": value})})
 			}
 			job := asyncjob.Job{ResourceID: record.ID, CreateUserID: "u", PayloadJSON: marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: artifacts})}

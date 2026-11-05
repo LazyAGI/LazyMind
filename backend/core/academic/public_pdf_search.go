@@ -2,6 +2,7 @@ package academic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -9,6 +10,43 @@ import (
 
 	"lazymind/core/paperlibrary"
 )
+
+func lookupPublishedPDF(ctx context.Context, user, doi, title string) paperPDFLookup {
+	result := lookupOpenDOIPDF(ctx, doi, true)
+	if result.Candidate != nil || title == "" {
+		return result
+	}
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	results, err := searchPublicPDFHits(ctx, user, fmt.Sprintf("%q %q", title, doi), 8)
+	if err != nil {
+		return result // Web search is an optional fallback for publisher discovery.
+	}
+	var candidates []FulltextCandidate
+	seen := map[string]bool{}
+	for _, r := range results {
+		u, err := url.Parse(r.URL)
+		if err != nil || !zoteroAllowedURL(u, false) || u.Scheme != "https" || tokenCoverage(r.Title, title) < 0.95 {
+			continue
+		}
+		u.Fragment = ""
+		address := u.String()
+		if seen[address] || officialArxivID(address) != "" || strings.HasSuffix(strings.ToLower(u.Path), ".pdf") {
+			continue
+		}
+		seen[address] = true
+		candidates = append(candidates, FulltextCandidate{URL: address, SourceType: "published_landing", SourceProvider: "publisher", Version: "publishedVersion", ExpectedMIME: "application/pdf"})
+	}
+	client, release := paperPDFClient(ctx)
+	defer release()
+	found := probeOpenPDFCandidates(ctx, client, candidates, doi)
+	if found.Candidate == nil {
+		result.Warnings = append(result.Warnings, found.Warnings...)
+		result.Err = errors.Join(result.Err, found.Err)
+		return result
+	}
+	return found
+}
 
 type publicPDFSearchResult struct {
 	Title   string `json:"title"`
@@ -36,7 +74,11 @@ func lookupAuthorPDF(ctx context.Context, user string, m paperlibrary.Metadata) 
 // Keep identifier-backed hits as well as unregistered page leads. Search credentials
 // are consumed by the existing provider service, never by candidate downloads.
 func searchPublicPDFs(ctx context.Context, user, title string) ([]publicPDFSearchResult, error) {
-	papers, leads, err := externalPaperSearch(ctx, user, "web", fmt.Sprintf("%q paper PDF", title), 5)
+	return searchPublicPDFHits(ctx, user, fmt.Sprintf("%q paper PDF", title), 5)
+}
+
+func searchPublicPDFHits(ctx context.Context, user, query string, limit int) ([]publicPDFSearchResult, error) {
+	papers, leads, err := externalPaperSearch(ctx, user, "web", query, limit)
 	if err != nil {
 		return nil, err
 	}

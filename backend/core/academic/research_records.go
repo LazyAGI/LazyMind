@@ -2,11 +2,102 @@ package academic
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 )
+
+type academicMaterialProgress struct {
+	ProcessingCount    int  `json:"processing_count"`
+	DistinctReadyCount *int `json:"distinct_ready_count,omitempty"`
+}
+
+type academicExpansionRecord struct {
+	orm.AcademicExpansion
+	MaterialProgress *academicMaterialProgress `json:"material_progress,omitempty"`
+}
+
+func readExpansionContents(db *gorm.DB, record orm.AcademicExpansion, ids []string) ([]orm.AcademicPaperContent, error) {
+	contents := make([]orm.AcademicPaperContent, 0, len(ids))
+	for _, id := range ids {
+		source, err := expansionSource(db, record, id)
+		if err != nil {
+			continue
+		}
+		content, err := findSourceContent(db, record.UserID, source)
+		if err == nil {
+			contents = append(contents, content)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	return contents, nil
+}
+
+func summarizeExpansionContents(contents []orm.AcademicPaperContent) academicMaterialProgress {
+	var result academicMaterialProgress
+	ready := make(map[[2]string]bool)
+	for _, content := range contents {
+		if paperContentProcessing(content) {
+			result.ProcessingCount++
+		}
+		if usablePaperContent(content) {
+			ready[[2]string{content.SourceHash, content.ContentHash}] = true
+		}
+	}
+	count := len(ready)
+	result.DistinctReadyCount = &count
+	return result
+}
+
+func listExpansionRecords(db *gorm.DB, user string, expansions []orm.AcademicExpansion) ([]academicExpansionRecord, error) {
+	// Only papers with active content can change an expansion's completed badge.
+	// Resolve exact sources for those papers, and count eligible papers for
+	// reviews still waiting to hand off.
+	var activeIDs []string
+	if err := db.Model(&orm.AcademicPaperContent{}).
+		Where("user_id=? AND parser_version=? AND status IN ?", user, orm.AcademicPaperParserVersion, []string{"pending", "processing"}).
+		Distinct("paper_id").Pluck("paper_id", &activeIDs).Error; err != nil {
+		return nil, err
+	}
+	active := make(map[string]bool, len(activeIDs))
+	for _, id := range activeIDs {
+		active[id] = true
+	}
+	records := make([]academicExpansionRecord, 0, len(expansions))
+	for _, expansion := range expansions {
+		record := academicExpansionRecord{AcademicExpansion: expansion}
+		if expansion.Status == "completed" {
+			progress := academicMaterialProgress{}
+			reviewPending := expansion.Goal == "review" && expansion.AutoReviewID == ""
+			if reviewPending || expansion.Goal != "review" && len(active) > 0 {
+				var input ReviewWorkflowInput
+				if err := json.Unmarshal(expansion.ResultJSON, &input); err != nil {
+					return nil, err
+				}
+				ids := make([]string, 0, len(input.Papers))
+				for _, item := range input.Papers {
+					if reviewPending || active[item.Paper.PaperID] {
+						ids = append(ids, item.Paper.PaperID)
+					}
+				}
+				contents, err := readExpansionContents(db, expansion, ids)
+				if err != nil {
+					return nil, err
+				}
+				progress = summarizeExpansionContents(contents)
+				if !reviewPending {
+					progress.DistinctReadyCount = nil
+				}
+			}
+			record.MaterialProgress = &progress
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
 
 // Review records are views of existing handoffs, not a second task history.
 type academicReviewRecord struct {

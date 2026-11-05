@@ -13,7 +13,7 @@ runtime:
   - expansion_result
   - expansion_report
   host_extensions:
-  - academic-paper-chat-v1
+  - academic-paper-chat-v2
   trigger_inputs:
   - expansion_id
   completed_continue_steps:

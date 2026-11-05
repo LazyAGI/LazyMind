@@ -107,6 +107,11 @@ func preserveHistoryKnowledgeConfirmation(currentExt json.RawMessage, values map
 		}
 		var stored, next map[string]any
 		if json.Unmarshal(currentExt, &stored) == nil && json.Unmarshal(raw, &next) == nil && next != nil {
+			changed := false
+			if cards, ok := stored["knowledge_confirmations"]; ok {
+				next["knowledge_confirmations"] = cards
+				changed = true
+			}
 			pending, _ := stored["ask_pending"].(map[string]any)
 			incomingPending, _ := next["ask_pending"].(map[string]any)
 			if pending["knowledge_management"] != nil && (incomingPending == nil || incomingPending["knowledge_management"] != nil) {
@@ -116,6 +121,9 @@ func preserveHistoryKnowledgeConfirmation(currentExt json.RawMessage, values map
 						next[key] = value
 					}
 				}
+				changed = true
+			}
+			if changed {
 				merged, err := json.Marshal(next)
 				if err != nil {
 					return err

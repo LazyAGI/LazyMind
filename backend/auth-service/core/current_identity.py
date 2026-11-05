@@ -14,7 +14,7 @@ def current_identity(user_id):
     if not user or user.disabled:
         raise_error(ErrorCodes.UNAUTHORIZED)
     return {
-        'sub': str(user.id), 'role': user.role.name,
+        'sub': str(user.id), 'username': user.username, 'role': user.role.name,
         'tenant_id': user.tenant_id,
         'permissions': sorted(get_effective_permission_codes(user)),
     }

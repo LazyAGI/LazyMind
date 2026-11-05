@@ -1,4 +1,3 @@
-import type { KnowledgeOperation } from "../utils/knowledgeOperations";
 import type { MediaCapabilityDependencyDetail } from "../utils/mediaCapabilityDependency";
 import type { OrdinaryTaskView as CoreOrdinaryTaskView, PublicProcessStep as CorePublicProcessStep } from "@/api/generated/core-client";
 
@@ -34,7 +33,7 @@ export interface PublicArtifact {
   created_at: string;
 }
 
-export type OrdinaryCollection = "process_steps" | "sources" | "stage_artifacts" | "knowledge_operations";
+export type OrdinaryCollection = "process_steps" | "sources" | "stage_artifacts";
 
 export interface CollectionPage {
   total: number;
@@ -71,10 +70,9 @@ export interface OrdinaryTaskView {
   input_required?: string;
   /** Validated setup actions, without the raw task failure or tool logs. */
   capability_dependency?: Pick<MediaCapabilityDependencyDetail, "status" | "required" | "missing" | "message">;
-  knowledge_operations?: KnowledgeOperation[];
   sources: PublicSource[];
   stage_artifacts: PublicArtifact[];
-  pages: Record<Exclude<OrdinaryCollection, "knowledge_operations">, CollectionPage> & { knowledge_operations?: CollectionPage };
+  pages: Record<OrdinaryCollection, CollectionPage>;
   timing: {
     started_at: string | null;
     finished_at: string | null;

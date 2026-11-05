@@ -218,6 +218,17 @@ def apply_request_advanced(config, *, method, url, headers=None, json_body=None,
     if feature_disables and 'json' in result:
         from lazymind.model_features import apply_model_features
         result['json'] = apply_model_features(result['json'], features, source)
+        # ZenMux defaults to reasoning when the field is omitted. An explicit
+        # disabled feature must disable upstream reasoning, not restore defaults.
+        endpoint = urlsplit(str(url))
+        model = str(result['json'].get('model', ''))
+        if features.get('reasoning') is False and endpoint.path.rstrip('/').endswith('/chat/completions'):
+            if endpoint.hostname == 'zenmux.ai':
+                result['json']['reasoning'] = {'enabled': False}
+            elif endpoint.hostname in ('api.deepseek.com', 'aihubmix.com') and (
+                model.startswith('deepseek-v4') or model == 'deepseek-flash'
+            ):
+                result['json']['thinking'] = {'type': 'disabled'}
     return result
 
 

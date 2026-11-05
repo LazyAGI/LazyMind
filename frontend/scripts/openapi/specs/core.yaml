@@ -73,6 +73,8 @@ components:
                     type: string
                 paper_count:
                     type: integer
+                processing_count:
+                    type: integer
                 ready_count:
                     type: integer
                 research_complete:
@@ -459,6 +461,8 @@ components:
                     type: string
                 id:
                     type: string
+                material_progress:
+                    $ref: '#/components/schemas/AcademicMaterialProgress'
                 preparation:
                     properties:
                         answers:
@@ -1225,6 +1229,15 @@ components:
                 - queries
                 - unresolved_clues
                 - gaps
+            type: object
+        AcademicMaterialProgress:
+            properties:
+                distinct_ready_count:
+                    type: integer
+                processing_count:
+                    type: integer
+            required:
+                - processing_count
             type: object
         AcademicModelMetrics:
             properties:
@@ -10121,6 +10134,8 @@ components:
                         - model_fallback_exhausted
                         - model_context_not_fit
                     type: string
+                input_required:
+                    type: string
                 knowledge_operations:
                     items:
                         $ref: '#/components/schemas/KnowledgeOperation'
@@ -10206,6 +10221,315 @@ components:
                 - timing
                 - title
                 - workflow_step_id
+            type: object
+        PDFBlockTranslation:
+            properties:
+                block_id:
+                    type: string
+                language:
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                model:
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                translated_text:
+                    type: string
+            required:
+                - block_id
+                - translated_text
+                - language
+                - model
+                - source_sha256
+            type: object
+        PDFBlockTranslationEnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFBlockTranslation'
+            required:
+                - data
+            type: object
+        PDFFormulaEvidence:
+            properties:
+                bbox:
+                    items:
+                        maximum: 1
+                        minimum: 0
+                        type: number
+                    maxItems: 4
+                    minItems: 4
+                    type: array
+                id:
+                    type: string
+                page:
+                    minimum: 0
+                    type: integer
+                text:
+                    type: string
+            required:
+                - id
+                - text
+                - page
+            type: object
+        PDFFormulaExplanation:
+            properties:
+                display_latex:
+                    type: string
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/PDFFormulaEvidence'
+                    type: array
+                model:
+                    type: string
+                repair_note:
+                    type: string
+                steps:
+                    items:
+                        properties:
+                            evidence_ids:
+                                items:
+                                    type: string
+                                type: array
+                            inferred:
+                                type: boolean
+                            text:
+                                type: string
+                        required:
+                            - text
+                            - evidence_ids
+                            - inferred
+                        type: object
+                    type: array
+                summary:
+                    type: string
+                symbols:
+                    items:
+                        properties:
+                            evidence_ids:
+                                items:
+                                    type: string
+                                type: array
+                            inferred:
+                                type: boolean
+                            meaning:
+                                type: string
+                            symbol:
+                                type: string
+                        required:
+                            - symbol
+                            - meaning
+                            - evidence_ids
+                            - inferred
+                        type: object
+                    type: array
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - summary
+                - symbols
+                - steps
+                - evidence
+                - warnings
+            type: object
+        PDFFormulaExplanationEnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFFormulaExplanation'
+            required:
+                - data
+            type: object
+        PDFFormulaExplanationRequest:
+            properties:
+                focus_symbol:
+                    description: Optional nonblank exact substring of the target formula LaTeX; requests a focused symbol definition with a separate cache entry.
+                    maxLength: 500
+                    minLength: 1
+                    type: string
+                force:
+                    type: boolean
+                language:
+                    enum:
+                        - zh
+                        - en
+                    type: string
+            type: object
+        PDFIRBlock:
+            properties:
+                bbox:
+                    description: '[left, top, right, bottom], normalized to the original visible page with intrinsic rotation'
+                    items:
+                        maximum: 1
+                        minimum: 0
+                        type: number
+                    maxItems: 4
+                    minItems: 4
+                    type: array
+                id:
+                    type: string
+                latex:
+                    type: string
+                page:
+                    minimum: 0
+                    type: integer
+                text:
+                    type: string
+                type:
+                    type: string
+            required:
+                - id
+                - type
+                - page
+            type: object
+        PDFIRDocument:
+            properties:
+                blocks:
+                    items:
+                        $ref: '#/components/schemas/PDFIRBlock'
+                    type: array
+                coordinate_space:
+                    enum:
+                        - normalized_top_left
+                    type: string
+                pages:
+                    items:
+                        properties:
+                            height:
+                                type: number
+                            index:
+                                type: integer
+                            width:
+                                type: number
+                        required:
+                            - index
+                        type: object
+                    type: array
+                parser:
+                    properties:
+                        model:
+                            type: string
+                        name:
+                            type: string
+                    required:
+                        - name
+                        - model
+                    type: object
+                source_sha256:
+                    type: string
+                version:
+                    type: integer
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - version
+                - source_sha256
+                - parser
+                - coordinate_space
+                - pages
+                - blocks
+            type: object
+        PDFIREnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFIRState'
+            required:
+                - data
+            type: object
+        PDFIRRequest:
+            properties:
+                force:
+                    type: boolean
+            type: object
+        PDFIRState:
+            properties:
+                document:
+                    $ref: '#/components/schemas/PDFIRDocument'
+                error_message:
+                    type: string
+                source_sha256:
+                    type: string
+                status:
+                    enum:
+                        - not_requested
+                        - queued
+                        - running
+                        - ready
+                        - failed
+                        - unavailable
+                    type: string
+            required:
+                - status
+            type: object
+        PDFPaperReadingRequest:
+            properties:
+                force:
+                    type: boolean
+                language:
+                    enum:
+                        - zh
+                        - en
+                    type: string
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+            type: object
+        PDFVisualExplanation:
+            properties:
+                evidence:
+                    items:
+                        $ref: '#/components/schemas/PDFFormulaEvidence'
+                    type: array
+                model:
+                    type: string
+                observations:
+                    items:
+                        properties:
+                            evidence_ids:
+                                items:
+                                    type: string
+                                type: array
+                            inferred:
+                                type: boolean
+                            text:
+                                type: string
+                        required:
+                            - text
+                            - evidence_ids
+                            - inferred
+                        type: object
+                    type: array
+                source_sha256:
+                    description: Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+                    pattern: ^[a-fA-F0-9]{64}$
+                    type: string
+                summary:
+                    type: string
+                warnings:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - summary
+                - observations
+                - evidence
+                - model
+                - warnings
+                - source_sha256
+            type: object
+        PDFVisualExplanationEnvelope:
+            properties:
+                data:
+                    $ref: '#/components/schemas/PDFVisualExplanation'
+            required:
+                - data
             type: object
         Pages:
             properties:
@@ -10375,6 +10699,8 @@ components:
                     type: string
                 paperId:
                     type: string
+                source:
+                    $ref: '#/components/schemas/PaperLibraryNoteSource'
                 title:
                     type: string
                 updatedAt:
@@ -10388,6 +10714,41 @@ components:
                 - kind
                 - createdAt
                 - updatedAt
+            type: object
+        PaperLibraryNoteSource:
+            properties:
+                attachmentId:
+                    type: string
+                bbox:
+                    items:
+                        format: double
+                        type: number
+                    type: array
+                color:
+                    enum:
+                        - red
+                        - orange
+                        - yellow
+                        - green
+                        - blue
+                        - indigo
+                        - purple
+                        - rainbow
+                    type: string
+                page:
+                    type: integer
+                quote:
+                    type: string
+                rects:
+                    items:
+                        items:
+                            format: double
+                            type: number
+                        type: array
+                    type: array
+            required:
+                - attachmentId
+                - page
             type: object
         PaperLibraryPaper:
             properties:
@@ -11297,6 +11658,123 @@ components:
                     items:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
+            type: object
+        ReadingPreparationPolicy:
+            properties:
+                automatic_eligible_after:
+                    type: string
+                limits:
+                    properties:
+                        automatic_concurrency:
+                            enum:
+                                - 1
+                            type: integer
+                        daily_documents:
+                            maximum: 100
+                            minimum: 1
+                            type: integer
+                        study_items_per_document:
+                            maximum: 100
+                            minimum: 1
+                            type: integer
+                    required:
+                        - daily_documents
+                        - study_items_per_document
+                        - automatic_concurrency
+                    type: object
+                modes:
+                    additionalProperties:
+                        enum:
+                            - on_demand
+                            - automatic
+                            - disabled
+                        type: string
+                    type: object
+                parser_ref:
+                    type: string
+                preset:
+                    enum:
+                        - demand
+                        - advance
+                        - full
+                        - custom
+                    type: string
+                provider_selections:
+                    properties:
+                        parser:
+                            $ref: '#/components/schemas/ReadingProviderSelection'
+                        study:
+                            $ref: '#/components/schemas/ReadingProviderSelection'
+                    type: object
+                study_model_ref:
+                    type: string
+            required:
+                - preset
+                - modes
+                - limits
+            type: object
+        ReadingPreparationRequest:
+            properties:
+                scopes:
+                    items:
+                        enum:
+                            - pdf_parse
+                            - formula
+                            - figure
+                            - table
+                        type: string
+                    type: array
+            required:
+                - scopes
+            type: object
+        ReadingPreparationStatus:
+            properties:
+                error_message:
+                    type: string
+                job_id:
+                    type: string
+                model_requests:
+                    type: integer
+                progress_current:
+                    type: integer
+                progress_total:
+                    type: integer
+                scopes:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    enum:
+                        - not_requested
+                        - pending
+                        - running
+                        - succeeded
+                        - failed
+                        - canceled
+                    type: string
+            required:
+                - status
+            type: object
+        ReadingProviderSelection:
+            properties:
+                default_label:
+                    type: string
+                effective_label:
+                    type: string
+                options:
+                    items:
+                        properties:
+                            id:
+                                type: string
+                            label:
+                                type: string
+                        required:
+                            - id
+                            - label
+                        type: object
+                    type: array
+                unavailable_reason:
+                    type: string
             type: object
         RecoveryDeleteCountResponse:
             properties:
@@ -13168,6 +13646,244 @@ components:
                     type: string
                 name:
                     type: string
+            type: object
+        VocabularyCloudConnection:
+            properties:
+                add_to_study:
+                    type: boolean
+                configured:
+                    type: boolean
+                enabled:
+                    type: boolean
+                failed:
+                    format: int64
+                    type: integer
+                last_error:
+                    type: string
+                pending:
+                    format: int64
+                    type: integer
+                provider:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+                succeeded:
+                    format: int64
+                    type: integer
+                target_id:
+                    type: string
+                target_name:
+                    type: string
+            required:
+                - provider
+                - configured
+                - enabled
+                - target_id
+                - target_name
+                - add_to_study
+                - pending
+                - failed
+                - succeeded
+                - last_error
+            type: object
+        VocabularyCloudConnectionRequest:
+            properties:
+                add_to_study:
+                    type: boolean
+                enabled:
+                    type: boolean
+                target_id:
+                    type: string
+                target_name:
+                    type: string
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            type: object
+        VocabularyCloudConnectionResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/VocabularyCloudConnection'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudConnectionsResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudConnection'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudDisconnectResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        deleted:
+                            type: boolean
+                    required:
+                        - deleted
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudOperation:
+            properties:
+                id:
+                    type: string
+                last_error:
+                    type: string
+                provider:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - failed
+                        - succeeded
+                        - canceled
+                    type: string
+                term:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - provider
+                - term
+                - status
+                - last_error
+                - updated_at
+            type: object
+        VocabularyCloudOperationsResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudOperation'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudSyncResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        queued:
+                            type: integer
+                    required:
+                        - queued
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudTokenRequest:
+            properties:
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            type: object
+        VocabularyCloudWordbook:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
+            type: object
+        VocabularyCloudWordbookRequest:
+            properties:
+                name:
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            required:
+                - name
+            type: object
+        VocabularyCloudWordbookResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/VocabularyCloudWordbook'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudWordbooksResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudWordbook'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
             type: object
         WeChatNotificationTargets:
             properties:
@@ -18053,6 +18769,8 @@ components:
                 artifact_id:
                     type: string
                 artifact_value: {}
+                attempt:
+                    type: integer
                 caption:
                     type: string
                 change_source:
@@ -18079,6 +18797,8 @@ components:
                     type: integer
                 order_version:
                     type: integer
+                producer_attempt_id:
+                    type: string
                 provider:
                     type: string
                 provider_document_id:
@@ -18111,6 +18831,7 @@ components:
                     type: string
             required:
                 - artifact_id
+                - attempt
                 - created_at
                 - revision
                 - selected
@@ -19187,6 +19908,8 @@ paths:
                                         items:
                                             $ref: '#/components/schemas/AcademicHandoffLink'
                                         type: array
+                                    material_progress:
+                                        $ref: '#/components/schemas/AcademicMaterialProgress'
                                     paper_importance:
                                         additionalProperties:
                                             type: boolean
@@ -19207,6 +19930,20 @@ paths:
                                     source_queries:
                                         items:
                                             $ref: '#/components/schemas/AcademicSourceQueryReceipt'
+                                        type: array
+                                    workflow_steps:
+                                        items:
+                                            properties:
+                                                label:
+                                                    type: string
+                                                status:
+                                                    type: string
+                                                step_id:
+                                                    type: string
+                                            required:
+                                                - step_id
+                                                - status
+                                            type: object
                                         type: array
                                 type: object
                     description: Read saved rounds, current papers, content states and Chat availability
@@ -19645,14 +20382,19 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: include_processing
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PaperLibraryResponse'
-                    description: Read paper entries, logical folders and active materials
-            summary: Read paper entries, logical folders and active materials
+                    description: Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
+            summary: Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
             tags:
                 - AcademicWorkflows
     /api/core/academic/library/folders:
@@ -19869,6 +20611,8 @@ paths:
                                     type: string
                                 id:
                                     type: string
+                                source:
+                                    $ref: '#/components/schemas/PaperLibraryNoteSource'
                             required:
                                 - id
                                 - content
@@ -25973,6 +26717,47 @@ paths:
             summary: Update document
             tags:
                 - documents
+    /api/core/datasets/{dataset}/documents/{document}/parse-status:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    status:
+                                        enum:
+                                            - not_requested
+                                            - parsed
+                                            - parsing
+                                            - failed
+                                            - unknown
+                                        type: string
+                                    task_id:
+                                        type: string
+                                type: object
+                    description: Observed parse state
+                "202":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    status:
+                                        type: string
+                                type: object
+                    description: Existing parsing in progress
+            summary: Observe chat parsing without submitting new work
     /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
         delete:
             parameters:
@@ -26139,6 +26924,216 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFIREnvelope'
+                    description: Current PDF reading structure state
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Document missing or forbidden
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF IR storage unavailable
+            summary: Read PDF structure without triggering parsing or retrieval
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFIRRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFIREnvelope'
+                    description: Current PDF reading structure state
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Document missing or forbidden
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF IR storage unavailable
+            summary: Parse the original PDF using the selected MinerU service independently of retrieval
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation:
+        post:
+            description: 'Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.'
+            parameters:
+                - in: path
+                  name: block
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFPaperReadingRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFVisualExplanationEnvelope'
+                    description: Source-grounded reading result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing or forbidden document/block
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: PDF structure missing or source changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model unavailable or source block too large
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model request failed or response invalid
+            summary: Explain a figure or table using extracted text and cells
+    /api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation:
+        post:
+            description: Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+            parameters:
+                - description: Formula block id from the current PDF IR
+                  in: path
+                  name: block
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PDFFormulaExplanationRequest'
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PDFFormulaExplanationEnvelope'
+                    description: Formula explanation with source evidence
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid request
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Document or formula missing or forbidden
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Parse or refresh the original PDF first
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Selected chat model unavailable or formula too large
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Model generation failed or invalid output
+            summary: Explain a formula from original PDF evidence using the selected chat model without retrieval
     /api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:
         patch:
             parameters:
@@ -26216,6 +27211,42 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/{dataset}/documents/{document}/pdf-translations
+    /api/core/datasets/{dataset}/documents/{document}/reading-preparation:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationStatus'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Read durable preparation progress and accounted model requests
     /api/core/datasets/{dataset}/documents/{document}/segments:
         get:
             parameters:
@@ -26333,6 +27364,48 @@ paths:
                 "200":
                     description: OK
             summary: POST /datasets/{dataset}/documents/{document}:ensure-parsed
+    /api/core/datasets/{dataset}/documents/{document}:prepare-reading:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReadingPreparationRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationStatus'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Explicitly prepare this document; scopes only; preserves existing outputs
     /api/core/datasets/{dataset}/documents/{document}:read:
         get:
             parameters:
@@ -35623,6 +36696,61 @@ paths:
             summary: Compare revision; closing requires confirmation of every currently affected run; completed confirmed runs do not require another confirmation
             tags:
                 - TaskNotifications
+    /api/core/user/reading-preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationPolicy'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Read personal AI reading preferences and capability registry
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReadingPreparationPolicy'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        $ref: '#/components/schemas/ReadingPreparationPolicy'
+                                type: object
+                    description: Personal policy or durable preparation status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid policy, dependency or limits
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Generation prohibited by personal policy
+            summary: Replace personal preferences; never process historical documents
     /api/core/user/ui-preferences:
         get:
             responses:
@@ -35755,6 +36883,488 @@ paths:
                 "200":
                     description: OK
             summary: GET /vocabulary/capabilities
+    /api/core/vocabulary/cloud/connections:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudConnectionsResponse'
+                    description: List the current user's vocabulary cloud connections and sync counts
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: List the current user's vocabulary cloud connections and sync counts
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}:
+        delete:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudDisconnectResponse'
+                    description: Disconnect vocabulary cloud sync and cancel queued operations
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Disconnect vocabulary cloud sync and cancel queued operations
+            tags:
+                - VocabularyCloud
+        put:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudConnectionResponse'
+                    description: Save vocabulary cloud credentials and target settings
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Save vocabulary cloud credentials and target settings
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/sync:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudSyncResponse'
+                    description: Queue historical local English words and retry unsuccessful sync operations
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Queue historical local English words and retry unsuccessful sync operations
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/test:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudTokenRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudWordbooksResponse'
+                    description: Test supplied or stored credentials and list wordbooks
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Test supplied or stored credentials and list wordbooks
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/wordbooks:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudWordbookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudWordbookResponse'
+                    description: Create a remote vocabulary wordbook
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Create a remote vocabulary wordbook
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/operations:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudOperationsResponse'
+                    description: List up to 50 recent vocabulary cloud sync operations for the current user
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: List up to 50 recent vocabulary cloud sync operations for the current user
+            tags:
+                - VocabularyCloud
     /api/core/vocabulary/dictionary:lookup:
         get:
             responses:

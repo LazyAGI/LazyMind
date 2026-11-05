@@ -97,7 +97,7 @@ func init() {
 		{2005132, 400, "The paper upload request is invalid or conflicts with an existing request", []string{"paper upload only supports pdf", "paper upload request does not match its original context", "paper upload request key is already in use", "paper upload requires a paper library", "paper upload requires an uploaded pdf", "record paper upload"}},
 		{2005130, 400, "Paper libraries require document parsing", []string{"academic paper libraries require at least parsed processing", "enable document parsing before using an academic paper library"}},
 		{2005138, http.StatusConflict, "The paper library changed; refresh and retry", []string{"论文已在其他窗口更新，请保留草稿并加载最新内容后重试", "题录已移除或合并，停止后台补全", "题录已变更，请重试补全", "题录已保存；匹配到库中已有文献，请核对重复项后合并"}},
-		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity"}},
+		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity", "decode note %s source"}},
 		{2005140, http.StatusConflict, "Processing submission is unconfirmed; verify the existing task before retrying", []string{
 			"imported task metadata is unavailable; submission outcome requires verification",
 			"previous processing submission outcome requires verification",
@@ -130,6 +130,7 @@ func init() {
 			"verified paper identity conflict",
 		}},
 		{2005137, 409, "The paper content or cache is unavailable or changed; retry the read", []string{
+			"conversation pdf content changed",
 			"verified paper source version conflict",
 			"paper content changed after research analysis; report publication requires renewed analysis",
 		}},
@@ -138,6 +139,10 @@ func init() {
 		}},
 		{2005147, 502, "Unable to find an available paper PDF source", []string{
 			"开放全文探测失败",
+			"arxiv 预印本不能替代正式发表版",
+			"出版社 pdf 地址转向了其他来源",
+			"论文页面未声明目标 doi",
+			"paper source did not return a pdf original",
 		}},
 		{2005135, 400, "The selected paper does not match the import request", []string{
 			"doi metadata is missing",
@@ -224,8 +229,11 @@ func init() {
 			"expansion report must preserve the research analysis",
 		}},
 		{2000103, 400, "Invalid request", []string{
+			"new reviews support only quick or standard expansion",
 			"unsupported_source",
 			"unknown paper research step",
+			"无法唯一核对论文身份或指定版本",
+			"论文候选需要确认（%s）：%w",
 		}},
 	} {
 		for _, source := range group.sources {
