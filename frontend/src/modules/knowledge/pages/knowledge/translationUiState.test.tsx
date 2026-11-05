@@ -13,6 +13,42 @@ import { getTranslationProgressLabel, resolveDocumentTranslationProvider, useDoc
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe("document translation service state", () => {
+  it("orders the available translation sources without changing the selected default", async () => {
+    mocks.status.mockResolvedValue({
+      configured: true, provider: "Google Translate Web", document_supported: true, selected_group_id: "google",
+      document_providers: [
+        { group_id: "baidu", group_name: "Baidu", provider_name: "Baidu Translation" },
+        { group_id: "google", group_name: "Google", provider_name: "Google Translate Web" },
+        { group_id: "sogou", group_name: "Sogou", provider_name: "Sogou Translate Web" },
+        { group_id: "tencent", group_name: "Tencent", provider_name: "Tencent TranSmart Web" },
+        { group_id: "bing", group_name: "Bing", provider_name: "Bing Translate Web" },
+        { group_id: "deepl", group_name: "DeepL", provider_name: "DeepL Web" },
+      ],
+    });
+    const { result } = renderHook(() => useDocumentTranslationService());
+    await waitFor(() => expect(result.current.documentProviders).toHaveLength(6));
+    expect(result.current.documentProviders.map((provider) => provider.provider_name)).toEqual([
+      "Tencent TranSmart Web", "DeepL Web", "Bing Translate Web", "Google Translate Web",
+      "Sogou Translate Web", "Baidu Translation",
+    ]);
+    expect(result.current.defaultProviderGroupId).toBe("google");
+    expect(result.current.providerGroupId).toBe("google");
+  });
+
+  it("keeps the existing fallback source when no default is available", async () => {
+    mocks.status.mockResolvedValue({
+      configured: false, provider: "", document_supported: true,
+      document_providers: [
+        { group_id: "baidu", group_name: "Baidu", provider_name: "Baidu Translation" },
+        { group_id: "tencent", group_name: "Tencent", provider_name: "Tencent TranSmart Web" },
+      ],
+    });
+    const { result } = renderHook(() => useDocumentTranslationService());
+    await waitFor(() => expect(result.current.documentProviders).toHaveLength(2));
+    expect(result.current.documentProviders[0].group_id).toBe("tencent");
+    expect(result.current.providerGroupId).toBe("baidu");
+  });
+
   it("uses only an explicitly chosen connection when regenerating an artifact", () => {
     const providers = [
       { group_id: "google", group_name: "Free web", provider_name: "Google Translate Web" },

@@ -97,7 +97,7 @@ func init() {
 		{2005132, 400, "The paper upload request is invalid or conflicts with an existing request", []string{"paper upload only supports pdf", "paper upload request does not match its original context", "paper upload request key is already in use", "paper upload requires a paper library", "paper upload requires an uploaded pdf", "record paper upload"}},
 		{2005130, 400, "Paper libraries require document parsing", []string{"academic paper libraries require at least parsed processing", "enable document parsing before using an academic paper library"}},
 		{2005138, http.StatusConflict, "The paper library changed; refresh and retry", []string{"论文已在其他窗口更新，请保留草稿并加载最新内容后重试", "题录已移除或合并，停止后台补全", "题录已变更，请重试补全", "题录已保存；匹配到库中已有文献，请核对重复项后合并"}},
-		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity"}},
+		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity", "decode note %s source"}},
 		{2005140, http.StatusConflict, "Processing submission is unconfirmed; verify the existing task before retrying", []string{
 			"imported task metadata is unavailable; submission outcome requires verification",
 			"previous processing submission outcome requires verification",

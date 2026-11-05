@@ -12,6 +12,7 @@ import {
   message,
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { PdfTextSelection } from "@/components/ui";
 import {
   getTranslationStatus,
@@ -95,6 +96,7 @@ export default function AddVocabularyModal({
   onClose,
   onAdded,
 }: Props) {
+  const { t } = useTranslation();
   const [form] = Form.useForm();
   const [resolved, setResolved] = useState<SelectionResolveResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -134,6 +136,7 @@ export default function AddVocabularyModal({
     setLoading(true);
     void resolveVocabularySelection({
       term: selection.text,
+      provider: "local",
       language: "en",
       context: selection.context || context || selection.text,
     })
@@ -147,6 +150,9 @@ export default function AddVocabularyModal({
         const first = normalized.dictionary[0];
         setSelectedDictionary(first?.id || "");
         const sentence = cleanText(normalized.sentence);
+        const sourceTranslation = sentence === cleanText(selection.context)
+          ? cleanText(selection.contextTranslation)
+          : "";
         setInitialSentence(sentence);
         form.setFieldsValue({
           term: normalized.term,
@@ -154,12 +160,13 @@ export default function AddVocabularyModal({
             ? [normalized.wordbooks[0].id]
             : [],
           sentence,
+          translation: sourceTranslation,
           tags: [],
           example_tags: [],
         });
         applyDictionary(first);
         try {
-          if (sentence && (await getTranslationStatus()))
+          if (!sourceTranslation && sentence && (await getTranslationStatus()))
             await translate(sentence, true);
         } catch {
           /* Translation is an optional capability. */
@@ -268,7 +275,7 @@ export default function AddVocabularyModal({
     try {
       const result = await addVocabularyWord({
         ...values,
-        provider: undefined,
+        provider: "local",
         dataset_id: datasetId,
         document_id: documentId,
         segment_id: segmentId,
@@ -279,8 +286,8 @@ export default function AddVocabularyModal({
         origin_type: "document",
       });
       message.success(
-        result.queued
-          ? "Anki 未连接，已加入待处理队列"
+        result.cloud_queued
+          ? t("vocabularyCloud.localSaved", { defaultValue: "已保存到本地生词表，云端同步将在后台完成" })
           : resolved?.existing
             ? "已补充到现有单词"
             : "已加入生词表",

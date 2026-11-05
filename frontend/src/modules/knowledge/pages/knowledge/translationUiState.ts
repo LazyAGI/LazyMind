@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getTranslationServiceStatus, translateSelectionText, type DocumentTranslationProvider, type TranslationServiceStatus } from "@/modules/knowledge/api/translation";
 import { translateTextWithLLM } from "@/modules/knowledge/api/pdfArtifacts";
+import { sortTranslationProviders } from "@/modules/modelProvider/translationProviderNames";
 
 const unavailableStatus: TranslationServiceStatus = {
   configured: false,
@@ -35,11 +36,12 @@ export function useDocumentTranslationService() {
     }
     if (requestGeneration.current === generation) {
       setStatus(nextStatus);
-      const nextProviders = nextStatus.document_providers || [];
+      const availableProviders = nextStatus.document_providers || [];
+      const nextProviders = sortTranslationProviders(availableProviders, (provider) => provider.provider_name);
       setDocumentProviders(nextProviders);
       setProviderGroupId((current) => nextProviders.find((item) => item.group_id === current)?.group_id
         || nextProviders.find((item) => item.group_id === nextStatus.selected_group_id)?.group_id
-        || nextProviders[0]?.group_id);
+        || availableProviders[0]?.group_id);
       if (!nextProviders.length) setMode("llm");
       setRefreshing(false);
     }

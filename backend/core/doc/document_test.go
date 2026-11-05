@@ -162,6 +162,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 	db := orm.OpenTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.Dataset{},
+		&orm.UserReadingPolicy{},
 		&learning.KnowledgeBaseCapability{}, &learning.CapabilityProfile{},
 		&orm.Document{},
 		&orm.Task{},
