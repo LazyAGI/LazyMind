@@ -436,6 +436,7 @@ export async function updateProviderRequestConfig(
 ): Promise<ProviderRequestConfig> {
   if (
     input.default_protocol !== "openai" &&
+    input.default_protocol !== "openai-responses" &&
     input.default_protocol !== "anthropic"
   )
     throw new Error("Unsupported request protocol");

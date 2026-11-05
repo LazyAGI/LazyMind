@@ -21,7 +21,7 @@ func TestAdvancedRequestSettingsEncryptAndPreserveCredentials(t *testing.T) {
 	if err := prepareProviderKeySelection(t.Context(), db, &parent); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"default_protocol":"openai","advanced":{"headers":{"X-Gateway-Token":"private-gateway-secret"},"query":{"tenant":"private-tenant"},"extra_body":{"metadata":{"project":"private-project"}}}}`
+	body := `{"default_protocol":"openai","endpoints":{"openai":"","openai-responses":"","anthropic":""},"advanced":{"headers":{"X-Gateway-Token":"private-gateway-secret"},"query":{"tenant":"private-tenant"},"extra_body":{"metadata":{"project":"private-project"}}}}`
 	rec := httptest.NewRecorder()
 	SetProviderRequestConfig(rec, requestConfigRequest(http.MethodPut, parent.ID, "user-1", body))
 	if rec.Code != http.StatusOK {
