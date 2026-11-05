@@ -1,6 +1,6 @@
 """Named, offline presentation assets shared by HTML/PDF and native PPTX.
 
-Only the bundled, checksummed catalog is accepted. Icons are visual aids, not
+Only the cloud-hosted, checksummed catalog is accepted. Icons are visual aids, not
 document evidence, and never consume the one-evidence-image slot.
 """
 from copy import deepcopy
@@ -14,12 +14,14 @@ import re
 import tempfile
 
 
-ASSET_ROOT = Path(__file__).resolve().parents[1] / 'assets' / 'presentation-assets'
+def asset_root():
+    from lazymind.presentation_resources import ensure_resource
+    return ensure_resource('assets')
 
 
 @lru_cache(maxsize=1)
 def catalog():
-    return json.loads((ASSET_ROOT / 'catalog.json').read_text(encoding='utf-8'))
+    return json.loads((asset_root() / 'catalog.json').read_text(encoding='utf-8'))
 
 
 def search(query='', collection='', limit=12):
@@ -58,8 +60,8 @@ def resolve(name):
 
 
 def _verified_file(entry, kind):
-    path = (ASSET_ROOT / entry[kind]).resolve()
-    if not path.is_relative_to(ASSET_ROOT.resolve()):
+    path = (asset_root() / entry[kind]).resolve()
+    if not path.is_relative_to(asset_root().resolve()):
         raise ValueError('Asset must stay inside the bundled library')
     data = path.read_bytes()
     if sha256(data).hexdigest() != entry[kind + '_sha256']:
@@ -90,7 +92,7 @@ def stage(name, directory, kind='html'):
     # Retain every bundled notice deterministically, including offline exports.
     notices = []
     for source in catalog()['sources'].values():
-        license_path = ASSET_ROOT / source['license_file']
+        license_path = asset_root() / source['license_file']
         notices.append(source['name'] + '\n' + source['source_url'] + '\n' + license_path.read_text(encoding='utf-8'))
     _write(directory / 'ASSET-LICENSES.txt', '\n\n'.join(notices).encode())
     source = catalog()['sources'][entry['collection']]

@@ -248,3 +248,7 @@ def test_template_typography_does_not_invent_missing_title_or_body_roles():
     style = {'font_ea': 'A</style><script>bad</script>', 'color': {'css': 'red;display:none'}}
     css = template._typography_css(style)
     assert '</style>' not in css and 'display:none' not in css
+
+
+# Template rendering uses the cloud asset resolver with local test payloads.
+pytestmark = pytest.mark.usefixtures('ppt_asset_library')

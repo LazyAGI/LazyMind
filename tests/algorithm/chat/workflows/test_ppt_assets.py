@@ -10,19 +10,22 @@ from pptx import Presentation
 import pytest
 
 
+pytestmark = pytest.mark.usefixtures('ppt_asset_library')
+
+
 ROOT = Path(__file__).resolve().parents[4]
 LIB = ROOT / 'workflows/ppt-workflow/runtime/lib'
 sys.path.insert(0, str(LIB))
 import presentation_assets as assets  # noqa: E402
 
 
-def test_bundled_catalog_has_verified_offline_files_and_license_notices():
+def test_cached_catalog_has_verified_offline_files_and_license_notices():
     data = assets.catalog()
-    assert len(data['sources']) >= 10
-    assert len(data['assets']) >= 200
+    assert len(data['sources']) == 2
+    assert len(data['assets']) == 2
     assert len({a['name'] for a in data['assets']}) == len(data['assets'])
     for source in data['sources'].values():
-        assert (assets.ASSET_ROOT / source['license_file']).stat().st_size > 200
+        assert (assets.asset_root() / source['license_file']).stat().st_size > 200
         assert source['source_url'].startswith('https://github.com/')
     for entry in data['assets']:
         _, png = assets._verified_file(entry, 'png')

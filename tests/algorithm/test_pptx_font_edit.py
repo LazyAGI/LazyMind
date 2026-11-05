@@ -386,3 +386,29 @@ def test_html_without_head_keeps_fonts_after_publication_sanitizer(html_tools):
         {'op': 'set_style', 'el': 'title', 'styles': {'font-family': 'Test Font'}}])
     assert 'data-lazymind-font-required="true"' in html_tools._sanitize_page_html(updated)
     assert local_font_css(updated) == ''  # Do not duplicate large font resources in preview.
+
+
+def test_cloud_font_library_registers_verified_font_and_preserves_license(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    from lazymind import presentation_resources
+    from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit
+    root = tmp_path / 'cloud'
+    root.mkdir()
+    source = make_font(root, family='Cloud Test Font')
+    (root / 'OFL.txt').write_text('SIL OPEN FONT LICENSE test fixture')
+    (root / 'manifest.json').write_text(json.dumps({'families': [{
+        'family': 'Cloud Test Font', 'files': [{'file': source.name, 'weight': 400, 'variable': False,
+                                               'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}],
+    }]}))
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'managed'))
+    monkeypatch.setattr(presentation_resources, 'font_families', lambda: ['Cloud Test Font'])
+    monkeypatch.setattr(presentation_resources, 'ensure_resource', lambda kind: root)
+    monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: set())
+    assert font_library.ensure_font('cloud test font', True) == 'Cloud Test Font'
+    record, = font_library.local_fonts()
+    assert record['family'] == 'Cloud Test Font'
+    assert (font_library.font_library_root() / (record['id'] + '.OFL.txt')).read_text().startswith('SIL')
+    source.write_bytes(b'corrupted')
+    with pytest.raises(ValueError, match='checksum'):
+        font_library.ensure_font('Cloud Test Font', True)

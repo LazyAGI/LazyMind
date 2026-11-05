@@ -252,8 +252,7 @@ For native PPTX, title scope means title placeholders; custom text-box titles
 need inspected slot IDs. Chart/SmartArt parts and text baked into images are not
 rewritten by the native text editor and are disclosed in its result.
 
-Missing Noto Sans SC / Noto Serif SC fonts download from the allowlisted source
-automatically; `allow_font_download=false` disables downloads. Other missing
+Missing fonts from the 67-family cloud catalog download automatically; `allow_font_download=false` disables downloads. Other missing
 fonts fail without changing the document. User-provided
 TTF/OTF files can be imported with `ppt_import_font(filename=...)`; native edits
 also accept `font_filename`. System fonts are copied into the managed library
@@ -278,3 +277,30 @@ artifact-size limits still apply; large fonts can cause an explicit size error.
   browser raster PPTX. Local/Desktop enables editable export automatically after
   its dependency bundle is detected; container deployments use
   `LAZYMIND_OUTPUT_EDITABLE_PPT=true`.
+
+
+## Cloud font and presentation asset libraries
+
+`Font/fonts-20261105.zip` and `Ppt-assets/presentation-assets-20261105.zip`
+are hosted in the ModelScope `CarlosShaoting/lazymind-cst` dataset and mirrored
+in Hugging Face `LazyAGI/LazyMind`. Font and image binaries are not bundled in
+this workflow or committed to GitHub. The asset pack contains 318 named icons
+from 12 collections, with original license notices and per-file checksums.
+
+Preparing or resuming a PPT workflow starts background prefetch of both packs.
+The request returns without waiting for downloads. The first consumer waits for
+its pack if prefetch is still running. Downloads try ModelScope first, then
+Hugging Face; failures report the mirror and reason, and later use retries.
+Concurrent processes share a file lock. Exact byte count and SHA256 are verified
+before safe extraction and atomic publication; partial downloads are discarded.
+
+`LAZYMIND_PPT_RESOURCE_CACHE` overrides the disposable download cache (default:
+`~/.cache/lazymind/presentation-resources`). Selected fonts are converted to
+static faces in `LAZYMIND_FONT_DIR` for portable document embedding; downloading
+the catalog does not install all fonts into the operating system. Completed
+HTML/PPTX documents continue carrying their used fonts and asset license notices.
+
+Resource versions, sizes, SHA256 and supported font names are pinned in
+`algorithm/lazymind/presentation_resources.json`. Updating a pack requires
+uploading identical versioned archives to both mirrors and updating that file.
+Never commit archives or the extracted libraries to the code repository.

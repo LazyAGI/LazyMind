@@ -2099,6 +2099,9 @@ def resolve_workflow_injection(
                              + '\n\nClarification answers:\n' + current_query)
     session_id = str(context.get('session_id') or '')
     workflow_id = str(context.get('workflow_id') or context.get('workflow_ref') or '')
+    if session_id and workflow_id.removeprefix('builtin:') == 'ppt-workflow':
+        from lazymind.presentation_resources import prefetch
+        prefetch()
     revision_id = str(context.get('revision_id') or '')
     mode = 'auto' if context.get('workflow_mode') == 'auto' else 'dynamic'
     # Keep the model-facing advance tools narrow (step_id only), while restoring

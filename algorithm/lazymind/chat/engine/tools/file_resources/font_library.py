@@ -29,6 +29,10 @@ def ensure_font(family: str, allow_download: bool = False) -> str:
     available = {name.casefold(): name for name in available_font_families()}
     if requested.casefold() in available:
         return available[requested.casefold()]
+    from lazymind.presentation_resources import font_families
+    cloud_family = next((name for name in font_families() if name.casefold() == requested.casefold()), None)
+    if allow_download and cloud_family:
+        return _acquire_cloud_family(cloud_family)
     canonical = next((name for name in DOWNLOAD_FONTS if name.casefold() == requested.casefold()), None)
     if not allow_download or canonical is None:
         raise ValueError(f'字体 {requested!r} 不可用。请提供合法字体文件或选择已安装字体。'
@@ -67,9 +71,24 @@ def ensure_font(family: str, allow_download: bool = False) -> str:
     return canonical
 
 
+def _acquire_cloud_family(family):
+    from lazymind.presentation_resources import ensure_resource
+    root = ensure_resource('fonts')
+    manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+    entry = next(item for item in manifest['families'] if item['family'] == family)
+    for item in entry['files']:
+        source = (root / item['file']).resolve()
+        if not source.is_relative_to(root) or hashlib.sha256(source.read_bytes()).hexdigest() != item['sha256']:
+            raise ValueError('Cloud font checksum/path mismatch')
+        weights = (400, 700) if item['variable'] else (item['weight'],)
+        for weight in weights:
+            record = register_font(source, weight=weight)
+            (font_library_root() / (record['id'] + '.OFL.txt')).write_bytes((source.parent / 'OFL.txt').read_bytes())
+    return family
+
+
 def font_library_root() -> Path:
-    # TODO: replace this local storage boundary with cloud object storage plus
-    # a local cache. Keep content-hash font IDs and catalog metadata unchanged.
+    # Derived static faces are runtime cache; original libraries live in cloud storage.
     return Path(os.environ.get('LAZYMIND_FONT_DIR')
                 or Path.home() / '.local/share/lazymind/fonts').expanduser().resolve()
 

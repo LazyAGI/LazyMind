@@ -265,6 +265,9 @@ class HostWorkflowToolkit:
                          revision_id: str = '') -> Dict[str, Any]:
         """Prepare a Workflow; in LazyMind create its Session and return Ready steps."""
         self._require_allowed(workflow_id)
+        if workflow_id == 'ppt-workflow':
+            from lazymind.presentation_resources import prefetch
+            prefetch()
         client = self._client()
         prepared = client.prepare_workflow(
             workflow_id, input_bindings=input_bindings, command_id=command_id,
