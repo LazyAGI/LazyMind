@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -83,7 +84,7 @@ type StartInput struct {
 	RequestContext      string                   `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
 	RevisionID          string                   `json:"revision_id,omitempty" jsonschema:"Published Workflow revision; preserve the revision_id returned with needs_input when submitting answers"`
 	ClarificationValues map[string]any           `json:"clarification_values,omitempty" jsonschema:"Confirmed startup answers keyed by the exact question IDs returned by needs_input; merge previously confirmed clarification_values with new answers. Answers in request_context alone do not satisfy required fields."`
-	Inputs              map[string][]InputSource `json:"inputs,omitempty" jsonschema:"Files to import and bind before starting; keys are declared external material IDs and values are ordered source arrays (use one item for a single material). Each source uses local_path or resource_id. Do not also name the same material in input_bindings."`
+	Inputs              map[string][]InputSource `json:"inputs,omitempty" jsonschema:"Files to import and bind before starting; use exact material_id keys from workflow.get startup_contract.input_materials, with ordered source arrays (use one item for a single material). Each source uses local_path or resource_id. Do not also name the same material in input_bindings."`
 	InputBindings       map[string]any           `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
 	IdempotencyKey      string                   `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it for unchanged-payload retries. Use a new key when answers, revision or inputs change."`
 	SessionID           string                   `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
@@ -295,6 +296,31 @@ func (c *Client) Get(ctx context.Context, workflowID, revisionID string) (map[st
 }
 
 func keepHostGetFiles(pkg map[string]any) {
+	if graph, ok := pkg["compiled_graph"].(map[string]any); ok {
+		producers, _ := graph["material_producers"].(map[string]any)
+		types, _ := graph["material_types"].(map[string]any)
+		cardinalities, _ := graph["material_cardinalities"].(map[string]any)
+		ids := make([]string, 0, len(producers))
+		for id, raw := range producers {
+			if producer, ok := raw.(map[string]any); ok && producer["kind"] == "external" {
+				ids = append(ids, id)
+			}
+		}
+		sort.Strings(ids)
+		materials := make([]map[string]any, 0, len(ids))
+		for _, id := range ids {
+			producer := producers[id].(map[string]any)
+			optional, _ := producer["optional"].(bool)
+			materials = append(materials, map[string]any{
+				"material_id": id, "type": types[id], "cardinality": cardinalities[id], "required": !optional,
+			})
+		}
+		contract := map[string]any{"revision_id": pkg["revision_id"], "input_materials": materials}
+		if runtime, ok := graph["runtime"].(map[string]any); ok {
+			contract["clarification_fields"] = runtime["clarification_fields"]
+		}
+		pkg["startup_contract"] = contract
+	}
 	delete(pkg, "compiled_graph")
 	raw, _ := pkg["files"].(map[string]any)
 	if raw == nil {

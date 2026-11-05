@@ -155,3 +155,36 @@ func TestStartRejectsUnsupportedPreparationState(t *testing.T) {
 		})
 	}
 }
+
+func TestGetExposesDeclaredStartupInputsWithoutExecutionGraph(t *testing.T) {
+	client := readinessClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/core/workflow-runtime/v1/workflows/ppt-workflow" {
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"workflow_id":"ppt-workflow","revision_id":"r1","compiled_graph":{
+			"material_producers":{"requirement_analysis":{"kind":"step"},"uploaded_materials":{"kind":"external","optional":true}},
+			"material_types":{"uploaded_materials":"file"},"material_cardinalities":{"uploaded_materials":"list"},
+			"runtime":{"clarification_fields":[{"id":"topic","type":"text","required":true}]}}}`))
+	})
+	session := inputToolSession(t, client)
+	result := inputToolCall(t, session, "workflow.get", map[string]any{"workflow_id": "ppt-workflow"})
+	if result.IsError {
+		t.Fatalf("cannot discover inputs: %+v", result.Content)
+	}
+	encoded, _ := json.Marshal(result.StructuredContent)
+	var pkg map[string]any
+	_ = json.Unmarshal(encoded, &pkg)
+	if _, exists := pkg["compiled_graph"]; exists {
+		t.Fatal("startup metadata leaked the execution graph")
+	}
+	contract, ok := pkg["startup_contract"].(map[string]any)
+	if !ok || contract["revision_id"] != "r1" {
+		t.Fatalf("missing pinned startup contract: %s", encoded)
+	}
+	inputs := contract["input_materials"].([]any)
+	if len(inputs) != 1 || !reflect.DeepEqual(inputs[0], map[string]any{
+		"material_id": "uploaded_materials", "type": "file", "cardinality": "list", "required": false,
+	}) || contract["clarification_fields"].([]any)[0].(map[string]any)["id"] != "topic" {
+		t.Fatalf("lost external material or clarification declaration: %s", encoded)
+	}
+}
