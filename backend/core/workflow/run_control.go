@@ -18,7 +18,18 @@ func guardRunAdvance(tx *gorm.DB, session orm.WorkflowSession) error {
 	if err != nil {
 		return err
 	}
-	if display.ApprovalRequired() {
+	approvalRequired := display.ApprovalRequired()
+	if controlstore.Controlled(session) {
+		// Running siblings take precedence in display state, but pending reviews
+		// still block new grants. Existing grants drain through GuardClaim.
+		var pendingReviews int64
+		if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).
+			Where("session_id = ? AND status = ?", session.ID, "pending").Count(&pendingReviews).Error; err != nil {
+			return err
+		}
+		approvalRequired = approvalRequired || pendingReviews > 0
+	}
+	if approvalRequired {
 		return controlstore.Reject("WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing")
 	}
 	if display.Status == "waiting" && display.Reason == "inputs_changed" {
