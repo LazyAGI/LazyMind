@@ -1,8 +1,6 @@
 name: Branch naming
 
-on:
-  pull_request:
-    branches: [main, master, 'dev/*']
+on: pull_request
 
 permissions:
   contents: read
