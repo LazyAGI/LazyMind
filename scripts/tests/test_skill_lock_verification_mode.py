@@ -117,9 +117,21 @@ Path(os.environ['BUNDLER_CAPTURE']).write_text(json.dumps(sys.argv[1:]))
         self.merge_after_target_skill_update(pr_changes_patch=True)
         args = self.workflow_args()
         self.assertIn('--verify-lock-artifacts', args)
+        self.assertNotIn('--verify-lock-base', args)
+        self.assertNotIn('--catalog-only', args)
+
+    def test_workflow_incrementally_verifies_changed_remote_lock_entries(self):
+        self.git('checkout', '-qb', 'pr')
+        self.lock['skills'][1]['tree_sha256'] = 'updated-in-pr'
+        self.write_lock()
+        self.commit()
+        self.git('checkout', '-qb', 'target', self.base)
+        self.git('merge', '--no-ff', '-qm', 'PR merge fixture', 'pr')
+        args = self.workflow_args()
+        self.assertIn('--verify-lock-artifacts', args)
         self.assertIn('--verify-lock-base', args)
         base_lock = Path(args[args.index('--verify-lock-base') + 1])
-        self.assertEqual(json.loads(base_lock.read_text(encoding='utf-8')), self.lock)
+        self.assertEqual(json.loads(base_lock.read_text(encoding='utf-8'))['skills'][1]['tree_sha256'], 'remote')
 
     def test_workflow_uses_frozen_catalog_verification_for_local_skill_changes(self):
         self.git('checkout', '-qb', 'pr')

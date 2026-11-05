@@ -195,9 +195,10 @@ func (Conversation) TableName() string { return "conversations" }
 // A nil Conversation.ArchiveFolderID represents the virtual "unfiled" group.
 type ConversationArchiveFolder struct {
 	ID             string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	UserID         string    `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_name,priority:1"`
+	UserID         string    `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_kind_name,priority:1"`
 	Name           string    `gorm:"column:name;type:varchar(255);not null"`
-	NormalizedName string    `gorm:"column:normalized_name;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_name,priority:2"`
+	IsTaskConv     bool      `gorm:"column:is_task_conv;not null;default:false;uniqueIndex:uk_conversation_archive_folders_user_kind_name,priority:2"`
+	NormalizedName string    `gorm:"column:normalized_name;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_kind_name,priority:3"`
 	CreatedAt      time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
 }

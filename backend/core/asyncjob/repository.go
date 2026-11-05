@@ -144,7 +144,7 @@ func enqueue(ctx context.Context, db *gorm.DB, req EnqueueRequest, inTransaction
 	if inTransaction {
 		err = write(db.WithContext(ctx))
 	} else {
-		err = db.WithContext(ctx).Transaction(write)
+		err = common.TransactionWithSQLiteBusyRetry(ctx, db, write)
 	}
 	if !inTransaction && err != nil && req.IdempotencyKey != "" && isUniqueConflict(err) {
 		existing, findErr := findReusableJob(ctx, db, req.JobType, req.IdempotencyKey, false, req.SkipSucceeded)

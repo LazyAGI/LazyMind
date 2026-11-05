@@ -316,7 +316,9 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 		if err != nil {
 			return err
 		}
-		if view.Status == "paused" || view.Status == "waiting" || session.Status == "pausing" || session.Status == SessionStatusCompleted {
+		// Dynamic hand-off can continue, but edited inputs still require an explicit user command.
+		inputsChanged := view.Status == "waiting" && view.Reason == "inputs_changed"
+		if view.Status == "paused" || view.ApprovalRequired() || inputsChanged || session.Status == "pausing" || session.Status == SessionStatusCompleted {
 			return nil
 		}
 		if session.Status != SessionStatusActive {
@@ -451,7 +453,7 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 // Terminal states are first-writer-wins: once a step has been interrupted by the
 // user, delayed start/done/error frames from the SubAgent stream cannot revive it.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var rows []orm.WorkflowSessionStep
 		if err := tx.Where("task_id = ?", taskID).Find(&rows).Error; err != nil {
 			return err

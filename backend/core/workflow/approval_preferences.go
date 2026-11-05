@@ -50,7 +50,7 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 		return 0, controlstore.Reject("INVALID_COMMAND", "expected approve, resume, retry, rewind or continue")
 	}
 	approval := req.Kind == "approve"
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var session orm.WorkflowSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND conversation_id = ? AND dismissed = false", req.SessionID, owner, conversationID).First(&session).Error; err != nil {
 			return err
@@ -122,6 +122,9 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 		payload, _ := json.Marshal(map[string]any{"status": session.Status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
+	if err == nil {
+		NotifyWorkflowRuntimeUpdated(ctx, db, req.SessionID, "", req.Kind)
+	}
 	return version, err
 }
 

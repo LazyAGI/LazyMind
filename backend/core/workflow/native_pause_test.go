@@ -4,15 +4,72 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
+
+func TestNativeResumeWithConcurrentSQLiteWrite(t *testing.T) {
+	for _, changedID := range []string{"other", "paused"} {
+		t.Run(changedID, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{})
+			if db.Dialector.Name() != orm.DriverSQLite {
+				t.Skip("SQLite snapshot contention regression")
+			}
+			for _, id := range []string{"paused", "other"} {
+				if err := db.Create(&orm.WorkflowSession{ID: id, ConversationID: "chat", WorkflowID: "test",
+					CreateUserID: "owner", ControllerHost: "lazymind", Status: "stopped", StateVersion: 1}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Commit an independent writer after resume reads its snapshot, as a
+			// background projection can do even when it updates another session.
+			wrote := false
+			if err := db.Callback().Query().After("gorm:query").Register("test:concurrent_resume_write", func(tx *gorm.DB) {
+				if wrote || tx.Statement.Table != "plugin_sessions" || tx.Error != nil {
+					return
+				}
+				wrote = true
+				if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", changedID).Update("state_version", 2).Error; err != nil {
+					t.Fatal(err)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			version, err := BeginNativeControlTurn(t.Context(), db.DB, "owner", "chat", NativeControlCommand{
+				SessionID: "paused", Kind: "resume", ExpectedStateVersion: 1, HistoryID: "resume-turn",
+			})
+			if !wrote {
+				t.Fatal("concurrent write did not run")
+			}
+			current, readErr := GetSession(t.Context(), db.DB, "paused")
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			var events int64
+			if countErr := db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", "paused").Count(&events).Error; countErr != nil {
+				t.Fatal(countErr)
+			}
+			bound, bindingErr := displaystate.ChatHistoryID(*current)
+			if changedID == "paused" {
+				if err == nil || !strings.Contains(err.Error(), "STATE_VERSION_CONFLICT") || current.Status != "stopped" || bindingErr != nil || bound != "" || current.StateVersion != 2 || events != 0 {
+					t.Fatalf("stale resume changed workflow: session=%+v events=%d err=%v", current, events, err)
+				}
+				return
+			}
+			if err != nil || version != 2 || current.StateVersion != 2 || current.Status != "active" || bindingErr != nil || bound != "resume-turn" || events != 1 {
+				t.Fatalf("resume must commit once: session=%+v version=%d events=%d err=%v bindingErr=%v", current, version, events, err, bindingErr)
+			}
+		})
+	}
+}
 
 func TestNativeSessionPauseIsScopedAndWaitsForExecutor(t *testing.T) {
 	for _, target := range []string{"foreground", "background"} {

@@ -44,7 +44,10 @@ type WorkflowStepParams struct {
 	StepID      string `json:"step_id"`
 	SessionID   string `json:"session_id"`
 	UserInput   string `json:"user_input"`
-	// LaunchUserInput remains fixed while UserInput carries the current turn.
+	// LaunchUserInput remains fixed. CurrentUserInput is the actual turn input
+	// (also the launch text on cold start); empty means no new turn requirement.
+	// UserInput may fall back to launch intent, including during recovery.
+	// Consumers must not treat cold-start current input as a material override.
 	LaunchUserInput  string `json:"launch_user_input,omitempty"`
 	CurrentUserInput string `json:"current_user_input,omitempty"`
 	IsColdStart      bool   `json:"is_cold_start"`
@@ -117,7 +120,7 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	if p.LaunchUserInput != "" {
 		m["launch_user_input"] = p.LaunchUserInput
 	}
-	if p.CurrentUserInput != "" {
+	if p.CurrentUserInput != "" || p.LaunchUserInput != "" {
 		m["current_user_input"] = p.CurrentUserInput
 	}
 	if p.WorkflowMode != "" {
@@ -414,6 +417,10 @@ func HandleWorkflowStepCreated(
 // launchWorkflowAttempt persists and launches an attempt after its caller has
 // performed admission. New transitions pass legacyEvent=false so the legacy
 // single-current compatibility field is not mutated.
+// ConfigureHostStep lets installed host capabilities constrain an attempt using
+// server-owned task state. It runs inside the launch transaction.
+var ConfigureHostStep func(context.Context, *gorm.DB, string, string, *WorkflowStepParams) error
+
 func launchWorkflowAttempt(
 	ctx context.Context,
 	db *gorm.DB,
@@ -572,7 +579,7 @@ func launchWorkflowAttempt(
 	if params.LaunchUserInput != "" {
 		rawParamsMap["launch_user_input"] = params.LaunchUserInput
 	}
-	if params.CurrentUserInput != "" {
+	if params.CurrentUserInput != "" || params.LaunchUserInput != "" {
 		rawParamsMap["current_user_input"] = params.CurrentUserInput
 	}
 	refOrID := params.WorkflowRef
@@ -607,6 +614,11 @@ func launchWorkflowAttempt(
 	}
 	if params.TerminalToolsOnly {
 		rawParamsMap["terminal_tools_only"] = true
+	}
+	if ConfigureHostStep != nil {
+		if err := ConfigureHostStep(ctx, db, userID, convID, &params); err != nil {
+			return sessionID, taskID, false, err
+		}
 	}
 	if !params.Runtime.IsZero() {
 		rawParamsMap["workflow_runtime"] = params.Runtime
@@ -774,7 +786,20 @@ func OnSubAgentDone(
 			return
 		}
 	}
-	_ = UpdateStepStatus(ctx, db, taskID, status)
+	reportStatusWriteError := func(target string, err error) {
+		fmt.Printf("[plugin] persist workflow %s status failed task=%s err=%v\n", target, taskID, err)
+		if pctx != nil && onSSE != nil {
+			onSSE("workflow_error", map[string]any{
+				"session_id": pctx.SessionID,
+				"step_id":    pctx.StepID,
+				"message":    "Failed to save workflow status",
+			})
+		}
+	}
+	if err := UpdateStepStatus(ctx, db, taskID, status); err != nil {
+		reportStatusWriteError("step", err)
+		return
+	}
 	stepFailed := status != subagent.StatusSucceeded && status != subagent.StatusInterrupted
 	sessionCompleted := false
 	if status == subagent.StatusSucceeded && pctx != nil && pctx.SessionID != "" {
@@ -813,7 +838,10 @@ func OnSubAgentDone(
 		// and mark the session failed. Auto mode still asks DriverAgent to diagnose
 		// and recommend retry/rewind; dynamic mode leaves the failure for the user.
 		if pctx != nil && pctx.SessionID != "" {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
+			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed); err != nil {
+				reportStatusWriteError("session", err)
+				return
+			}
 			_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "failed")
 			clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)

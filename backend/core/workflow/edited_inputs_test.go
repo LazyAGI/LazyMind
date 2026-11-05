@@ -86,6 +86,13 @@ func TestEditedInputsWaitAndRegenerateAcrossControllers(t *testing.T) {
 				t.Fatalf("edited state: session=%s display=%+v", session.Status, view)
 			}
 			expectControlCode(t, guardRunAdvance(db.DB, session), "EDITS_PENDING_CONTINUE")
+			if provider == "native" {
+				admitted, err := prepareContinuation(t.Context(), db.DB, session.ID)
+				must(err)
+				if admitted {
+					t.Fatal("completion callback resumed edited inputs without explicit continuation")
+				}
+			}
 			var old orm.WorkflowSessionStep
 			must(db.First(&old, "id = ?", "plan-attempt").Error)
 			if old.Status != "succeeded" || old.Validity != "stale" {

@@ -27,6 +27,11 @@ def test_notification_permissions_and_openapi_cover_public_operations():
         assert method.lower() in schema['paths'][prefix + path]
     for item in extractor.extract_from_go_file(root / 'backend/core/routes.go'):
         if 'notification' in item['path']:
-            assert item['permissions'] == ['qa.read' if item['method'] == 'GET' else 'qa.write']
+            # Marking the caller's paper notification as read is part of reading.
+            read_operation = item['method'] == 'GET' or (
+                item['method'] == 'POST'
+                and item['path'] == '/api/core/academic/notifications/{notification_id}:read'
+            )
+            assert item['permissions'] == ['qa.read' if read_operation else 'qa.write']
     assert schema['components']['schemas']['WeComCredentials']['properties']['secret']['writeOnly'] is True
     assert schema['components']['schemas']['TaskNotificationCreate']['additionalProperties'] is False

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type Dispatch, type
 import { Alert, Button, Input, Modal, Radio, Tooltip, Upload, message, type RadioChangeEvent } from 'antd';
 import { InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
-import { assignFolders, classifyIdentifier, parseBibTeX, parseCSV, parseRIS, planImport, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
+import { assignFolders, classifyIdentifier, parseAuthorInput, parseBibTeX, parseCSV, parseRIS, planImport, paperSourceVersionLabels, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
 import { mergeLibraryChanges, previewLibraryPapers, confirmLibraryPdf, importLibraryPapers, type LibraryChanges } from './store';
 import { previewPaperLink, previewPaperPDF, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
 import { paperFromPdf } from './pdfMeta';
@@ -220,7 +220,7 @@ export function usePaperImports(options: ImportOptions) {
         clearImportResult();
         const current = dataRef.current;
         const existing = current.papers.find(paper => paper.id === item.library_paper_id);
-        const metadata: PdfPaper = { ...snapshot, identityVerified: false };
+        const metadata: PdfPaper = { ...snapshot, metadata: { ...snapshot.metadata, authors: parseAuthorInput(snapshot.metadata.authors) }, identityVerified: false };
         const restored = { ...metadata, arxivVersion: item.source_version || metadata.arxivVersion, folderId: metadata.folderId && current.folders.some(folder => folder.id === metadata.folderId) ? metadata.folderId : null };
         setPending({ fresh: existing ? [] : [restored], skipped: [], folders: current.folders, attachTo: existing });
         setPendingPdf({ documentId, metadata: restored, contentHash: item.content_sha256 || '' });
@@ -489,10 +489,11 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
             <div className="paper-library-modal-actions"><Button type="primary" loading={searching} disabled={disabled || searching || !bibliography.trim()} onClick={importBibliography}>识别题录</Button></div>
           </>}
           {pendingArxiv && <section className="paper-library-import-confirm" aria-label="链接导入确认">
-            <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.arxivVersion}</code></div>
+            <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.metadata.identifiers.arxiv && /^v[1-9][0-9]*$/.test(pendingArxiv.arxivVersion || '') ? pendingArxiv.arxivVersion : ''}</code>{pendingArxiv.arxivVersion && !pendingArxiv.metadata.identifiers.arxiv && <span>{paperSourceVersionLabels[pendingArxiv.arxivVersion] || pendingArxiv.arxivVersion}</span>}</div>
             <h3>{pendingArxiv.metadata.title}</h3>
             <p className="paper-library-arxiv-authors"><PaperAuthors authors={pendingArxiv.metadata.authors} /> · {pendingArxiv.metadata.year}</p>
             {pendingArxiv.metadata.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.metadata.abstract}</p>}
+            {linkPreview?.fulltext_error && <div role="alert"><p>{linkPreview.fulltext_error.message}。{linkPreview.fulltext_error.recovery}</p><Button disabled={disabled || searching} onClick={importIdentifier}>重新查询全文</Button></div>}
             <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先加入文献库，后续补充 PDF。"}</p>
             {linkPhase === 'pdf' && <p role="status">元信息已就绪，可以立即加入文献库；等待查找完成后也可连同 PDF 一起导入。</p>}
             <div className="paper-library-modal-actions"><Button className={linkPhase === 'pdf' || linkPhase === 'ready' ? 'paper-import-unlocked' : undefined} type="primary" loading={linkPhase === 'submitting' || saving} disabled={disabled} onClick={commitArxiv}>{linkPhase === 'submitting' ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : linkPhase === 'pdf' ? "立即加入文献库" : "加入文献库"}</Button></div>
@@ -501,7 +502,7 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
             <h3>{pending.attachTo ? "为已有文献添加 PDF" : pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>
             <div className="paper-library-import-preview">
               {pending.attachTo && <p>{pending.attachTo.metadata.title}</p>}
-              {pending.fresh.map((item) => <p key={item.id}>{item.metadata.title}{item.incomplete && <small>待补全论文题名</small>}</p>)}
+              {pending.fresh.map((item) => <p key={item.id}>{item.metadata.title}{item.incomplete && <small>题录待补全</small>}</p>)}
               {pending.skipped.map((item, index) => <p key={`${item.id}-${index}`} className="paper-library-import-skipped">已跳过重复：{item.metadata.title}</p>)}
             </div>
             {pendingPdf && <PdfImportReview metadata={pendingPdf.metadata} target={pending.attachTo} papers={data.papers} candidateIds={pdfTargetCandidates(data.papers, pendingPdf.metadata).map(paper => paper.id)} file={pendingPdf.file} fixedTarget={!!importTargetPaperId} conflict={pdfConflict} requiresConfirmation={pdfRequiresConfirmation} sameVersion={samePdfVersion} confirmed={pdfConfirmed} disabled={disabled || searching || !!pendingPdf.documentId} onTargetChange={selectPdfTarget} onConfirmedChange={setPdfConfirmed}/>}

@@ -13,6 +13,7 @@ import (
 // execution metadata or caller-supplied tenant claims.
 type CurrentIdentity struct {
 	Subject     string   `json:"sub"`
+	Username    string   `json:"username"`
 	TenantID    string   `json:"tenant_id"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`

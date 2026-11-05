@@ -43,7 +43,8 @@ func PauseNativeWorkflowHTTP(w http.ResponseWriter, r *http.Request) {
 // worker calls it after its executor (including tools and cleanup) has exited.
 // The old lease token identifies that exact execution even after it was fenced.
 func ConfirmNativeStop(ctx context.Context, db *gorm.DB, attemptID, token string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var stoppedSessionID string
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var step orm.WorkflowSessionStep
 		if err := tx.Where("id = ?", attemptID).First(&step).Error; err != nil {
 			return err
@@ -76,8 +77,16 @@ func ConfirmNativeStop(ctx context.Context, db *gorm.DB, attemptID, token string
 			return err
 		}
 		session.StateVersion++
-		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"waiting"}`))
+		if err := appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"waiting"}`)); err != nil {
+			return err
+		}
+		stoppedSessionID = session.ID
+		return nil
 	})
+	if err == nil && stoppedSessionID != "" {
+		NotifyWorkflowRuntimeUpdated(ctx, db, stoppedSessionID, attemptID, "paused")
+	}
+	return err
 }
 
 func ConfirmNativeStopHTTP(w http.ResponseWriter, r *http.Request) {

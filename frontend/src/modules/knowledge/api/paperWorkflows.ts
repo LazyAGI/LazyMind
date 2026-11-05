@@ -1,3 +1,4 @@
+import type { AcademicResearchClaim, AcademicExpansionReportRecommendationsInner, AcademicExpansionReportRelationsInner, AcademicExpansionReportResearchStructure, AcademicPaperSelection, AcademicResearchCompletion } from '@/api/generated/core-client/api';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import type { ImportPreviewItem } from './academicReferences';
 const core = `${BASE_URL}/api/core/academic`;
@@ -9,6 +10,8 @@ export interface PaperRef {
   document_id?: string;
   source_version?: string;
   source_provider?: string;
+  published_at?: string;
+  source_version_date?: string;
   paper_id: string;
   title?: string;
   authors?: string[];
@@ -28,15 +31,87 @@ export interface WorkflowPaper {
   direction_relation?: string;
   key_contribution?: string;
 }
-export interface ReviewWorkflowInput {
+export interface ReviewWorkflowInput extends PaperInvestigation {
   user_instruction: string;
   candidate_directions: string[];
   selected_directions: string[];
   papers: WorkflowPaper[];
 }
+export type DirectionSelection = 'all' | 'manual';
+export type BudgetMode = 'fast' | 'balanced' | 'deep';
+export type PaperRecommendation = AcademicExpansionReportRecommendationsInner;
+export type PaperResearchStructure = AcademicExpansionReportResearchStructure;
+export type PaperRelation = AcademicExpansionReportRelationsInner;
+export interface PaperInvestigation {
+ research_questions?: Array<{ id: string; direction: string; question: string; category: string }>;
+ named_clues?: Array<{
+  name: string; role: string; source_paper_id: string; source_location: string; source_version: string;
+  source_excerpt: string;
+  /** Zero-based body block positions. */
+  positions?: number[];
+  reference_key?: string;
+  identity: Record<string, string>; question_ids: string[]; paper_id?: string;
+ }>;
+ investigation?: Array<{
+  question_id: string; direction: string; kind: 'predecessor' | 'successor' | 'peer'; question: string;
+  status: 'resolved' | 'excluded' | 'blocked' | 'open'; conclusion: string;
+  paper_ids: string[]; queries: string[]; unresolved_clues: string[]; gaps: string[]; relation_ids?: string[]; query_ids?: string[];
+  clue_resolutions?: Array<{
+   source_paper_id: string; name: string; status: 'resolved' | 'excluded' | 'open' | 'blocked';
+   paper_id?: string; reason: string; query_ids: string[];
+  }>;
+ }>;
+ research_complete?: boolean;
+ completion?: AcademicResearchCompletion;
+ coverage_gaps?: Array<{ direction: string; kind: string; question_id?: string; clue_name?: string; reason?: string }>;
+}
+export type PaperSelectionChanges = AcademicPaperSelection;
+export interface PaperRelationAnalysis extends PaperInvestigation {
+ selection?: PaperSelectionChanges;
+ input: ReviewWorkflowInput; research_structure?: PaperResearchStructure; relations?: PaperRelation[];
+ reading?: ExpansionReport['reading']; analysis_version?: string;
+}
+export interface ExpansionReport extends PaperInvestigation {
+ list_mode?: 'fast' | 'balanced';
+ recommendations?: PaperRecommendation[];
+ selection?: PaperSelectionChanges;
+ input?: ReviewWorkflowInput;
+ research_structure?: PaperResearchStructure; relations?: PaperRelation[];
+ analysis_version?: string;
+ narrative?: string;
+ claims?: AcademicResearchClaim[];
+ reading?: Record<string, { read_level: string; positions: number[]; pages: number[]; total_blocks: number }>;
+ currency_cost?: number | null;
+ execution_elapsed_ms?: number;
+ result_projection_delay_ms?: number;
+ stage_timing?: Array<{step_id: string; attempt: number; status: string; queue_and_execution_ms: number}>;
+ stage_metrics?: Record<string, {model?: string; provider_usage_records?: unknown[]}>;
+ source_queries?: Array<{query: string; sources?: Array<{source: string; status: string; count: number; elapsed_ms: number}>}>;
+ preparation_attempts?: Array<{revision: number; model: string; metrics?: unknown}>;
+}
+export interface ExpansionPreparation {
+ direction_selection?: DirectionSelection;
+ skipped?: boolean;
+ original_instruction?: string;
+ user_instruction: string; summary: string; error?: string;
+ questions: Array<{ id: string; question: string; options?: string[] }>;
+ directions: Array<{ name: string; question: string; reason: string; difference: string; paper_ids: string[]; papers?: PaperRef[] }>;
+ selected_directions: string[];
+ auto_confirmed?: boolean;
+  confirmed_at?: string;
+}
+export interface PaperMaterialProgress {
+  processing_count: number;
+  distinct_ready_count?: number;
+}
 export interface Expansion {
+  preparation?: ExpansionPreparation;
+  preparation_revision: number;
+  budget_mode: BudgetMode;
+  reading?: ExpansionReport['reading'];
+  report?: ExpansionReport;
   discovery_mode?: string;
-  progress?: Record<string, Partial<ReviewWorkflowInput>>;
+  progress?: Record<string, Partial<ReviewWorkflowInput> & { input?: Partial<ReviewWorkflowInput>; plan?: string[]; gaps?: string[]; list_mode?: BudgetMode; screening_pending?: boolean; recommendations?: ExpansionReport['recommendations']; projection_delay_ms?: number }>;
   id: string;
   dataset_id: string;
   conversation_id: string;
@@ -48,23 +123,33 @@ export interface Expansion {
   created_at: string;
   updated_at: string;
   auto_review_id?: string;
+  material_progress?: PaperMaterialProgress;
 }
 export interface PaperContent {
   id: string;
   paper_id: string;
   status: string;
   content_hash: string;
+  source_hash?: string;
+  quality?: { eligible: boolean; downloaded: boolean; parsed: boolean; identity: string; text: string; material: string; acquisition?: { started_at?: string } };
   parser_version?: string;
   error?: string;
 }
+export interface PaperWorkflowStep {
+  step_id: string;
+  label?: string;
+  status: string;
+}
 export interface ExpansionDetail {
   record: Expansion;
-  rounds: Array<{ discovery_mode?: string; id: string; version: number; status: string; result: ReviewWorkflowInput }>;
-  chat_status: 'available' | 'trashed' | 'deleted';
+  rounds: Array<{ discovery_mode?: string; id: string; version: number; status: string; result: ReviewWorkflowInput; report?: ExpansionReport }>;
+  chat_status: 'uncreated' | 'available' | 'trashed' | 'deleted';
   contents: PaperContent[];
+  material_progress?: PaperMaterialProgress;
   paper_importance: Record<string, boolean>;
   presence?: Array<{ work_id: string; metadata_only?: boolean; current_dataset: ImportPreviewItem['presence']['current_dataset']; importing: boolean }>;
   handoffs: Array<{ id: string; kind: string; conversation_id: string; version: number }>;
+  workflow_steps?: PaperWorkflowStep[] | null;
 }
 export interface DocumentAcademic {
   source_url?: string;
@@ -82,6 +167,10 @@ export interface DocumentAcademic {
 }
 export type PaperTask = 'expansion' | 'review' | 'reflection' | 'ppt';
 export interface PaperLaunch {
+  direction_selection?: DirectionSelection;
+  skip_expansion?: boolean;
+  review_scope?: 'selected' | 'direct_references';
+  budget_mode?: BudgetMode;
   kind: PaperTask;
   dataset_id: string;
   document_ids?: string[];
@@ -95,11 +184,42 @@ export interface PaperLaunch {
 }
 export async function launchPaperTask(input: PaperLaunch, silentError = false) {
   const res = await axiosInstance.post(`${core}/workflow-launches`, input, { silentError } as never);
-  return unwrap<{ conversation_id: string; expansion_id?: string }>(res.data);
+  return unwrap<{ conversation_id?: string; expansion_id?: string; status?: string }>(res.data);
 }
-export async function resolvePaperSelection(dataset: string, documents: string[], silentError = false) {
-  const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents }, { silentError } as never);
-  return unwrap<{ papers: WorkflowPaper[]; invalid: Array<{ document_id: string; reason: string }> }>(res.data);
+export type ReviewTopicInput = Pick<PaperLaunch, 'dataset_id' | 'document_ids' | 'expansion_id' | 'expansion_version' | 'paper_ids' | 'user_instruction'>;
+export async function generateReviewTopic(input: ReviewTopicInput, signal?: AbortSignal) {
+  const res = await axiosInstance.post(`${core}/review-topic:generate`, input, { signal, timeout: 100000, silentError: true } as never);
+  return unwrap<{ topic: string }>(res.data).topic;
+}
+export interface PaperSelection {
+  papers: WorkflowPaper[];
+  invalid: Array<{ document_id: string; reason: string }>;
+  materials?: Array<{ paper_id: string; status: string; eligible: boolean; reason?: string }>;
+}
+export async function resolvePaperSelection(dataset: string, documents: string[], silentError = false, review = false) {
+  const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents, ...(review ? { kind: 'review', skip_expansion: true } : {}) }, { silentError } as never);
+  return unwrap<PaperSelection>(res.data);
+}
+export interface ReviewRecord {
+  id: string;
+  conversation_id: string;
+  expansion_id: string;
+  version: number;
+  title: string;
+  paper_count: number;
+  source_title: string;
+  source_available: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export type ReviewRecordTarget = Pick<ReviewRecord, 'id' | 'conversation_id'> & Partial<ReviewRecord>;
+export async function listResearchRecords(dataset: string, silentError = false) {
+  const res = await axiosInstance.get(`${core}/expansions`, { params: { dataset_id: dataset, include_reviews: true }, silentError } as never);
+  return unwrap<{ items: Expansion[]; reviews: ReviewRecord[] }>(res.data);
+}
+export async function getReviewRecordContext(conversationId: string, signal?: AbortSignal) {
+  const res = await axiosInstance.get(`${core}/chat-context`, { params: { conversation_id: conversationId }, signal, silentError: true } as never);
+  return unwrap<{ kind: string; input: ReviewWorkflowInput; expansion_id?: string; source_available?: boolean }>(res.data);
 }
 export async function listExpansions(dataset: string, silentError = false) {
   const res = await axiosInstance.get(`${core}/expansions`, { params: { dataset_id: dataset }, silentError } as never);
@@ -124,4 +244,22 @@ export async function updatePaperIdentity(id: string, input: {
 }
 export async function retryPaperContent(id: string, expansionId: string, silentError = false) {
   await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id, expansion_id: expansionId }, { silentError } as never);
+}
+
+export async function submitPreparation(id: string, input: {
+ action: 'answer' | 'revise' | 'retry'; revision: number; request_key: string;
+ answers?: Record<string, string>; user_instruction?: string;
+}) {
+ const response = await axiosInstance.post(`${core}/expansions/${encodeURIComponent(id)}/preparation`, input);
+ return unwrap<{ expansion_id: string; revision: number; status: string }>(response.data);
+}
+export async function confirmExpansion(id: string, input: {
+ revision: number; request_key: string; selected_directions: string[];
+}) {
+ const response = await axiosInstance.post(`${core}/expansions/${encodeURIComponent(id)}:confirm`, input);
+ return unwrap<{ conversation_id: string; expansion_id: string }>(response.data);
+}
+export async function getExpansionCapabilities() {
+ const response = await axiosInstance.get(`${core}/expansion-capabilities`);
+ return unwrap<{ openalex_key: boolean; sciverse: boolean; web_search: boolean }>(response.data);
 }

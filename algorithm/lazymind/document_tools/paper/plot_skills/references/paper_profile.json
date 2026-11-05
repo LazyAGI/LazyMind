@@ -1,0 +1,1096 @@
+{
+  "base": {
+    "version": "paper-v1",
+    "colors": [
+      "#D3D3D3",
+      "#A9A9A9",
+      "#546BF5",
+      "#AEC0FA",
+      "#344BB5",
+      "#7894DD",
+      "#21356F"
+    ],
+    "edge_colors": [
+      "#707070",
+      "#606060",
+      "#354CC8",
+      "#6D80BC",
+      "#263980",
+      "#536BAD",
+      "#18274F"
+    ],
+    "markers": [
+      "o",
+      "s",
+      "^",
+      "D",
+      "v",
+      "P",
+      "X"
+    ],
+    "line_styles": [
+      "--",
+      "-.",
+      "-",
+      ":",
+      "--",
+      "-.",
+      ":"
+    ],
+    "scatter_sizes": [
+      18,
+      17,
+      24,
+      18,
+      24,
+      20,
+      20
+    ],
+    "note_font_size": 6.2,
+    "preserve_canvas": true,
+    "preserve_legend_location": true,
+    "palette_source": "approved_gray_gray_blue",
+    "bar_linewidth": 0.45,
+    "primary_hatch": "//",
+    "layout": {
+      "single_panel": {
+        "left": 0.15,
+        "right": 0.97,
+        "bottom": 0.22,
+        "top": 0.875
+      },
+      "two_panels": {
+        "left": 0.074,
+        "right": 0.988,
+        "bottom": 0.18,
+        "top": 0.88,
+        "wspace": 0.25
+      },
+      "single_inches": [
+        3.5039370078740157,
+        2.834645669291339
+      ],
+      "two_inches": [
+        7.165354330708662,
+        2.9133858267716537
+      ],
+      "legend_anchor": [
+        0.992,
+        0.986
+      ]
+    },
+    "rc": {
+      "font.family": "serif",
+      "font.serif": [
+        "STIXGeneral",
+        "DejaVu Serif"
+      ],
+      "mathtext.fontset": "stix",
+      "axes.formatter.use_mathtext": true,
+      "text.usetex": false,
+      "axes.unicode_minus": false,
+      "font.size": 8,
+      "axes.labelsize": 8.5,
+      "axes.labelweight": "normal",
+      "axes.titlesize": 9,
+      "axes.titleweight": "normal",
+      "xtick.labelsize": 8,
+      "ytick.labelsize": 8,
+      "text.color": "#202020",
+      "axes.labelcolor": "#202020",
+      "xtick.color": "#333333",
+      "ytick.color": "#333333",
+      "axes.labelpad": 4,
+      "xtick.direction": "out",
+      "ytick.direction": "out",
+      "xtick.major.size": 2.5,
+      "ytick.major.size": 2.5,
+      "xtick.major.width": 0.6,
+      "ytick.major.width": 0.6,
+      "axes.spines.top": false,
+      "axes.spines.right": false,
+      "axes.linewidth": 0.65,
+      "axes.edgecolor": "#333333",
+      "axes.axisbelow": true,
+      "axes.grid": true,
+      "axes.grid.axis": "y",
+      "grid.color": "#EBEBEB",
+      "grid.linewidth": 0.45,
+      "grid.linestyle": "--",
+      "hatch.linewidth": 0.65,
+      "hatch.color": "white",
+      "legend.fontsize": 7.3,
+      "legend.fancybox": false,
+      "legend.framealpha": 1,
+      "legend.edgecolor": "#C8C8C8",
+      "legend.borderpad": 0.28,
+      "legend.labelspacing": 0.26,
+      "legend.handlelength": 1.7,
+      "legend.handletextpad": 0.45,
+      "legend.borderaxespad": 0.4,
+      "figure.figsize": [
+        3.5039370078740157,
+        2.834645669291339
+      ]
+    },
+    "rules": [
+      "Reuse the supplied drawing helpers when applicable, or implement the required geometry with the shared appearance. The model chooses readable labels, layout and observed-vs-summary data from actual evidence.",
+      "Use the shared group identity for colors, edge colors, markers and line styles; sorting or filtering panels must not change that identity. Color is not a rank or significance claim.",
+      "Use 89 mm single-column or 182 mm double-column layouts with the supplied margins; these are a general paper preset, not universal journal requirements. For more panels or longer labels allocate more space rather than shrinking all fonts.",
+      "Return short figure titles as metadata, never on the canvas. Native title arguments contain an empty string or a short verified scope label such as (a) <cohort>; the full figure title stays external. Put panel descriptions, data provenance, statistics definitions, missing values and uncertainty limitations in the separate caption. Do not invent replication or significance.",
+      "Do not add reference events, axis breaks, smoothing, uncertainty bands or embeddings unless the actual data and research question support them.",
+      "Method identity colors and numeric colormaps have different meanings. Native stacked components use their own stable palette. Matrix heatmaps use viridis or cividis; signed differences and correlations use zero-centered PuOr. The rejected all-blue benchmark matrix is not an option; Blues remains approved for confusion counts/proportions."
+    ]
+  },
+  "styles": {
+    "bar_grouped_hatch": {
+      "script": "bar_grouped.py",
+      "function": "draw_panel",
+      "native_template": "draw_reference_panel",
+      "kind": "bar",
+      "value_label_size": 7.2,
+      "total_group_width": 0.78,
+      "rules": [
+        "Keep grouped offsets, white bar seams, value labels and a compact per-panel legend. Only a user-designated focal method receives white // hatch and bold values. Never choose the focal method from a maximum. Value axes include zero. Allow missing cells without zero fill. Do not overlay duplicate mean dots."
+      ],
+      "fit_paper_layout": true
+    },
+    "line_training_curve": {
+      "script": "line_training.py",
+      "function": "draw_training_panel",
+      "native_template": "draw_training_panel",
+      "kind": "line",
+      "rc": {
+        "axes.grid": false
+      },
+      "line_width": 1.25,
+      "rules": [
+        "Use paired loss/validation panels when they answer complementary training questions. Plot observed checkpoints in order, with sparse markers and no smoothing. One run per method cannot supply a between-run confidence band."
+      ]
+    },
+    "box_raw_points": {
+      "script": "box_raw_points.py",
+      "function": "draw_distribution",
+      "native_template": "draw_distribution",
+      "kind": "box",
+      "rules": [
+        "Use independent run data, unequal group sizes and missing values as supplied. Box: median, IQR and 1.5-IQR whiskers. All valid raw points appear once, including outliers; suppress duplicate flier markers. Show valid n once per group. Horizontal jitter is only a layout offset, never a new observation."
+      ]
+    },
+    "scatter_tradeoff": {
+      "script": "scatter_tradeoff.py",
+      "function": "draw_tradeoff",
+      "native_template": "draw_tradeoff",
+      "kind": "scatter",
+      "rules": [
+        "Preserve every observed x/y pair. Use stable shapes and colors for groups. Ordinary tradeoffs do not need t-SNE styling, a broken axis, connecting lines or quartile bars; bins do not imply matched budgets."
+      ],
+      "fit_paper_layout": true
+    },
+    "line_confidence_band": {
+      "script": "line_selfdistill.py",
+      "function": "draw_confidence_panel",
+      "native_template": "draw_confidence_panel",
+      "kind": "line",
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "rules": [
+        "Use verified mean/lower/upper endpoints at each actual x and group. Do not broadcast group-wide intervals over checkpoints or fabricate decreasing bands. Keep missing intervals as gaps, define the interval and exact replication in the caption. Use a log axis only for positive actual coordinates and label it."
+      ],
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.074,
+          "right": 0.988,
+          "bottom": 0.18,
+          "top": 0.88,
+          "wspace": 0.25
+        },
+        "single_inches": [
+          3.5039370078740157,
+          2.834645669291339
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      }
+    },
+    "line_loss_with_inset": {
+      "script": "line_loss_inset.py",
+      "function": "draw_loss_zoom",
+      "native_template": "draw_loss_zoom",
+      "kind": "line",
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "rules": [
+        "Pass an empty Figure. The helper creates overview and boxed zoom axes with connecting guides. Both show the same observations without smoothing. Overview includes all finite observations; zoom limits exactly match the rectangle and must contain actual points."
+      ],
+      "preserve_template_axes": true
+    },
+    "scatter_tsne_cluster": {
+      "script": "scatter_tsne.py",
+      "function": "draw_embedding",
+      "native_template": "draw_embedding",
+      "kind": "scatter",
+      "rc": {
+        "figure.figsize": [
+          3.5039370078740157,
+          3.2283464566929134
+        ],
+        "axes.grid": false
+      },
+      "rules": [
+        "Use supplied measured embedding coordinates and equal axis scales. Do not compute random clusters or call authored 2D points t-SNE. Preserve every valid x/y pair, disclose incomplete pairs. Supply label_positions when center labels hide important points."
+      ],
+      "preserve_template_axes": true,
+      "layout": {
+        "single_panel": {
+          "left": 0.16,
+          "right": 0.96,
+          "top": 0.88,
+          "bottom": 0.17
+        },
+        "two_panels": {
+          "left": 0.074,
+          "right": 0.988,
+          "bottom": 0.18,
+          "top": 0.88,
+          "wspace": 0.25
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.2283464566929134
+        ],
+        "two_inches": [
+          7.165354330708662,
+          2.9133858267716537
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      }
+    },
+    "scatter_broken_axis": {
+      "script": "scatter_break.py",
+      "function": "draw_broken_scatter",
+      "native_template": "draw_broken_scatter",
+      "kind": "scatter",
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          2.9921259842519685
+        ]
+      },
+      "rules": [
+        "Pass an empty Figure. Two ordered disjoint windows must include every valid observation exactly once; an empty gap needs research justification. Keep common y limits, matching x units per pixel, explicit break marks and no speculative connecting fits."
+      ],
+      "preserve_template_axes": true
+    },
+    "radar_dual_series": {
+      "script": "radar_comparison.py",
+      "function": "draw_radar",
+      "native_template": "draw_radar",
+      "kind": "radar",
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.6220472440944884
+        ]
+      },
+      "rules": [
+        "Use two methods per polar axes, the actual number of comparable dimensions, a shared zero-based scale and explicit grid levels. Missing dimensions must not become zero. Disclose input normalization; polygon area is not a composite score. Baseline outlines use series_edges, focal outline uses series_colors; fills always use series_colors. The focal method must be specified, not selected by score."
+      ],
+      "preserve_template_line_colors": true,
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.07,
+          "right": 0.93,
+          "bottom": 0.15,
+          "top": 0.88,
+          "wspace": 0.33
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.6220472440944884
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.6220472440944884
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      }
+    },
+    "bar_paired_delta": {
+      "script": "bar_paired.py",
+      "function": "draw_paired_panel",
+      "native_template": "draw_paired_panel",
+      "kind": "bar",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.074,
+          "right": 0.988,
+          "bottom": 0.18,
+          "top": 0.79,
+          "wspace": 0.28
+        },
+        "single_inches": [
+          3.5039370078740157,
+          2.834645669291339
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rules": [
+        "Compare baseline then method on matched categories with nonnegative values and a zero-based linear axis. Use actual method colors and explicitly selected focal hatch.",
+        "Finalize the figure size and margins before calling draw_paired_panel. Place gain arrows above the shorter bar; omit arrows and guides shorter than 3 pt while retaining the signed difference text. Never inflate a difference.",
+        "Differences are method minus baseline in explicit absolute units. Use pp only for values already in percent units; never label absolute differences as relative percent. Missing cells retain observed bars but have no difference annotation.",
+        "For two panels use the specified top margin and one shared legend made from actual bar handles in global method order. Single-panel legends may be in free space inside the axes."
+      ]
+    },
+    "heatmap_matrix": {
+      "script": "paper_extended.py",
+      "function": "draw_heatmap",
+      "native_template": "draw_heatmap",
+      "kind": "heatmap",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.4645669291338583
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Actual matrix cells, explicit unique row/column labels and full value limits. Modes: matrix, difference, correlation, correlation_pairs, confusion_counts, confusion_row. correlation is a full symmetric matrix; correlation_pairs is a rectangular view of verified anchor-variable associations, optionally in cohort rows. Both use PuOr, signed=True, limits=(-1,1). Matrix allows viridis/cividis only; Blues is only for confusion modes. Pass raw integer counts to either confusion mode; normalize only once inside the helper. Zero-support rows are NA, never zero. All artists and the colorbar remain vector."
+      ],
+      "helpers": [
+        "draw_colorbar"
+      ],
+      "color_role": "numeric",
+      "colormaps": {
+        "matrix": [
+          "viridis",
+          "cividis"
+        ],
+        "difference": [
+          "PuOr"
+        ],
+        "correlation": [
+          "PuOr"
+        ],
+        "correlation_pairs": [
+          "PuOr"
+        ],
+        "confusion_counts": [
+          "Blues"
+        ],
+        "confusion_row": [
+          "Blues"
+        ]
+      },
+      "heatmap_layouts": {
+        "matrix": {
+          "inches": [
+            3.5039370078740157,
+            3.4645669291338583
+          ],
+          "panel": [
+            0.245,
+            0.18,
+            0.575,
+            0.69
+          ],
+          "colorbar": [
+            0.855,
+            0.18,
+            0.026,
+            0.69
+          ]
+        },
+        "difference": {
+          "inches": [
+            3.5039370078740157,
+            3.3070866141732287
+          ],
+          "panel": [
+            0.245,
+            0.18,
+            0.575,
+            0.69
+          ],
+          "colorbar": [
+            0.855,
+            0.18,
+            0.026,
+            0.69
+          ]
+        },
+        "correlation": {
+          "inches": [
+            3.5039370078740157,
+            3.582677165354331
+          ],
+          "panel": [
+            0.195,
+            0.245,
+            0.625,
+            0.625
+          ],
+          "colorbar": [
+            0.855,
+            0.245,
+            0.026,
+            0.625
+          ]
+        },
+        "correlation_pairs": {
+          "inches": [
+            3.5039370078740157,
+            2.559055118110236
+          ],
+          "panel": [
+            0.26,
+            0.24,
+            0.56,
+            0.55
+          ],
+          "colorbar": [
+            0.855,
+            0.24,
+            0.026,
+            0.55
+          ]
+        },
+        "confusion": {
+          "inches": [
+            7.165354330708662,
+            3.2283464566929134
+          ],
+          "panels": [
+            [
+              0.09,
+              0.2,
+              0.32,
+              0.66
+            ],
+            [
+              0.57,
+              0.2,
+              0.32,
+              0.66
+            ]
+          ],
+          "colorbars": [
+            [
+              0.428,
+              0.2,
+              0.012,
+              0.66
+            ],
+            [
+              0.908,
+              0.2,
+              0.012,
+              0.66
+            ]
+          ]
+        }
+      },
+      "fit_paper_layout": true
+    },
+    "point_interval": {
+      "script": "paper_extended.py",
+      "function": "draw_point_intervals",
+      "native_template": "draw_point_intervals",
+      "helpers": [
+        "label_difference_axis"
+      ],
+      "kind": "errorbar",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.78,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Use verified estimate/lower/upper triples for each method and category, preserving asymmetric endpoints and exact units. Do not fabricate intervals, pair unrelated runs or recompute inference in drawing. Keep all finite intervals within the view. Use zero for arithmetic differences and one for ratios only when meaningful.",
+        "For arithmetic differences call label_difference_axis after draw_point_intervals. Supply comparisons mapping every original series identity to [minuend name, subtrahend name] in the computed order; use its returned handles/labels in the legend. Baseline-only labels are ambiguous. Keep original artist identities/colors unchanged. State the changed metric and units on the x axis. Panel descriptions belong in the separate caption; title arguments keep short verified scope labels and subplot identifiers. Include zero and all intervals on an increasing linear scale. Only known higher/lower metric preference permits a direction cue; otherwise pass None, None. Reserve space above the data for cues and subplot identifiers. Share a legend only for panels with identical comparison semantics. Do not apply this difference helper to absolute means or ratios."
+      ],
+      "fit_paper_layout": true
+    },
+    "histogram_distribution": {
+      "script": "paper_extended.py",
+      "function": "draw_histogram",
+      "native_template": "draw_histogram",
+      "kind": "histogram",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "All groups use common finite strictly increasing bin edges covering every finite observation. Use a density y label with reciprocal input units. Missing is omitted and counted, not zero-filled. No KDE or smoothing is introduced."
+      ]
+    },
+    "ecdf_distribution": {
+      "script": "paper_extended.py",
+      "function": "draw_ecdf",
+      "native_template": "draw_ecdf",
+      "kind": "line",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Use all finite raw observations, tied values grouped into their exact cumulative mass. Show step geometry from 0 to 1 and the full observed x range; no fitted distribution or smoothing."
+      ]
+    },
+    "bar_stacked": {
+      "script": "paper_extended.py",
+      "function": "draw_stacked",
+      "native_template": "draw_stacked",
+      "kind": "bar",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.78,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Use complete nonnegative additive components in consistent units, with positive row totals. Missing components invalidate that composition, never zero-fill. A normalized panel divides by its own category total exactly once. Color identifies COMPONENT, not method. Bind component_colors to full input component order before any filtering/sorting, and use the same mapping in all panels."
+      ],
+      "color_role": "component",
+      "component_colors": [
+        "#0072B2",
+        "#E69F00",
+        "#009E73",
+        "#CC79A7",
+        "#56B4E9",
+        "#D55E00",
+        "#F0E442"
+      ],
+      "preserve_template_bar_colors": true
+    },
+    "classification_roc_pr": {
+      "script": "paper_extended.py",
+      "function": "draw_classification",
+      "native_template": "draw_classification",
+      "kind": "line",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Requires paired complete observed binary labels and actual scores for the same cases; both classes must occur. Group tied thresholds. ROC AUC is trapezoidal ROC area; AP is noninterpolated average precision, not trapezoidal PR area. Score ranking does not require calibrated probabilities. Chance/prevalence references are explicitly labeled in the caption. No inference or uncertainty is invented. Do not fabricate prediction vectors from aggregate findings."
+      ]
+    },
+    "density_hexbin": {
+      "script": "paper_extended.py",
+      "function": "draw_hexbin",
+      "native_template": "draw_hexbin",
+      "kind": "hexbin",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Bin all valid raw coordinate pairs into count-valued hexagons. Incomplete pairs are omitted and disclosed; finite points cannot be cropped. Empty bins remain blank, not fabricated measurements. Use viridis, a count colorbar and explicit physical units; no fitted density is implied."
+      ],
+      "helpers": [
+        "draw_colorbar"
+      ],
+      "color_role": "numeric",
+      "colormap": "viridis",
+      "field_layout": {
+        "inches": [
+          7.165354330708662,
+          3.2283464566929134
+        ],
+        "panels": [
+          [
+            0.085,
+            0.2,
+            0.32,
+            0.66
+          ],
+          [
+            0.59,
+            0.2,
+            0.32,
+            0.66
+          ]
+        ],
+        "colorbars": [
+          [
+            0.423,
+            0.2,
+            0.012,
+            0.66
+          ],
+          [
+            0.928,
+            0.2,
+            0.012,
+            0.66
+          ]
+        ]
+      }
+    },
+    "contour_response": {
+      "script": "paper_extended.py",
+      "function": "draw_contour",
+      "native_template": "draw_contour",
+      "kind": "contour",
+      "layout": {
+        "single_panel": {
+          "left": 0.15,
+          "right": 0.97,
+          "bottom": 0.22,
+          "top": 0.875
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.070866141732284
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Requires a complete finite rectangular response grid at actual strictly increasing x/y coordinates. Color and contour levels cover the full measured range. Show sampled grid nodes, disclose interpolation within the grid, and do not extrapolate or fabricate missing cells. Ordinary scattered observations should use scatter or hexbin instead."
+      ],
+      "helpers": [
+        "draw_colorbar"
+      ],
+      "color_role": "numeric",
+      "colormap": "viridis",
+      "field_layout": {
+        "inches": [
+          7.165354330708662,
+          3.2283464566929134
+        ],
+        "panels": [
+          [
+            0.085,
+            0.2,
+            0.32,
+            0.66
+          ],
+          [
+            0.59,
+            0.2,
+            0.32,
+            0.66
+          ]
+        ],
+        "colorbars": [
+          [
+            0.423,
+            0.2,
+            0.012,
+            0.66
+          ],
+          [
+            0.928,
+            0.2,
+            0.012,
+            0.66
+          ]
+        ]
+      }
+    },
+    "violin_raw_points": {
+      "script": "paper_extended.py",
+      "function": "draw_violin",
+      "native_template": "draw_violin",
+      "kind": "violin",
+      "layout": {
+        "single_panel": {
+          "left": 0.17,
+          "right": 0.96,
+          "bottom": 0.23,
+          "top": 0.87
+        },
+        "two_panels": {
+          "left": 0.085,
+          "right": 0.985,
+          "bottom": 0.2,
+          "top": 0.86,
+          "wspace": 0.32
+        },
+        "single_inches": [
+          3.5039370078740157,
+          3.2283464566929134
+        ],
+        "two_inches": [
+          7.165354330708662,
+          3.070866141732284
+        ],
+        "legend_anchor": [
+          0.992,
+          0.986
+        ]
+      },
+      "rc": {
+        "figure.figsize": [
+          7.165354330708662,
+          3.070866141732284
+        ]
+      },
+      "edge_colors": [
+        "#707070",
+        "#606060",
+        "#546BF5",
+        "#6D80BC",
+        "#263980",
+        "#536BAD",
+        "#18274F"
+      ],
+      "preserve_template_axes": true,
+      "preserve_template_line_colors": true,
+      "rules": [
+        "Requires nonconstant finite raw samples, at least five per displayed method. Keep every original value once, valid n once, Gaussian KDE bandwidth factor 0.30, IQR and median overlays. KDE is a disclosed density estimate, not an observed trajectory or a confidence interval. Do not create a violin from means and intervals alone."
+      ]
+    }
+  }
+}

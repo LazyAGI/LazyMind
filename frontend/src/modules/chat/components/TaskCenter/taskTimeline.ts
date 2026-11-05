@@ -100,6 +100,8 @@ function taskState(
   validity?: "effective" | "stale",
 ): OrdinaryTaskState {
   if (validity === "stale") return "outdated";
+  if (step?.ordinary?.input_required || task?.ordinary?.input_required
+    || (task?.status === "interrupted" && task.current_phase === "awaiting_input")) return "waiting";
   const status = step?.ordinary?.status || step?.status || task?.ordinary?.status || task?.status;
   if (status === "succeeded") return "complete";
   if (status === "running") return "running";

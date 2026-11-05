@@ -49,6 +49,7 @@ const {
   installExternalNavigationHandler,
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
+  isTrustedGitHubCLINavigation,
 } = require("./external-navigation");
 const { loadDesktopCloudConfiguration } = require("./cloud-release-config");
 const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
@@ -275,6 +276,15 @@ const desktopNotifications = createDesktopNotifications({
       if (!notificationSession.rotated(session, result.session)) return null;
       return result.session;
     }));
+  },
+  isTargetVisible: (target) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isFocused()) return false;
+    try {
+      const url = new URL(mainWindow.webContents.getURL());
+      return url.origin === notificationFrontendOrigin()
+        && url.pathname.endsWith(`/lib/knowledge/detail/${encodeURIComponent(target.dataset_id)}`)
+        && url.searchParams.get("expansion_id") === target.expansion_id;
+    } catch { return false; }
   },
   getRuntime: async () => {
     const status = await readStatus({ timeout: 10000 });
@@ -2098,6 +2108,14 @@ async function openTrustedFeishuCLINavigation(rawURL) {
   return { opened: true };
 }
 
+async function openTrustedGitHubCLINavigation(rawURL) {
+  if (!isTrustedGitHubCLINavigation(rawURL)) {
+    throw new Error("GitHub authorization navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
 function cloudRegisterURL() {
   const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
   return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
@@ -3046,6 +3064,9 @@ ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) 
 });
 ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {
   return openTrustedFeishuCLINavigation(String(url || ""));
+});
+ipcMain.handle("lazymind:openGitHubCLIAuthorization", async (_event, url) => {
+  return openTrustedGitHubCLINavigation(String(url || ""));
 });
 ipcMain.handle("lazymind:openCloudRegister", async () => {
   const url = cloudRegisterURL();

@@ -1,0 +1,98 @@
+{
+  "step": "write_document",
+  "input": {
+    "topic": "方法得分比较",
+    "request": "",
+    "constraints": {
+      "paper_language": "zh-CN",
+      "word_target": null,
+      "paper_type": "research",
+      "citation_style": "GB/T 7714",
+      "focus": []
+    },
+    "mode": "draft",
+    "papers": [
+      {
+        "id": "P1",
+        "title": "方法比较示例",
+        "text": "比较方法时应报告评价指标与实验条件。",
+        "url": null,
+        "authors": [],
+        "year": null,
+        "doi": null,
+        "content_type": "excerpt",
+        "source": "upload",
+        "truncated": false
+      }
+    ],
+    "question": {
+      "summary": "比较方法得分，验证差异是否稳定。",
+      "candidates": [
+        {
+          "id": "Q1",
+          "question": "新方法的得分提升是否稳定？",
+          "innovation": "补充重复实验与误差分析。",
+          "rationale": "单次得分不足以说明稳定性。",
+          "source_refs": [
+            "P1"
+          ],
+          "validation_plan": "固定测试条件，重复运行并报告均值和区间。"
+        }
+      ],
+      "selected_id": "Q1"
+    },
+    "evidence": {
+      "summary": "评价方法需要说明指标及实验条件。",
+      "items": [
+        {
+          "id": "E1",
+          "paper_id": "P1",
+          "claim": "方法比较应明确指标和实验条件。",
+          "quote": "比较方法时应报告评价指标与实验条件。",
+          "locator": null,
+          "relation": "background"
+        }
+      ],
+      "gaps": [
+        "现有材料未给出重复实验结果。"
+      ],
+      "limitations": [
+        "仅提供一段节选。"
+      ]
+    },
+    "analysis": {
+      "data_sha256": "262603dbeb95d726f1f6b08d89731256d0d1a055f0d52a5256a18da6d5121e98",
+      "summary": "新方法单次得分比基线高 15 分。",
+      "row_count": 2,
+      "methods": [
+        "按 method 比较 score，计算差值。"
+      ],
+      "findings": [
+        {
+          "statement": "新方法得分比基线高 15 分。",
+          "columns": [
+            "method",
+            "score"
+          ],
+          "calculation": "75 - 60",
+          "value": 15,
+          "unit": "point",
+          "sample_size": 2
+        }
+      ],
+      "limitations": [
+        "每种方法只有一次记录，不能推断统计显著性。"
+      ]
+    },
+    "charts": [],
+    "outline": null,
+    "manuscript": null,
+    "review": null,
+    "selected_issue_ids": []
+  },
+  "output": {
+    "is_demo": true,
+    "outline": "# 示例研究\n\n## 方法\n\n## 结果\n\n## 局限",
+    "manuscript": "# 示例研究\n\n## 方法\n比较两个方法的单次得分。\n\n## 结果\n新方法得分高 15 分。\n\n## 局限\n尚未进行重复实验。"
+  }
+}

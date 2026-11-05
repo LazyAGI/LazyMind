@@ -133,17 +133,84 @@ type projectionResponse struct {
 	InputWitnesses map[string][]graphengine.Witness `json:"input_witnesses"`
 }
 
+type StepProgress struct {
+	StepID string `json:"step_id"`
+	Label  string `json:"label,omitempty"`
+	Status string `json:"status"`
+}
+
+// ReadStepProgress reads the pinned workflow's route and current attempts
+// without building the panel's artifact and attempt history.
+func ReadStepProgress(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) ([]StepProgress, error) {
+	if session.WorkflowRevisionID == "" || session.GraphSchemaVersion != "" && session.GraphSchemaVersion != graphengine.SchemaVersion {
+		return recordedStepProgress(ctx, db, session.ID)
+	}
+	graph, err := loadSessionGraph(ctx, db, session)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Some old revisions have been removed while their attempts remain.
+		return recordedStepProgress(ctx, db, session.ID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := loadRuntimeSnapshot(ctx, db, session.ID, graph)
+	if err != nil {
+		return nil, err
+	}
+	projection := graphengine.Project(graph, snapshot)
+	steps := make([]StepProgress, 0, len(graph.StaticOrder))
+	for _, id := range graph.StaticOrder {
+		if id == "__start__" || id == "__end__" {
+			continue
+		}
+		node, state := graph.Nodes[id], projection.Nodes[id]
+		if state.Execution == "none" && (state.Branch == "bypassed" || state.Branch == "pruned" ||
+			node.SkipIf != nil && graphengine.Evaluate(node.SkipIf, snapshot.Materials).Satisfied) {
+			continue
+		}
+		steps = append(steps, StepProgress{StepID: id, Label: node.Label, Status: state.Execution})
+	}
+	return steps, nil
+}
+
+func recordedStepProgress(ctx context.Context, db *gorm.DB, sessionID string) ([]StepProgress, error) {
+	attempts, err := ListSteps(ctx, db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var steps []StepProgress
+	index := make(map[string]int)
+	latest := make(map[string]int)
+	for _, attempt := range attempts {
+		if attempt.Validity == "stale" {
+			continue
+		}
+		if i, ok := index[attempt.StepID]; ok {
+			if attempt.Attempt >= latest[attempt.StepID] {
+				steps[i].Status = attempt.Status
+				latest[attempt.StepID] = attempt.Attempt
+			}
+			continue
+		}
+		index[attempt.StepID] = len(steps)
+		latest[attempt.StepID] = attempt.Attempt
+		steps = append(steps, StepProgress{StepID: attempt.StepID, Status: attempt.Status})
+	}
+	return steps, nil
+}
+
 type attemptHistoryDTO struct {
-	AttemptID     string  `json:"attempt_id"`
-	Attempt       int     `json:"attempt"`
-	TaskID        string  `json:"task_id"`
-	Status        string  `json:"status"`
-	Validity      string  `json:"validity"`
-	DurationSec   float64 `json:"duration_sec"`
-	ArtifactCount int64   `json:"artifact_count"`
-	StartedAt     string  `json:"started_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	IntentContext string  `json:"intent_context,omitempty"`
+	AttemptID     string          `json:"attempt_id"`
+	Attempt       int             `json:"attempt"`
+	TaskID        string          `json:"task_id"`
+	Status        string          `json:"status"`
+	Validity      string          `json:"validity"`
+	DurationSec   float64         `json:"duration_sec"`
+	ArtifactCount int64           `json:"artifact_count"`
+	StartedAt     string          `json:"started_at"`
+	UpdatedAt     string          `json:"updated_at"`
+	IntentContext string          `json:"intent_context,omitempty"`
+	InputRequired json.RawMessage `json:"input_required,omitempty"`
 }
 
 func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) (projectionResponse, error) {
@@ -184,9 +251,16 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		if duration < 0 {
 			duration = 0
 		}
+		var pending struct {
+			InputRequired json.RawMessage `json:"input_required"`
+		}
+		if attempt.TerminalCode == "WORKFLOW_INPUT_REQUIRED" {
+			_ = json.Unmarshal([]byte(attempt.ResultJSON), &pending)
+		}
 		attemptHistory[attempt.StepID] = append(attemptHistory[attempt.StepID], attemptHistoryDTO{
 			AttemptID: attempt.ID, Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
 			IntentContext: intentMap[attempt.StepID],
+			InputRequired: pending.InputRequired,
 			DurationSec:   duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: attempt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
 		var bindings []orm.WorkflowAttemptInputBinding
@@ -214,7 +288,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	if err != nil {
 		return projectionResponse{}, err
 	}
-	if display.Status == "waiting" {
+	if display.ApprovalStepID != "" {
 		projection.Completed = false
 	}
 	return projectionResponse{

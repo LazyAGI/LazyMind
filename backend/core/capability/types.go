@@ -23,11 +23,14 @@ func (p PermissionSet) Has(value string) bool {
 
 type Principal struct {
 	UserID      string
+	UserName    string
 	TenantID    string
 	Permissions PermissionSet
 }
 
 type InvocationContext struct {
+	ConversationID    string
+	HistoryID         string
 	ExecutionKey      string
 	OperationKey      string
 	ExpectedSnapshot  string

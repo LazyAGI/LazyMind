@@ -16,6 +16,7 @@ func TestIsTextFileExtension(t *testing.T) {
 		// Known text extensions.
 		{"txt", true},
 		{"md", true},
+		{"svg", true},
 		{"lmd", true},
 		{"json", true},
 		{"yaml", true},

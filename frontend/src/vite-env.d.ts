@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_HIDE_EVO?: string;
   readonly VITE_APP_LOGO?: string;
   readonly VITE_APP_CHAT_TITLE?: string;
+  readonly VITE_USER_AGREEMENT_VERSION?: string;
 }
 
 interface ImportMeta {
@@ -45,6 +46,7 @@ declare global {
       clearObsidianRoot?: () => Promise<unknown> | unknown;
       exportDiagnostics?: () => Promise<string> | string;
       openCloudLogin?: (url: string) => Promise<unknown> | unknown;
+      openGitHubCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
       openCloudRegister?: () => Promise<unknown> | unknown;
       openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
       notifyAppReady?: () => void;

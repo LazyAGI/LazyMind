@@ -15,6 +15,7 @@ const displayLabels: Record<WorkflowDisplayState['status'], string> = {
 };
 export const workflowDisplayLabel = (status?: WorkflowDisplayState['status'], reason?: string): string =>
   status === 'waiting' && reason === 'inputs_changed' ? 'chat.workflowStatusInputsChanged'
+    : status === 'waiting' && reason === 'next_step_required' ? 'chat.workflowStatusNextStep'
     : status ? displayLabels[status] : 'common.loading';
 
 export interface RuntimeProjectionStatus {

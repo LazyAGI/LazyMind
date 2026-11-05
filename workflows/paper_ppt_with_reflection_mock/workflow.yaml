@@ -35,6 +35,11 @@ tool_scripts:
   - academic_read_paper
 
 ui:
+  slots:
+    ppt_request:
+      widgetType: json-block
+      readOnly: true
+      collapsed: true
   tabs:
   - id: reflection
     step_id: reflection

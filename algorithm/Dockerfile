@@ -54,7 +54,7 @@ RUN set -eu; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         curl ffmpeg fonts-noto-cjk fonts-wqy-zenhei nodejs \
-        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 ripgrep; \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 ripgrep libseccomp2; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
       amd64) pandoc_arch="amd64"; pandoc_sha="${PANDOC_SHA256_AMD64}" ;; \

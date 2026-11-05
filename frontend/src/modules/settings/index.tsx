@@ -514,7 +514,7 @@ function SettingsPageContent() {
       {overview?.issues.length ? <div className="settings-ref-issues" role="status" aria-live="polite">{overview.issues.map((issue) => <Alert key={issue.id} type={issue.severity === "warning" ? "warning" : "info"} showIcon message={issue.message} action={<Button type="link" size="small" onClick={() => selectSection(issue.section as SectionID)}>{t("settingsPage.view")}</Button>} />)}</div> : null}
       <div className="settings-dashboard-grid">
         {dashboardCard("models", <ApiOutlined />, t("settingsPage.sections.models"), t("settingsPage.overview.modelServicesDesc"), [
-          dashboardRow(t("settingsPage.sections.models"), t("modelProvider.workspace.suppliers"), formatCount(models, t), <Button size="small" onClick={() => selectSection("models")}>{t("settingsPage.quickConfig")}</Button>),
+          dashboardRow(t("settingsPage.sections.models"), t("modelProvider.workspace.suppliers"), formatCount(models, t), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("models")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
         {dashboardCard("model_defaults", <RobotOutlined />, t("settingsPage.sections.defaultModels"), t("settingsPage.overview.modelsDesc"), [
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,
@@ -554,8 +554,8 @@ function SettingsPageContent() {
           dashboardRow(t("settingsPage.sections.tasks"), t("settingsPage.tasks.enableSchedules"), t("settingsPage.tasks.enableSchedulesDesc", { count: tasks.counts.enabled }), switchControl("schedules_enabled", t("settingsPage.tasks.enableSchedules"))),
         ])}
         {dashboardCard("diagnostics", <CheckCircleFilled />, t("settingsPage.sections.diagnostics"), t("settingsPage.overview.diagnosticsDesc"), [
-          dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button size="small" loading={checking} onClick={handleCheckAll}>{t("settingsPage.check")}</Button>),
-          dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Tag className="settings-status-tag">{t("settingsPage.viewable")}</Tag>),
+          dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button className="settings-dashboard-quick-action" size="small" loading={checking} onClick={() => { selectSection("diagnostics"); void handleCheckAll(); }}>{t("settingsPage.check")}</Button>),
+          dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("diagnostics")}>{t("settingsPage.viewable")}</Button>),
         ])}
         {isSettingsSectionVisible("developer", isAdmin) ? dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.enableDeveloper"), t("settingsPage.overview.enableDeveloperDesc"), <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label={t("settingsPage.overview.enableDeveloper")} />),

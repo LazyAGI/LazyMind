@@ -179,6 +179,18 @@ EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
     ),
     'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
+ACADEMIC_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Academic Search Content Rules\n'
+        'Use the returned abstract or passage if it supports the answer. When more detail is needed for a '
+        'selected academic search hit, pass the unchanged result to `get_content` or `get_contents` on the '
+        'same provider. Use that reader for the paper even when general web tools are available. If the '
+        'provider has no matching paper or the available text is insufficient, state the evidence gap. '
+        'Distinguish a preview or abstract from the full paper. Cite the original paper ref verbatim '
+        'in the answer text, outside code formatting.',
+    ),
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+}
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
@@ -237,17 +249,30 @@ ASK_USER_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'actual `ask_user` function-tool call. Never put such a question or request in assistant prose. '
         'If the user explicitly asks you to question or interview them, follow that instruction by '
         'calling `ask_user`. This contract controls only the response channel; decide what and how much '
-        'to ask from the user’s request and the conversation.',
+        'to ask from the user’s request and the conversation. '
+        'Ask only when missing information or a material ambiguity/conflict blocks correct delivery and '
+        'neither context nor a safe declared default resolves it. Do not ask preferences merely to improve '
+        'an already feasible answer. Respect "you decide" for optional preferences. Use 1-3 separate '
+        'decision dimensions. Follow the ask_user parameter schema: every question needs id, text, type, '
+        'reason and required. The text is the question body, not title or description. '
+        'Suggested single choices have at most 3 options; multiple choices at most 4; do not pad them. '
+        'The system adds Other for free input. Multiple allows one selection. Fixed business '
+        'enums remain complete and declare choice_policy=fixed; never use fixed to evade suggestion limits. '
+        'Boolean requires two complete boolean_labels, without choices. Text has no choices; '
+        'give examples and answer limits only when useful and justified. Never invent options, use internal tool '
+        'names or ask for secrets. Dedicated send/delete/permission confirmations remain authoritative; '
+        'do not duplicate or replace them with ask_user. Do not re-ask resolved fields or chase an ignored '
+        'card after the user changes topics. Discovering a new blocking fact during execution may require '
+        'a question even when the original request was complete.',
     ),
 }
 ASK_USER_QUERY_APPENDIX = (
-    'ATTENTION — `ask_user` is registered for this turn. If you ask the user any question, request '
-    'their opinion, or invite any reply, you MUST make an actual `ask_user` function-tool call; NEVER '
-    'write that request as assistant prose. This rule applies to every kind of user-facing question or '
-    'reply request, including clarification, confirmation, opinion, open-ended questions, and optional '
-    'follow-ups. Exception: after you have already given the substantive answer to the user request, '
-    'do NOT call `ask_user` merely to offer optional next steps or say what the user can ask for next; '
-    'write that brief follow-up in assistant prose instead.'
+    'ATTENTION — `ask_user` is available, not mandatory. Ask only for a blocking gap, material '
+    'ambiguity/conflict, or a user-requested interview; reuse known answers and safe declared defaults. '
+    'For such ordinary questions, make an actual `ask_user` function-tool call, never a prose question. '
+    'Dedicated approval, secure-input and review flows use their own controls, not another ask_user card. '
+    'Do not create questions merely because this tool exists. After answering, optional next-step '
+    'suggestions belong in brief prose and must not create another interruption.'
 )
 SESSION_ENV_QUERY_APPENDIX = (
     'Call set_session_env only after the user explicitly asks to configure, set, save, or provide an '
@@ -823,8 +848,8 @@ DEFAULT_TOOLS: list[ToolConfig] = [
             'name': 'AcademicSearchToolkit',
             'desc': (
                 'Search papers, authors, abstracts, and scholarly metadata with the first available '
-                'provider. Use this instead of general web search for academic questions, and fetch '
-                'content only after identifying the relevant paper.'
+                'provider. Use this for academic questions. To read more about a paper found here, '
+                'pass the original hit to get_content or get_contents on the same provider.'
             ),
             'pick_first_valid': True,
             'tools': _ACADEMIC_SEARCH_ENGINE_INSTANCES,
@@ -835,7 +860,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='academic_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
-        appendix_system_prompt=EXTERNAL_SEARCH_CONTENT_APPENDIX,
+        appendix_system_prompt=ACADEMIC_SEARCH_CONTENT_APPENDIX,
     ),
     ToolConfig(
         name='url_fetch',

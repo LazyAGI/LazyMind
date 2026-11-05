@@ -9,7 +9,7 @@ func ordinaryConversationEvent(event *ConvEvent) *ConvEvent {
 	case "task_created", "task_updated", "artifact_created", "driver_input", "auto_chat_started",
 		"task_run_updated", "workflow_step_feedback", "workflow_runtime_updated", "step_waiting", "workflow_completed",
 		"workflow_error", "step_partial_done", "intent_updated", "workflow_artifact_updated",
-		"workflow_session_created", "ask_pending", "max_retries_exceeded", "driver_fallback":
+		"workflow_session_created", "ask_pending", "knowledge_confirmation", "max_retries_exceeded", "driver_fallback":
 	default:
 		return nil
 	}
