@@ -229,6 +229,20 @@ def apply_request_advanced(config, *, method, url, headers=None, json_body=None,
                 model.startswith('deepseek-v4') or model == 'deepseek-flash'
             ):
                 result['json']['thinking'] = {'type': 'disabled'}
+
+    # GPT-5.4–5.6 Chat Completions only accept function tools with reasoning
+    # disabled. Apply this after feature filtering so an explicit disabled
+    # reasoning feature cannot accidentally restore the model's medium default.
+    body = result.get('json')
+    if (str(source).lower() == 'openai' and isinstance(body, dict)
+            and urlsplit(str(url)).path.rstrip('/').endswith('/chat/completions')
+            and body.get('tools') and re.match(r'^gpt-5\.[456](?:[.-]|$)', str(body.get('model', '')).lower())):
+        body['reasoning_effort'] = 'none'
+    if (str(source).lower() == 'openai_responses' and isinstance(body, dict)
+            and urlsplit(str(url)).path.rstrip('/').endswith('/responses')):
+        legacy_effort = body.pop('reasoning_effort', None)
+        if legacy_effort is not None and 'reasoning' not in body:
+            body['reasoning'] = {'effort': legacy_effort}
     return result
 
 
@@ -245,15 +259,18 @@ def configure_request_advanced(model_config):
         features = features if isinstance(features, dict) else {}
         feature_disables = any(features.get(key) is False for key in ('tool_calling', 'reasoning'))
         private = any(advanced.get(key) for key in ('headers', 'query', 'extra_body'))
-        if not feature_disables and not private:
+        source = str(entry.get('source') or '').lower()
+        model = str(entry.get('model') or '').lower()
+        completions_compatibility = (source == 'openai' and re.match(r'^gpt-5\.[456](?:[.-]|$)', model))
+        if not feature_disables and not private and not completions_compatibility:
             continue
         base = str(entry.get('base_url') or '').strip()
         parsed = urlsplit(base)
         if private and (parsed.scheme not in {'http', 'https'} or not parsed.hostname
                         or parsed.query or parsed.fragment or parsed.username or parsed.password):
             raise ProviderRequestConfigurationError('advanced request configuration requires a valid supplier API root')
-        policies[role] = {'base': base, 'advanced': advanced, 'source': str(entry.get('source') or '').lower(),
-                          'model': str(entry.get('model') or '').lower(), 'features': deepcopy(features),
+        policies[role] = {'base': base, 'advanced': advanced, 'source': source,
+                          'model': model, 'features': deepcopy(features),
                           'private': private, 'kind': kind}
     lazyllm.globals['lazymind_request_advanced'] = policies
     _install_runtime_hooks()

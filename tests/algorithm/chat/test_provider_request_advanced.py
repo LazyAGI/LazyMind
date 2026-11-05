@@ -39,6 +39,82 @@ def test_request_options_preserve_authentication_and_mandatory_body():
     )
 
 
+@pytest.mark.parametrize('model,source,tools,want', [
+    ('gpt-5.6-sol', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], 'none'),
+    ('gpt-5.6-sol', 'openai', [], None),
+    ('gpt-4o', 'openai', [{'type': 'function', 'function': {'name': 'lookup'}}], None),
+    ('gpt-5.6-sol', 'openrouter', [{'type': 'function', 'function': {'name': 'lookup'}}], None),
+])
+def test_chat_completions_tool_compatibility_is_model_scoped(model, source, tools, want):
+    body = {'model': model, 'messages': [], 'tools': tools}
+    result = apply_request_advanced({}, method='POST', url='https://example.test/v1/chat/completions',
+                                    json_body=body, source=source)
+    assert result['json'].get('reasoning_effort') == want
+
+
+def test_disabled_reasoning_still_sends_none_for_openai_chat_tools():
+    result = apply_request_advanced({'extra_body': {'reasoning_effort': 'high'}}, method='POST',
+                                    url='https://api.openai.com/v1/chat/completions',
+                                    json_body={'model': 'gpt-5.6-sol', 'messages': [], 'tools': [{'type': 'function'}]},
+                                    features={'reasoning': False}, source='openai')
+    assert result['json']['reasoning_effort'] == 'none'
+
+
+def test_saved_chat_reasoning_effort_uses_responses_shape_after_protocol_switch():
+    result = apply_request_advanced({'extra_body': {'reasoning_effort': 'none'}}, method='POST',
+                                    url='https://api.openai.com/v1/responses',
+                                    json_body={'model': 'gpt-5.6-sol', 'input': [{'role': 'user', 'content': 'Hi'}]},
+                                    source='openai_responses')
+    assert result['json']['reasoning'] == {'effort': 'none'}
+    assert 'reasoning_effort' not in result['json']
+
+
+def test_chat_completions_compatibility_activates_without_advanced_settings(monkeypatch):
+    import lazyllm
+    from lazyllm import AutoModel
+    from lazyllm.common import new_session
+    from lazyllm.module.llms.model_config_inject import inject_model_config
+
+    sent = []
+
+    def send(session, request, **kwargs):
+        sent.append(json.loads(request.body))
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({'choices': [{'message': {'content': 'ok'},
+                                                      'finish_reason': 'stop'}]}).encode()
+        response._content_consumed = True
+        response.raw = BytesIO()
+        response.request = request
+        return response
+
+    monkeypatch.setattr(requests.Session, 'send', send)
+
+    with new_session('test-completions-compatibility'):
+        config = {'llm': {'source': 'openai', 'model': 'gpt-5.6-sol', 'api_key': 'test-key',
+                          'base_url': 'https://api.openai.com/v1/'}}
+        inject_model_config(config)
+        configure_request_advanced(config)
+        assert lazyllm.globals['lazymind_request_advanced']['llm']['private'] is False
+        assert lazyllm.globals['lazymind_request_advanced']['llm']['model'] == 'gpt-5.6-sol'
+        model = AutoModel(source='dynamic', name='llm', dynamic_auth=True)
+        assert model('Hi', stream_output=False)['content'] == 'ok'
+        supplier = next(iter(model._suppliers.values()))
+        generate = supplier._prompt.generate_prompt
+
+        def with_tool(**kwargs):
+            return {**generate(**kwargs), 'tools': [{'type': 'function', 'function': {
+                'name': 'lookup', 'parameters': {'type': 'object', 'properties': {}}}}]}
+
+        monkeypatch.setattr(supplier._prompt, 'generate_prompt', with_tool)
+        assert model('Hi', stream_output=False)['content'] == 'ok'
+        assert sent[0].get('reasoning_effort') is None
+        assert sent[1].get('reasoning_effort') == 'none', sent[1]
+        configure_request_advanced({'llm': {'source': 'openai', 'model': 'gpt-4o',
+                                            'base_url': 'https://api.openai.com/v1/'}})
+        assert 'llm' not in lazyllm.globals['lazymind_request_advanced']
+
+
 @pytest.mark.parametrize('config', [
     {'headers': {'Authorization': 'replacement'}}, {'headers': {'X-Test': 'bad\r\nheader'}},
     {'extra_body': {'model': 'replacement'}}, {'extra_body': {'dimensions': 1}},

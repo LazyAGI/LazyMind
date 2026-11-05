@@ -18,6 +18,20 @@ func requestConfigRequest(method, provider, user, body string) *http.Request {
 	return mux.SetURLVars(req, map[string]string{"model_provider_id": provider})
 }
 
+func TestBuiltInOpenAIDefaultsToResponsesWhileCustomProviderKeepsChat(t *testing.T) {
+	official := orm.UserModelProvider{Name: "OpenAI", BaseURL: "https://api.openai.com/v1/"}
+	if got := savedRequestConfig(nil, official).DefaultProtocol; got != "openai-responses" {
+		t.Fatalf("OpenAI default protocol = %q, want openai-responses", got)
+	}
+	if !runtimeSupportsRequestProtocol(official, "openai-responses") {
+		t.Fatal("Responses is not available at runtime")
+	}
+	custom := orm.UserModelProvider{Name: "OpenAI", IsCustom: true, BaseURL: "https://proxy.example/v1/"}
+	if got := savedRequestConfig(nil, custom).DefaultProtocol; got != "openai" {
+		t.Fatalf("custom provider default protocol = %q, want openai", got)
+	}
+}
+
 func TestRequestDefaultsUseSupplierAddressAndKeepProxyPrefix(t *testing.T) {
 	for _, tc := range []struct {
 		name, protocol, base, openai, anthropic string

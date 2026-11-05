@@ -417,7 +417,7 @@ export interface ProviderRequestConfig {
 export interface ProviderRequestConfigInput {
   advanced?: ProviderRequestAdvanced;
   default_protocol: RequestProtocol;
-  endpoints: { openai?: string; anthropic?: string };
+  endpoints: { openai?: string; "openai-responses"?: string; anthropic?: string };
 }
 
 export async function getProviderRequestConfig(

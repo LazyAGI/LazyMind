@@ -36,6 +36,15 @@ def normalize_type(value: str) -> str:
 
 def _chat(request: ProbeInput, source: str) -> ProbePlan:
     visual = request.vision if request.vision is not None else request.model_type == 'vlm'
+    if source == 'openai_responses':
+        content = PROMPT if not visual else [
+            {'type': 'input_text', 'text': PROMPT},
+            {'type': 'input_image', 'image_url': IMAGE_DATA_URL},
+        ]
+        return ProbePlan('responses', 'responses', json={
+            'model': request.model, 'input': [{'role': 'user', 'content': content}],
+            'max_output_tokens': 32, 'stream': False,
+        })
     if source in {'anthropic', 'claude'}:
         content = [{'type': 'text', 'text': PROMPT}]
         if visual:
@@ -70,7 +79,7 @@ def build_plan(request: ProbeInput) -> ProbePlan:
     source = runtime_source(request.source)
     embedding_input = request.embedding.get('query_prefix', '') + 'test'
     if kind in {'llm', 'vlm'}:
-        if source not in COMPATIBLE | {'anthropic', 'claude', 'qwen', 'doubao', 'sensenova', 'minimax'}:
+        if source not in COMPATIBLE | {'openai_responses', 'anthropic', 'claude', 'qwen', 'doubao', 'sensenova', 'minimax'}:
             raise UnsupportedProbe('unsupported_provider')
         plan = _chat(request, source)
         if source == 'kimi' and not urlsplit(request.url).path.rstrip('/').endswith('/v1'):

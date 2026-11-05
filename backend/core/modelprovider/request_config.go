@@ -49,10 +49,19 @@ type updateProviderRequestConfigRequest struct {
 }
 
 func defaultRequestProtocol(provider orm.UserModelProvider) string {
+	if !provider.IsCustom && provider.Name == "OpenAI" {
+		return "openai-responses"
+	}
 	if LazyLLMSource(RuntimeProviderName(provider)) == "claude" {
 		return "anthropic"
 	}
 	return "openai"
+}
+
+// RuntimeRequestProtocol returns the saved wire protocol, including the
+// built-in OpenAI default when no explicit selection has been stored.
+func RuntimeRequestProtocol(provider orm.UserModelProvider) string {
+	return savedRequestConfig(nil, provider).DefaultProtocol
 }
 
 func providerRequestDefaults(db *gorm.DB, parent orm.UserModelProvider) map[string]string {
@@ -98,7 +107,7 @@ func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProvider
 	var stored savedProviderRequestConfig
 	if parent.RequestConfig != "" && json.Unmarshal([]byte(parent.RequestConfig), &stored) == nil {
 		config.Advanced, config.AdvancedCiphertext = stored.Advanced, stored.AdvancedCiphertext
-		if stored.DefaultProtocol == "openai" || stored.DefaultProtocol == "anthropic" {
+		if stored.DefaultProtocol == "openai" || stored.DefaultProtocol == "openai-responses" || stored.DefaultProtocol == "anthropic" {
 			config.DefaultProtocol = stored.DefaultProtocol
 		}
 		for key, value := range stored.Endpoints {
@@ -257,7 +266,7 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for key, value := range req.Endpoints {
-		if key != "openai" && key != "anthropic" {
+		if key != "openai" && key != "openai-responses" && key != "anthropic" {
 			common.ReplyErr(w, "request protocol is not supported by the current runtime", 400)
 			return
 		}

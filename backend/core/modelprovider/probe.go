@@ -157,6 +157,9 @@ func loadProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID, gro
 		}
 		features := modelsettings.Effective(settings, model.Vision, modelType)
 		snapshot = modelProbeSnapshot{Model: model.Name, ModelType: modelType, Source: RuntimeProviderName(parent), URL: connectionBaseURL(parent, group.BaseURL), Vision: features.Vision != nil && *features.Vision, ModelSettings: model.ModelSettings}
+		if (modelType == "llm" || modelType == "vlm") && savedRequestConfig(tx, parent).DefaultProtocol == "openai-responses" {
+			snapshot.Source = "OpenAIResponses"
+		}
 		if modelType == "llm" || modelType == "vlm" {
 			encoded, err := json.Marshal(features)
 			if err != nil {

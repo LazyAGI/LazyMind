@@ -234,6 +234,7 @@ type SelectedRuntimeModel struct {
 	Vision             bool
 	ModelSettings      string                                  `gorm:"column:model_settings"`
 	RequestAdvanced    credentialvault.ProviderRequestAdvanced `gorm:"-" json:"-"`
+	RequestProtocol    string                                  `gorm:"-" json:"-"`
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
@@ -1078,11 +1079,13 @@ func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []Sele
 		if credentials != nil && groupID != "" {
 			key := runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}
 			if cached, ok := credentials[key]; ok &&
-				(cached.err != nil || strings.TrimSpace(cached.key) != "" || strings.TrimSpace(cached.baseURL) != "") {
+				(cached.err != nil || cached.protocol != "") {
 				if cached.err != nil {
 					return cached.err
 				}
 				rows[i].APIKey = cached.key
+				rows[i].RequestAdvanced = cached.advanced
+				rows[i].RequestProtocol = cached.protocol
 				if strings.TrimSpace(cached.baseURL) != "" {
 					rows[i].BaseURL = cached.baseURL
 				}
@@ -1095,9 +1098,10 @@ func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []Sele
 		if runtimeErr == nil {
 			rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
 			rows[i].RequestAdvanced = runtimeConfig.Advanced
+			rows[i].RequestProtocol = runtimeConfig.Protocol
 			rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
 			if groupID != "" && credentials != nil {
-				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL}
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL, advanced: runtimeConfig.Advanced, protocol: runtimeConfig.Protocol}
 			}
 			continue
 		}
@@ -1155,6 +1159,9 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"model":    row.ModelName,
 			"base_url": baseURL,
 			"api_key":  row.APIKey,
+		}
+		if row.RequestProtocol == "openai-responses" && (role == "llm" || role == "vlm" || role == "evo_llm") {
+			cfg["source"] = "openai_responses"
 		}
 		if row.SkipAuth && strings.TrimSpace(row.APIKey) == "" {
 			cfg["skip_auth"] = true
