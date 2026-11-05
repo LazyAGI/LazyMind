@@ -5,6 +5,7 @@ import "net/http"
 func init() {
 	registerAdditionalErrorAlias("agent not allowed", "forbidden", http.StatusForbidden, 2000102)
 	registerAdditionalErrorAlias("idempotency conflict", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorAlias("workflow run changed before its state could be written", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalError("workflow controls require an interactive single Chat run", http.StatusBadRequest, 2004901)
 	registerAdditionalError("native workflow controls require the LazyMind Chat executor", http.StatusConflict, 2004902)
 	registerAdditionalError("lease_token required", http.StatusBadRequest, 2004903)

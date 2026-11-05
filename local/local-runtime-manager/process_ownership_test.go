@@ -9,7 +9,16 @@ import (
 )
 
 func TestOwnedRuntimeProcessesRequiresOwnership(t *testing.T) {
-	paths := RuntimePaths{RepoRoot: "/repo", BuildRoot: "/repo/local/build", RuntimeRoot: "/runtime", BinDir: "/repo/local/build/bin", CoreBin: "/repo/local/build/bin/core"}
+	root := t.TempDir()
+	repoRoot := filepath.Join(root, "repo")
+	buildRoot := filepath.Join(repoRoot, "local", "build")
+	paths := RuntimePaths{
+		RepoRoot:    repoRoot,
+		BuildRoot:   buildRoot,
+		RuntimeRoot: filepath.Join(root, "runtime"),
+		BinDir:      filepath.Join(buildRoot, "bin"),
+		CoreBin:     filepath.Join(buildRoot, "bin", "core"),
+	}
 	registered := []LocalProcessRecord{
 		{PID: 800001, Service: "core", RuntimeRoot: paths.RuntimeRoot, StartID: 100},
 		{PID: 800007, Service: "core", RuntimeRoot: paths.RuntimeRoot, StartID: 99},
@@ -23,8 +32,8 @@ func TestOwnedRuntimeProcessesRequiresOwnership(t *testing.T) {
 		{PID: 800003, ParentPID: 800002, Executable: "/usr/bin/python", StartID: 102},
 		{PID: 800002, ParentPID: 800001, Executable: "/usr/bin/python", StartID: 101},
 		{PID: 800001, Executable: paths.CoreBin, StartID: 100},
-		{PID: 800004, Executable: paths.BinDir + "/lazymind", Command: []string{"lazymind", "mcp", "proxy"}, OwnerRoot: paths.RuntimeRoot, StartID: 100},
-		{PID: 800005, Executable: paths.BinDir + "/unrelated", Command: []string{"unrelated", paths.RuntimeRoot}, StartID: 100},
+		{PID: 800004, Executable: filepath.Join(paths.BinDir, "lazymind"), Command: []string{"lazymind", "mcp", "proxy"}, OwnerRoot: paths.RuntimeRoot, StartID: 100},
+		{PID: 800005, Executable: filepath.Join(paths.BinDir, "unrelated"), Command: []string{"unrelated", paths.RuntimeRoot}, StartID: 100},
 		{PID: 800006, Executable: "/usr/bin/python", OwnerRoot: paths.RuntimeRoot, StartID: 100},
 		{PID: 800007, Executable: paths.CoreBin, OwnerRoot: paths.RuntimeRoot, StartID: 100},
 		{PID: 800008, Executable: paths.CoreBin, StartID: 100},
@@ -34,7 +43,7 @@ func TestOwnedRuntimeProcessesRequiresOwnership(t *testing.T) {
 		{PID: 800012, Executable: "/usr/bin/node", ParentPID: 800004, OwnerRoot: paths.RuntimeRoot, StartID: 103},
 		// A shared group, directory, or similar service path does not prove ownership.
 		{PID: 800013, Executable: paths.CoreBin + "-other", PGID: 800001, StartID: 100},
-		{PID: 800014, Executable: "/repo/local/build-other/bin/core", StartID: 100},
+		{PID: 800014, Executable: filepath.Join(repoRoot, "local", "build-other", "bin", "core"), StartID: 100},
 	}
 	var skipped []int
 	got := ownedRuntimeProcesses(paths, registered, inventory, func(record LocalProcessRecord) { skipped = append(skipped, record.PID) })
