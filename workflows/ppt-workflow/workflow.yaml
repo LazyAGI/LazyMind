@@ -691,6 +691,29 @@ slots:
     ordered: true
     summary_max_chars: 900
 
+  - id: presentation_style
+    user_visible: true
+    label: Global Style
+    type: text
+    cardinality: single
+    summary_max_chars: 900
+
+  - id: page_layout
+    user_visible: true
+    label: Page Layout
+    type: text
+    cardinality: list
+    ordered: true
+    summary_max_chars: 900
+
+  - id: page_assets
+    user_visible: true
+    label: Page Assets
+    type: text
+    cardinality: list
+    ordered: true
+    summary_max_chars: 900
+
   - id: deck_outline
     user_visible: true
     label: Deck Outline
@@ -816,12 +839,19 @@ ui:
       slot_scope: step
       composite_tab_position: left
       slots:
+        - id: presentation_style
         - id: slide_outline
+        - id: page_layout
+        - id: page_assets
       composite_layout:
-        direction: row
+        direction: column
         children:
+          - slot: presentation_style
           - slot: slide_outline
+          - slot: page_layout
+          - slot: page_assets
       composite_behavior:
+        repeat_single_slots: [presentation_style]
         hide_empty_columns: true
         empty_column_scope: selected
 
@@ -886,6 +916,9 @@ i18n:
       background_prompts: {label: 底图提示词}
       background_images: {label: AI 底图}
       deck_outline: {label: 大纲}
-      slide_outline: {label: 每页提示词}
+      slide_outline: {label: 页面正文}
+      presentation_style: {label: 全局风格}
+      page_layout: {label: 页面布局}
+      page_assets: {label: 页面素材}
       preview_html: {label: 幻灯片}
       preview_notes: {label: 讲稿}

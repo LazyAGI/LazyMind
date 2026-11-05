@@ -65,7 +65,7 @@ def test_publish_correct_route_preserves_authored_prompt(monkeypatch, tmp_path, 
     (tmp_path / 'outline_draft.md').write_text('## 封面', encoding='utf-8')
     monkeypatch.setattr(tools, '_bound_workflow_deck', lambda: tmp_path)
     monkeypatch.setattr(tools, 'require_context', lambda: SimpleNamespace())
-    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda *a: ('## 封面\n标题', 'text'))
+    monkeypatch.setattr(tools, '_resolve_artifact_text', lambda _ctx, key: ('## 封面\n标题' if key == 'deck_outline' else None, 'text'))
     monkeypatch.setattr(tools, '_ui_slot_order_list', lambda *a: [])
     published = []
     monkeypatch.setattr(tools, '_publish_ordered_ppt_artifact',

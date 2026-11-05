@@ -29,6 +29,7 @@ Each subcommand:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import tempfile
 from contextvars import ContextVar
@@ -200,8 +201,27 @@ def _sanitize_page_html(raw: str) -> str:
         s = fence.group(1).strip()
     m = _HTML_DOC_RE.search(s)
     if m:
-        return m.group(1).strip()
+        return _restore_serialized_html(m.group(1).strip())
     return s.strip()
+
+
+def _restore_serialized_html(html: str) -> str:
+    """Repair old str(response-dict) pages, not normal JS/CSS string escapes.
+
+    Those pages contain Python-repr escapes across the document, including
+    between root tags and every CSS line. Require that signature before
+    decoding one layer; preserve Unicode and intentionally doubled escapes.
+    """
+    start = re.search(r'(?i)<!doctype\s+html|<html\b', html)
+    if start is None:
+        return html
+    head = html[start.start():].split('</head>', 1)[0]
+    if not (re.search(r'(?i)<html\b[^>]*>\\n\s*<head>', head)
+            and re.search(r'(?i)<style[^>]*>\\n', head)
+            and '\n' not in head):
+        return html
+    escapes = {'n': '\n', 'r': '\r', 't': '\t', '\\': '\\', "'": "'", '"': '"'}
+    return re.sub(r'''\\([nrt\\'"])''', lambda match: escapes[match[1]], html)
 
 
 def _parse_json_loose(s: str) -> dict:
@@ -238,6 +258,26 @@ def _parse_json_loose(s: str) -> dict:
             return decoder.raw_decode(candidate)[0]
         except json.JSONDecodeError as exc:
             error = exc
+    # Some providers serialize structured output as a Python dict repr. Accept
+    # only literal JSON-shaped data; never execute expressions or repair values
+    # by replacing quotes (which corrupts apostrophes and escaped content).
+    def json_shaped(value):
+        if value is None or type(value) in (str, bool, int, float):
+            return True
+        if type(value) is list:
+            return all(json_shaped(item) for item in value)
+        if type(value) is dict:
+            return all(type(key) is str and json_shaped(item) for key, item in value.items())
+        return False
+
+    literal_start = s.find('{')
+    for candidate in (s, s[literal_start:] if literal_start > 0 else s):
+        try:
+            value = ast.literal_eval(candidate)
+            if isinstance(value, dict) and json_shaped(value):
+                return json.loads(json.dumps(value, allow_nan=False))
+        except (SyntaxError, ValueError, TypeError, RecursionError):
+            pass
     raise error
 
 

@@ -3511,6 +3511,8 @@ def ppt_update_speaker_notes(page_order: list, total_minutes: float | None = Non
 def _publish_text_page_briefs(
     deck: Path, pages: Optional[list[int]], page_prompts: Optional[Union[str, list]] = None,
     speaker_notes: Optional[Union[str, list]] = None,
+    page_components: Optional[list[dict]] = None,
+    global_style: Optional[str] = None,
 ) -> dict[str, Any]:
     ctx = require_context()
     text, _ = _resolve_artifact_text(ctx, 'deck_outline')
@@ -3535,6 +3537,14 @@ def _publish_text_page_briefs(
     if not isinstance(prompts, list) or len(prompts) != len(targets):
         raise ValueError('Provide page_prompts: one authored visual generation prompt per target page; '
                          'do not copy deck_outline')
+    old_style, _ = _resolve_artifact_text(ctx, 'presentation_style')
+    if old_style and page_components is None:
+        raise ValueError('This plan uses components; update content/layout/assets instead of legacy page_prompts')
+    if page_components is not None:
+        if len(page_components) != len(targets):
+            raise ValueError('Provide one content/layout/assets object per target page')
+        if pages is not None and not old_style:
+            raise ValueError('Convert every page together before editing modular page components')
     for number, prompt in zip(targets, prompts):
         if number < 1 or number > len(briefs):
             raise ValueError(f'Page {number} outside approved outline')
@@ -3547,8 +3557,31 @@ def _publish_text_page_briefs(
     published = []
     if saved_notes is not None:
         _save_notes_source(deck, saved_notes)
-    for number, prompt in zip(targets, prompts):
+    if page_components is not None:
+        saved = _save_artifact(key='presentation_style', value=global_style.strip(),
+                               content_type='text', source_tool='ppt_publish_outline', internal_publish=True)
+        if _tool_failed(saved):
+            raise ValueError(_tool_fail_reason(saved) or 'Global style publication failed')
+        for field, slot in (('layout', 'page_layout'), ('assets', 'page_assets')):
+            component_order = _ui_slot_order_list(slot)
+            for number, component in zip(targets, page_components):
+                saved = _publish_ordered_ppt_artifact(
+                    slot=slot, page_no=number, value=component[field].strip(),
+                    content_type='text', source_tool='ppt_publish_outline',
+                    caption=briefs[number - 1].splitlines()[0].lstrip('# ').strip(),
+                    order_list=component_order, expected_total=len(briefs),
+                )
+                if _tool_failed(saved):
+                    raise ValueError(_tool_fail_reason(saved) or 'Page component publication failed')
+            if pages is None:
+                for position in range(len(component_order), len(briefs), -1):
+                    deleted = _delete_ui_slot_item(slot, position)
+                    if _tool_failed(deleted):
+                        raise ValueError('Cannot remove stale page component')
+    for index, (number, prompt) in enumerate(zip(targets, prompts)):
         brief = prompt.strip()
+        if page_components is not None:
+            brief = page_components[index]['content'].strip()
         saved = _publish_ordered_ppt_artifact(
             slot='slide_outline', page_no=number, value=brief,
             content_type='text', source_tool='ppt_publish_outline',
@@ -3760,8 +3793,28 @@ def _load_slide_outline_briefs(page_nos: list[int]) -> dict[int, str]:
         except Exception:
             text = None
         if text and str(text).strip():
-            briefs[page_no] = str(text).strip()
+            briefs[page_no] = _assemble_page_prompt(ctx, page_no, str(text).strip())
     return briefs
+
+
+def _compose_page_prompt(style: str, content: str, layout: str, assets: str) -> str:
+    return content.strip() + '\n\n' + '\n\n'.join(
+        f'## {label}\n{body.strip()}' for label, body in (
+            ('全局风格', style), ('页面布局', layout), ('页面素材', assets),
+        )
+    )
+
+
+def _assemble_page_prompt(ctx: Any, page_no: int, content: str) -> str:
+    """Resolve current editable artifacts each time; never reuse a stale merge."""
+    style, _ = _resolve_artifact_text(ctx, 'presentation_style')
+    layout, _ = _resolve_artifact_text(ctx, 'page_layout', sort_order=page_no)
+    assets, _ = _resolve_artifact_text(ctx, 'page_assets', sort_order=page_no)
+    if not any((style, layout, assets)):
+        return content  # Existing sessions still own a complete text prompt.
+    if not all(isinstance(value, str) and value.strip() for value in (style, layout, assets, content)):
+        raise ValueError(f'Page {page_no} has incomplete prompt components; restore style/content/layout/assets')
+    return _compose_page_prompt(style, content, layout, assets)
 
 
 def _artifact_text(value: Any) -> str:
@@ -3810,7 +3863,7 @@ def _selected_slide_outline_items() -> list[tuple[int, str]]:
                 detail = _workflow_client().read_artifact(artifact_id).result
                 if isinstance(detail, dict):
                     content = _artifact_text(detail.get('value'))
-        items.append((list_index, content))
+        items.append((list_index, _assemble_page_prompt(require_context(), len(items) + 1, content)))
     return items
 
 
@@ -5403,6 +5456,23 @@ def _batch_page_html_publish_progressive(
     }
 
 
+def _model_response_text(response: Any) -> str:
+    """Read model content without stringifying response envelopes/reasoning."""
+    if isinstance(response, str):
+        return response.strip()
+    if isinstance(response, dict):
+        content = response.get('content')
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return ''.join(
+                block['text'] for block in content
+                if isinstance(block, dict) and block.get('type') in ('text', 'output_text')
+                and isinstance(block.get('text'), str)
+            ).strip()
+    return ''
+
+
 def _agent_llm_call(
     system_prompt: str,
     user_prompt: str,
@@ -5482,7 +5552,7 @@ def _agent_llm_call(
                 f'[{request_name}]'
             ) from exc
         raise
-    text = str(out).strip() if out is not None else ''
+    text = _model_response_text(out)
     if not text:
         raise RuntimeError(f'AutoModel llm returned empty text [{request_name}]')
     return text
@@ -5510,7 +5580,7 @@ def _agent_vlm_call(
     )
     role = select_vision_model_role()
     out = AutoModel(model=role, type='vlm')(encoded, stream_output=False, llm_chat_history=[], lazyllm_files=None)
-    text = str(out).strip() if out is not None else ''
+    text = _model_response_text(out)
     if not text:
         raise RuntimeError('Visual model returned empty text')
     return text
@@ -8783,7 +8853,7 @@ def ppt_delete_page(deck_dir: str, page: int) -> dict:
     try:
         require_context()
         for slot in (
-            'slide_outline', 'background_prompts', 'background_images',
+            'slide_outline', 'page_layout', 'page_assets', 'background_prompts', 'background_images',
             'preview_html', 'preview_notes',
         ):
             ui_deleted.append(_delete_ui_slot_item(slot, page_no))
@@ -8819,6 +8889,8 @@ def ppt_publish_outline(
     page_prompts: Optional[Union[str, list]] = None,
     output_format: str = 'auto',
     speaker_notes: Optional[Union[str, list]] = None,
+    page_components: Optional[Union[str, list]] = None,
+    global_style: Optional[str] = None,
 ) -> dict:
     """Publish outline.json pages into slide_outline list artifacts for the UI.
 
@@ -8838,6 +8910,11 @@ def ppt_publish_outline(
         speaker_notes: Separate array of complete timed spoken scripts in the same
             target-page order. Saved as a hidden file artifact; do not include these
             scripts in page_prompts. Downstream tools need only notes_ref.
+        page_components: Preferred array of objects with non-empty content, layout,
+            assets strings, one per target page. Each field is independently editable.
+            Use assets="无外部素材" when the page needs no external image.
+        global_style: Shared typography, colors, canvas and output rules. Required
+            with page_components; saved once and assembled with each page at generation.
         pages: Optional 1-based page filter. Omit = all outline pages.
         insert_before: For an incremental whole-slide insertion, the one page
             position to insert into the UI list while preserving later items.
@@ -8845,6 +8922,21 @@ def ppt_publish_outline(
     Returns:
         published_count and per-page titles (no full brief bodies).
     """
+    components = json.loads(page_components) if isinstance(page_components, str) else page_components
+    if components is not None:
+        if page_prompts is not None:
+            raise ValueError('Use page_components or legacy page_prompts, not both')
+        if not isinstance(global_style, str) or not global_style.strip():
+            raise ValueError('page_components requires non-empty global_style')
+        if not isinstance(components, list) or not components or any(
+            not isinstance(item, dict) or any(
+                not isinstance(item.get(key), str) or not item[key].strip()
+                for key in ('content', 'layout', 'assets')
+            ) for item in components
+        ):
+            raise ValueError('Every page component needs content, layout and assets text')
+        page_prompts = [_compose_page_prompt(global_style, item['content'], item['layout'], item['assets'])
+                        for item in components]
     required_format = _validate_prompt_output_format(output_format, page_prompts)
     try:
         if _coerce_str(deck_dir).strip():
@@ -8876,11 +8968,14 @@ def ppt_publish_outline(
                 'ppt_publish_outline',
                 'insert_before requires pages to contain exactly the same one position',
             )
+        if components is not None and (insertion or not (deck / 'outline_draft.md').exists()):
+            raise ValueError('Modular prompts require the approved text outline; publish the complete updated plan')
         if required_format == 'native_pptx' and (insertion or not (deck / 'outline_draft.md').exists()):
             raise ValueError('Native PPTX prompts require the approved text outline; '
                              'do not publish a legacy HTML outline or use HTML insertion')
         if (deck / 'outline_draft.md').exists() and not insertion:
-            result = _publish_text_page_briefs(deck, page_list, page_prompts, speaker_notes)
+            result = _publish_text_page_briefs(deck, page_list, page_prompts, speaker_notes,
+                                              components, global_style)
         else:
             if speaker_notes is not None:
                 raise ValueError('Separate speaker_notes require approved text page planning')

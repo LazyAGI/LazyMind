@@ -585,6 +585,23 @@ class WholePageInsertionTests(unittest.TestCase):
 
 
 class PartialEditTests(unittest.TestCase):
+    def test_model_envelope_content_keeps_real_newlines_and_literal_escapes(self):
+        html = '<html>\n<style>\n.wrapper { width:1600px; }\n</style>\n<script>const s="\\n";</script></html>'
+        model = mock.Mock()
+        model.share.return_value = mock.Mock(return_value={
+            'content': html, 'reasoning_content': 'private', 'tool_calls': [],
+        })
+        lazyllm_module = mock.Mock()
+        lazyllm_module.AutoModel.return_value = model
+        with mock.patch.dict('sys.modules', {'lazyllm': lazyllm_module}):
+            self.assertEqual(TOOLS._agent_llm_call('system', 'user'), html)
+        self.assertEqual(TOOLS._model_response_text({'content': [
+            {'type': 'reasoning', 'text': 'private'},
+            {'type': 'text', 'text': 'first\n'},
+            {'type': 'output_text', 'text': 'second'},
+        ]}), 'first\nsecond')
+        self.assertEqual(TOOLS._model_response_text({'reasoning_content': 'private'}), '')
+
     def test_agent_llm_call_propagates_default_and_explicit_timeout(self):
         model = mock.Mock()
         shared = mock.Mock(return_value='generated')
@@ -1808,14 +1825,51 @@ class DeferredTextOutlineTest(unittest.TestCase):
             model.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
+    def test_modular_publication_and_generation_reads_latest_components(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp)
+            artifacts = {'deck_outline': '## 标题\n已确认事实'}
+            def resolve(_ctx, key, sort_order=None):
+                return artifacts.get(key), 'text'
+            def save(**kwargs):
+                artifacts[kwargs.get('slot') or kwargs.get('key')] = kwargs['value']
+                return {'ok': True}
+            with (
+                mock.patch.object(TOOLS, 'require_context', return_value=object()),
+                mock.patch.object(TOOLS, '_resolve_artifact_text', side_effect=resolve),
+                mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
+                mock.patch.object(TOOLS, '_publish_ordered_ppt_artifact', side_effect=save),
+                mock.patch.object(TOOLS, '_save_artifact', side_effect=save),
+            ):
+                result = TOOLS._publish_text_page_briefs(
+                    deck, None, ['标题与事实；左文右图；浅色背景'],
+                    page_components=[{'content': '标题与事实', 'layout': '左文右图', 'assets': '图1'}],
+                    global_style='浅色背景')
+                self.assertEqual(result['published_count'], 1)
+                self.assertEqual(artifacts['slide_outline'], '标题与事实')
+                prompt = TOOLS._load_slide_outline_briefs([1])[1]
+                for value in ('标题与事实', '左文右图', '图1', '浅色背景'):
+                    self.assertIn(value, prompt)
+                with self.assertRaisesRegex(ValueError, 'uses components'):
+                    TOOLS._publish_text_page_briefs(deck, None, ['旧格式覆盖'])
+                artifacts['page_layout'] = '上下布局'
+                edited = TOOLS._load_slide_outline_briefs([1])[1]
+                self.assertIn('上下布局', edited)
+                self.assertNotIn('左文右图', edited)
+                del artifacts['page_assets']
+                with self.assertRaisesRegex(ValueError, 'incomplete prompt components'):
+                    TOOLS._load_slide_outline_briefs([1])
+                del artifacts['presentation_style'], artifacts['page_layout']
+                self.assertEqual(TOOLS._load_slide_outline_briefs([1]), {1: '标题与事实'})
+
     def test_text_cards_use_edited_artifact_not_original_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
             (deck / 'outline_draft.md').write_text('## 原始标题\n原始内容')
             with (
                 mock.patch.object(TOOLS, 'require_context', return_value=object()),
-                mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=(
-                    '## 用户新标题\n用户删改后内容', 'text')),
+                mock.patch.object(TOOLS, '_resolve_artifact_text', side_effect=lambda _ctx, key: (
+                    '## 用户新标题\n用户删改后内容' if key == 'deck_outline' else None, 'text')),
                 mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
                 mock.patch.object(TOOLS, '_publish_ordered_ppt_artifact', return_value={'ok': True}) as publish,
             ):

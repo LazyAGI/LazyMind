@@ -1180,7 +1180,7 @@ steps:
       editable charts/tables/images, and plain-language notes with approved timing.
       Preserve template masters, logos and geometry; remove sample/placeholder text.
       Do not request HTML documents, CSS layout or HTML speaker-note tags.
-      Call ppt_publish_outline(output_format="native_pptx", page_prompts=[...]).
+      Call ppt_publish_outline(output_format="native_pptx", global_style="...", page_components=[...]).
       For html, call it with output_format="html" and apply the HTML-only rules below.
       If a template is uploaded, preserve its inspected positions, typography,
       colors, table structure and original background media while replacing sample
@@ -1190,7 +1190,7 @@ steps:
       expanding the deck; do not assume output page number equals source page number.
 
       You are a PPT per-page prompt planner. The readable content outline exists.
-      Publish exactly one editable generation prompt per page for human review.
+      Publish one shared editable global style and three editable components per page: content, layout and assets.
       Do NOT rebuild the outline and do NOT generate slide HTML.
 
       Deck outline:
@@ -1250,7 +1250,7 @@ steps:
         elements for native_pptx, or HTML/MathML/SVG for html;
       - typography, emphasis and colors consistent with the user's style;
       - output-format-appropriate rendering and the disabled AI-background policy.
-      Each prompt includes audience, visible language, approved copy, composition,
+      Each assembled prompt includes audience, visible language, approved copy, composition,
       theme and supplied asset references; invent no facts or assets.
       For technical/research pages, write the actual on-slide sentences in full:
       problem and causal mechanism, concrete implementation/algorithm steps,
@@ -1278,7 +1278,7 @@ steps:
       Native PPTX prompts use the actual template dimensions and layout geometry;
       do not impose a 1280x720 HTML canvas or replace native logos with CSS.
 
-      HTML ONLY (presentation_output_format=html, including uploaded templates): prompts must be self-contained, with a
+      HTML ONLY (presentation_output_format=html, including uploaded templates): assembled prompts must be self-contained, with a
       1600x900 canvas, explicit fonts/colors, asset placements and an instruction
       to return one complete HTML document without explanations. Inline required
       context; never refer to unseen style files or preceding slides.
@@ -1287,18 +1287,26 @@ steps:
       placement, not just a list of Spring Festival customs.
 
       Call ppt_publish_outline once with output_format as specified above and
-      page_prompts=[<visual prompt for each slide>],
+      global_style=<shared audience, language, canvas, typography, colors and output rules>,
+      page_components=[{"content": <exact title and body copy>,
+                        "layout": <placement, hierarchy and page-specific design>,
+                        "assets": <actual asset references and usage, or explicit no-assets>} for each slide],
       speaker_notes=[<complete timed spoken script for each slide>].
       The tool saves speaker_notes_source as a hidden file artifact and returns
       only its reference. Do not embed scripts or timing narration in slide_outline.
       Omit deck_dir: the tool reads the bound deck automatically. Do not search
       for a deck or invent task_ref. If the tool reports a missing bound deck,
       stop and report that build_outline must be resumed.
-      These editable prompts become slide_outline and guide the selected native
+      These become presentation_style, slide_outline (content), page_layout and
+      page_assets. Generation reads their current versions and concatenates them
+      into a complete prompt automatically. Do not duplicate shared style in each
+      component, and do not put speaker notes into any visual component. The
+      assembled prompts guide the selected native
       PPTX or HTML generation route. Generate only builds a page execution index; it must not ask
       another model to rewrite these prompts into an internal content outline.
 
-      Incremental insertion: when the current request added one whole slide at
+      For modular plans, publish all updated components together after an insertion.
+      Legacy incremental insertion: when the current request added one whole slide at
       position N, call
         ppt_publish_outline(pages=[N], insert_before=N)
       so only one new composite page-prompt card is inserted. Never republish or
@@ -1336,9 +1344,18 @@ steps:
     outputs:
       - material: slide_outline
       - material: speaker_notes_source
+      - material: presentation_style
+        required: false
+      - material: page_layout
+        required: false
+      - material: page_assets
+        required: false
     acceptance_criteria: |
       slide_outline must contain exactly one non-empty, editable generation
-      prompt per requested page with aligned sort_order.
+      prompt per requested page with aligned sort_order. For new decks publish
+      presentation_style once and page_layout/page_assets once per page, aligned
+      with slide_outline. Optional schema flags preserve older saved sessions.
+      Existing monolithic prompts remain supported; never silently mix formats.
 
   plan_background_prompts:
     label: Plan Background Prompts
@@ -1989,6 +2006,12 @@ steps:
       - material: background_prompts
         required: false
       - material: slide_outline
+        required: false
+      - material: presentation_style
+        required: false
+      - material: page_layout
+        required: false
+      - material: page_assets
         required: false
       - material: deck_outline
         required: false

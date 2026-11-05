@@ -199,7 +199,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             self.assertEqual(tab['slot_scope'], 'step')
         self.assertEqual(
             page_prompts['composite_layout']['children'],
-            [{'slot': 'slide_outline'}],
+            [{'slot': name} for name in ('presentation_style', 'slide_outline', 'page_layout', 'page_assets')],
         )
         self.assertIn(
             'rewind to plan_background_prompts',
@@ -718,6 +718,17 @@ class CombinedStyleOutlineTest(unittest.TestCase):
 
 
 class OutputNormalizationTest(unittest.TestCase):
+    def test_old_stringified_response_html_is_restored_once(self):
+        html = '<!doctype html>\n<html>\n<head>\n<style>\n.wrapper{width:1600px}\n</style></head>\n<body><script>const x="\\n";</script><p>中文</p></body></html>'
+        broken = repr({'content': html})
+        recovered = run_stage._sanitize_page_html(broken)
+        self.assertEqual(recovered, html)
+        self.assertEqual(run_stage._sanitize_page_html(recovered), html)
+
+    def test_normal_html_string_literals_are_not_unescaped(self):
+        html = '<html>\n<head><style>p::before{content:"\\n"}</style></head><body><script>const x="\\n";</script></body></html>'
+        self.assertEqual(run_stage._sanitize_page_html(html), html)
+
     def test_json_wrapper_and_trailing_commas_preserve_literal_text(self):
         raw = '<think>example {not json}</think>说明： {"pages":[{"title":"literal ,} and ]",},],} 完成'
         self.assertEqual(run_stage._parse_json_loose(raw), {'pages': [{'title': 'literal ,} and ]'}]})
@@ -726,6 +737,18 @@ class OutputNormalizationTest(unittest.TestCase):
     def test_truncated_json_is_not_fabricated(self):
         with self.assertRaises(json.JSONDecodeError):
             run_stage._parse_json_loose('{"pages":[{"title":"unfinished')
+
+    def test_python_literal_style_preserves_strings_and_nested_values(self):
+        style = {'design_style': {'name': "Speaker's style"},
+                 'palette': {'colors': ['#ffffff', '#000000']},
+                 'typography': {'font': '微软雅黑'}, 'optional': None, 'enabled': True}
+        self.assertEqual(run_stage._parse_json_loose(repr(style)), style)
+
+    def test_python_literal_compatibility_rejects_code_and_non_json_values(self):
+        for raw in ("{'x': __import__('os').getcwd()}", "{'x': {1, 2}}",
+                    "{1: 'value'}", "{'x': (1, 2)}", "{'x': 1e999}"):
+            with self.subTest(raw=raw), self.assertRaises(json.JSONDecodeError):
+                run_stage._parse_json_loose(raw)
 
     def test_outline_representation_is_normalized_without_mutating_input(self):
         source = [{'title': '封面', 'page_no': 0, 'narrative': None, 'bullets': ['短句', {'head': '清单', 'detail': None}]}]
