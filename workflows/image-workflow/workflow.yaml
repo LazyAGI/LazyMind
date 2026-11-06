@@ -53,6 +53,234 @@ when_to_use: >
   for text content, quizzes, reports, summaries, or any non-visual task.
 
 runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
+      to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      analyze_subject:
+        prompt: Read scenario/external.md and its analyze_subject step contract from this pinned package. Complete Analyze
+          Subject using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - subject_analysis
+        - workflow_routing
+        acceptance_criteria:
+        - 'subject_analysis must be saved (50+ words), user-facing natural language only —
+
+          no WORKFLOW:/NEXT_STEPS:/SKIP_STEPS: lines or step-id lists.
+
+          workflow_routing must be saved with WORKFLOW, REQUIRES, NEXT_STEPS, and SKIP_STEPS lines.
+
+          REQUIRES must name only the media dependencies this exact behavior will call.
+
+          NEXT_STEPS must include collect_materials only when external/uploaded/KB/reference material
+
+          is genuinely required. A self-contained text-only request should skip collect_materials and
+
+          continue directly to optimize_prompt.
+
+          An explicit find/search-then-edit request must use WORKFLOW: FIND_AND_EDIT, include
+
+          collect_materials,optimize_prompt,enhance_image, skip generate_image, and save
+
+          edit_route=edit.
+
+          Exception: when the static final result explicitly asks for a post-caption/subtitle,
+
+          including a source visual edit plus caption, it must use WORKFLOW: CREATE_STATIC_MEME,
+
+          skip generate_image when REQUIRES omits image_generator, and must not save edit_route. Text explicitly integrated
+
+          into a physical object/scene remains FIND_AND_EDIT or EDIT_UPLOAD.
+
+          Do NOT call kb_search/web_search/image_search_tool/image_search_and_validate in this step.
+
+          Do NOT save material_images, raw_source_image, image_output, prompt_used, or material_summary in this step.'
+      collect_materials:
+        prompt: Read scenario/external.md and its collect_materials step contract from this pinned package. Complete Collect
+          Reference Materials using the bound evidence and the domain rules above. Generate and validate with your own
+          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+        required_outputs:
+        - material_summary
+        acceptance_criteria:
+        - 'The step must never use find_artifact/get_artifact/list_artifacts to locate user uploads.
+
+          Uploaded files must be resolved through find_user_attachment only.
+
+          If the current request has uploaded images, only those uploads may be saved as
+
+          material_images; saving at least one resolved upload is mandatory, even on routes where
+
+          this slot is normally optional. A summary without the uploaded image is not success.
+
+          No knowledge-base or web image search may be performed or appended.
+
+          For uploaded edit workflows, the first upload must also be raw_source_image.
+
+          For uploaded animated workflows, the first upload must also be image_output.
+
+          For CREATE_NEW: material_images are optional (0–3) when the text request is sufficient.
+
+          For KB_STYLE: material_summary must preserve the useful KB style findings; material_images
+
+          are optional (0–3). Sufficient text-only KB results must not trigger web/image search solely
+
+          because they contain no image.
+
+          For REFERENCE_GENERATE: 1–3 validated material_images should be saved (never more than 3).
+
+          For CREATE_ANIMATED: if the user asked to find a photo first, 1–3 material_images and
+
+          one image_output must be saved; otherwise material_images optional (0–3).
+
+          material_summary should still be saved.
+
+          For FIND_AND_EDIT: 1–3 material_images and one raw_source_image must be saved (never more than 3 images).
+
+          For EDIT_UPLOAD: both material_images and raw_source_image must be saved from the user upload
+
+          (same path/URL).
+
+          For ANIMATE_UPLOAD: both material_images and image_output must be saved from the user upload
+
+          (same path/URL, image_output sort_order=1).
+
+          For CREATE_STATIC_MEME: material_images are optional character/style references (0–3).
+
+          For CREATE_ANIMATED_MEME: material_images are optional; an uploaded or searched character
+
+          reference must also be saved as image_output.
+
+          For CREATE_MEME_PACK: save at most 3 shared character/style references; do not search for
+
+          a separate source image for every state.
+
+          material_summary should be saved with a concise description of search results and image selection.
+
+          optimize_prompt writes prompt_used in the next step.'
+      optimize_prompt:
+        prompt: Read scenario/external.md and its optimize_prompt step contract from this pinned package. Complete Optimize
+          Prompt using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - prompt_used
+        acceptance_criteria:
+        - 'prompt_used artifact must be saved in English.
+
+          For generation workflows: at least 30 words, suitable for image_generator.
+
+          Generation prompts must lead with canvas/use and composition, specify concrete subject and
+
+          scene details, keep one coherent medium/capture grammar, and control materials, lighting,
+
+          and palette separately. Empty quality-keyword stacks do not satisfy this criterion.
+
+          For edit workflows (FIND_AND_EDIT / EDIT_UPLOAD): a clear image_editor instruction containing
+
+          Requested edit, Edit scope, Preserve, and Do not clauses. It must faithfully reflect the user
+
+          request, select the smallest sufficient edit scope, and forbid unrequested collateral changes.
+
+          For animated workflows (CREATE_ANIMATED / ANIMATE_UPLOAD): the exact FIRST_FRAME_PROMPT,
+
+          LAST_FRAME_PROMPT, MOTION_PROMPT contract plus COUNT in 1–10; LAST_FRAME_PROMPT is none
+
+          unless explicitly needed.
+
+          For CREATE_STATIC_MEME / CREATE_ANIMATED_MEME / CREATE_MEME_PACK, meme_generation_plan
+
+          must be saved with schema_version, mode, delivery, count, and exactly count distinct items.
+
+          Every item must contain caption, caption_box, caption_style, communication_task,
+
+          image_prompt, last_frame_prompt, and motion_prompt. caption_style must contain valid text_color, stroke_color,
+
+          and stroke_width_ratio fields selected by the LLM. Meme media prompts must prohibit
+
+          model-rendered text; caption_box defaults to [0.15, 0.75, 0.85, 0.93] unless the user
+
+          requests another placement.
+
+          A static request such as "给这个小狗做敬礼手势，然后配上字幕‘收到!’" must produce a
+
+          CREATE_STATIC_MEME plan whose image_prompt contains only the salute-pose edit and whose
+
+          caption is exactly "收到!"; the caption text must not be delegated to image_editor.
+
+          select_image_route owns control.next_step after all required artifacts are saved.
+
+          Direct-source routes proceed to enhance_image; other routes proceed to generate_image.'
+      generate_image:
+        prompt: Read scenario/external.md and its generate_image step contract from this pinned package. Complete Generate
+          Image using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: image_generator
+          source: global
+        required_outputs:
+        - generated_base_image
+        acceptance_criteria:
+        - 'At least one valid generated_base_image from this attempt is mandatory. Ordinary still
+
+          routes also save generated_image_output and end. Animated routes save every real first frame
+
+          to generated_first_frame, save only explicitly requested/designated tails to
+
+          generated_last_frame, and expose all real uploaded/collected references through
+
+          generation_reference_images. Every existing-source route stages the
+
+          source without editing; text-free base creation for meme/animation routes uses only
+
+          image_generator when declared by REQUIRES. No image edit, video, GIF, or caption tool may
+
+          run here. A model error with zero
+
+          base images is a failed step, never a successful empty result, and the concrete failure
+
+          reason must remain available for Chat. select_image_postprocess_route owns the next branch.'
+      enhance_image:
+        prompt: Read scenario/external.md and its enhance_image step contract from this pinned package. Complete Enhance
+          Image using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: image_editor
+          source: global
+        required_outputs:
+        - enhancement_status
+        acceptance_criteria:
+        - 'A route-appropriate final media artifact and enhancement_status are both required. Edit
+
+          routes save enhanced_image_output with the four-clause narrow edit contract. Meme visual
+
+          edits also happen here, before their final caption/video operation. Static caption routes
+
+          save meme_static_output made by meme_add_caption. Animated routes save gif_output
+
+          when conversion succeeds and may additionally save video_output; meme GIFs are captioned.
+
+          Each animated output keeps the same sort_order as its first/base frame so the composite UI
+
+          renders one page per item with input on the left and GIF/video on the right.
+
+          Every output must derive from the authoritative source on direct-source routes, or from
+
+          generated_base_image on other routes. A zero-output tool/model failure is not
+
+          acceptable and must preserve its concrete cause for Chat instead of saving a placeholder.'
   clarification_fields:
     - id: image_goal
       label: 图片主体或修改要求

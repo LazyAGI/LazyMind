@@ -17,6 +17,176 @@ when_to_use: >
   不用于仅编写商务报价、资质证明或制作 PPT 的请求。
 
 runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
+      to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      parse_bid_document:
+        prompt: Read scenario/external.md and its parse_bid_document step contract from this pinned package. Complete 招标文件解析
+          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
+          the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - generation_parameters
+        - raw_bid_text
+        - raw_bid_meta
+        acceptance_criteria:
+        - 'generation_parameters contains canonical md/docx output format, a valid integer word
+
+          target and an explicit DOCX style mode. raw_bid_text contains substantive source text,
+
+          and raw_bid_meta identifies the source filename, detected format, parser, section count
+
+          and any honest warnings.'
+      extract_tech_requirements:
+        prompt: Read scenario/external.md and its extract_tech_requirements step contract from this pinned package. Complete
+          技术要求提取 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - technical_requirements
+        acceptance_criteria:
+        - 'Every actionable requirement has one stable ID, evidence location, original
+
+          excerpt and response suggestion. Every number and standard is source-grounded.'
+      extract_disqualification_items:
+        prompt: Read scenario/external.md and its extract_disqualification_items step contract from this pinned package.
+          Complete 废标项聚焦 using the bound evidence and the domain rules above. Generate and validate with your own host
+          capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - disqualification_items
+        acceptance_criteria:
+        - 'Explicit rejection clauses and inferred risks are separated. Every D-NNN item has
+
+          a source reference, response strategy and risk rating without invented conditions.'
+      search_reference_materials:
+        prompt: Read scenario/external.md and its search_reference_materials step contract from this pinned package. Complete
+          知识库资料检索 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+        required_outputs:
+        - knowledge_evidence
+        - writing_task
+        - resource_profiles
+        - writing_context
+        acceptance_criteria:
+        - 'knowledge_evidence truthfully states the selected-KB evidence with available source
+
+          labels/evidence identifiers, that no KB was selected, or the outcome of every attempted
+
+          query when retrieval failed.
+
+          writing_task, resource_profiles, and writing_context are real files authored by the external subagent and the
+          Writer resources include the knowledge evidence.'
+      build_chapter_outline:
+        prompt: Read scenario/external.md and its build_chapter_outline step contract from this pinned package. Complete
+          章节大纲与字数 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - outline_document
+        - outline
+        - outline_check_report
+        - writing_context_after_outline
+        acceptance_criteria:
+        - 'outline_document is a real editable `.md` file authored and checked by the external subagent. outline_check_report
+          begins with PASS; the normalized
+
+          outline satisfies level, numbering, title, target allocation and complete ID coverage.
+
+          writing_context_after_outline exists and preserves the selected knowledge-base
+
+          evidence as fact `bid-selected-knowledge-evidence`. Revision internals are required
+
+          only for an AI modification run; direct frontend edits remain human revisions of
+
+          outline_document. After saving the editable outline, stop at the human approval
+
+          checkpoint; do not start body drafting until the user saves any edits and clicks Continue.'
+      write_chapter_contents:
+        prompt: Read scenario/external.md and its write_chapter_contents step contract from this pinned package. Complete
+          逐章正文编写 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - effective_outline
+        - effective_outline_check_report
+        - draft_document
+        - writing_context_after_draft
+        acceptance_criteria:
+        - 'effective_outline_check_report begins with PASS. draft_document is one real editable
+
+          Markdown file and writing_context_after_draft exists. Generation mode requires
+
+          section_instructions and one ordered chapter_contents file per planned section;
+
+          targeted revision mode requires all document_* revision internals. The final draft
+
+          explicitly covers mapped IDs and follows the validated latest human/AI outline. After
+
+          saving draft_document, stop at the human approval checkpoint; do not generate images
+
+          or delivery files until the user saves any edits and clicks Continue.'
+      generate_proposal_images:
+        prompt: Read scenario/external.md and its generate_proposal_images step contract from this pinned package. Complete
+          架构图与效果图 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: image_generator
+          source: global
+        required_outputs:
+        - architecture_image
+        - effect_images
+        - image_manifest
+        acceptance_criteria:
+        - 'One real 1920x1080 architecture PNG exists. The effect PNG count matches the
+
+          explicit effect_image_count, or the automatic 5–10 range when unspecified.
+
+          Use distinct effect layout types, all images share one palette and the
+
+          manifest order matches the effect_images order.'
+      compose_proposal_docx:
+        prompt: Read scenario/external.md and its compose_proposal_docx step contract from this pinned package. Complete
+          技术方案导出 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - final_proposal_markdown
+        - final_proposal
+        acceptance_criteria:
+        - 'final_proposal_markdown is complete and non-duplicated. final_proposal is one real,
+
+          non-empty file matching generation_parameters.output_format. A DOCX export contains
+
+          the complete body, updateable TOC and every selected architecture/effect image, and
+
+          its style mode matches use_default_docx_template.'
+      validate_proposal:
+        prompt: Read scenario/external.md and its validate_proposal step contract from this pinned package. Complete 文档结果校验
+          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
+          the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - validation_report
+        - validation_summary
+        acceptance_criteria:
+        - 'validation_report and validation_summary are internally consistent, verify the actual
+
+          selected Markdown or DOCX delivery file, and provide evidence for word count, chapters,
+
+          ID coverage, disqualification responses and image count.'
   exclusive_tool_capabilities: [writer.create, writer.revise]
   collects_knowledge: true
   clarification_fields:

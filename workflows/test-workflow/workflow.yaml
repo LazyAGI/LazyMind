@@ -128,3 +128,71 @@ i18n:
       list_attachments: {label: 列表附件}
       verification_report: {label: 验证报告}
       test_status: {label: 测试状态}
+
+runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall
+      back to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      prompt:
+        prompt: Read scenario/external.md and its prompt step contract from this pinned package. Complete Prompt using
+          the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
+          the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - prompt_result
+        acceptance_criteria:
+        - prompt_result is present and non-empty.
+      script:
+        prompt: Read scenario/external.md and its script step contract from this pinned package. Complete Script Tool
+          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - metadata_json
+        acceptance_criteria:
+        - metadata_json is valid JSON with smoke_test=true.
+      typed_artifacts:
+        prompt: Read scenario/external.md and its typed_artifacts step contract from this pinned package. Complete
+          Typed Artifacts using the bound evidence and the domain rules above. Generate and validate with your own
+          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - text_attachment
+        - image_attachment
+        acceptance_criteria:
+        - The text file is readable and the PNG decodes from real transferred bytes.
+      rewrite:
+        prompt: Read scenario/external.md and its rewrite step contract from this pinned package. Complete Rewrite
+          Artifact using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - rewritten_attachment
+        acceptance_criteria:
+        - rewritten_attachment is selected at revision 2 and contains revision-2.
+      list_artifacts:
+        prompt: Read scenario/external.md and its list_artifacts step contract from this pinned package. Complete
+          List Artifacts using the bound evidence and the domain rules above. Generate and validate with your own
+          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - list_attachments
+        acceptance_criteria:
+        - list_attachments contains exactly two ordered files.
+      verify:
+        prompt: Read scenario/external.md and its verify step contract from this pinned package. Complete Verify using
+          the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
+          the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - verification_report
+        - test_status
+        acceptance_criteria:
+        - test_status equals Workflow smoke test passed.

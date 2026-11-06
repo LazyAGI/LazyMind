@@ -371,6 +371,8 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 	switch action {
 	case "connect":
 		status = adapter.Connect(ctx)
+	case "refresh":
+		status = adapter.Refresh(ctx)
 	case "status":
 		status = adapter.Status(ctx)
 	case "disconnect":
@@ -383,7 +385,7 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 	if err := printJSON(stdout, status); err != nil {
 		return err
 	}
-	if action == "connect" && status.State != agentintegration.Enabled {
+	if (action == "connect" || action == "refresh") && status.State != agentintegration.Enabled {
 		return fmt.Errorf("Codex plugin installation did not complete: %s", status.Message)
 	}
 	return nil

@@ -4923,6 +4923,7 @@ const zhCN = {
     schedulePlans: "定时任务",
     taskDetail: "任务详情",
     openConversation: "打开任务对话",
+    openWorkflow: "查看过程与产物",
     conversationUnavailable: "关联对话尚未就绪，暂时无法打开",
     moreActions: "更多操作",
     noDescription: "暂无任务说明",

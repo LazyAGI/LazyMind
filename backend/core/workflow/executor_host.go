@@ -2,9 +2,13 @@ package workflow
 
 import "lazymind/core/workflow/graphengine"
 
-// Steps with declared tools or post-step checks run entirely inside LazyMind.
+// Versioned external steps retain external execution even when the native
+// implementation declares tools/checks. Older revisions keep their routing.
 func executorHostForStep(controllerHost string, node graphengine.CompiledNode, runtime graphengine.RuntimePolicy) string {
 	if controllerHost != "external-agent" {
+		return controllerHost
+	}
+	if node.ExternalExecution.Supported() {
 		return controllerHost
 	}
 	if len(node.LegacyTools) > 0 || len(node.TerminalTools) > 0 {

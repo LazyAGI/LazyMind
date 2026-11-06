@@ -632,6 +632,10 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
+	if err := RecoverExternalWorkflowTasks(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, "workflow tasks unavailable", http.StatusInternalServerError)
+		return
+	}
 
 	q := r.URL.Query()
 	status := strings.TrimSpace(q.Get("status"))

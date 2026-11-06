@@ -7,6 +7,7 @@ import (
 	"lazymind/core/workflow/execution"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/hosted"
+	"lazymind/core/workflowtool"
 )
 
 type workflowControlPath struct {
@@ -90,6 +91,23 @@ type workflowExecutionStopBody struct {
 	CommandID string `json:"command_id"`
 }
 
+type workflowToolListBody struct {
+	ExecutionHandle string `json:"execution_handle"`
+}
+type workflowToolListResult struct {
+	Tools []workflowtool.Tool `json:"tools"`
+}
+type workflowToolListReply struct {
+	ContractVersion string                 `json:"contract_version"`
+	OK              bool                   `json:"ok"`
+	Result          workflowToolListResult `json:"result"`
+}
+type workflowToolCallReply struct {
+	ContractVersion string              `json:"contract_version"`
+	OK              bool                `json:"ok"`
+	Result          workflowtool.Result `json:"result"`
+}
+
 func workflowControlOperations() []openAPIOperation {
 	body := func(v any) *openAPIBody {
 		return &openAPIBody{Required: true, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -119,6 +137,8 @@ func workflowControlOperations() []openAPIOperation {
 		operation("POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume", "Rotate the existing execution handle for explicit recovery", workflowHostedPath{}, nil, workflowHostedExecutionReply{}),
 		operation("POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete", "Complete an execution using already published artifacts", workflowHostedPath{}, executor.Completion{}, workflowHostedCompletionReply{}),
 		operation("POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", "Publish one artifact during execution", workflowHostedPath{}, hosted.Publication{}, map[string]any{}),
+		operation("POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list", "Discover tools declared by a pinned external step", workflowHostedPath{}, workflowToolListBody{}, workflowToolListReply{}),
+		operation("POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call", "Invoke a declared tool under the current execution lease", workflowHostedPath{}, workflowtool.CallInput{}, workflowToolCallReply{}),
 	}
 	result[1].QueryParams = struct {
 		View string `json:"view,omitempty"`

@@ -23,6 +23,44 @@ slots:
   type: json
   cardinality: single
 runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
+      to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      reflection:
+        prompt: Read scenario/external.md and its reflection step contract from this pinned package. Complete reflection
+          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
+          the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        required_outputs:
+        - reflection_markdown
+        acceptance_criteria:
+        - The external subagent has completed the declared objective, verified the actual outputs and reported concrete
+          evidence without inventing state.
+      ppt:
+        prompt: Read scenario/external.md and its ppt step contract from this pinned package. Complete ppt using the bound
+          evidence and the domain rules above. Generate and validate with your own host capabilities; return the real declared
+          artifacts and verification evidence for hosted publication.
+        tools:
+        - name: academic_context
+          source: package
+        - name: academic_read_paper
+          source: package
+        required_outputs:
+        - ppt_request
+        acceptance_criteria:
+        - The external subagent has completed the declared objective, verified the actual outputs and reported concrete
+          evidence without inventing state.
   publisher_owned_slots: [ppt_request]
   trigger_inputs:
   - task_context

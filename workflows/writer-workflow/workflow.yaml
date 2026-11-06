@@ -30,6 +30,116 @@ when_to_use: >
   its locator.
 
 runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
+      to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      prepare:
+        prompt: Read scenario/external.md and its prepare step contract from this pinned package. Read sources and prepare
+          the immutable writing command and evidence context without drafting. Generate and validate with your own host
+          capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+        required_outputs:
+        - writer_command
+        - writing_task
+        - media_assets
+        - writing_context
+        acceptance_criteria:
+        - 'writer_command, writing_task, media_assets, and writing_context are present.
+
+          media_assets is valid even when its assets mapping is empty.
+
+          When a URL source was required, source_document and target_document are also present.'
+      outline:
+        prompt: Read scenario/external.md and its outline step contract from this pinned package. Create or revise the
+          editable outline according to the bound command. Generate and validate with your own host capabilities; return
+          the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+        required_outputs:
+        - outline_document
+        acceptance_criteria:
+        - 'outline_document is present. Markdown outlines
+
+          are `.md`; IR outlines have stage="outline" and ui_editable=true. Revision internals are required only when
+
+          this execution handled an AI revision. For a cloud-bound revision,
+
+          outline_write_result must report success.'
+      write_flat_document:
+        prompt: Read scenario/external.md and its write_flat_document step contract from this pinned package. Write the
+          requested complete flat document without an outline stage. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+        required_outputs:
+        - flat_draft_document
+        acceptance_criteria:
+        - 'flat_draft_document is present and is Markdown or a non-outline WriterDocument IR
+
+          with ui_editable=true. Required media is saved before the body.
+
+          No outline_document, section_instructions, or draft_blocks are produced.
+
+          short_writing_plan and flat_visual_plan are auxiliary publications: a save failure
+
+          leaves a pending checkpoint entry and does not invalidate delivery or rerun generation.'
+      write_document:
+        prompt: Read scenario/external.md and its write_document step contract from this pinned package. Draft or revise
+          the complete document within the bound operation and approved scope. Generate and validate with your own host
+          capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: knowledge_list_documents
+          source: package
+        - name: knowledge_read_document
+          source: package
+        required_outputs:
+        - draft_document
+        acceptance_criteria:
+        - 'draft_document is present. Markdown output is a
+
+          `.md` file or an IR document with ui_editable=true. Required media is saved before the body. A targeted revision
+          requires a successful
+
+          document_revision_result. A targeted image-adding revision also requires resolved_media_assets.
+
+          section_instructions, draft_blocks, visual_plan, document_revision_task,
+
+          document_locate_result, document_modify_plan, and document_revision_set are auxiliary
+
+          publications. Their save failures leave pending checkpoint entries without invalidating
+
+          delivery; recovery retries saving without rerunning generation or provider writes.
+
+          When generation started without draft_document and used a cloud-bound `.lmd` source,
+
+          document_write_result must report success and draft_document must be the
+
+          provider-confirmed document. Every cloud-bound IR full-document rewrite also requires
+
+          one successful document_write_result and a provider-confirmed draft_document,
+
+          regardless of whether a previous draft existed. Markdown rewrite remains local and
+
+          does not require document_write_result. Later targeted revisions must not mutate the
+
+          cloud document automatically.'
   clarification_fields:
     - id: writing_goal
       label: 写作目标

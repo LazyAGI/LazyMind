@@ -333,6 +333,7 @@ async function fetchLimited(url, maxBytes, fetchImpl) {
 
 /** Download the embeddable Google font faces actually used by the extracted DOM. */
 export async function collectGoogleFontFaces(pages, { fetchImpl = globalThis.fetch } = {}) {
+  if (process.env.LAZYMIND_PPT_EXTERNAL_OFFLINE === '1') return [];
   if (typeof fetchImpl !== 'function') return [];
   const stylesheetUrls = new Set();
   for (const page of pages || []) {

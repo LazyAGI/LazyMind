@@ -68,6 +68,7 @@ import (
 	workflowhosted "lazymind/core/workflow/hosted"
 	workflowstore "lazymind/core/workflow/store"
 	workflowstream "lazymind/core/workflow/stream"
+	"lazymind/core/workflowtool"
 
 	"github.com/gorilla/mux"
 )
@@ -269,6 +270,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
+	workflowToolHandler := workflowtool.Handler{Service: &workflowtool.Service{DB: corestore.DB()}}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
@@ -733,6 +735,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit", []string{"qa.write"}, hostedHandler.Submit)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete", []string{"qa.write"}, hostedHandler.Complete)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts", []string{"qa.write"}, hostedHandler.Publish)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:list", []string{"qa.read"}, workflowToolHandler.List)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/tools:call", []string{"qa.write"}, workflowToolHandler.Call)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
