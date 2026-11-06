@@ -668,7 +668,7 @@ func failExternalTask(db *gorm.DB, task orm.ExternalAgentWorkflowTask, code, mes
 }
 
 func persistExternalTask(db *gorm.DB, task orm.ExternalAgentWorkflowTask, updates map[string]any) orm.ExternalAgentWorkflowTask {
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(db.Statement.Context, db, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, "id=?", task.ID).Error; err != nil {
 			return err
 		}
