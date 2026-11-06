@@ -9941,8 +9941,21 @@ def _deterministic_selection_styles(
         r'(?:字体\s*(?:替换成|替换为|换成|改成|改为|设为|设置为|用)|font(?:[ -]family)?\s*(?:to|:|=))\s*[\"\“\']?([^，。；;\n\"\”\']+)',
         command, re.I,
     )
-    if font_match and not re.fullmatch(r'\d+(?:\.\d+)?\s*(?:px|pt)', font_match.group(1).strip(), re.I):
-        family = font_match.group(1).strip()
+    family = font_match.group(1).strip() if font_match else ''
+    if not family:
+        short = re.fullmatch(r'\s*(?:换成|换为|改成|改为|改用|使用)\s*[“\"\']?(.+?)[”\"\']?[。！!]?\s*', command)
+        if short:
+            from lazymind.presentation_resources import font_families
+            candidate = short.group(1).strip()
+            explicit_font = candidate.endswith('字体')
+            if explicit_font:
+                candidate = candidate[:-2].strip()
+            known = available_font_families() | set(font_families()) | {
+                '宋体', 'SimSun', '黑体', 'SimHei', '楷体', 'KaiTi', '仿宋', 'FangSong', '微软雅黑',
+            }
+            if explicit_font or candidate.casefold() in {name.casefold() for name in known}:
+                family = candidate
+    if family and not re.fullmatch(r'\d+(?:\.\d+)?\s*(?:px|pt)', family, re.I):
         available = {f.casefold(): f for f in available_font_families()}
         if family.casefold() not in available:
             from lazymind.chat.engine.tools.file_resources.font_library import ensure_font

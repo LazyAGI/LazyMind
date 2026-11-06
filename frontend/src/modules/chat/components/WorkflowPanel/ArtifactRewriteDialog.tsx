@@ -111,6 +111,7 @@ function errorMessage(code: string | undefined, fallback: string): string {
   if (code === 'SELECTION_AMBIGUOUS') return 'errors.ambiguous';
   if (code === 'SELECTION_STALE') return 'errors.stale';
   if (code === 'SELECTION_UNSUPPORTED') return 'errors.unsupported';
+  if (code === 'FONT_UNAVAILABLE') return 'errors.fontUnavailable';
   if (code === 'WORKFLOW_ACTION_FAILED') return 'errors.workflowFailed';
   return fallback;
 }

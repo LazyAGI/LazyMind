@@ -22,6 +22,11 @@ DOWNLOAD_FONTS = {
 }
 
 
+class FontUnavailableError(ValueError):
+    """A requested family is unavailable; never silently substitute another."""
+    error_code = 'FONT_UNAVAILABLE'
+
+
 def ensure_font(family: str, allow_download: bool = False) -> str:
     """Resolve an installed family, optionally acquire an allowlisted OFL font."""
     from .presentation_edit import available_font_families
@@ -35,8 +40,8 @@ def ensure_font(family: str, allow_download: bool = False) -> str:
         return _acquire_cloud_family(cloud_family)
     canonical = next((name for name in DOWNLOAD_FONTS if name.casefold() == requested.casefold()), None)
     if not allow_download or canonical is None:
-        raise ValueError(f'字体 {requested!r} 不可用。请提供合法字体文件或选择已安装字体。'
-                         f'可按明确请求下载的开源字体：{", ".join(DOWNLOAD_FONTS)}。不会自动替换字体。')
+        raise FontUnavailableError(f'字体 {requested!r} 不可用。请提供合法字体文件或选择已安装字体。'
+                                   f'可按明确请求下载的开源字体：{", ".join(DOWNLOAD_FONTS)}。不会自动替换字体。')
     import tempfile
     import httpx
     relative = DOWNLOAD_FONTS[canonical]

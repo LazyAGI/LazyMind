@@ -412,3 +412,12 @@ def test_cloud_font_library_registers_verified_font_and_preserves_license(tmp_pa
     source.write_bytes(b'corrupted')
     with pytest.raises(ValueError, match='checksum'):
         font_library.ensure_font('Cloud Test Font', True)
+
+
+def test_missing_font_has_actionable_error_code_without_substitution(monkeypatch):
+    from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit
+    monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: {'Songti SC', '宋体-简'})
+    with pytest.raises(font_library.FontUnavailableError) as error:
+        font_library.ensure_font('宋体', True)
+    assert error.value.error_code == 'FONT_UNAVAILABLE'
+    assert '宋体' in str(error.value)
