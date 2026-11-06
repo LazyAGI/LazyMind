@@ -109,7 +109,7 @@ interface WriterDownloadFormatButtonProps {
 }
 
 const preparedFileCache = new Map<string, Promise<Blob>>();
-const WRITER_DOWNLOAD_CONVERSION_VERSION = 'lazyllm-writer-conversion-v1';
+const WRITER_DOWNLOAD_CONVERSION_VERSION = 'lazyllm-writer-conversion-v2';
 
 function hashText(value: string): string {
   let hash = 2166136261;
@@ -206,7 +206,6 @@ async function convertWriterDownload(
       target_format: format,
       content: source.conversionSource,
       document_id: writerFilenameStem(source.filename) || 'writer-document',
-      ...(format === 'latex' ? { language: 'zh-CN' } : {}),
       ...(format === 'latex' ? { materialized_numbering: source.materializedNumbering ?? true } : {}),
     },
     {

@@ -334,6 +334,12 @@ class Chart(Object):
     svg: Text
     finding_ids: list[Text]
     caption: Text
+    style: Text | None = None
+    base_style: Text | None = None
+    category: Text | None = None
+    series: Text | None = None
+    facet: Text | None = None
+    normalize: bool = False
 
 
 class AnalysisOutput(Object):
@@ -413,6 +419,9 @@ def refs_exist(refs, tables, field):
     missing = [(t, c) for t, c in pairs if t not in tables or c not in tables[t]['columns']]
     if len(set(pairs)) != len(pairs) or missing:
         detail = f'不存在的列引用: {missing}。' if missing else '列引用重复。'
+        if ('table_id', 'column') in missing:
+            detail += (" Copy column-reference dictionaries directly, or read ref['table_id'] and ref['column']; "
+                       'unpacking a dictionary yields its key names. ')
         available = {name: value['columns'] for name, value in tables.items()}
         code = 'INVALID_OUTPUT' if field.startswith(('output', 'analysis.results')) else 'INVALID_INPUT'
         raise ContractError(code, field, detail + f'可用表及原始列: {available}')

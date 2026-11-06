@@ -56,11 +56,21 @@ def unique_candidates(existing, candidates):
 
 def sciverse_provider():
     from lazyllm.tools.tools.search import SciverseSearch
-    return SciverseSearch()
+    provider = SciverseSearch()
+    try:
+        provider.inject_auth_header()
+    except ValueError as error:
+        if 'credential is not configured' not in str(error):
+            raise
+        from .crossref import CrossrefSearch
+        return CrossrefSearch()
+    return provider
 
 
 def search_sciverse(provider, queries, year_from, year_to, warnings, *, page=1):
     candidates, more_queries = [], {}
+    source = provider.source_name if isinstance(provider.source_name, str) else 'sciverse'
+    label = 'Crossref' if source == 'crossref' else 'Sciverse'
     for query, count in queries.items():
         try:
             pagination = {'page': page} if page > 1 else {}
@@ -68,10 +78,10 @@ def search_sciverse(provider, queries, year_from, year_to, warnings, *, page=1):
                                           year_from=year_from, year_to=year_to, **pagination)
             items = result['items']
         except RETRIEVAL_ERRORS as error:
-            warnings.append(f'Sciverse 检索「{query}」失败（{type(error).__name__}），未用模型知识替代检索结果。')
+            warnings.append(f'{label} 检索「{query}」失败（{type(error).__name__}），未用模型知识替代检索结果。')
             continue
         if not items:
-            warnings.append(f'Sciverse 检索「{query}」未找到可用文献。')
+            warnings.append(f'{label} 检索「{query}」未找到可用文献。')
         total_pages = result.get('total_pages')
         if (total_pages > page if isinstance(total_pages, int) else len(items) >= count):
             more_queries[query] = count
@@ -80,8 +90,8 @@ def search_sciverse(provider, queries, year_from, year_to, warnings, *, page=1):
                 continue
             metadata = copy.deepcopy(item.get('extra') or {})
             identity = metadata.get('doc_id') or metadata.get('doi') or item.get('url') or item['title']
-            paper = {**copy.deepcopy(item), 'metadata': metadata, 'kind': 'paper', 'source': 'sciverse',
-                     'id': 'sciverse-' + hashlib.sha256(str(identity).encode()).hexdigest()[:20],
+            paper = {**copy.deepcopy(item), 'metadata': metadata, 'kind': 'paper', 'source': source,
+                     'id': source + '-' + hashlib.sha256(str(identity).encode()).hexdigest()[:20],
                      'text': item.get('snippet') or '', 'reading': {'content_type': 'search_preview'}}
             paper.update({key: metadata[key] for key in ('doi', 'authors', 'year', 'venue') if metadata.get(key)})
             candidates.append(paper)

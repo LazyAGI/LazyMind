@@ -17,6 +17,19 @@ def test_retry_control_preserves_review_requirements(command):
     assert workflow._step_request('peer_review', pool, params) == '重点检查数字与实验设计'
 
 
+@pytest.mark.parametrize('command', ['继续', '继续执行', 'Continue.'])
+@pytest.mark.parametrize('step', [
+    'literature_review', 'refine_topic', 'experiment', 'data_analysis',
+    'write_outline', 'write_document', 'peer_review', 'revise_document',
+])
+def test_native_continue_preserves_the_original_writing_goal(command, step):
+    request = '检索相关研究，使用已有结果，完成5000词英文论文及审稿修订。'
+    pool = workflow.pool_from_business({'topic': 'Writing methods', 'request': request})
+    params = {'step_id': step, 'current_user_input': command, 'user_input': command,
+              'remote_inputs': {'research_topic_pool': '/saved/pool.json'}}
+    assert workflow._step_request(step, pool, params) == request
+
+
 def test_retry_uses_saved_module_requirements_not_initial_launch():
     pool = workflow.pool_from_business({'topic': 'T', 'request': '检查论文', 'manuscript': '正文'})
     pool['history'] = [{'node': 'F6', 'request': '只检查引用'}, {'node': 'F5', 'request': '修改措辞'}]
@@ -78,6 +91,15 @@ def test_recovery_request_wins_over_restored_launch_input():
     params = {'user_input': '最初选题', 'retry_hint': 'Recovery request for this rerun only: 只调整恢复机制',
               'remote_inputs': {'literature_review_pool': '/saved/pool.json'}}
     assert workflow._step_request('refine_topic', pool, params) == '只调整恢复机制'
+
+
+@pytest.mark.parametrize('restored', ['继续', '按审稿意见修订'])
+def test_explicit_recovery_edits_override_restored_current_input(restored):
+    pool = workflow.pool_from_business({'topic': 'Paper', 'request': 'Write and review the paper'})
+    params = {'step_id': 'revise_document', 'current_user_input': restored,
+              'retry_hint': 'Recovery request for this rerun only: 精简重复的局限说明',
+              'remote_inputs': {'peer_review_pool': '/saved/pool.json'}}
+    assert workflow._step_request('revise_document', pool, params) == '精简重复的局限说明'
 
 
 def test_text_upload_initializes_without_pool_or_json(tmp_path):

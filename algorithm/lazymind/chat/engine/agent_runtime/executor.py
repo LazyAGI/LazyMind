@@ -114,10 +114,24 @@ def _skill_filesystem(fs: Any, skills_dir: Optional[str]) -> Any:
     return fs
 
 
+AGENT_MODULE_TRACE = {
+    'by_class': {
+        'FunctionCall': False, 'ToolManager': False,
+        'Pipeline': False, 'Diverter': False,
+        'ReactAgent': False, 'FallbackLLM': False,
+    },
+    'by_name': {
+        '_build_history': False, '_post_action': False,
+        '_safe_call': False, '_indexed_call': False, '_stop': False,
+    },
+}
+
+
 class AgentInvocation:
     """LazyLLM-traceable boundary for one in-process agent invocation."""
 
-    __span_name__ = 'invoke_agent'
+    __span_name__ = 'ChatAgent'
+    __trace_exclude__ = {'plan'}
     _type = 'agent'
     _agent_name = 'ChatAgent'
 
@@ -129,6 +143,11 @@ class AgentInvocation:
 
     def __call__(self):
         return self._executor.stream_agent(self._agent, self._plan)
+
+    def stream(self, **trace_context):
+        if not lazyllm.config['trace_enabled']:
+            return self()
+        return lazyllm.enable_trace(self, **trace_context)
 
 
 class _ChatWithoutTools(_agent_mod.ReactAgent):

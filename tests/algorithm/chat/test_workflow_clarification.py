@@ -234,3 +234,147 @@ def test_owned_continuation_returns_only_remaining_questions_without_prepare(mon
     assert card['workflow']['revision_id'] == 'r1'
     client.get_workflow.assert_called_once_with('academic', 'r1')
     toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.fixture
+def startup_tools(monkeypatch):
+    from unittest.mock import MagicMock
+    from lazymind.chat.workflow import workflow_manager as manager
+
+    client, toolkit = MagicMock(), MagicMock()
+    client.get_state.return_value = {'projection': {'ready': ['prepare']}}
+    toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['prepare']}
+    monkeypatch.setattr(manager, '_client', lambda: client)
+    monkeypatch.setattr(manager, 'HostWorkflowToolkit', lambda *args, **kwargs: toolkit)
+    events = []
+    monkeypatch.setattr('lazyllm.tools.agent.base._write_agent_data',
+                        lambda tag, **payload: events.append((tag, payload)))
+    monkeypatch.setattr('lazymind.chat.engine.tools.ask_user._write_agent_data',
+                        lambda tag, **payload: events.append((tag, payload)))
+
+    def build(runtime, request, history=None):
+        client.get_workflow.return_value.result = {
+            'revision_id': 'revision-1', 'runtime': runtime,
+            'compiled_graph': {'material_types': {}, 'material_producers': {}},
+        }
+        return manager._workflow_trigger_tools([{
+            'workflow_id': 'writer-workflow', 'workflow_ref': 'builtin:writer-workflow',
+            'revision_id': 'revision-1', 'tool_name': 'trigger_writer_workflow', 'runtime': runtime,
+        }], {'builtin:writer-workflow'}, current_query=request, conversation_history=history, session_holder={})[0]
+
+    return build, client, toolkit, events
+
+
+@pytest.fixture
+def run_startup_agent(tmp_path):
+    import lazyllm
+    from lazymind.chat.engine.agent_runtime import (
+        AgentExecutor, AgentRunPlan, AgentRole, AgentExecutionOptions, PromptBuilder,
+    )
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {}
+
+    class Model:
+        def __init__(self, call):
+            self._module_id = f'startup-test-{id(self)}'
+            self.requests = 0
+            self.call = call
+
+        def share(self, **kwargs):
+            return self
+
+        def used_by(self, _):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            self.requests += 1
+            return ({'content': '', 'tool_calls': [self.call]} if self.requests == 1
+                    else {'content': 'Unexpected continuation after asking the user.'})
+
+    def run(tools, name, arguments, stop_tools=()):
+        model = Model({'id': 'startup-call', 'type': 'function',
+                       'function': {'name': name, 'arguments': arguments}})
+        with lazyllm.locals._scope():
+            plan = AgentRunPlan(
+                role=AgentRole.CHAT,
+                prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Start the workflow', source='user').build(),
+                tools=tools, stop_tools=list(stop_tools), execution_options=AgentExecutionOptions(
+                    workspace=str(tmp_path), max_retries=2, enable_builtin_tools=False,
+                    workspace_permission=WorkspaceContext(local_runtime=False)),
+            )
+            result = AgentExecutor().create_agent(model, plan)('Start the workflow')
+        return result, model.requests
+
+    yield run
+    if previous is None:
+        lazyllm.globals.pop('agentic_config', None)
+    else:
+        lazyllm.globals['agentic_config'] = previous
+
+
+@pytest.mark.parametrize('answered', [False, True])
+def test_writer_starts_without_requiring_duplicate_goal_binding(startup_tools, answered):
+    build, _client, toolkit, events = startup_tools
+    runtime = policy('writer-workflow')
+    original = '用中文写一篇克苏鲁小说，不超过3章、3000字以内，第一章生成一张图片'
+    history = [
+        {'role': 'user', 'content': original},
+        {'role': 'assistant', 'tool_calls': [{'id': 'ask-1', 'function': {
+            'name': 'ask_user', 'arguments': {'questions': [{
+                'id': 'writing_goal', 'text': '想写什么内容，或修改哪份文档？', 'type': 'text',
+            }]}},
+        }]},
+        {'role': 'tool', 'tool_call_id': 'ask-1', 'name': 'ask_user',
+         'content': 'The user submitted the form.'},
+    ] if answered else None
+    trigger = build(runtime, '主题是海边小镇的怪谈。' if answered else original, history)
+    result = trigger()
+    assert result['outcome'] == 'ready'
+    context = toolkit.prepare_workflow.call_args.kwargs['request_context']
+    assert original in context
+    if answered:
+        assert '主题是海边小镇的怪谈。' in context
+    assert events == []
+
+
+def test_writer_can_still_ask_for_an_unknown_topic(startup_tools, run_startup_agent):
+    from lazymind.chat.service.chat_service import (
+        _build_ask_user_tool, _workflow_startup_clarification_available,
+    )
+
+    build, _client, toolkit, events = startup_tools
+    runtime = policy('writer-workflow')
+    trigger = build(runtime, '帮我写篇文章')
+    assert _workflow_startup_clarification_available(runtime, None)
+    ask = _build_ask_user_tool(runtime)[0]
+    _result, requests = run_startup_agent([trigger, ask], 'ask_user', {'questions': [{
+        'id': 'writing_goal', 'text': '这篇文章想写什么主题？', 'type': 'text',
+        'reason': '需要确定文章主题才能开始写作。', 'required': True,
+    }]}, stop_tools=['ask_user'])
+    assert requests == 1
+    assert len(events) == 1
+    assert events[0][1]['questions'][0]['id'] == 'writing_goal'
+    toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('source', ['host', 'core'])
+def test_startup_question_stops_the_agent_before_another_model_round(startup_tools, run_startup_agent, source):
+    build, client, toolkit, events = startup_tools
+    question = {'id': 'topic', 'question': '主题是什么？', 'type': 'text',
+                'reason': '主题决定本次交付内容。', 'required': True}
+    runtime = {'clarification_fields': [question]} if source == 'host' else {}
+    if source == 'core':
+        toolkit.prepare_workflow.return_value = {'status': 'needs_input', 'questions': [{
+            **question, 'text': question['question'],
+        }]}
+    trigger = build(runtime, '开始工作流')
+    _result, requests = run_startup_agent([trigger], 'trigger_writer_workflow', {})
+    assert requests == 1
+    assert len(events) == 1
+    assert events[0][0] == 'ask_pending'
+    assert events[0][1]['questions'][0]['id'] == 'topic'
+    assert 'workflow' in events[0][1]
+    assert toolkit.prepare_workflow.call_count == (source == 'core')
+    client.get_state.assert_not_called()

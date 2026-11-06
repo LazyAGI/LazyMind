@@ -14,6 +14,9 @@ def test_workflow_model_routing_uses_request_llm_and_isolates_users(monkeypatch)
     from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
 
     class Supplier:
+        def used_by(self, _):
+            return self
+
         def forward(self, prompt, **options):
             return json.dumps({
                 'model': options['model'], 'url': options['url'],

@@ -234,11 +234,7 @@ func collectRequiredInputMaterials(expression graphengine.Expression, materials 
 	for _, nested := range expression.All {
 		collectRequiredInputMaterials(nested, materials)
 	}
-	for _, nested := range expression.Any {
-		// Keep the existing conservative preparation contract for alternatives:
-		// every candidate branch input must be available before the Session starts.
-		collectRequiredInputMaterials(nested, materials)
-	}
+	// Alternative sources are checked by the node input expression when that node runs.
 }
 
 func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {

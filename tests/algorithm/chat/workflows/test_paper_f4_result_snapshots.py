@@ -1,11 +1,12 @@
 """Result-record snapshots preserve scientific identities before JSON serialization."""
 import copy
+import json
 from unittest.mock import Mock
 
 import pytest
 
 from lazymind.document_tools.paper.analysis import generated_worker as worker, pipeline
-from lazymind.document_tools.paper.analysis.schema import normalize_input
+from lazymind.document_tools.paper.analysis.schema import ContractError, normalize_input
 
 
 CODE = '''def analyze(tables, plan, rng):
@@ -70,10 +71,9 @@ def test_coordinate_alias_error_uses_existing_bounded_code_repair_and_preserves_
     plan = dict(questions=['Compare supplied conditions'], outline='Keep both conditions separate.')
     line = next(index for index, value in enumerate(CODE.splitlines(), 1) if 'scope=' in value)
     replacement = CODE.splitlines()[line - 1].replace('coordinates=coordinates,', 'coordinates=dict(coordinates),')
-    initial = Mock(return_value={'code': CODE})
-    repair = Mock(return_value=dict(replacements=[dict(start_line=line, end_line=line, code=replacement)]))
-    monkeypatch.setattr(pipeline.model, 'call_code_model', initial)
-    monkeypatch.setattr(pipeline.model, 'call_model', repair)
+    calls = Mock(side_effect=[dict(code=CODE), dict(replacements=[dict(
+        start_line=line, end_line=line, code=replacement)])])
+    monkeypatch.setattr(pipeline.model, 'call_code_model', calls)
     monkeypatch.setattr(pipeline.executor, 'execute', worker.run)
     code, history, rendered, analysis = pipeline.execute_analysis(inputs, plan, attempts=2)
     assert [item['outcome'] for item in history] == ['failed', 'passed']
@@ -82,5 +82,33 @@ def test_coordinate_alias_error_uses_existing_bounded_code_repair_and_preserves_
     assert [row['comparison'] for row in rendered['results']['results']] == ['first', 'second']
     assert [row['coordinates']['version'] for row in rendered['results']['results']] == ['first', 'second']
     assert 'coordinates=dict(coordinates)' in code
-    initial.assert_called_once()
-    repair.assert_called_once()
+    assert calls.call_count == 2
+
+
+@pytest.mark.parametrize('converges', [True, False])
+def test_code_repair_uses_current_error_and_retains_complete_failure_history(monkeypatch, converges):
+    inputs = normalize_input(dict(topic='Compare conditions', data=payload()['tables']['data']))
+    plan = dict(questions=['Compare supplied conditions'], outline='Keep both conditions separate.')
+    correct = CODE.replace('comparison=version, coordinates=coordinates,',
+                           'comparison=version, coordinates=dict(coordinates),')
+    invalid_refs = correct.replace("table_id='data', column='score'", "table_id='table_id', column='column'")
+    responses = [dict(code='def analyze(tables, plan, rng):\n    return row.耗时（秒）\n'), dict(code=invalid_refs)]
+    if converges:
+        responses.extend([dict(replacements=[dict(start_line=999, end_line=999, code='pass')]), dict(code=correct)])
+    calls = Mock(side_effect=responses)
+    monkeypatch.setattr(pipeline.model, 'call_code_model', calls)
+    monkeypatch.setattr(pipeline.executor, 'execute', worker.run)
+    if not converges:
+        with pytest.raises(ContractError) as failure:
+            pipeline.execute_analysis(inputs, plan, attempts=2)
+        assert 'Attempt 1:' in str(failure.value) and 'SyntaxError' in str(failure.value)
+        assert 'Attempt 2:' in str(failure.value) and '不存在的列引用' in str(failure.value)
+        return
+    _, history, _, analysis = pipeline.execute_analysis(inputs, plan, attempts=4)
+    feedback = json.loads(calls.call_args.args[0]['input'][-1]['content'].split('INPUT_JSON:\n', 1)[1])['error']
+    assert '不存在的列引用' in feedback and "ref['table_id']" in feedback
+    assert '替换行号无效' in feedback
+    assert 'SyntaxError' not in feedback and 'Attempt 1:' not in feedback
+    assert 'SyntaxError' in history[0]['error'] and '不存在的列引用' in history[1]['error']
+    assert [item['outcome'] for item in history] == ['failed', 'failed', 'failed', 'passed']
+    assert [row['value'] for row in analysis['findings']] == [1., 2.]
