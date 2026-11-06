@@ -184,6 +184,11 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 			}
 		}
 		if strings.TrimSpace(provider.BaseURL) == "" {
+			if strings.TrimSpace(restored.Provider.BaseURL) != "" {
+				if err := guardEmbeddingRuntimeMutation(tx, sink.localUserID, provider.ID, "", ""); err != nil {
+					return err
+				}
+			}
 			if err := tx.Model(&provider).Update("base_url", restored.Provider.BaseURL).Error; err != nil {
 				return err
 			}
@@ -215,6 +220,18 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		return err
 	}
 	if groupFound {
+		if hasSharedProviderEndpoint(provider) {
+			currentPool, decryptErr := apiKeyForGroup(tx, &group)
+			if (decryptErr != nil || currentPool != string(restored.Provider.APIKey)) && provider.ActiveKeyGroupID == group.ID {
+				if err := guardEmbeddingRuntimeMutation(tx, sink.localUserID, provider.ID, "", ""); err != nil {
+					return err
+				}
+			}
+		} else if group.BaseURL != restored.Provider.BaseURL {
+			if err := guardEmbeddingRuntimeMutation(tx, sink.localUserID, provider.ID, group.ID, ""); err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(&orm.UserModelProviderGroup{}).Where("id = ? AND create_user_id = ?", group.ID, sink.localUserID).Updates(map[string]any{
 			"name": restored.Provider.DisplayName, "base_url": restored.Provider.BaseURL, "api_key": "", "api_key_ciphertext": ciphertext,
 			"credential_version": modelProviderCredentialVersion, "credential_revision": localRevision, "is_verified": verified, "updated_at": now,

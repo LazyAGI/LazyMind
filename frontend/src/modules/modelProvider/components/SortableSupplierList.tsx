@@ -20,7 +20,7 @@ function SortableSupplierRow({ item, disabled, children, onVisibilityChange, res
     ref={setNodeRef}
     className={`provider-workspace-sortable-row${isDragging ? " is-dragging" : ""}`}
     data-provider-id={item.id}
-    style={{ transform: CSS.Transform.toString(transform), transition }}
+    style={{ transform: CSS.Translate.toString(transform), transition }}
   >
     {!disabled ? <Dropdown trigger={onVisibilityChange ? ["click"] : []} disabled={isDragging} menu={{ items: [{ key: "visibility", label: t(`modelProvider.workspace.${restoring ? "restoreSupplier" : "hideSupplier"}`), onClick: () => onVisibilityChange?.(item.id) }] }}>
     <button

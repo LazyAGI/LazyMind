@@ -11,6 +11,7 @@ import (
 	"lazymind/core/knowledge_market"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -114,8 +115,20 @@ func TestMarketControlIndexedRetryResponseLossDoesNotUseOldFailure(t *testing.T)
 	for _, repair := range []bool{false, true} {
 		t.Run(map[bool]string{false: "retry", true: "repair"}[repair], func(t *testing.T) {
 			f := newMarketControlFixture(t, "SUCCESS", "FAILED")
-			if err := f.db.AutoMigrate(&orm.UserUIPreferences{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{}, &orm.UserSelectedCloudModel{}); err != nil {
+			if err := f.db.AutoMigrate(&orm.UserUIPreferences{}, &orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{}, &orm.UserSelectedCloudModel{}, &orm.EmbeddingIndexState{}); err != nil {
 				t.Fatal(err)
+			}
+			now := time.Now().UTC()
+			base := orm.BaseModel{CreateUserID: "control-owner", CreatedAt: now, UpdatedAt: now}
+			for _, row := range []any{
+				&orm.UserModelProvider{ID: "control-vector-provider", Name: "OpenAI", ProtocolName: "OpenAI", Category: "model", Capabilities: "has_models", BaseModel: base},
+				&orm.UserModelProviderGroup{ID: "control-vector-group", UserModelProviderID: "control-vector-provider", BaseURL: "https://example.test/v1", APIKey: "fixture-key", IsVerified: true, BaseModel: base},
+				&orm.UserModelProviderGroupModel{ID: "control-vector-model", UserModelProviderID: "control-vector-provider", UserModelProviderGroupID: "control-vector-group", Name: "fixture-embed", ProviderName: "OpenAI", ModelType: "embed", Enabled: true, BaseModel: base},
+				&orm.EmbeddingIndexState{Scope: "global", ActiveModelID: "control-vector-model", ActiveSource: "own", ActiveModelName: "fixture-embed", ActiveProviderName: "OpenAI", Signature: "v1:1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64), Phase: "ready", Generation: 1, UpdatedAt: now},
+			} {
+				if err := f.db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := f.db.Model(&orm.Dataset{}).Where("id = ?", "control-dataset").Update("processing_level", "indexed").Error; err != nil {
 				t.Fatal(err)

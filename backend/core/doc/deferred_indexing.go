@@ -2,7 +2,9 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -11,6 +13,11 @@ import (
 	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/systemdeps"
+)
+
+const (
+	embeddingVersionReembedPending = "reembed:pending"
+	embeddingVersionReembedManual  = "reembed:manual"
 )
 
 // StartDeferredIndexing upgrades native artifacts only when both RAG and the
@@ -45,7 +52,8 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 	}
 	db := store.DB().WithContext(ctx)
 	var states []orm.DocumentProcessingState
-	if db.Where("parse_artifact_ref <> '' AND index_status <> ?", "succeeded").
+	if db.Where("(parse_artifact_ref <> '' OR embedding_version = ?) AND embedding_version <> ? AND index_status <> ?",
+		embeddingVersionReembedPending, embeddingVersionReembedManual, "succeeded").
 		Order("updated_at ASC").Find(&states).Error != nil {
 		return
 	}
@@ -95,17 +103,46 @@ func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(contex
 		if claimed.Error != nil || claimed.RowsAffected != 1 {
 			continue
 		}
+		if state.EmbeddingVersion == embeddingVersionReembedPending && strings.TrimSpace(document.LazyllmDocID) == "" {
+			// Legacy documents with no remote ID have no saved segment nodes to
+			// reembed. Re-add from the retained original when possible; otherwise
+			// leave an explicit repair state instead of retrying a futile task.
+			var ext documentExt
+			_ = json.Unmarshal(document.Ext, &ext)
+			sourceAvailable := false
+			for _, path := range []string{ext.ParseStoredPath, ext.StoredPath} {
+				if info, statErr := os.Stat(strings.TrimSpace(path)); statErr == nil && info.Mode().IsRegular() {
+					sourceAvailable = true
+					break
+				}
+			}
+			if !sourceAvailable {
+				_ = db.Model(&orm.DocumentProcessingState{}).
+					Where("dataset_id = ? AND document_id = ?", dataset.ID, document.ID).
+					Updates(map[string]any{
+						"index_status": "failed", "index_error_code": "MANUAL_REBUILD_REQUIRED",
+						"index_error_message": "Original document is unavailable. Upload or replace it, then rebuild its index.",
+						"embedding_version":   embeddingVersionReembedManual, "updated_at": time.Now().UTC(),
+					}).Error
+				continue
+			}
+		}
 		err = ensureDatasetRAG(ctx, &dataset)
 		if err == nil {
 			err = db.Model(&orm.Dataset{}).Where("id = ?", dataset.ID).Update("ext", dataset.Ext).Error
 		}
 		if err == nil {
 			taskType := string(TaskTypeParseUploaded)
+			payload := TaskPayload{DocumentID: document.ID}
 			if strings.TrimSpace(document.LazyllmDocID) != "" {
 				taskType = string(TaskTypeReparse)
+				if state.EmbeddingVersion == embeddingVersionReembedPending {
+					payload.ReparseMode = "slice_and_embed"
+					payload.ReparseGroups = []string{"block", "line", "code", "doc-summary"}
+				}
 			}
 			task, createErr := createTaskFromExistingDocument(r, dataset.ID, dataset.CreateUserID, "",
-				CreateTaskItem{Task: TaskPayload{DocumentID: document.ID}}, taskType)
+				CreateTaskItem{Task: payload}, taskType)
 			err = createErr
 			if err == nil {
 				_, err = startTasksInternal(r, dataset.ID, []string{task.ID})

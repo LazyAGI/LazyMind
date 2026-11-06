@@ -85,7 +85,7 @@ describe("provider credential availability", () => {
         name: "Old connection", base_url: provider.base_url,
         api_key: "fixture-replacement-key", verify: false,
       },
-    }, { timeout: 180000 }));
+    }, { timeout: 180000, silentError: true }));
     await waitFor(() => expect(screen.queryByText("modelProvider.credentialUnavailable")).not.toBeInTheDocument());
     page.unmount();
 

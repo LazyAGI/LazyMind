@@ -5374,11 +5374,63 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingIndexStatusResponse {
+    'affected_knowledge_bases': number;
+    'indexed_knowledge_bases': number;
+    'model_name'?: string;
+    'pending_knowledge_bases': number;
+    'provider_name'?: string;
+    'status': EmbeddingIndexStatusResponseStatusEnum;
+}
+
+export const EmbeddingIndexStatusResponseStatusEnum = {
+    Empty: 'empty',
+    Indexed: 'indexed',
+    Rebuilding: 'rebuilding',
+    Clearing: 'clearing',
+    Cleared: 'cleared',
+    Unknown: 'unknown'
+} as const;
+
+export type EmbeddingIndexStatusResponseStatusEnum = typeof EmbeddingIndexStatusResponseStatusEnum[keyof typeof EmbeddingIndexStatusResponseStatusEnum];
+
 export interface EmbeddingOptions {
     'batch_size'?: number | null;
     'passage_prefix'?: string;
     'query_prefix'?: string;
 }
+export interface EmbeddingSignatureResponse {
+    'code': string;
+    'dimensions'?: number;
+    'model_type': string;
+    'passage_signature'?: string;
+    'query_signature'?: string;
+    'status': string;
+}
+export interface EmbeddingSwitchPreviewRequest {
+    'model_id': string;
+    'source': string;
+}
+export interface EmbeddingSwitchPreviewResponse {
+    'active_model_name'?: string;
+    'can_switch': boolean;
+    'candidate_model_name'?: string;
+    'generation': number;
+    'indexed_knowledge_bases': number;
+    'outcome': EmbeddingSwitchPreviewResponseOutcomeEnum;
+    'signature_status'?: string;
+}
+
+export const EmbeddingSwitchPreviewResponseOutcomeEnum = {
+    Unchanged: 'unchanged',
+    Empty: 'empty',
+    Same: 'same',
+    ClearRequired: 'clear_required',
+    ProbeFailed: 'probe_failed'
+} as const;
+
+export type EmbeddingSwitchPreviewResponseOutcomeEnum = typeof EmbeddingSwitchPreviewResponseOutcomeEnum[keyof typeof EmbeddingSwitchPreviewResponseOutcomeEnum];
+
 export interface EpisodeMemory {
     'conversation_id': string;
     'episode_type': EpisodeMemoryEpisodeTypeEnum;
@@ -19816,6 +19868,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             assertParamExists('apiCoreAcademicImportsBatchIdCancelPost', 'batchId', batchId)
             const localVarPath = `/api/core/academic/imports/{batch_id}:cancel`
                 .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/library/papers:delete
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersDeletePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/library/papers:delete`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -34845,6 +34926,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /academic/library/papers:delete
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersDeletePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryPapersDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -40624,6 +40717,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicImportsBatchIdCancelPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicImportsBatchIdCancelPost(requestParameters.batchId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/library/papers:delete
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -47382,6 +47484,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdCancelPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdCancelPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/library/papers:delete
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersDeletePost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicLibraryPapersDeletePost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -58108,6 +58220,71 @@ export class McpServersApi extends BaseAPI {
 export const ModelProvidersApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingIndexStateGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/model_providers/embedding/index-state`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {EmbeddingSwitchPreviewRequest} embeddingSwitchPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingSwitchPreviewPost: async (embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'embeddingSwitchPreviewRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersEmbeddingSwitchPreviewPost', 'embeddingSwitchPreviewRequest', embeddingSwitchPreviewRequest)
+            const localVarPath = `/api/core/model_providers/embedding/switch-preview`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(embeddingSwitchPreviewRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -58577,6 +58754,48 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             }
 
             const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost', 'modelId', modelId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -59377,6 +59596,31 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = ModelProvidersApiAxiosParamCreator(configuration)
     return {
         /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingIndexStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingIndexStateGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingIndexStateGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {EmbeddingSwitchPreviewRequest} embeddingSwitchPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersEmbeddingSwitchPreviewPost(embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingSwitchPreviewResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersEmbeddingSwitchPreviewPost(embeddingSwitchPreviewRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersEmbeddingSwitchPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -59547,6 +59791,21 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(modelProviderId, groupId, modelId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EmbeddingSignatureResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(modelProviderId, groupId, modelId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -59844,6 +60103,25 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
     const localVarFp = ModelProvidersApiFp(configuration)
     return {
         /**
+         * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+         * @summary Get shared text-vector index state
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingIndexStatusResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingIndexStateGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+         * @summary Check whether a text embedding model can replace the active model
+         * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingSwitchPreviewResponse> {
+            return localVarFp.apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters.embeddingSwitchPreviewRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
          * @summary Get model feature flags
          * @param {*} [options] Override http request option.
@@ -59961,6 +60239,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteModelProviderGroupModelOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+         * @summary Fingerprint one saved text embedding model
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<EmbeddingSignatureResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
          * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
@@ -60174,6 +60462,13 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
 };
 
 /**
+ * Request parameters for apiCoreModelProvidersEmbeddingSwitchPreviewPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest {
+    readonly embeddingSwitchPreviewRequest: EmbeddingSwitchPreviewRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersGetRequest {
@@ -60285,6 +60580,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest {
     readonly modelProviderId: string
 
     readonly groupId: string
@@ -60461,6 +60767,27 @@ export interface ModelProvidersApiApiCoreModelProvidersWithGroupsGetRequest {
  */
 export class ModelProvidersApi extends BaseAPI {
     /**
+     * Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+     * @summary Get shared text-vector index state
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingIndexStateGet(options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingIndexStateGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+     * @summary Check whether a text embedding model can replace the active model
+     * @param {ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters: ModelProvidersApiApiCoreModelProvidersEmbeddingSwitchPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersEmbeddingSwitchPreviewPost(requestParameters.embeddingSwitchPreviewRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
      * @summary Get model feature flags
      * @param {*} [options] Override http request option.
@@ -60589,6 +60916,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDeleteRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Computes SHA-256 digests for fixed passage and query samples through the saved model\'s actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+     * @summary Fingerprint one saved text embedding model
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdEmbeddingSignaturePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

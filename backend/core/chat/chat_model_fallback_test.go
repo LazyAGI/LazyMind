@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -744,19 +745,36 @@ func TestChatFallbackCandidateCredentialHeaderSafety(t *testing.T) {
 		{name: "keyless endpoint", key: " \n ", current: "own:model-a", want: ""},
 		{name: "encrypted outer whitespace", key: " \r\nfixture-single\t ", current: "own:model-a", want: "fixture-single"},
 		{name: "access secret pair", key: "fixture-access:fixture-secret", current: "own:model-a", want: "fixture-access:fixture-secret"},
-		{name: "embedded LF", key: "fixture-first\nfixture-second", current: "own:model-b", want: "fixture-b", replacement: true},
+		{name: "multiple saved keys", key: "fixture-first\nfixture-second", current: "own:model-a", want: "fixture-first"},
 		{name: "embedded CR", key: "fixture-first\rfixture-second", current: "own:model-b", want: "fixture-b", replacement: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db, conversation, _ := fallbackTestBody(t, "fixed")
-			before := string(conversation.ChatModelSnapshot)
 			const fixtureEncryptionKey = "fixture-local-credential-encryption-key"
 			t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", fixtureEncryptionKey)
+			db, conversation, _ := fallbackTestBody(t, "fixed")
+			before := string(conversation.ChatModelSnapshot)
 			ciphertext, err := secretcrypto.EncodeAESGCM([]byte(test.key), fixtureEncryptionKey)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Updates(map[string]any{"api_key": "", "api_key_ciphertext": string(ciphertext)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			selectedKey := strings.Split(strings.TrimSpace(test.key), "\n")[0]
+			active := map[string]any{
+				"active_key_group_id": "group-a",
+				"active_key_id":       fmt.Sprintf("%x", sha256.Sum256([]byte("group-a\x00"+selectedKey))),
+			}
+			if test.name == "keyless endpoint" {
+				// An unauthenticated custom endpoint has no saved key to enable.
+				if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Updates(map[string]any{"api_key_ciphertext": ""}).Error; err != nil {
+					t.Fatal(err)
+				}
+				active["is_custom"] = true
+				active["active_key_group_id"] = ""
+				active["active_key_id"] = ""
+			}
+			if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "provider-a").Updates(active).Error; err != nil {
 				t.Fatal(err)
 			}
 			body := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1"}

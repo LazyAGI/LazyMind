@@ -312,7 +312,14 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 // loadLLMConfigWithOptions keeps the legacy role loading behavior while allowing
 // chat runtime preparation to omit the chat role and reuse credential results.
 func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, omitEvolution, omitChat bool, credentials runtimeCredentials) (map[string]any, error) {
+	globalEmbedding, globalEmbeddingRow, err := loadGlobalEmbeddingRuntime(ctx, db, credentials)
+	if err != nil {
+		return nil, err
+	}
 	selectionScope := func(query *gorm.DB) *gorm.DB {
+		if globalEmbedding {
+			query = query.Where("LOWER(TRIM(usm.model_type)) <> ?", "embed_main")
+		}
 		if omitEvolution {
 			query = query.Where("usm.model_type <> ?", "evo_llm")
 		}
@@ -323,7 +330,7 @@ func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, o
 	}
 	// Step 1: load the user's own selections.
 	var ownRows []SelectedRuntimeModel
-	err := db.WithContext(ctx).
+	err = db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Scopes(selectionScope).
 		Select(
@@ -385,6 +392,9 @@ func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, o
 	unresolvedCloudTypes := make(map[string]struct{}, len(cloudSelections))
 	resolvedCloudRows := make([]SelectedRuntimeModel, 0, len(cloudSelections))
 	for _, selection := range cloudSelections {
+		if globalEmbedding && strings.EqualFold(strings.TrimSpace(selection.ModelType), "embed_main") {
+			continue
+		}
 		if omitChat && strings.EqualFold(strings.TrimSpace(selection.ModelType), "llm") {
 			continue
 		}
@@ -493,6 +503,18 @@ func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, o
 			}
 		}
 		rows = filtered
+	}
+	if globalEmbedding {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !strings.EqualFold(strings.TrimSpace(row.ModelType), "embed_main") {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+		if globalEmbeddingRow != nil {
+			rows = append(rows, *globalEmbeddingRow)
+		}
 	}
 	return BuildLLMConfig(rows), nil
 }
@@ -1101,7 +1123,7 @@ func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []Sele
 			rows[i].RequestProtocol = runtimeConfig.Protocol
 			rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
 			if groupID != "" && credentials != nil {
-				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL, advanced: runtimeConfig.Advanced, protocol: runtimeConfig.Protocol}
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL, advanced: runtimeConfig.Advanced, protocol: runtimeConfig.Protocol, runtimeChecked: true}
 			}
 			continue
 		}

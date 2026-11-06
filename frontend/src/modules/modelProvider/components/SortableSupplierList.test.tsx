@@ -1,16 +1,27 @@
 import type { ComponentProps } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { applyModifiers, type DragEndEvent, type Modifiers } from "@dnd-kit/core";
 import { SortableSupplierList } from "./SortableSupplierList";
 
-const state = vi.hoisted(() => ({ end: undefined as ((event: DragEndEvent) => void) | undefined, modifiers: undefined as Modifiers | undefined }));
+const state = vi.hoisted(() => ({
+  end: undefined as ((event: DragEndEvent) => void) | undefined,
+  modifiers: undefined as Modifiers | undefined,
+  transform: undefined as { x: number; y: number; scaleX: number; scaleY: number } | undefined,
+}));
 vi.mock("@dnd-kit/core", async (original) => {
   const actual = await original<typeof import("@dnd-kit/core")>();
   return { ...actual, DndContext: (props: ComponentProps<typeof actual.DndContext>) => {
     state.end = props.onDragEnd;
     state.modifiers = props.modifiers;
     return <actual.DndContext {...props} />;
+  } };
+});
+vi.mock("@dnd-kit/sortable", async (original) => {
+  const actual = await original<typeof import("@dnd-kit/sortable")>();
+  return { ...actual, useSortable: (...args: Parameters<typeof actual.useSortable>) => {
+    const sortable = actual.useSortable(...args);
+    return { ...sortable, transform: state.transform ?? sortable.transform };
   } };
 });
 vi.mock("react-i18next", () => ({
@@ -24,7 +35,20 @@ const items = [
   { id: "openai", name: "OpenAI" },
 ];
 
+beforeEach(() => { state.transform = undefined; });
+
 describe("supplier drag handles", () => {
+  it("keeps a dragged supplier logo unscaled over an expanded brand row", () => {
+    state.transform = { x: 0, y: 72, scaleX: 1, scaleY: 3 };
+    render(<SortableSupplierList items={[items[0]]} disabled={false} onReorder={vi.fn()}>
+      {(item) => <><button><span className="provider-workspace-logo"><img src="/provider-icons/sensenova.svg" alt="" /></span>{item.name}</button><ul><li>Expanded model</li></ul></>}
+    </SortableSupplierList>);
+    const row = document.querySelector<HTMLElement>(".provider-workspace-sortable-row");
+    expect(row?.querySelector(".provider-workspace-logo")).not.toBeNull();
+    expect(row?.style.transform).toContain("translate3d(0px, 72px, 0)");
+    expect(row?.style.transform).not.toContain("scale");
+  });
+
   it("uses separate keyboard-focusable handles without taking over normal supplier selection", () => {
     const select = vi.fn(); const reorder = vi.fn();
     render(<SortableSupplierList items={items} disabled={false} onReorder={reorder}>

@@ -333,6 +333,9 @@ func TestRemoteModelDiscoveryRejectsErrorObjectsAndInvalidCollectionShapes(t *te
 		{"data object", `{"data":{"id":"looks-like-a-model"}}`, "invalid_response"},
 		{"data string", `{"data":"provider-secret"}`, "invalid_response"},
 		{"data null", `{"data":null}`, "invalid_response"},
+		{"data with only malformed entries", `{"data":[null,42,{"id":{"unexpected":"shape"}}]}`, "invalid_response"},
+		{"models with only blank identities", `{"models":[{}, {"id":"  "}]}`, "invalid_response"},
+		{"empty data with malformed models", `{"data":[],"models":[42]}`, "invalid_response"},
 		{"models object", `{"models":{"id":"looks-like-a-model"}}`, "invalid_response"},
 		{"error object", `{"error":{"message":"provider-secret"},"data":[]}`, "upstream_error"},
 		{"numeric root array", `[123]`, "invalid_response"},
@@ -376,6 +379,60 @@ func TestRemoteModelDiscoveryAcceptsKnownEmptyAndLegacyCollectionShapes(t *testi
 				t.Fatalf("valid model collection rejected: entries=%v err=%v", entries, err)
 			}
 		})
+	}
+}
+
+func TestRemoteModelDiscoveryKeepsModelsWithProviderSpecificMetadata(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"kimi-k3.1-pro","reasoning":{"type":"only","effort":{"valid":["low","high","max"],"default":"max"}},"supports_reasoning":true},{"id":"openrouter/model","reasoning":{"mandatory":false,"default_enabled":true,"supported_efforts":["high","low","none"]},"tool_call":{"unknown":true},"context_length":"unknown"},{"id":"stable-id","name":{"localized":"unstable"}}]}`))
+	}))
+	defer upstream.Close()
+	baseURL := siliconFlowTestBaseURL(t, upstream)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fetchRemoteModelEntries(req)
+	if err != nil {
+		t.Fatalf("provider-specific metadata rejected the model list: %v", err)
+	}
+	if len(entries) != 3 || entries[0].ID != "kimi-k3.1-pro" || entries[1].ID != "openrouter/model" || entries[2].ID != "stable-id" {
+		t.Fatalf("valid model IDs were lost: %#v", entries)
+	}
+}
+
+func TestRemoteModelDiscoverySkipsMalformedEntriesWithoutDroppingValidModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[null,42,{"id":{"unexpected":"shape"}},{"id":{"unexpected":"shape"},"name":"named-fallback"},{"id":"kimi-valid","reasoning":{"type":"only"},"supports_reasoning":true}]}`))
+	}))
+	defer upstream.Close()
+	baseURL := siliconFlowTestBaseURL(t, upstream)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fetchRemoteModelEntries(req)
+	if err != nil {
+		t.Fatalf("malformed sibling rejected the model list: %v", err)
+	}
+	if len(entries) != 2 || entries[0].ID != "kimi-valid" || entries[1].ID != "named-fallback" || entries[0].SupportsReasoning == nil || !*entries[0].SupportsReasoning {
+		t.Fatalf("valid model metadata was lost: %#v", entries)
+	}
+}
+
+func TestRemoteModelDiscoveryUsesModelsWhenDataHasOnlyMalformedEntries(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[null,{"id":{"unexpected":"shape"}}],"models":[{"id":"fallback-model"}]}`))
+	}))
+	defer upstream.Close()
+	baseURL := siliconFlowTestBaseURL(t, upstream)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := fetchRemoteModelEntries(req)
+	if err != nil || len(entries) != 1 || entries[0].ID != "fallback-model" {
+		t.Fatalf("valid fallback collection was lost: entries=%#v err=%v", entries, err)
 	}
 }
 

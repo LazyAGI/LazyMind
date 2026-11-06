@@ -104,6 +104,26 @@ describe("DefaultServicesPage", () => {
     );
   });
 
+  it("marks model setup ready while unrelated service checks are still pending", async () => {
+    mocks.listModels.mockResolvedValue({
+      data: { models: [{ id: "model-llm", model_type: "llm" }] },
+    });
+    mocks.listProviderGroups.mockImplementation(() => new Promise(() => {}));
+
+    render(
+      <DefaultServicesPage
+        {...defaultOcrProps}
+        onConfigureCloudService={vi.fn()}
+        onConfigureProviders={vi.fn()}
+        onModelSelectionChanged={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("model-provider-setup-state")).toHaveTextContent("ready");
+    });
+  });
+
   it("supports a backend that still requires model_type during a rolling update", async () => {
     mocks.listModels.mockImplementation(({ modelType }: { modelType?: string } = {}) => {
       if (!modelType) return Promise.reject(new Error("model_type is required"));
