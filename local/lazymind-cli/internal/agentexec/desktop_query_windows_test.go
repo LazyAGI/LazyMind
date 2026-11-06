@@ -20,7 +20,9 @@ func TestWindowsPackageQueryHasNoConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	// This verifies console flags, not the production package-query deadline.
+	// A cold PowerShell + Add-Type compiler can exceed 8s on a busy CI runner.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := windowsAppPackageCommand(ctx, system, []string{"OpenAI.Codex"})
 	if !command.SysProcAttr.HideWindow || command.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
@@ -28,9 +30,9 @@ func TestWindowsPackageQueryHasNoConsole(t *testing.T) {
 	}
 	// Exercise the actual process flags, without scanning installed applications.
 	command.Args[len(command.Args)-1] = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'; [ConsoleProbe]::GetConsoleWindow().ToInt64()`
-	body, err := command.Output()
+	body, err := command.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("console probe: %v (context: %v): %s", err, ctx.Err(), body)
 	}
 	if strings.TrimSpace(string(body)) != "0" {
 		t.Fatalf("background PowerShell owns console window: %s", body)
