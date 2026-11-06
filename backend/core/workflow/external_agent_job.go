@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -83,15 +84,16 @@ func recoverExternalWorkflowTasks(ctx context.Context, db *gorm.DB) error {
 	var recovered []orm.ExternalAgentWorkflowTask
 	if err := db.WithContext(ctx).Where("status=? AND stage=? AND error_code=? AND session_id IN (?)",
 		externalTaskStatusFailed, "execute", "WORKFLOW_EXECUTION_FAILED",
-		db.Model(&orm.WorkflowSession{}).Select("id").Where("status=? AND dismissed=?", "completed", false)).Find(&recovered).Error; err != nil {
+		db.Model(&orm.WorkflowSession{}).Select("id").Where("status=? AND dismissed=?", "completed", false)).Order("created_at, id").Find(&recovered).Error; err != nil {
 		return err
 	}
+	var collectionErrors []error
 	for _, task := range recovered {
 		if err := collectRecoveredExternalTask(ctx, db, task.ID); err != nil {
-			return err
+			collectionErrors = append(collectionErrors, fmt.Errorf("collect recovered task %s: %w", task.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(collectionErrors...)
 }
 
 func RegisterExternalWorkflowTaskJob() {

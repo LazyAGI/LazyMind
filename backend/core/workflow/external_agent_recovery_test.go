@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
@@ -176,5 +177,47 @@ func TestExternalTaskRecoveryRequiresCompletedProjection(t *testing.T) {
 	}
 	if task.Status != externalTaskStatusFailed {
 		t.Fatal("incomplete projection was collected as success")
+	}
+}
+
+func TestExternalTaskRecoveryContinuesAfterOneCollectionFails(t *testing.T) {
+	db, bad, _ := seedRecoveredExternalTask(t)
+	if err := db.Where("id=?", externalWorkflowHistoryID(bad.ID)).Delete(&orm.ChatHistory{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	task := bad
+	task.ID, task.IdempotencyKey = "next-valid-task", "next-valid-recovery"
+	task.CreatedAt = bad.CreatedAt.Add(time.Hour)
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	history := orm.ChatHistory{ID: externalWorkflowHistoryID(task.ID), ConversationID: task.ConversationID, RunStatus: "failed", Result: "original failure"}
+	if err := db.Create(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		err := recoverExternalWorkflowTasks(context.Background(), db.DB)
+		if err := db.First(&task, "id=?", task.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != externalTaskStatusSucceeded {
+			t.Fatalf("valid task blocked: %s", task.Status)
+		}
+		if err == nil || !strings.Contains(err.Error(), bad.ID) {
+			t.Fatalf("missing per-task error: %v", err)
+		}
+		if err := db.First(&bad, "id=?", bad.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if bad.Status != externalTaskStatusFailed || bad.ErrorMessage != "original failure" {
+			t.Fatal("failed candidate lost retry eligibility or error")
+		}
+	}
+	var artifacts, attempts, jobs int64
+	db.Model(&orm.WorkflowSlotRevision{}).Count(&artifacts)
+	db.Model(&orm.WorkflowSessionStep{}).Count(&attempts)
+	db.Model(&orm.AsyncJob{}).Count(&jobs)
+	if artifacts != 1 || attempts != 2 || jobs != 0 {
+		t.Fatalf("unexpected execution/writes: %d %d %d", artifacts, attempts, jobs)
 	}
 }
