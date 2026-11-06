@@ -116,7 +116,7 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
         {!loading && !loadFailed && !hasVisibleTasks ? <WorkbenchEmpty /> : null}
       </Spin>
       <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={setRemovingTask} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenWorkflow={(sessionId) => navigate(`/workflow-runs/${encodeURIComponent(sessionId)}`)} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onDelete={setRemovingTask} />
       {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );

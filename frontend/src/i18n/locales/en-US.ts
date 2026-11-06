@@ -5003,6 +5003,7 @@ const enUS = {
     schedulePlans: "Schedules",
     taskDetail: "Task Details",
     openConversation: "Open task conversation",
+    openWorkflow: "View progress and artifacts",
     conversationUnavailable: "The linked conversation is not ready yet",
     moreActions: "More actions",
     noDescription: "No task description",

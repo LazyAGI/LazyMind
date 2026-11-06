@@ -197,7 +197,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       </div>
       <Table rowKey='id' className='task-table' tableLayout='fixed' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
       <TaskRemovalDialog task={removingTask} onClose={() => setRemovingTask(null)} />
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onArchive={setArchiveTask} onDelete={setRemovingTask} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenWorkflow={(sessionId) => navigate(`/workflow-runs/${encodeURIComponent(sessionId)}`)} onOpenGraph={(sessionId) => selected && setGraphTask({ ...selected, workflow_session_id: sessionId })} onArchive={setArchiveTask} onDelete={setRemovingTask} />
       <ArchiveConversationModal
         open={Boolean(archiveTask)}
         conversationId={archiveTask?.conversation_id}

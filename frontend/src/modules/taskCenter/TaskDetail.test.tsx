@@ -25,6 +25,7 @@ const translations: Record<string, string> = {
   'taskCenter.noSteps': '暂无执行步骤',
   'taskCenter.noTitle': '（无标题）',
   'taskCenter.openConversation': '打开任务对话',
+  'taskCenter.openWorkflow': '查看过程与产物',
   'taskCenter.statusCompleted': '已完成',
   'taskCenter.statusPending': '待执行',
   'taskCenter.statusSkipped': '已跳过',
@@ -97,6 +98,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  it('opens an external workflow with no LazyMind conversation', async () => {
+    const external = { ...task, conversation_id: '', conversation_state: 'missing' as const, workflow_session_id: 'external-run' };
+    vi.mocked(getTask).mockResolvedValue(external);
+    const openWorkflow = vi.fn();
+    const openConversation = vi.fn();
+    render(<TaskDetail task={external} onClose={vi.fn()} onOpenConversation={openConversation} onOpenWorkflow={openWorkflow} />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看过程与产物' }));
+    expect(openWorkflow).toHaveBeenCalledWith('external-run');
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '打开任务对话' })).not.toBeInTheDocument();
+  });
+
   it.each([
     ['writer', 'write_document', '成稿', 'write_flat_document', '短文成稿', 'pruned'],
     ['ppt', 'generate_ppt', '生成幻灯片', 'choose_style', '选择风格', 'bypassed'],
