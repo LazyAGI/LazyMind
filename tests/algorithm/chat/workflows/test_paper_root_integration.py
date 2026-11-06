@@ -27,12 +27,18 @@ def test_outline_binds_explicit_requirements_before_default(monkeypatch, prompt,
     assert pool == original
 
 
-def test_review_receives_original_research_materials():
+def test_review_excludes_upstream_research_materials():
     notes = 'PT0005→PT0007; MiniMax: 3647→2831 字。'
     pool = workflow.pool_from_business(dict(
         topic='Paper', writing_materials=notes, manuscript='# Paper\n\n## 结果\n待核对。'))
+    original = copy.deepcopy(pool)
     value = contracts.validate_input('peer_review', workflow.business_input('peer_review', pool))
-    assert value['writing_materials'] == notes
+    assert value == {
+        'topic': 'Paper', 'request': '', 'manuscript': '# Paper\n\n## 结果\n待核对。',
+        'papers': [], 'charts': [],
+    }
+    assert workflow.material(pool, 'writing_materials')['content'] == notes
+    assert pool == original
 
 
 @pytest.mark.parametrize('sections', [['unknown'], ['abstract', 'abstract'], 'abstract', [None]])
