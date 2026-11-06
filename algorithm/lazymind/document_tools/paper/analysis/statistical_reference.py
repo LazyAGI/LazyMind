@@ -46,7 +46,8 @@ EXAMPLES = (
      'Rank association from actual variable pairs; do not invent intervals or independent repetitions.'),
     ('binomtest', ('二项', 'binomial', 'wilson', 'mcnemar', '精确检验'),
      'result = stats.binomtest(successes, n=trials, p=null_probability, alternative=alternative)\n'
-     'wilson = result.proportion_ci(confidence_level=level, method="wilson")',
+     'wilson = result.proportion_ci(confidence_level=level, method="wilson")\n'
+     'lower, upper = wilson.low, wilson.high',
      'Use integer successes/trials and the real denominator. Wilson is not Student-t. Exact McNemar uses '
      'discordant paired counts as binomial successes/total under p=0.5; handle zero discordant pairs explicitly.'),
     ('bootstrap', ('bootstrap', '重采样', '自助'),

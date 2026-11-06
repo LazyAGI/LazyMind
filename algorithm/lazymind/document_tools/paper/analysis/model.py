@@ -5,7 +5,7 @@ from .schema import prompt_tables, table_map
 from ..model_context import model_prompt
 from ..plotting.model import call_model, call_code_model, call_markdown_model
 from ..plotting.code_response import (
-    code_response, repair_response, numbered_source, CODE_INSTRUCTION, REPAIR_INSTRUCTION,
+    code_response, repair_response, CODE_INSTRUCTION, REPAIR_INSTRUCTION,
 )
 
 
@@ -74,6 +74,9 @@ fields to populate with nulls. Omit unavailable optional fields; the host applie
 Use keyword arguments for result construction so that metric labels, methods and source columns cannot be confused.
 Keep derived statistic names separate from original source column names; a derived result still cites the raw columns
 used in its calculation. Set kind='effect' for contrasts/differences, including algebraic contrast formulas.
+Copy column-reference objects directly, or read their ref['table_id'] and ref['column'] values.
+Use kind='count' only for nonnegative integer counts. Means, standard deviations and ratios of count-valued
+variables are estimates, even when their source column records calls, tokens or requests.
 Implement only the current empirical analysis. Do not produce literature mappings, citation audits, paper summaries,
 design rationales or their invented numeric scores. Do not build a general validation/reporting framework.
 The host has ALREADY validated the table structure and non-null cell types. Trust columns/column_types and use the
@@ -85,6 +88,8 @@ standardized statistics or result inventories by default. Include them when requ
 If a supplementary statistic is undefined, omit only that statistic and note the reason; preserve valid estimates.
 At execution tables contains the COMPLETE original tables: each table is a dictionary with columns, column_types,
 units and rows (a list of row lists). Build DataFrames using pd.DataFrame(table['rows'], columns=table['columns']).
+Read tabular cells through DataFrame columns or iterrows() and row[original_column_name], including in metric
+loops. Use ordinary dictionaries for records so labels, values and source references share the same measurement.
 This request shows small tables in full. A table marked rows_omitted is summarized here by row_count,
 column_profiles and sample_rows only; analyze still receives all of its rows.
 plan contains questions with host-assigned IDs, the prose outline and facts with the COMPLETE research context.
@@ -112,6 +117,8 @@ used, not the sample size implied by aggregate summaries. Unknown supplied n/exc
 interval/test/probability are optional; omit unavailable statistics. Report their actual method and meaning.
 Do not invent intervals, independence, sample counts or tests. Existing summary estimates, endpoints and p values
 are valid inputs with their declared meanings, not raw replicates. Distinguish paired and independent observations.
+Follow the outline's method choices. When it excludes intervals or significance tests, omit interval/test fields;
+descriptive associations can be reported as coefficients without adding unrequested p-values or hypothesis tests.
 Use installed scientific libraries for the actual method; method names are not a backend dispatch whitelist.
 statistical_reference gives installed SciPy signatures and relevant data-free examples. Adapt their placeholder
 arrays/options to this input and the intended method. It is assistance, not a restriction on available methods.
@@ -135,13 +142,12 @@ or extra validation framework is required. Briefly check that imports are availa
 and source references name real inputs, then return the script directly without another plan or long deliberation.
 On repair change the code using the exact error; retain the scientific outline.
 '''
-    request = call_model if previous else call_code_model
-    answer = request(model_prompt(
+    answer = call_code_model(model_prompt(
         prompt, facts=facts(inputs), tables=prompt_tables(table_map(inputs)),
         shared=dict(output_schema=ExecutedAnalysis.model_json_schema(),
                     generation_contract=generation_contract(), statistical_reference=reference_for(plan)),
         task=dict(plan=dict(outline=plan['outline'], questions=questions(plan)),
-                  previous_code=numbered_source(previous) if previous else '', error=error),
+                  previous_code=previous, error=error),
         response_instruction=REPAIR_INSTRUCTION if previous else CODE_INSTRUCTION))
     return repair_response(answer, previous, error) if previous else code_response(answer)
 
@@ -152,7 +158,9 @@ def plan_figures(inputs, analysis, plan, previous_error=''):
     prompt = '''Choose the figures AFTER inspecting these executed analysis results
 and the source tables or their profiles.
 Return JSON matching schema. Use a small, useful set of figures that answer the research questions, including
-adverse results, uncertainty and supported tradeoffs. A figure has a title, purpose, style and free-text requirements;
+adverse results, uncertainty and supported tradeoffs. Each figure supports multiple comparable observations or a
+meaningful composition. Reserve heterogeneous singleton operating records for compact manuscript tables.
+A figure has a title, purpose, style and free-text requirements;
 finding_ids selects exact IDs from the compact analysis_results catalog; copy these IDs, never count list positions
 or derive an ID from its numeric suffix. result_indices is legacy compatibility and should be omitted. Do not generate
 new material/result IDs, axis-coordinate schemas or native function arguments.
@@ -166,10 +174,14 @@ select the intended quantity, never substitute a neighboring result or include u
 Never place numeric annotations (counts, totals, estimates) in category/series/facet or tick labels.
 Use actual coordinate keys or descriptive string fields from each executed result (for example label or metric).
 Field availability is determined by the selected results, not a fixed business-field vocabulary.
-category=null uses the existing result labels; metric/unit/kind already create separate panels, so a metric facet
-is optional. Never use a translated display label as a field name. Repeated category/series cells require a facet
+category=null uses the existing result labels. To compare compatible metrics on one axis, use category=metric
+or category=label; unit and result kind still separate incompatible quantities. A metric used as category or series
+does not also require its own panel. Never use a translated display label as a field name.
+Repeated category/series cells require a facet
 or separate figures; no hidden pooling.
 Use value_format=percent ONLY when every selected row declares a proportion or percentage unit.
+For additive bar_stacked compositions, normalize=true explicitly requests within-category percentages.
+For this style, series identifies components and category identifies compositions; omit category for a single stack.
 Percentage-point effects are NOT percentages: keep their original numeric units, never multiply them by 100.
 For mixed units or any other units choose auto; each panel retains its source values and units.
 Use number to retain the original scale. A rate label or favorable-looking value does not establish a proportion.
@@ -188,6 +200,17 @@ string fields present in every selected row. category MUST be an ordered numeric
 independent tasks or unordered conditions need bars or points, never an invented trajectory.
 sort is source (preserve evidence order), value_ascending or value_descending. Lines always sort by numeric x.
 Prefer coherent, readable comparisons. The host partitions dense standard figures without dropping findings.
+Plan a small set of argument-led figures. Combine related measurements and align paired observations across
+panels. Prefer source-level observations for small samples, with summaries in annotations or captions.
+Select observation IDs for a task-level plot; aggregate-summary IDs remain in annotations or captions.
+Prefer moderately landscape layouts, compact panel grids and horizontal comparisons for long category labels.
+Use a shared multi-panel geometry when the same observational units have different metrics. A few isolated,
+heterogeneous records are usually clearer in a compact manuscript table. Each panel should support a useful
+comparison; one scalar alone rarely needs a coordinate system. Translate all visible labels, including source-column
+facet values, through terminology into the requested paper language.
+For label/layout-only redraws, carry forward the existing figure's style and coordinate encodings.
+For redraws, express whether the request selects every existing figure in all_existing_figures.
+Honor the requested selection, limits and exclusions when setting that scope and choosing source_chart_id values.
 Keep the metric name independent of group values: put a media condition or method in coordinates, not in metric.
 data_status is simulated only when the input explicitly says so; otherwise use supplied. executed/code success and
 is_demo=false do not establish real-world measurement. The bound plan will expose actual values, denominators,
@@ -203,12 +226,14 @@ with coherent purposes and result selections, each generated independently. Pres
 the figure set. Use facet for intended panels and describe their purpose briefly in requirements.
 Receiving all results is context, not a request to pack every metric, group or research question into one figure.
 Use the chart readers of this field expect for each displayed quantity:
-values or means per category and series -> bar_grouped_hatch with CI error bars;
+unordered estimates -> compact points or grouped bars, with intervals when supplied;
 any quantity along an ordered numeric x such as epochs, data size, time or a sweep, including differences or effects
 estimated at each x -> line_confidence_band when each x value has an interval, otherwise line_training_curve;
 signed differences, effects or coefficients with intervals across unordered categories -> point_interval;
-raw per-run distributions -> box_raw_points or violin_raw_points; two measured quantities of the same runs or
-groups -> scatter_tradeoff. When methods or conditions are compared, show their measured values or
+few paired runs -> aligned task-level points or bars; supported distributions -> box_raw_points or violin_raw_points;
+paired resource and outcome measurements -> scatter_tradeoff to expose their relationship, retaining run identity.
+Choose complementary geometries for distinct scientific relationships. When methods or conditions are compared,
+show their measured values or
 means unless only their differences are meaningful; paired differences add the inferential view. Showing both is
 not duplication when each answers a different question. Use specialized styles only when the data require them.
 Tables marked rows_omitted provide row counts, column profiles and sample rows; drawing receives every row.

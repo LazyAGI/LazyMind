@@ -3,6 +3,7 @@ from ..prompts.write_document_prompt import REVIEW_REVISION_INSTRUCTIONS, REVISI
 from lazyllm.tools.writer.data_models.revision import MarkdownModifyPlan, StringReplaceSet
 from ...toolkits import WriterCreateToolkit, WriterRevisionToolkit
 from ..publication import validate_chart_references as _validate_chart_references
+from ..publication import split_references, repair_generated_citation_links
 from .. import contracts
 import copy
 import re
@@ -13,7 +14,7 @@ from lazyllm import AutoModel
 from lazyllm.tools.writer.tools.base import _WriterJsonFormatter
 from lazyllm.tools.writer.utils import locate_markdown_paragraph
 from lazyllm.tools.writer.utils.serialization import markdown_section_range
-from .recovery import repair_locators, repair_replacements
+from .recovery import repair_locators, repair_replacements, repair_reader_provenance
 from .matching import resolve_locator
 
 from .common import (  # noqa: F401 - validate_* are public algorithm entries
@@ -288,7 +289,8 @@ def _validated_ranges(source, plan, pending=None):
     return plan.model_copy(update={'instructions': accepted}), ranges, bool(failures)
 
 
-def _validated_changes(source, plan, allowed, generated, *, allow_repair, pending=None):
+def _validated_changes(source, plan, allowed, generated, *, allow_repair, pending=None,
+                       candidates=(), material_identifiers=()):
     if pending is not None:
         accepted = []
         for raw in generated.get('replacements', []):
@@ -314,26 +316,32 @@ def _validated_changes(source, plan, allowed, generated, *, allow_repair, pendin
             if pending is None:
                 raise
             pending.append('部分修改补丁未能纠正：' + str(error))
-    if pending is None:
-        return _bounded_replacements(source, allowed, generated)
     accepted = []
     for raw in generated.get('replacements', []):
         try:
             _bounded_replacements(source, allowed, {'replacements': accepted + [raw]})
         except ValueError as error:
+            if pending is None:
+                raise
             pending.append('修改补丁未应用，已保留原文：' + str(error))
         else:
             accepted.append(raw)
-    return (_bounded_replacements(source, allowed, {'replacements': accepted})
-            if accepted else ({'replacements': []}, []))
+    if not accepted and pending is not None:
+        return {'replacements': []}, []
+    replacements = StringReplaceSet.model_validate({'replacements': accepted})
+    texts = repair_reader_provenance([item.new_string for item in replacements.replacements], material_identifiers)
+    for replacement, text in zip(replacements.replacements, texts):
+        replacement.new_string = repair_generated_citation_links(text, candidates)
+    return _bounded_replacements(source, allowed, replacements.model_dump())
 
 
 def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
     """Apply request edits or review-bound edits with the same public toolkit."""
-    source = prepared['manuscript']
+    source, references = split_references(prepared['manuscript'])
     pending = []
 
     def finish(body):
+        body += references
         if pending:
             report_progress(85, f'已保留可执行的修改，另有 {len(pending)} 项待处理')
         events = current_events()
@@ -397,11 +405,16 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
     try:
         generated = json.loads(editor.generate_string_replace_set(
             markdown_document=source, modify_plan_json=plan.model_dump_json(), writing_context_json=context_json))
-        changes, located_changes = _validated_changes(
-            source, plan, allowed, generated, allow_repair=not repaired, pending=pending)
+        _, located_changes = _validated_changes(
+            source, plan, allowed, generated, allow_repair=not repaired, pending=pending,
+            candidates=prepared['reference_candidates'],
+            material_identifiers=prepared.get('material_identifiers', []))
     except Exception as error:
         pending.append('修改内容未能生成，已保留原稿：' + str(error))
         return finish(source)
+    if plan.title_instruction and not any(
+            start <= title.end() and end >= title.start() for start, end, _ in located_changes):
+        pending.append('本轮未生成有效的标题修改，保留原标题')
     if reviewing:
         for issue in issues:
             if issue['action_type'] != 'text_revision' or issue['id'] not in covered:
@@ -412,8 +425,14 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
                 pending.append(f"{issue['id']}：本轮未产生有效修改，保留原文")
     report_progress(80, '正在逐项应用可执行的修改')
     body = source
-    for raw in changes['replacements']:
+    for start, end, replacement in reversed(located_changes):
+        raw = replacement.model_dump()
         try:
+            if plan.title_instruction and start <= title.end() and end >= title.start():
+                if (not title.start() <= start <= end <= title.end()
+                        or replacement.new_string.count('\n') != replacement.old_string.count('\n')
+                        or replacement.new_string.count('\r') != replacement.old_string.count('\r')):
+                    raise ValueError('A paper title change must stay within its original heading line.')
             # Each patch retains the original scope/source checks; one failed patch cannot roll back others.
             _validate_reference_markers(raw['new_string'], prepared['reference_candidates'], raw['old_string'])
             _validate_chart_references(raw['new_string'], prepared['charts'])
@@ -423,8 +442,9 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
             if not applied['string_replace_result']['success']:
                 raise ValueError('Writer 未能应用此项修改')
             candidate = _materialize_chart_insertions(applied['revised_document'], prepared['charts'])
-            _validate_manuscript(candidate, None, prepared['charts'], constraints, toolkit, context_json,
-                                 candidates=prepared['reference_candidates'], original=body, check_quality=False)
+            _validate_manuscript(candidate + references, None, prepared['charts'], constraints, toolkit, context_json,
+                                 candidates=prepared['reference_candidates'], original=body + references,
+                                 check_quality=False)
         except Exception as error:
             pending.append('修改未应用，已保留对应原文：' + str(error))
         else:
@@ -482,3 +502,22 @@ def run(inputs):
         reviewed.issues.append(ReviewIssue.model_validate(pending))
     fresh = peer_review.build_output(reviewed, review_inputs, fact_checks=fresh['review_data']['fact_checks'])
     return {**fresh, 'manuscript': body}
+
+
+def retain_manuscript(inputs):
+    """Deliver the existing manuscript when an optional workflow revision cannot be applied."""
+    from ..publication import publish_citations, resolve_chart_sources, figure_catalog
+    from ..review.schema import SavedReview, text_digest
+
+    body = inputs.get('manuscript')
+    contracts.text(body, 'manuscript')
+    body = publish_citations(body, inputs.get('papers') or [],
+                             paper_language=(inputs.get('constraints') or {}).get('paper_language'))
+    body = resolve_chart_sources(body, figure_catalog(inputs.get('charts') or [], inputs.get('media_assets')))
+    review, data = inputs.get('review'), copy.deepcopy(inputs.get('review_data'))
+    if (not review or not data or data.get('manuscript_sha256') != text_digest(body)
+            or data.get('review_sha256') != text_digest(review)):
+        review = '# 稿件记录\n\n沿用当前稿件。\n'
+        data = SavedReview(summary='沿用当前稿件。', issues=[], limitations=['本轮沿用稿件，新增核对待执行。'],
+                           manuscript_sha256=text_digest(body), review_sha256=text_digest(review)).model_dump()
+    return dict(manuscript=body, review=review, review_data=data, is_demo=False)

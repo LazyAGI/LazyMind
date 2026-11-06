@@ -61,6 +61,7 @@ def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect,
         assert workflow.business_input('peer_review', completed)['manuscript'] == body
     forbidden_review.assert_not_called()
     toolkit.check_consistency.assert_not_called()
+    toolkit.stream_draft_blocks_markdown.assert_called_once()
 
 
 @pytest.mark.parametrize('language,target', [('zh-CN', None), ('zh-CN', 1000), ('en', 1000)])
@@ -137,7 +138,8 @@ def revision():
     manuscript = '# 论文\n\n## 方法\n\n来源[SRC-001]。'
     reviewed = peer_review.build_output(peer_review.ReviewResult.model_validate(dict(
         summary='修改表述', limitations=[], issues=[dict(severity='minor', category='language',
-        location='方法', quote='来源[SRC-001]。', problem='表述不清', suggestion='澄清', action_type='text_revision')]
+                                                     location='方法', quote='来源[SRC-001]。', problem='表述不清',
+                                                     suggestion='澄清', action_type='text_revision')]
     )), dict(topic='论文', manuscript=manuscript, evidence=None, analysis=None, request=''))
     return dict(topic='论文', manuscript=manuscript, selected_issue_ids=['R1'],
                 papers=[dict(id='SRC-001', title='来源', text='来源正文', citation='来源文献[Z].')],
@@ -211,6 +213,7 @@ def test_chart_directory_reuses_one_index_and_keeps_exact_associations(monkeypat
     before = copy.deepcopy(source)
     indexes = []
     original = document._chart_directory
+
     def record(chart, findings):
         indexes.append(findings)
         return original(chart, findings)
@@ -222,6 +225,20 @@ def test_chart_directory_reuses_one_index_and_keeps_exact_associations(monkeypat
 
 
 # Scoped revision through the public Writer toolkit.
+def test_reader_material_registry_preserves_study_names_and_tracks_internal_ids():
+    title = 'ImageNet-1K'
+    inputs = contracts.validate_input('write_document', {
+        'topic': '方法比较', 'outline': OUTLINE, 'papers': [dict(
+            id='upload-test-records', title=title, text='Thirty observed tasks.',
+            review_role='background', attachment_key='test-attachment', content_type='excerpt')],
+    })
+    prepared = document.prepare_writer_inputs(inputs)
+    registry = prepared['material_identifiers']
+    assert 'upload-test-records' in registry
+    assert '[文献:upload-test-records]' in registry
+    assert title not in registry and '`' + title + '`' not in registry
+
+
 SOURCE = '# 论文\n\n## 方法\n\n原方法。\n\n## 结果\n\n原结果。\n\n## 局限\n\n保留原局限。'
 
 
@@ -241,8 +258,8 @@ def prepared(issues=None):
                 writing_task={'query': '只修改选中意见', 'meta': {'mode': 'revise', 'review_driven': True}},
                 writing_context={'context_id': 'scope-test'}, charts=[], reference_candidates=[],
                 selected_issues=[dict(id=key, action_type=action,
-                    location=section, quote=None)
-                    for key, section, action in issues])
+                                      location=section, quote=None)
+                                 for key, section, action in issues])
 
 
 def editor(operations, changes=()):
@@ -274,6 +291,16 @@ def test_replacements_cannot_escape_planned_scope():
             'replacements': [replacement('原结果。', '篡改结果。', '结果')]})
 
 
+def test_generated_citation_repair_precedes_effective_scope_validation():
+    change = replacement(new=r'修订方法。[\[1\](#paper-ref-ref-1)')
+    changes, located = revision_entry._validated_changes(
+        SOURCE, None, [(0, len(SOURCE))], {'replacements': [change]}, allow_repair=False,
+        candidates=[{'id': 'ref-1', 'citation': 'Author. Study. 2026.'}],
+    )
+    assert changes['replacements'][0]['new_string'] == r'修订方法。[\[1\]](#paper-ref-ref-1)'
+    assert located[0][2].new_string == changes['replacements'][0]['new_string']
+
+
 def test_replacements_reject_overlap():
     with pytest.raises(ValueError, match='overlapping'):
         revision_entry._bounded_replacements(SOURCE, [(0, len(SOURCE))], {'replacements': [
@@ -290,6 +317,28 @@ def test_reverse_application_preserves_child_references_when_title_changes():
     assert result['string_replace_result']['success']
     assert result['revised_document'] == SOURCE.replace('原方法。', '修订方法。').replace(
         '原结果。', '修订结果。').replace('# 论文', '# 新论文')
+
+
+@pytest.mark.parametrize('new_title', ['# 论文的实证研究', '# 新论文'])
+def test_planned_title_revision_accepts_suffix_and_replacement(new_title):
+    changes = [dict(old_string='# 论文', new_string=new_title,
+                    content_ref={'heading_path': ['论文']}), replacement()]
+    tools = editor([instruction()], changes)
+    tools.generate_modify_plan.return_value = json.dumps({
+        'scope': 'document', 'title_instruction': '修改论文题目', 'instructions': [instruction()],
+    })
+    result = revision_entry._modify_manuscript(prepared(), {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('# 论文', new_title).replace('原方法。', '修订方法。')
+
+
+def test_planned_title_revision_keeps_other_edits_when_title_is_missing():
+    tools = editor([instruction()], [replacement()])
+    tools.generate_modify_plan.return_value = json.dumps({
+        'scope': 'document', 'title_instruction': '修改论文题目', 'instructions': [instruction()],
+    })
+    result = revision_entry._modify_manuscript(prepared(), {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('原方法。', '修订方法。')
+    assert any('标题' in item for item in result['_pending_edits'])
 
 
 @pytest.mark.parametrize('ids', [[], ['R2'], [1]])
@@ -367,7 +416,8 @@ def test_selected_revision_preserves_unselected_sections_and_inputs(word_target)
     before = copy.deepcopy(data)
     tools = editor([instruction()], [replacement()])
     quality = Mock()
-    result = revision_entry._modify_manuscript(data, {'word_target': word_target, 'paper_language': 'zh-CN'}, quality, editor=tools)
+    result = revision_entry._modify_manuscript(
+        data, {'word_target': word_target, 'paper_language': 'zh-CN'}, quality, editor=tools)
     assert result == dict(manuscript=SOURCE.replace('原方法。', '修订方法。'), is_demo=False, _pending_edits=[])
     assert data == before
     tools.apply_string_replace.assert_called_once()
@@ -416,7 +466,6 @@ def test_new_draft_still_checks_planned_headings():
             SOURCE.replace('## 方法', '## 研究方法'), signature=document._heading_signature(SOURCE))
 
 
-
 def test_inline_trace_failure_preserves_business_result_and_error(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError('trace unavailable')
@@ -440,6 +489,7 @@ def test_completed_revision_streams_full_text_once_after_validation(monkeypatch,
     emitted = []
     candidate = SOURCE.replace('原方法。', '修订方法。')
     expected = SOURCE if failure else candidate
+
     def validate(body, *args, **kwargs):
         assert body == candidate
         assert not any(e['type'].startswith('artifact_stream') for e in emitted)
@@ -447,6 +497,7 @@ def test_completed_revision_streams_full_text_once_after_validation(monkeypatch,
             raise ValueError('invalid candidate')
     monkeypatch.setattr(revision_entry, '_validate_manuscript', validate)
     slot = 'revise_document_document'
+
     def run():
         with bind_runtime_events(emitted.append, slot) as events:
             result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
@@ -471,8 +522,8 @@ def test_completed_revision_streams_full_text_once_after_validation(monkeypatch,
 @pytest.mark.parametrize('target', [1, 10000])
 def test_manuscript_length_is_a_generation_target_not_a_failure(language, target):
     toolkit = Mock()
-    document._validate_manuscript(SOURCE, None, [],
-        {'word_target': target, 'paper_language': language}, toolkit, '{}',
+    document._validate_manuscript(
+        SOURCE, None, [], {'word_target': target, 'paper_language': language}, toolkit, '{}',
         candidates=[], check_quality=False)
     toolkit.check_consistency.assert_not_called()
 

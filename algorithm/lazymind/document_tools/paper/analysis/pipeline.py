@@ -74,12 +74,15 @@ def build_analysis(inputs, plan, results):
 def execute_analysis(inputs, plan, attempts):
     code, error, history = '', '', []
     material_check_error = ''
+    execution_error = ''
     executable_plan = model.execution_plan(inputs, plan)
     for attempt in range(1, attempts + 1):
+        generated = False
         try:
             with diagnostics.stage('analysis_code_generation', attempt=attempt):
                 code = model.generate_program(inputs, copy.deepcopy(plan), code, error)
                 diagnostics.save(f'analysis-code-{attempt}.py', code)
+            generated = True
             with diagnostics.stage('analysis_execution', attempt=attempt):
                 rendered = executor.execute(dict(tables=table_map(inputs), plan=copy.deepcopy(executable_plan),
                                                  code=code, seed=42))
@@ -109,9 +112,14 @@ def execute_analysis(inputs, plan, attempts):
                 error = ''.join(traceback.format_exception_only(type(exc), exc)).strip()[-6000:]
                 if material_check_error:
                     error = material_check_error + '\n单次空结果代码自查失败：' + error
+            if generated:
+                execution_error = error
+            elif execution_error and execution_error not in error:
+                error = execution_error + '\nCode repair response: ' + error
             history.append(dict(attempt=attempt, outcome='failed', error=error))
             if material_check_error and not (isinstance(exc, ContractError) and exc.code == 'MISSING_MATERIAL'):
                 break
+    error = '\n'.join(f'Attempt {item["attempt"]}: {item["error"]}' for item in history)[-12000:]
     raise ContractError('EXECUTION_FAILED', 'analysis.code', '统计执行失败，已保留错误记录: ' + error)
 
 
@@ -127,15 +135,20 @@ def redraw(inputs, analysis, charts):
         raise ContractError('INVALID_INPUT', 'input.data', '只重画必须使用原分析的数据；数据变更请重新分析')
     before = digest(frozen)
     existing = {chart['id']: chart for chart in originals}
+    redraw_all = None
     plan = dict(redraw_only=True, questions=[item['question'] for item in frozen['targets']],
                 outline='仅修改指定已有图表的表达；冻结统计结果和未选图表。',
-                existing_figures=[{key: value for key, value in chart.items() if key != 'svg'} for chart in originals])
+                existing_figures=[dict(
+                    {key: value for key, value in chart.items() if key not in {'svg', 'caption'}},
+                    caption=chart['caption'].split('\n\n', 1)[0]) for chart in originals])
     error, arrangement, history = '', None, []
     for attempt in range(1, 3):
         try:
             with diagnostics.stage('figure_planning', attempt=attempt):
                 candidate = model.plan_figures(inputs, copy.deepcopy(frozen), copy.deepcopy(plan), error)
                 bound = bind_figures(candidate, frozen)
+                if redraw_all is None:
+                    redraw_all = bound['all_existing_figures']
                 used = set()
                 if not bound['figures']:
                     raise ValueError('只重画必须选择至少一张已有图表')
@@ -147,6 +160,9 @@ def redraw(inputs, analysis, charts):
                         raise ValueError(f'只重画 {identifier} 不得添加或删除已有 finding_ids')
                     figure['id'] = identifier
                     used.add(identifier)
+                if redraw_all and used != set(existing):
+                    raise ValueError('The user requested every existing figure. Include these missing source_chart_id '
+                                     'values: ' + ', '.join(sorted(set(existing) - used)))
             arrangement = bound
             history.append(dict(attempt=attempt, outcome='passed'))
             break
@@ -218,6 +234,7 @@ def run(inputs):
         try:
             with diagnostics.stage('figure_planning', attempt=attempt):
                 candidate = model.plan_figures(inputs, copy.deepcopy(analysis), copy.deepcopy(plan), error)
+                diagnostics.save(f'figure-plan-attempt-{attempt}.json', candidate)
                 arrangement = bind_figures(candidate, analysis)
             figure_planning.append(dict(attempt=attempt, outcome='passed'))
             break

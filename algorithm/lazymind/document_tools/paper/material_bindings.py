@@ -20,16 +20,22 @@ class MaterialBindings:
             if value in self.aliases:
                 return self.aliases[value]
             pattern = '|'.join(re.escape(key) for key in sorted(self.aliases, key=len, reverse=True))
-            return re.sub(r'(?<![\w-])(?:' + pattern + r')(?![\w-])',
+            return re.sub(r'(?:(?<=#paper-ref-)|(?<![\w-]))(?:' + pattern + r')(?![\w-])',
                           lambda match: self.aliases[match[0]], value)
         return value
 
     def restore_citations(self, text):
         """Resolve display markers from this invocation, not file paths parsed from prose."""
         def restore(match):
-            key = match['key']
-            if key not in self.materials:
-                raise ValueError(f'Model cited an unavailable source marker: {key}')
-            return '[' + self.materials[key]['id'] + ']'
+            result = []
+            for group in re.split(r'\s*[,，;；]\s*', match['keys']):
+                bounds = re.split(r'\s*[-–—]\s*', group)
+                start, end = int(bounds[0][1:]), int(bounds[-1][1:])
+                if len(bounds) > 2 or start > end or end > len(self.materials):
+                    raise ValueError(f'Model cited an unavailable source marker: {group}')
+                for index in range(start, end + 1):
+                    result.append('[' + (match['prefix'] or '') + self.materials[f'M{index}']['id'] + ']')
+            return ''.join(result)
 
-        return re.sub(r'\[(?P<key>M[1-9][0-9]*)\]', restore, text)
+        return re.sub(r'\[(?P<prefix>文献:)?(?P<keys>M[1-9][0-9]*(?:\s*[,，;；–—-]\s*M[1-9][0-9]*)*)\]',
+                      restore, text)

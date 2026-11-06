@@ -273,6 +273,9 @@ def _handoff_tool(
                     }
                 return _result_text(result)
             except WorkflowClientError as exc:
+                pending = _approval_blocked_result(exc)
+                if pending:
+                    return pending
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
                 state_refreshed = True
@@ -410,6 +413,11 @@ def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') 
             'stop': True, 'reason': 'workflow_step_failed',
             'final_text': '论文步骤执行失败，已保留当前材料并停止自动重试和回退。请在工作流查看原因，修复后重试。',
         }}
+    display = workflow_state.get('display') or {}
+    if isinstance(display, dict) and display.get('status') == 'waiting' and display.get('approval_step_id'):
+        notice = '本阶段结果已保存，请在工作流面板审核后点击“继续执行”。'
+        return {**result, 'status': 'waiting', 'outcome': 'workflow_approval_required',
+                '_agent_control': {'stop': True, 'reason': 'workflow_approval_required', 'final_text': notice}}
     projection = result.get('projection')
     if not isinstance(projection, dict):
         projection = workflow_state.get('projection')
@@ -429,6 +437,14 @@ def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') 
             'final_text': '工作流已完成，最终产物已生成。',
         },
     }
+
+
+def _approval_blocked_result(error: WorkflowClientError) -> Optional[Dict[str, Any]]:
+    if error.code != 'WORKFLOW_APPROVAL_REQUIRED':
+        return None
+    notice = '当前阶段等待审批，请在工作流面板点击“继续执行”后继续。'
+    return {'status': 'waiting', 'outcome': 'workflow_approval_required', 'user_notice': notice,
+            '_agent_control': {'stop': True, 'reason': 'workflow_approval_required', 'final_text': notice}}
 
 
 def _input_required_result(
@@ -584,6 +600,9 @@ def _safe_session_tools(
                     result = _compact_transition_result(result)
                 return _compact_model_frontier(result)
             except WorkflowClientError as exc:
+                pending = _approval_blocked_result(exc)
+                if pending:
+                    return pending
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
                 state_refreshed = True
@@ -1788,6 +1807,9 @@ def _workflow_trigger_tools(
                     'The Host reads the complete original file. Never transcribe, summarize, repair, '
                     'or embed the uploaded JSON in tool arguments; pass only its filename, or omit '
                     'paper_input when the request unambiguously selects one JSON attachment.'
+                    ' For research-topic entry and drafting, Markdown background materials are imported '
+                    'directly from conversation attachments. Omit paper_input for these Markdown materials. '
+                    'Do not read or transcribe them before launching the research-topic step.'
                 )
         trigger_workflow.__doc__ = (
             'Initialize this Workflow. The only argument names are input_bindings and request_context. '

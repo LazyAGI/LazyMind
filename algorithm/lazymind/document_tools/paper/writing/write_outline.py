@@ -95,6 +95,9 @@ def prepare_outline(prepared, toolkit, *, on_delta=None):
     if not outline or needs_ownership:
         report_progress(15, '正在生成大纲和图表归属' if prepared['charts'] else '正在生成大纲')
         outline_task = copy.deepcopy(task)
+        if not outline:
+            from ..prompts.write_document_prompt import PAPER_OUTLINE_INSTRUCTIONS
+            outline_task['query'] = outline_task.get('query', '') + PAPER_OUTLINE_INSTRUCTIONS
         if prepared['charts']:
             outline_task['query'] += '\n' + CHART_OUTLINE_INSTRUCTIONS + _json(prepared['chart_directory'])
         if outline:
@@ -109,9 +112,28 @@ def prepare_outline(prepared, toolkit, *, on_delta=None):
         if original_signature and _heading_signature(outline) != original_signature:
             raise ValueError('Chart ownership planning changed the supplied outline structure.')
     if prepared['charts']:
-        owners = _outline_chart_owners(outline, prepared['charts'])
-        if any(owners.get(key) != value for key, value in previous.items()):
-            raise ValueError('Image planning moved an existing assignment.')
+        for attempt in range(2):
+            try:
+                owners = _outline_chart_owners(outline, prepared['charts'])
+                if any(owners.get(key) != value for key, value in previous.items()):
+                    raise ValueError('Image planning moved an existing assignment.')
+                break
+            except ValueError as error:
+                if attempt:
+                    raise
+                report_progress(65, '正在完善大纲图表归属')
+                repair_task = copy.deepcopy(task)
+                repair_task['query'] += (
+                    '\nCorrect only chart ownership markers in the supplied outline. Preserve its headings, '
+                    'hierarchy, order and section instructions. Assign every catalog ID exactly once and retain '
+                    'existing confirmed owners.\n' + CHART_OUTLINE_INSTRUCTIONS + _json(prepared['chart_directory'])
+                    + '\nConfirmed owners: ' + _json(previous) + '\nValidation feedback: ' + str(error)
+                    + '\nOutline to correct:\n' + outline)
+                corrected = _trace_call('outline', toolkit.generate_outline,
+                                        writing_task_json=_json(repair_task), writing_context_json=context_json)
+                if _heading_signature(corrected) != _heading_signature(outline):
+                    raise ValueError('Chart ownership correction changed the outline structure.')
+                outline = corrected
     _heading_signature(outline)
     validate_required_sections(outline, task.get('constraints', {}))
     return _normalize_outline_budgets(outline, task.get('constraints', {}))

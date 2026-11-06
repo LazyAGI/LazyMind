@@ -842,11 +842,12 @@ def test_real_unverified_numerical_correction_cannot_enter_automatic_revision(mo
     assert json.loads(notes[0].split('：', 1)[1])['original_issue'] == fixture['issue']
     assert result.model_dump() == before
     monkeypatch.setattr(revise_document, 'WriterRevisionToolkit', lambda: pytest.fail('Pending R3 reached Writer'))
-    monkeypatch.setattr(peer_review, 'run', lambda *a, **kw: pytest.fail('No edit must reach model recheck'))
-    with pytest.raises(api.contracts.MissingMaterials, match='没有可执行的文本修改'):
-        api.run_algorithm('revise_document', {
-            **inputs, 'review': review['review'], 'review_data': review['review_data'],
-            'selected_issue_ids': [issue['id']], 'request': '只修改该条意见'})
+    monkeypatch.setattr(peer_review, 'run', lambda current: peer_review.build_output(result, current))
+    output = api.run_algorithm('revise_document', {
+        **inputs, 'review': review['review'], 'review_data': review['review_data'],
+        'selected_issue_ids': [issue['id']], 'request': '只修改该条意见'})
+    assert output['manuscript'] == manuscript
+    assert any(item['action_type'] == 'needs_material' for item in output['review_data']['issues'])
 
 
 @pytest.mark.parametrize('binding', ['missing', 'verified', 'insufficient'])
@@ -904,12 +905,17 @@ def test_checked_conflict_and_pure_advice_still_reach_atomic_revision(monkeypatc
     assert editor.apply_string_replace.call_count == 1
 
 
-@pytest.mark.parametrize('ids', [['R2'], ['R1', 'R2']])
-def test_pending_issue_cannot_be_smuggled_into_a_mixed_revision_plan(ids):
+@pytest.mark.parametrize('ids,message', [
+    (['R2'], None), (['R1', 'R3'], 'selected issue_ids'),
+])
+def test_revision_plan_allows_partial_coverage_and_stays_within_selected_ids(ids, message):
     from lazymind.document_tools.paper.writing import revise_document
     plan = revise_document.MarkdownModifyPlan.model_validate(dict(scope='document', instructions=[dict(
         content_ref={'heading_path': ['论文']}, modify_type='update', target_scope='section',
         instruction='不能借合法修改执行待核纠错', meta={'issue_ids': ids})]))
-    with pytest.raises(ValueError, match='selected issue_ids'):
-        revise_document._validate_review_plan(plan, [
-            dict(id='R1', action_type='text_revision'), dict(id='R2', action_type='needs_material')])
+    issues = [dict(id='R1', action_type='text_revision'), dict(id='R2', action_type='needs_material')]
+    if message:
+        with pytest.raises(ValueError, match=message):
+            revise_document._validate_review_plan(plan, issues)
+    else:
+        revise_document._validate_review_plan(plan, issues)

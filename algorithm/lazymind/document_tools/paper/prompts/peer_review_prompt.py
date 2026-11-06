@@ -34,7 +34,11 @@ Review the following as appropriate to the paper type and supplied content; do n
    selective evidence, and confirmation bias.
 4. Evidence and citations: support for claims and conflicts with supplied materials. Distinguish supported
    findings from facts that cannot be verified.
-5. Structure and expression: broken reasoning, inconsistent terminology, repetition, and missing explanations.
+5. Structure and expression: coherent section proportions, compact single-paragraph abstract and conclusion,
+   clear methods and results, readable figures, consistent terminology and economical discussion. Assess
+   standalone academic narration, with dataset labels and collection/measurement provenance in the methods.
+   Assess each passage's relevance to the research question, methods and observations. Consolidate repeated
+   study-limitations statements in the discussion.
 
 Report only specific, supported issues. Distinguish demonstrable errors, requests for clarification, and
 unknowns. Do not invent issues to meet a quota. Missing materials do not establish fabricated experiments
@@ -96,6 +100,7 @@ Every issue must contain:
 - action_type: text_revision (existing materials suffice), needs_material (author must supply materials),
   or needs_experiment (new experiments are needed). If multiple actions are necessary, choose the external-work
   category and explain why.
+  Reader-facing presentation and study-label corrections use text_revision with existing materials.
 Do not duplicate issues. Return schema-conforming JSON, not Markdown or a rewritten manuscript.
 
 Before submitting, check your findings without outputting the checking process or inventing extra issues:

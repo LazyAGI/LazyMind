@@ -32,7 +32,10 @@ def selection(monkeypatch):
 
         def choose(prompt, schema):
             calls.append(json.loads(prompt.split('Input JSON:\n', 1)[1]))
-            return schema.model_validate(next(values))
+            value = next(values)
+            if isinstance(value, Exception):
+                raise value
+            return schema.model_validate(value)
 
         monkeypatch.setattr(review_materials, 'AutoModel', lambda **_: None)
         monkeypatch.setattr(literature_review, '_input_budget', lambda: 8192)
@@ -51,6 +54,7 @@ def test_scope_selects_requested_papers_and_keeps_background(paper, selection):
     assert [p['id'] for p in result] == ['NEW', 'BRIEF']
     assert result[1]['review_role'] == 'background'
     assert calls[0]['papers'][1]['id'] == 'M2'
+    assert calls[0]['material_role_keys'] == ['M1', 'M2', 'M3']
 
 
 def test_singleton_query_count_arrays_are_normalized_before_retrieval(paper, sciverse, selection):
@@ -61,6 +65,15 @@ def test_singleton_query_count_arrays_are_normalized_before_retrieval(paper, sci
     assert [p['title'] for p in result] == ['Test paper', 'Related research']
     sciverse.meta_search.assert_called_once_with(
         query='related', page_size=30, include_content=False, year_from=None, year_to=None)
+
+
+def test_imported_study_background_keeps_its_role_during_material_reselection(paper, selection):
+    background = dict(id='brief', title='Current study', text='Our methods and supplied measurements.',
+                      review_role='background')
+    selection({'material_roles': {'M1': 'paper', 'M2': 'paper'}, 'queries': {}})
+    result = review_materials.prepare({'papers': [background, paper], 'request': 'Review prior work'}, [])
+    assert result[0]['review_role'] == 'background'
+    assert review_materials._paper_count(result) == 1
 
 
 @pytest.mark.parametrize('count', [[], ['12', '15'], ['not a count'], ['0'], ['201'], [['12']]])

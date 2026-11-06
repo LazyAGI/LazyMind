@@ -11,6 +11,7 @@ import sys
 import time
 import base64
 import tempfile
+from functools import partial
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from pathlib import Path
@@ -21,7 +22,7 @@ from lazymind.chat.engine.tools.workspace_context import (
     ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
 )
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
-from lazyllm import LOG, AutoModel
+from lazyllm import LOG, AutoModel, enable_trace, config as llm_config
 from lazyllm.tools.fs.client import FS
 from lazyllm.tools.agent.base import (
     TOOL_OBSERVATION_KEY,
@@ -29,6 +30,7 @@ from lazyllm.tools.agent.base import (
 )
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
+from lazymind.chat.engine.agent_runtime.executor import AGENT_MODULE_TRACE
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolArgumentRetryExhausted
 
 from lazymind.chat.engine.agent_runtime import (
@@ -1485,24 +1487,15 @@ async def run_subagent_stream(
         sid = task_id
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
-        lazyllm.set_trace_context({
+        trace_context = {
             'trace_id': params.get('trace_id') or None,
             'parent_span_id': params.get('parent_span_id') or None,
-            'session_id': (
-                params.get('session_id') or params.get('chat_session_id')
-                or lazyllm.get_trace_context().session_id
-            ),
-            'sampled': True, 'request_tags': ['subagent'],
-            'module_trace': {
-                'by_class': {
-                    'FunctionCall': False, 'ToolManager': False,
-                    'Pipeline': False, 'Diverter': False,
-                },
-                'by_name': {
-                    '_build_history': False, '_post_action': False,
-                    '_safe_call': False, '_indexed_call': False,
-                },
-            }
+            'session_id': (ctx.conversation_id or params.get('chat_session_id') or params.get('session_id')
+                           or lazyllm.get_trace_context().session_id),
+        }
+        lazyllm.set_trace_context({
+            **trace_context, 'sampled': True, 'request_tags': ['subagent'],
+            'module_trace': AGENT_MODULE_TRACE,
         })
         inject_model_config(model_config)
         inject_tool_config(tool_config)
@@ -1623,8 +1616,11 @@ async def run_subagent_stream(
         if not display_plan:
             async def generate_plan_in_background():
                 try:
+                    plan_call = _generate_display_plan
+                    if llm_config['trace_enabled']:
+                        plan_call = enable_trace(**trace_context)(plan_call)
                     steps = await asyncio.wait_for(
-                        asyncio.to_thread(_generate_display_plan, llm, ctx.objective, {
+                        asyncio.to_thread(plan_call, llm, ctx.objective, {
                             **(ctx.params.get('_display_plan_scope') or {}),
                             'step_id': ctx.params.get('step_id') or '',
                             'title': task.get('title') or '',
@@ -1661,8 +1657,19 @@ async def run_subagent_stream(
         # PPT page). Route those events through the live queue while the Agent
         # iterator is running instead of holding them until tool_results.
         stream_merge_active = True
+        agent_call = (partial(executor.stream_agent, agent, plan) if agent is not None
+                      else partial(executor.stream, llm, plan))
+        if llm_config['trace_enabled']:
+            agent_call.__span_name__ = (
+                f"{params.get('workflow_id') or 'subagent'}.{params.get('step_id') or effective_agent_type}"
+            )
+            agent_call._type = 'agent'
+            agent_call._task_context = {
+                'task_id': task_id, 'workflow_session_id': params.get('session_id') or '',
+            }
+            agent_call = enable_trace(**trace_context)(agent_call)
         merged_events = merge_agent_and_stream_events(
-            executor.stream_agent(agent, plan) if agent is not None else executor.stream(llm, plan),
+            agent_call(),
             stream_events,
         )
         extension = resolve_runtime_extension(effective_agent_type, ctx.params)

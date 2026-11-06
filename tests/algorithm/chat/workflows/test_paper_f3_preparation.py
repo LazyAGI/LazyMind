@@ -101,6 +101,20 @@ def test_extracts_evidence_without_whole_document_or_model_transcription(model_b
     assert '原文第' in tables[0]['description']
 
 
+@pytest.mark.parametrize('selected,known,expected', [
+    ('paper', None, 'paper'), ('background', None, 'background'), ('paper', 'background', 'background')])
+def test_evidence_extraction_preserves_document_outline_and_background_role(
+        model_boundary, monkeypatch, selected, known, expected):
+    monkeypatch.setattr(WriterToolBase, '_build_structured_llm', lambda *_a, **_kw: lambda _prompt:
+                        json.dumps({'blocks': [0], 'review_role': selected}))
+    source = dict(id='source', title='Study material', text='# Study background\n\nMethods and measurements.')
+    if known:
+        source['review_role'] = known
+    result = sources.extract_paper(source, 'Use the supplied study material')
+    assert result['review_role'] == expected
+    assert result['document_outline'] == ['Study background']
+
+
 def test_incremental_uploads_are_read_once_and_tables_stored_once(model_boundary):
     pool = make_pool()
     reads = []

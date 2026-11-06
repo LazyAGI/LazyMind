@@ -7,7 +7,8 @@ when_to_use: >
   F3 从材料池中读取已提取的依据和完整数据表；已有结果仅整理展示，需要新计算时才运行实验。
   补传附件先提取有效信息入池，已处理的附件不重复读取，不将原文全文复制到后续上下文。
   Use when the user requests the paper-writing workflow or review of an uploaded academic manuscript.
-  Literature reviews retain supplied papers and expand references through Sciverse and selected knowledge bases.
+  Start broad paper-writing requests at research_topic, retaining the supplied study methods and results.
+  Literature reviews retain supplied papers and expand references through available academic sources and knowledge bases.
   Honor explicit source restrictions, dates, counts and focus. Frozen review handoffs use only their selection
   unless the user explicitly asks to expand it. Never substitute model knowledge for missing literature.
   Start review handoffs at literature_review with the frozen selection.
@@ -51,9 +52,10 @@ when_to_use: >
   also asks for a complete manuscript or peer review. Continue only after the user confirms the outline.
   Choose peer_review only when the user requests a review; uploading or having a manuscript does not request review.
   Use write_document only to draft from the confirmed outline. Use revise_document for all existing-manuscript edits.
+  Respect native approval checkpoints. On Continue, resume the earliest unfinished requested stage.
   Pass the current editing request unchanged through the existing request_context/user_input mechanism.
   Direct edits go to revise_document and use the public Writer to plan changes from that request.
-  For review followed by revision, run peer_review first and stop for the user's revision instructions.
+  For review followed by revision, run peer_review first and honor its approval checkpoint, then proceed to revision.
   When the user requests revision according to the review, use all current issues by default; honor explicit issue numbers, exclusions, or categories for selective revision.
   Direct edits must ignore historical review advice. Never broaden a partial-review request to all issues; clarify only ambiguous selections. Missing materials or experiments remain pending and must not block other executable text edits.
   A manuscript or historical review alone does not request review-driven revision.
@@ -61,6 +63,8 @@ when_to_use: >
   Keep the file's request; pass additions through request_context. review_request is for peer review.
   Ask which manuscript to review only when multiple attachments make the target ambiguous.
   Never substitute a filename or summary for the manuscript.
+  For complete-paper tasks, call finish after the last requested stage is approved.
+  If optional review-driven revision yields no accepted change, deliver the current valid manuscript.
   After the requested steps succeed and their artifacts are published, acknowledge completion in one
   short sentence in the user's language and direct them to the workflow.
   For the last step requested in the current turn, call the existing advance_step_and_hand_off tool
@@ -104,6 +108,9 @@ runtime:
     peer_review:
       recovery_review_pool: revise_document_pool
       recovery_review_document: revise_document_document
+    revise_document:
+      recovery_revise_document_pool: revise_document_pool
+      recovery_revise_document_document: revise_document_document
 tool_scripts:
   - path: scripts/tools.py
     functions: [run_paper_step]

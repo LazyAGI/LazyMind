@@ -12,7 +12,7 @@ from .experiment.schema import ResultMeta, code_column_types, validate_code_file
 from .experiment.results import validate_table
 
 FIELDS = {
-    'research_topic': ('papers', 'question', 'evidence'),
+    'research_topic': ('papers', 'question', 'evidence', 'writing_materials'),
     'literature_review': ('papers', 'question', 'evidence'),
     'experiment': ('papers', 'question', 'evidence', 'data', 'source_data', 'writing_materials'),
     'data_analysis': ('data', 'experiment', 'data_context', 'study_design', 'result_meta'),

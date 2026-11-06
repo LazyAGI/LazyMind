@@ -115,6 +115,32 @@ PAPERS = [dict(id='ref-001', citation='甲. 第一篇. 2026.'),
           dict(id='ref-002', citation='乙. 第二篇. 2025.')]
 
 
+@pytest.mark.parametrize('label', ['1', '[1]', r'\[1\]'])
+def test_numeric_stable_links_republish_to_one_canonical_form(label):
+    source = f'# Paper\n\nA claim [{label}](#paper-ref-ref-001).'
+    publication.validate_citations(source, PAPERS)
+    published = publication.publish_citations(source, PAPERS, paper_language='en')
+    assert r'[\[1\]](#paper-ref-ref-001)' in published
+    publication.validate_citations(published, PAPERS, published=True)
+
+
+@pytest.mark.parametrize('link', ['[1](#paper-ref-unknown)', '[[1](#paper-ref-ref-001)'])
+def test_stable_link_normalization_keeps_identity_and_syntax_checks(link):
+    with pytest.raises(ValueError):
+        publication.validate_citations('# Paper\n\n' + link, PAPERS)
+
+
+def test_generated_link_repairs_one_missing_bracket_without_guessing_source():
+    broken = r'[\[1\](#paper-ref-ref-001)'
+    repaired = publication.repair_generated_citation_links('A claim ' + broken, PAPERS)
+    assert repaired == r'A claim [\[1\]](#paper-ref-ref-001)'
+    publication.validate_citations(repaired, PAPERS)
+    unknown = broken.replace('ref-001', 'unknown')
+    assert publication.repair_generated_citation_links(unknown, PAPERS) == unknown
+    sample = '`' + broken + '`\n\n```md\n' + broken + '\n```'
+    assert publication.repair_generated_citation_links(sample, PAPERS) == sample
+
+
 def test_first_use_numbers_repeats_reorder_delete_and_idempotence():
     source = '# T\n\n## 结果\n依据[文献:ref-002][文献:ref-001]，再次[文献:ref-002]。'
     saved = publication.publish_citations(source, PAPERS)
@@ -383,7 +409,7 @@ def test_reference_heading_uses_paper_language_and_is_a_section(language, title)
     assert publication.publish_citations(published, PAPERS) == published
 
 
-@pytest.mark.parametrize('old_heading', ['**参考文献**', '## 参考文献', '## References'])
+@pytest.mark.parametrize('old_heading', ['**参考文献**', '**References**', '## 参考文献', '## References'])
 @pytest.mark.parametrize('language,title', [('en', 'References'), ('zh-CN', '参考文献')])
 def test_existing_reference_headings_remain_readable_and_migrate_on_publication(old_heading, language, title):
     original = publication.publish_citations('# Paper\n\nEvidence[文献:ref-001].', PAPERS)

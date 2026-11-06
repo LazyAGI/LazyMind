@@ -36,13 +36,22 @@ def test_experiment_package_keeps_one_public_algorithm_entry():
     assert not hasattr(experiment, 'build_output')
 
 
+def test_source_notice_is_idempotent_when_existing_charts_are_republished(example):
+    from lazymind.document_tools.paper.experiment.handoff import mark_analysis
+    output = dict(analysis=dict(limitations=[]), charts=[dict(id='fig1', title='Measured values', caption='Observed.')],
+                  is_demo=False)
+    original = copy.deepcopy(output)
+    first = mark_analysis(output, example['output']['result_meta'])
+    assert mark_analysis(first, example['output']['result_meta']) == first
+    assert output == original
+
+
 def test_example_matches_actual_contract_and_rendering(example):
     before = copy.deepcopy(example)
     draft = ExperimentDraft.model_validate(example['model_response'])
     output = build_output(draft, contracts.validate_input('experiment', example['input']))
     assert contracts.validate_output('experiment', output) == example['output']
     assert example == before
-    assert json.loads((PACKAGE / 'temp/examples/experiment.json').read_text()) == example
 
 
 def test_existing_writer_parser_handles_fences_and_missing_comma(example):

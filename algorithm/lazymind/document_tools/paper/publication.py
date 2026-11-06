@@ -1,6 +1,7 @@
 """Paper publication: validate and render chart resources and literature references."""
 from collections import Counter
 import hashlib
+import logging
 import os
 from pathlib import Path
 import re
@@ -151,7 +152,8 @@ START = '<a id="paper-references-start"></a>'
 END = '<a id="paper-references-end"></a>'
 _ID = r'[\w.-]+'
 _CITATION = re.compile(r'\[文献:(?P<new>' + _ID + r')\]|'
-                       r'\[\\\[(?P<number>[1-9][0-9]*)\\\]\]\(#paper-ref-(?P<saved>' + _ID + r')\)')
+                       r'(?<!\[)\[(?:\\\[(?P<number>[1-9][0-9]*)\\\]|\[[1-9][0-9]*\]|[1-9][0-9]*)\]'
+                       r'\(#paper-ref-(?P<saved>' + _ID + r')\)')
 _BOUNDARY = re.compile(r'<a\s+id="paper-references-(start|end)"\s*(?:></a>|/>)')
 
 
@@ -205,6 +207,9 @@ def _scan(body, papers):
         remaining[match.start():match.end()] = ' ' * len(match[0])
     remaining = ''.join(remaining)
     if '[文献' in remaining or '#paper-ref-' in remaining or 'id="paper-ref-' in remaining:
+        logging.getLogger(__name__).warning('Invalid paper citation markup: %r',
+                                            re.findall(
+                                                r'.{0,20}(?:\[文献|#paper-ref-|id="paper-ref-).{0,120}', remaining)[:4])
         raise ValueError('文献引用标记或稳定 ID 链接格式错误')
     if matches and (re.search(r'\[\d+(?:\s*[-,，–]\s*\d+)*\]', remaining)
                     or re.search(r'[（(][^()（）\n]*[,，]\s*(?:19|20)[0-9]{2}[a-z]?[)）]', remaining)
@@ -219,6 +224,17 @@ def validate_citations(text, papers, *, published=False):
     if published and (any(m['new'] for m in matches) or publish_citations(text, papers) != text):
         raise ValueError('文献编号或参考文献列表未同步，请先生成新稿版本')
     return matches
+
+
+def repair_generated_citation_links(text, papers):
+    """Restore one dropped outer bracket in generated links to registered sources."""
+    catalog = _catalog(papers)
+    pattern = re.compile(r'\[\\\[(?P<number>[1-9][0-9]*)\\\]\(#paper-ref-(?P<id>' + _ID + r')\)')
+    for match in reversed(list(pattern.finditer(prose(text)))):
+        if match['id'] in catalog:
+            canonical = f'[\\[{match["number"]}\\]](#paper-ref-{match["id"]})'
+            text = text[:match.start()] + canonical + text[match.end():]
+    return text
 
 
 def _literal(entry):
@@ -250,7 +266,7 @@ def render_references(papers, *, paper_language=None, existing_region=''):
     if paper_language is None and existing_region:
         # Citation-only validation also accepts previously published headings.
         existing = re.match(re.escape(START) + r'\n\n((?:<a id="block-paper-references"></a>\n\n)?'
-                            r'(?:## References|## 参考文献|\*\*参考文献\*\*))\n', existing_region)
+                            r'(?:## References|## 参考文献|\*\*References\*\*|\*\*参考文献\*\*))\n', existing_region)
         if existing:
             heading = existing[1]
     entries = [heading]
