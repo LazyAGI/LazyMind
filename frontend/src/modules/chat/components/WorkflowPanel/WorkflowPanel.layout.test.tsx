@@ -36,6 +36,22 @@ const fixture = vi.hoisted(() => ({
   focusedTab: undefined as string | undefined,
   documentAction: vi.fn(),
   registerFooterAction: undefined as SlotEditingContextValue['registerFooterAction'] | undefined,
+  getPaperProgress: vi.fn(),
+  openPaperProgress: vi.fn(),
+  closePaperProgress: vi.fn(),
+}));
+// The data-analysis tab has its own HTTP snapshot and SSE connection, separate
+// from useWorkflowSession. Keep both transports inside this layout fixture.
+vi.mock('@/components/request', async (original) => {
+  const actual = await original<typeof import('@/components/request')>();
+  return { ...actual, axiosInstance: { ...actual.axiosInstance, get: fixture.getPaperProgress } };
+});
+vi.mock('@/modules/chat/utils/sse', () => ({
+  Method: { GET: 'GET' },
+  SSE: class {
+    constructor(url: string) { fixture.openPaperProgress(url); }
+    close = fixture.closePaperProgress;
+  },
 }));
 vi.mock('@/modules/chat/hooks/useWorkflow', () => ({
   useWorkflowSession: () => ({ session: fixture.session, loading: false, refresh: fixture.refresh }),
@@ -99,6 +115,12 @@ beforeEach(async () => {
   fixture.fetchWorkflowUI.mockReset().mockImplementation(async () => fixture.ui);
   fixture.flush.mockReset().mockResolvedValue(true);
   fixture.pause.mockReset().mockResolvedValue(undefined);
+  fixture.getPaperProgress.mockReset().mockResolvedValue({ data: {
+    task_id: 'owner', execution_id: 'current-attempt', revision: 1, status: 'running',
+    process_steps: [{ step_id: 'f4-analysis', order: 1, title: '正在分析数据', status: 'running',
+      started_at: null, finished_at: null, elapsed_ms: null }],
+    timing: { started_at: null, finished_at: null, measured_at: '2026-09-16T00:00:00Z' },
+  } });
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
@@ -1642,6 +1664,15 @@ it.each(['research_topic', 'refine_topic', 'literature_review', 'experiment', 'd
     useTaskCenterStore.getState().upsertTask('layout-test', { task_id: 'owner', status: 'running', artifact_streams: [preview] });
     const view = render(<WorkflowPanel conversationId='layout-test' />);
     await waitFor(() => expect(screen.getByTestId('live-preview')).toHaveTextContent('已经返回的完整预览'));
+    if (stepId === 'data_analysis') {
+      expect(await screen.findByText('正在分析数据', { selector: '[role="status"]' })).toBeVisible();
+      expect(fixture.getPaperProgress).toHaveBeenCalledOnce();
+      expect(fixture.getPaperProgress).toHaveBeenCalledWith(
+        expect.stringContaining('/api/chat/paper-f4/tasks/owner/progress'), expect.any(Object));
+      expect(fixture.openPaperProgress).toHaveBeenCalledOnce();
+      expect(fixture.openPaperProgress).toHaveBeenCalledWith(
+        expect.stringContaining('/api/chat/paper-f4/tasks/owner/progress?stream=1'));
+    }
     fixture.session.steps![0].status = 'succeeded';
     fixture.session.slots = [{ ...fixture.session.slots![0], revision: 2, attempt: 2,
       producer_attempt_id: 'current-attempt', artifact_value: { text: '完整正式文档' } }];
@@ -1649,6 +1680,8 @@ it.each(['research_topic', 'refine_topic', 'literature_review', 'experiment', 'd
     await waitFor(() => expect(screen.queryByTestId('live-preview')).not.toBeInTheDocument());
     expect(view.container.querySelector('article[data-value="完整正式文档"]')).toBeInTheDocument();
     expect(fixture.refresh).not.toHaveBeenCalled();
+    view.unmount();
+    if (stepId === 'data_analysis') expect(fixture.closePaperProgress).toHaveBeenCalledOnce();
   },
 );
 
