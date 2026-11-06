@@ -11,6 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 const batchInvocationScript = `$ErrorActionPreference = 'Stop'
@@ -24,7 +27,7 @@ exit $LASTEXITCODE`
 func commandContext(ctx context.Context, binary string, arguments ...string) (*exec.Cmd, []string, error) {
 	extension := strings.ToLower(filepath.Ext(binary))
 	if extension != ".cmd" && extension != ".bat" {
-		return exec.CommandContext(ctx, binary, arguments...), nil, nil
+		return windowsBackgroundCommand(ctx, binary, arguments...), nil, nil
 	}
 	powershell, err := windowsPowerShell()
 	if err != nil {
@@ -38,7 +41,7 @@ func commandContext(ctx context.Context, binary string, arguments ...string) (*e
 		"LAZYMIND_COMMAND_PATH=" + binary,
 		"LAZYMIND_COMMAND_ARGUMENTS=" + base64.StdEncoding.EncodeToString(body),
 	}
-	return exec.CommandContext(ctx, powershell,
+	return windowsBackgroundCommand(ctx, powershell,
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", batchInvocationScript), environment, nil
 }
 
@@ -56,4 +59,12 @@ func windowsPowerShell() (string, error) {
 		return candidate, nil
 	}
 	return "", errors.New("Windows PowerShell is unavailable")
+}
+
+// These commands communicate over pipes. Interactive login terminals use the
+// separate interactiveCommand path and still create their requested console.
+func windowsBackgroundCommand(ctx context.Context, binary string, arguments ...string) *exec.Cmd {
+	command := exec.CommandContext(ctx, binary, arguments...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	return command
 }

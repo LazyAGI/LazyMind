@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 )
 
@@ -34,7 +33,7 @@ func launchDesktop(ctx context.Context, application string, port int) error {
 	// Pass the installed executable via environment, never interpolate a path
 	// into PowerShell source. CloseMainWindow allows ordinary application shutdown.
 	script := "$ErrorActionPreference='Stop';" + windowsDesktopFunctions + "\nStart-WorkBuddyDesktop"
-	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	command := backgroundCommand(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	command.Env = append(os.Environ(), "LAZYMIND_WB_DESKTOP="+application, "LAZYMIND_WB_CDP_PORT="+strconv.Itoa(port))
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("start WorkBuddy: %s: %w", output, err)
