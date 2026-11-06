@@ -80,6 +80,7 @@ import {
   openCloudRegister,
   reserveCloudLoginPopup,
 } from "@/runtime/desktopBridge";
+import { useAppVersion } from "@/runtime/useAppVersion";
 import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";
@@ -138,6 +139,7 @@ export default function MainLayout() {
       .conversationId || "";
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
+  const appVersion = useAppVersion();
   const isLoggedIn = Boolean(userInfo?.token);
   const datasetUserKey = JSON.stringify([
     userInfo?.userId || userInfo?.username || '',
@@ -304,7 +306,7 @@ export default function MainLayout() {
     },
     ...(isVocabularyEnabled() ? [{
       key: "/lib/vocabulary",
-      label: "生词表",
+      label: t("vocabularyPage.title"),
       icon: <BookOutlined />,
     }] : []),
     ...(developerActive ? [{
@@ -1308,6 +1310,13 @@ export default function MainLayout() {
                   </button>
                 </Tooltip>
               </Popover>
+            )}
+            {!isMenuCollapsed && appVersion && (
+              <Tooltip title={t("settingsPage.appVersion", { version: appVersion })}>
+                <span className="sider-app-version" aria-label={t("settingsPage.appVersion", { version: appVersion })}>
+                  v{appVersion}
+                </span>
+              </Tooltip>
             )}
             <div className="sider-account-actions">
               <Popover

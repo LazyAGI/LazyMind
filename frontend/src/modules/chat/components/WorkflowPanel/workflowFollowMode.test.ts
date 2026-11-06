@@ -69,6 +69,32 @@ describe('workflow runtime position', () => {
       projection: { stale: ['write'] },
     }), tabs)).toBe(0);
   });
+  it.each([
+    ['failed', 'failed'], ['active', 'running'], ['completed', 'succeeded'],
+  ])('follows the effective retry in a %s session even when an older attempt is stale', (status, execution) => {
+    expect(resolveWorkflowRealTabIndex(session({ status, steps: [
+      step('plan', 'succeeded', 1),
+      { ...step('write_short', 'failed', 2), validity: 'stale' },
+      { ...step('write_short', execution, 3), id: 'retry', attempt: 2 },
+    ], projection: {
+      current: status === 'completed' ? [] : ['write_short'], stale: ['write_short'],
+      nodes: { plan: node('succeeded'), write_short: node(execution) },
+    } }), tabs, 'plan')).toBe(1);
+  });
+  it('still excludes a node whose current validity is stale', () => {
+    expect(resolveWorkflowRealTabIndex(session({ status: 'failed', steps: [
+      step('plan', 'succeeded', 1), { ...step('write', 'failed', 2), validity: 'stale' },
+    ], projection: {
+      current: ['write'], nodes: { write: { ...node('failed'), validity: 'stale' } },
+    } }), tabs)).toBe(0);
+  });
+  it.each(['pruned', 'bypassed'] as const)('excludes an effective retry on a %s branch', branch => {
+    expect(resolveWorkflowRealTabIndex(session({ current_step_id: 'write', steps: [
+      step('plan', 'succeeded', 1), step('write', 'running', 2),
+    ], projection: {
+      current: ['write'], [branch]: ['write'], nodes: { write: node('running') },
+    } }), tabs)).toBe(0);
+  });
   it('does not point at pruned, bypassed or unexecuted nodes', () => {
     expect(resolveWorkflowRealTabIndex(session({ current_step_id: 'plan', projection: {
       pruned: ['write'], bypassed: ['write_short'], nodes: { plan: node('none') },
