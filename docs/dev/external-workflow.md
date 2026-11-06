@@ -124,7 +124,7 @@ local/build/bin/lazymind internal agent codex refresh
 
 ## 本地开发与回归入口
 
-遵守仓库 `AGENTS.md`：仅启动本地 runtime。已有构建使用 `make local-start`，需要重建时使用 `make local-up`，停止使用 `make local-down`；不要手动运行 Core/Chat，也不要启动 Desktop。重启后检查前端 8090、Core 18001、Chat 18046，并执行经过认证的实际读取。
+遵守所在工作区的 `AGENTS.md`：仅启动本地 runtime。仓库标准构建/启动入口是 `make local-up`，停止使用 `make local-down`；工作区额外提供 `make local-start` 时，可用它复用已有构建。首次检出不要假设存在该快捷目标。不要手动运行 Core/Chat，也不要启动 Desktop。重启后检查前端 8090、Core 18001、Chat 18046，并执行经过认证的实际读取。
 
 关键回归入口：
 
