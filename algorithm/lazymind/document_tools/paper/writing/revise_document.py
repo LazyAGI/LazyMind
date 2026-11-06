@@ -472,7 +472,8 @@ def run(inputs):
     body = resolve_chart_sources(body, prepared['charts'])
     review_inputs = {key: copy.deepcopy(inputs.get(key)) for key in contracts.FIELDS['peer_review']}
     review_inputs.update(topic=inputs['topic'], manuscript=body,
-                         request='核对修订后稿件的五类事实，特别检查改动是否引入新错误；不得把文字修改等同于事实已验证。')
+                         request='审阅修订后成稿的内部一致性和文献支持，特别检查改动是否引入新错误；'
+                                 '仅根据成稿及相关参考文献和已用图表判断，不要求上游实验或分析产出。')
     report_progress(88, '正在核对修订后的事实')
     try:
         fresh = peer_review.run(review_inputs)

@@ -41,6 +41,9 @@ When paper_input is bound, use it; validation failure must not trigger a fallbac
 
 Select the algorithm node matching the user's goal without requiring preceding steps.
 Review requests enter peer_review directly. Code initializes materials before execution; there is no prepare step.
+F6 reviews only the submitted manuscript, its related references and figures actually used in it.
+Do not supply experiment plans, analysis reports, raw data, research notes, execution metadata or writing constraints
+as review context. Missing publisher-specific reference/figure markers are review findings, not entry requirements.
 Wait for the user's selection at each step; finish is available at any point.
 Literature and review feedback use forward nodes:
 literature_review → refine_topic, then rewind literature_review when the user asks to continue;

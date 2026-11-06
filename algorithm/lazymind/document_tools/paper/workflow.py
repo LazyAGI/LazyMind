@@ -157,7 +157,7 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
     value = {'topic': pool['topic'], 'request': request}
     if module in contracts.CONSTRAINED_MODULES:
         value['constraints'] = copy.deepcopy(pool.get('constraints', {}))
-    if step in {'peer_review', 'revise_document'}:
+    if step == 'revise_document':
         # New research materials may inform the existing manuscript. Review freshness
         # is checked against manuscript/report digests by the revision contract.
         from .publication import validate_chart_references, figure_catalog
@@ -199,6 +199,9 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
     if module == 'data_analysis' and value.get('result_meta') is not None:
         from .experiment.handoff import to_analysis
         value = to_analysis(value)
+    if module == 'peer_review':
+        from .review.inputs import select_materials
+        return select_materials(value)
     return value
 
 

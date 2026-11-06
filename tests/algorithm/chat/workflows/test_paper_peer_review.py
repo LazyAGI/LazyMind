@@ -32,8 +32,10 @@ def test_dynamic_model_review_preserves_input_and_output_contract(example, offli
     assert example['input'] == before
     assert set(output) == {'review', 'review_data', 'is_demo'}
     assert output['is_demo'] is False
-    assert all(section in output['review'] for section in ('## 总体评价', '## 逐条意见', '## 检查范围与限制'))
-    assert '未提供分析材料' in output['review']
+    assert all(section in output['review'] for section in ('## 总体评价', '## 逐条意见'))
+    assert '## 检查范围与限制' not in output['review']
+    assert '未提供分析材料' not in output['review']
+    assert example['model_response']['limitations'][0] in output['review_data']['limitations']
     assert output['review_data']['manuscript_sha256'] == peer_review.text_digest(before['manuscript'])
 
 
@@ -82,8 +84,9 @@ def test_no_findings_is_not_publication_approval():
     result = peer_review.ReviewResult(summary='未识别出明确问题。', issues=[], limitations=[])
     text = peer_review.render_review(result, {'topic': 'T', 'manuscript': '# 稿件\n正文'})
     assert '不代表论文已达到发表标准' in text
-    assert '未提供文献证据材料' in text
-    assert '未提供分析材料' in text
+    assert '未提供文献证据材料' not in text
+    assert '未提供分析材料' not in text
+    assert '检查范围与限制' not in text
 
 
 def test_missing_content_and_multiline_quote_rendering(example):
@@ -236,15 +239,15 @@ def test_valid_result_needs_no_repair(example):
 
 
 def test_review_computes_fact_conflicts_and_keeps_language_advice_separate(example, monkeypatch):
-    inputs = {**example['input'], 'manuscript': '总token从 31,576 增至 34,840，成本下降。句子过长。',
-              'evidence': '总token，含失败：31,576 → 34,840。'}
+    source = '总token，含失败：31,576 → 34,840。'
+    inputs = {**example['input'], 'manuscript': '总token从 31,576 增至 34,840，成本下降。句子过长。\n' + source}
     issue = dict(example['model_response']['issues'][0], category='language', quote='句子过长。',
                  problem='表达可精简。', suggestion='精简句子。', action_type='text_revision')
     candidate = {'summary': '核对成本方向；另有表达建议。', 'issues': [issue], 'limitations': [], 'fact_claims': [{
         'category': 'comparison', 'location': '结果', 'quote': inputs['manuscript'].split('句子')[0],
         'asserted_text': '下降', 'operation': 'direction', 'sources': [
-            {'path': '/evidence', 'quote': inputs['evidence'], 'value_text': '34,840'},
-            {'path': '/evidence', 'quote': inputs['evidence'], 'value_text': '31,576'},
+            {'path': '/manuscript', 'quote': source, 'value_text': '34,840'},
+            {'path': '/manuscript', 'quote': source, 'value_text': '31,576'},
         ],
     }]}
     monkeypatch.setattr(peer_review, 'AutoModel', lambda **kw: object())
@@ -438,7 +441,8 @@ def test_unverifiable_issue_is_disclosed_and_excluded_from_auto_revision(example
         peer_review.repair_targets(candidate, example['input']['manuscript']), 'offline')
     output = peer_review.build_output(result, example['input'])
     assert len(output['review_data']['issues']) == 1
-    assert '待核验意见' in output['review'] and 'xyzzzz' in output['review']
+    assert any('待核验意见' in note and 'xyzzzz' in note for note in output['review_data']['limitations'])
+    assert '检查范围与限制' not in output['review']
     assert output['review_data']['issues'][0]['quote'] == candidate['issues'][0]['quote']
     assert candidate == before
 
@@ -593,7 +597,7 @@ def test_review_runs_independent_fulltext_reading_and_rerender_preserves_it(monk
     monkeypatch.setattr(peer_review, 'call_once', response)
     output = peer_review.run(inputs)
     assert calls == [peer_review.ReviewResult, peer_review.LiteratureReadings]
-    assert '文献全文' in output['review']
+    assert '独立模型全文语义核读' in output['review']
     assert '未提供文献证据材料' not in output['review']
     group = next(group for group in output['review_data']['fact_checks'] if group['category'] == 'literature')
     assert group['status'] == verdict
@@ -603,7 +607,8 @@ def test_review_runs_independent_fulltext_reading_and_rerender_preserves_it(monk
     rerender = peer_review.build_output(result, inputs, fact_checks=output['review_data']['fact_checks'])
     new = next(group for group in rerender['review_data']['fact_checks'] if group['category'] == 'literature')
     assert new == group
-    assert '外部材料仍待补' in rerender['review']
+    assert '外部材料仍待补。' in rerender['review_data']['limitations']
+    assert '检查范围与限制' not in rerender['review']
     assert len(calls) == 2
     api.contracts.validate_output('peer_review', rerender)
 
@@ -641,7 +646,9 @@ def test_report_scope_distinguishes_abstract_excerpt_and_bibliography(paper, lab
     result = peer_review.ReviewResult(summary='检查已提供材料。', issues=[], limitations=[])
     inputs = {'topic': 'T', 'manuscript': '# T\n引用[P1]。', 'papers': [{'id': 'P1', **paper}]}
     report = peer_review.render_review(result, inputs)
-    assert label in report and limitation in report
+    supplied, limitations = peer_review.review_scope(result, inputs)
+    assert label in supplied and any(limitation in note for note in limitations)
+    assert '检查范围与限制' not in report
     assert '本次使用：稿件、文献全文' not in report
     assert '未提供文献证据材料' not in report
 
@@ -675,11 +682,11 @@ def test_extra_data_structural_repair_preserves_every_scalar_and_records_origina
     assert 'structure_repair_rejected' in caplog.text
 
 
-def test_review_scope_keeps_research_notes_separate_from_literature_fulltext():
+def test_review_scope_does_not_request_upstream_research_notes():
     result = peer_review.ReviewResult(summary='检查', issues=[], limitations=[])
     supplied, limitations = peer_review.review_scope(result, {'writing_materials': '历史素材，非论文全文。'})
-    assert '研究素材（非文献全文）' in supplied
-    assert any('未核验外部引用' in item for item in limitations)
+    assert supplied == ['稿件']
+    assert not any('未提供分析材料' in item or '研究素材' in item for item in limitations)
 
 
 def _contract_candidate():
@@ -842,7 +849,13 @@ def test_real_unverified_numerical_correction_cannot_enter_automatic_revision(mo
     assert json.loads(notes[0].split('：', 1)[1])['original_issue'] == fixture['issue']
     assert result.model_dump() == before
     monkeypatch.setattr(revise_document, 'WriterRevisionToolkit', lambda: pytest.fail('Pending R3 reached Writer'))
-    monkeypatch.setattr(peer_review, 'run', lambda current: peer_review.build_output(result, current))
+
+    def recheck(current):
+        assert set(current) == {'topic', 'request', 'manuscript', 'papers', 'charts'}
+        return peer_review.build_output(peer_review.ReviewResult(
+            summary='未修改待核实事实。', issues=[], limitations=[]), current)
+
+    monkeypatch.setattr(peer_review, 'run', recheck)
     output = api.run_algorithm('revise_document', {
         **inputs, 'review': review['review'], 'review_data': review['review_data'],
         'selected_issue_ids': [issue['id']], 'request': '只修改该条意见'})
@@ -919,3 +932,65 @@ def test_revision_plan_allows_partial_coverage_and_stays_within_selected_ids(ids
             revise_document._validate_review_plan(plan, issues)
     else:
         revise_document._validate_review_plan(plan, issues)
+
+
+@pytest.mark.parametrize('defect', [
+    '如[图1](#block-missing)所示。',
+    '已有研究[文献:ref-missing]。',
+    '<a id="paper-references-start"></a>\n参考文献区域未闭合。',
+])
+def test_publication_defects_reach_review_instead_of_blocking_entry(example, monkeypatch, defect):
+    inputs = {**example['input'], 'manuscript': example['input']['manuscript'] + '\n' + defect}
+    pool = workflow.pool_from_business(inputs)
+    prompts = []
+    issue = dict(example['model_response']['issues'][0], category='structure', quote=defect,
+                 problem='稿件中的引用或参考文献区域不完整。', suggestion='修正所指位置后核对链接。',
+                 action_type='text_revision')
+
+    def review(_reviewer, prompt, schema, trace_id):
+        prompts.append(json.loads(prompt.split('Input JSON:\n')[1]))
+        return dict(summary='需要修正引用。', issues=[issue], limitations=[])
+
+    monkeypatch.setattr(peer_review, 'AutoModel', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'WriterToolBase', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'call_once', review)
+    output = workflow.execute_step('peer_review', pool, '检查引用和图文一致性')
+    assert output['status'] == 'completed'
+    assert defect in prompts[0]['manuscript']
+    assert set(prompts[0]) == {'topic', 'request', 'manuscript', 'papers', 'charts'}
+    assert issue['problem'] in output['document']
+    assert '## 检查范围与限制' not in output['document']
+
+
+@pytest.mark.parametrize('field', ['evidence', 'analysis', 'experiment', 'data', 'result_meta',
+                                   'writing_materials', 'constraints'])
+def test_review_rejects_unrelated_workflow_inputs(field):
+    with pytest.raises(ValueError, match='未知字段'):
+        api.contracts.validate_input('peer_review', {'topic': 'T', 'manuscript': '# Paper', field: {}})
+
+
+def test_model_receives_only_cited_papers_and_used_figure_content(example, monkeypatch):
+    inputs = {**example['input'], 'manuscript': example['input']['manuscript'] + '\n引用[P1]。\n'
+              '<a id="block-used"></a>\n![Figure](media-placeholder://used)',
+              'papers': [dict(id='P1', title='Cited', text='Only this reference is relevant.',
+                              content_type='full_text', internal_plan='UNRELATED_RETRIEVAL_STATE'),
+                         dict(id='P2', title='Unused', text='UNRELATED_PAPER')],
+              'charts': [dict(id='used', title='Figure', caption='Submitted figure.', svg='<svg><text>2</text></svg>',
+                              columns=['UNRELATED_ANALYSIS_COLUMNS'], finding_ids=['UNRELATED_FINDINGS']),
+                         dict(id='unused', title='Unused', caption='Unused', svg='<svg>UNRELATED_FIGURE</svg>')]}
+    before = copy.deepcopy(inputs)
+    prompts = []
+
+    def review(_reviewer, prompt, schema, trace_id):
+        prompts.append(json.loads(prompt.split('Input JSON:\n')[1]))
+        assert 'UNRELATED_' not in prompt
+        return example['model_response']
+
+    monkeypatch.setattr(peer_review, 'AutoModel', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'WriterToolBase', lambda **kw: object())
+    monkeypatch.setattr(peer_review, 'call_once', review)
+    output = peer_review.run(inputs)
+    assert [p['id'] for p in prompts[0]['papers']] == ['P1']
+    assert set(prompts[0]['charts'][0]) == {'id', 'title', 'caption', 'svg'}
+    assert output['review_data']['manuscript_sha256'] == peer_review.text_digest(inputs['manuscript'])
+    assert inputs == before

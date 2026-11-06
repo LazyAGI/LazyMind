@@ -107,7 +107,10 @@ def test_updated_research_materials_do_not_block_existing_manuscript(step):
     before = copy.deepcopy(pool)
     inputs = contracts.validate_input(step, workflow.business_input(step, pool, 'Use the updated evidence.'))
     assert inputs['manuscript'] == BODY
-    assert inputs['evidence'] == 'Additional verified evidence'
+    if step == 'peer_review':
+        assert 'evidence' not in inputs
+    else:
+        assert inputs['evidence'] == 'Additional verified evidence'
     assert pool == before
 
 
