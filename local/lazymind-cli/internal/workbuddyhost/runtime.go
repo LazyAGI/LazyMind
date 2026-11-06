@@ -98,7 +98,7 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 						if err == nil {
 							var lifetime context.Context
 							lifetime, stop = context.WithCancel(ctx)
-							cmd := exec.CommandContext(lifetime, config.Node, script, "--pairing-file", config.PairingFile,
+							cmd := backgroundCommand(lifetime, config.Node, script, "--pairing-file", config.PairingFile,
 								"--bridge-url", bridgeURL, "--cdp-port", strconv.Itoa(config.CDPPort), "--parent-pid", strconv.Itoa(os.Getpid()))
 							cmd.Stdout, cmd.Stderr = log, log
 							cmd.Cancel = func() error {
@@ -164,7 +164,7 @@ func removePresentation(home string, config Config) error {
 	if err := writeAtomic(script, bundle); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, config.Node, script, "--pairing-file", config.PairingFile, "--cdp-port", strconv.Itoa(config.CDPPort), "--cleanup-only")
+	cmd := backgroundCommand(ctx, config.Node, script, "--pairing-file", config.PairingFile, "--cdp-port", strconv.Itoa(config.CDPPort), "--cleanup-only")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("WorkBuddy is disabled but its panel cleanup failed; retry disconnect: %w", err)
 	}
