@@ -34,7 +34,9 @@ def eot_data(record, text=None):
     raw = font_bytes(record)
     if text is not None:
         from fontTools import subset
-        with TTFont(io.BytesIO(raw)) as font:
+        # Validation regenerates this subset. Preserve the source timestamp so
+        # crossing a second cannot change the bytes or checksum adjustment.
+        with TTFont(io.BytesIO(raw), recalcTimestamp=False) as font:
             if not font['OS/2'].fsType & 256:
                 options = subset.Options()
                 options.layout_features = ['*']

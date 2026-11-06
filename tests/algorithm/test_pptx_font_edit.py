@@ -30,7 +30,12 @@ def deck(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('scope', ['all', 'page', 'slot', 'title'])
-def test_font_scope_preserves_unselected_parts(deck, tmp_path, scope):
+def test_font_scope_preserves_unselected_parts(deck, tmp_path, scope, monkeypatch):
+    from itertools import count
+    from fontTools.ttLib.tables import _h_e_a_d
+    # Exercise validation across a clock tick without a slow, flaky sleep.
+    ticks = count(4000000000)
+    monkeypatch.setattr(_h_e_a_d, 'timestampNow', lambda: next(ticks))
     info = inspect_content(deck)
     slot = next(s['id'] for s in info['pages'][0]['slots'] if s['text'] == '正文 text')
     kwargs = {'pages': [1]} if scope in {'page', 'title'} else {}
@@ -243,6 +248,17 @@ def make_font(folder, family='Test Font', fs_type=0, text='正文 textTitle01234
     path = folder / (family + '.ttf')
     builder.save(path)
     return path
+
+
+def test_embedded_font_subset_is_stable_across_clock_ticks(deck, monkeypatch):
+    from itertools import count
+    from fontTools.ttLib.tables import _h_e_a_d
+    from lazymind.chat.engine.tools.file_resources.font_library import local_fonts
+    from lazymind.chat.engine.tools.file_resources.pptx_font_embedding import eot_data
+    ticks = count(4000000000)
+    monkeypatch.setattr(_h_e_a_d, 'timestampNow', lambda: next(ticks))
+    record, = local_fonts()
+    assert eot_data(record, '正文Title') == eot_data(record, '正文Title')
 
 
 def test_font_resource_failures_do_not_change_source_or_destination(deck, tmp_path, monkeypatch):
