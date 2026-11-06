@@ -1,0 +1,29 @@
+{
+  "mode": "local dependency packaging only; no runtime E2E",
+  "source_commit": "c75fda00ff0e41c8ee331ae312c8a07f1967653b",
+  "source_path": "marketing/skills/competitive-brief/SKILL.md",
+  "archive": "competitive-brief-marketing.zip",
+  "archive_sha256": "cd87836bf2565ac648b0ea2546263a21491634d9f4cebb33f104102fd3a7e775",
+  "files": {
+    "LICENSE": {
+      "bytes": 11607,
+      "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    },
+    "NOTICE.txt": {
+      "bytes": 595,
+      "sha256": "4e269d531b7c727fdd782a0944157d2ea3e5c32748a747c95559dba86ff9cf70"
+    },
+    "ORIGIN.json": {
+      "bytes": 1519,
+      "sha256": "8c09dccc9a08778e65a75105960dbac0b2f770d3de3de7cb3a6125dcd5739d75"
+    },
+    "SKILL.md": {
+      "bytes": 13295,
+      "sha256": "cbd975db84da1a5fec61f7cae3dbb8608cd8bed9ed45e319cecfddb518768675"
+    },
+    "references/CONNECTORS.md": {
+      "bytes": 1260,
+      "sha256": "e85d04dde99b220ba438cf1345212e7414da536fb7d781d83a4ad57270586630"
+    }
+  }
+}

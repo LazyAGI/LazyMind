@@ -1,0 +1,17 @@
+{
+  "contract_version": "workflow.v1",
+  "command_id": "competitive-brief-20261027-retry-analysis-1",
+  "tool": "advance_step",
+  "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+  "expected_state_version": 11,
+  "workflow_mode": "manual",
+  "retry_origin": "automatic",
+  "steps": [
+    {
+      "step_id": "analyze_positioning",
+      "objective": "Execute ONLY the existing intermediate step analyze_positioning in the already published Workflow. Its deliverable is the declared positioning_analysis JSON artifact, using the persisted competitor_research revision 2 and request_brief. Include comparison matrix, value propositions, narrative analysis, labelled subjective messaging scores, evidence-bounded content gaps, positioning axes, opportunities, threats and 3-5 actions with confidence flags and S1-S7 citations. This is NOT the final report step: the downstream synthesize_brief step must still produce and be evaluated against the complete seven-section Markdown brief, price table, 20-seat arithmetic, source dates and Human review: pending. Do not waive those final requirements or alter the Workflow. Do not search the live web or add sources. Evaluate this retry against its intermediate JSON output contract, not against the downstream Markdown deliverable.",
+      "user_input": "Execute ONLY the existing intermediate step analyze_positioning in the already published Workflow. Its deliverable is the declared positioning_analysis JSON artifact, using the persisted competitor_research revision 2 and request_brief. Include comparison matrix, value propositions, narrative analysis, labelled subjective messaging scores, evidence-bounded content gaps, positioning axes, opportunities, threats and 3-5 actions with confidence flags and S1-S7 citations. This is NOT the final report step: the downstream synthesize_brief step must still produce and be evaluated against the complete seven-section Markdown brief, price table, 20-seat arithmetic, source dates and Human review: pending. Do not waive those final requirements or alter the Workflow. Do not search the live web or add sources. Evaluate this retry against its intermediate JSON output contract, not against the downstream Markdown deliverable.",
+      "runtime_instruction": "Execute ONLY the existing intermediate step analyze_positioning in the already published Workflow. Its deliverable is the declared positioning_analysis JSON artifact, using the persisted competitor_research revision 2 and request_brief. Include comparison matrix, value propositions, narrative analysis, labelled subjective messaging scores, evidence-bounded content gaps, positioning axes, opportunities, threats and 3-5 actions with confidence flags and S1-S7 citations. This is NOT the final report step: the downstream synthesize_brief step must still produce and be evaluated against the complete seven-section Markdown brief, price table, 20-seat arithmetic, source dates and Human review: pending. Do not waive those final requirements or alter the Workflow. Do not search the live web or add sources. Evaluate this retry against its intermediate JSON output contract, not against the downstream Markdown deliverable."
+    }
+  ]
+}

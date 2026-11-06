@@ -1,0 +1,15 @@
+go: downloading github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1
+go: downloading golang.org/x/image v0.25.0
+# lazymind/core/cloudsession
+cloudsession/secure_store_darwin.go:22:10: warning: 'SecKeychainOpen' is deprecated: first deprecated in macOS 10.10 - SecKeychain is deprecated [-Wdeprecated-declarations]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecKeychain.h:294:10: note: 'SecKeychainOpen' has been explicitly marked deprecated here
+cloudsession/secure_store_darwin.go:47:7: warning: 'kSecUseAuthenticationUIFail' is deprecated: first deprecated in macOS 11.0 - Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [-Wdeprecated-declarations]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecItem.h:1078:26: note: 'kSecUseAuthenticationUIFail' has been explicitly marked deprecated here
+cloudsession/secure_store_darwin.go:140:19: warning: 'kSecUseAuthenticationUIFail' is deprecated: first deprecated in macOS 11.0 - Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [-Wdeprecated-declarations]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecItem.h:1078:26: note: 'kSecUseAuthenticationUIFail' has been explicitly marked deprecated here
+# lazymind/core/credentialvault
+credentialvault/local_store_darwin.go:30:7: warning: 'kSecUseAuthenticationUIFail' is deprecated: first deprecated in macOS 11.0 - Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [-Wdeprecated-declarations]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecItem.h:1078:26: note: 'kSecUseAuthenticationUIFail' has been explicitly marked deprecated here
+credentialvault/local_store_darwin.go:93:90: warning: 'kSecUseAuthenticationUIFail' is deprecated: first deprecated in macOS 11.0 - Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [-Wdeprecated-declarations]
+/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Headers/SecItem.h:1078:26: note: 'kSecUseAuthenticationUIFail' has been explicitly marked deprecated here
+ok  	lazymind/core/workflow	0.670s
