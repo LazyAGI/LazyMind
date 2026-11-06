@@ -34,6 +34,21 @@ const targets = groupPdfCitationTargets([
 ]);
 
 describe("citation target grouping", () => {
+  it("keeps distinct author-year references without numeric keys and their source regions", () => {
+    const authorYear = groupPdfCitationTargets([
+      { referenceId: "agarwal-2019", referenceKey: "", rawText: "Agarwal, A. Reinforcement learning. 2019.", kind: "download", page: 9, bbox: [307, 301, 543, 335] },
+      { referenceId: "agarwal-2019", referenceKey: "", rawText: "Agarwal, A. Reinforcement learning. 2019.", kind: "download", page: 9, bbox: [307, 336, 543, 345] },
+      { referenceId: "amari-1998", referenceKey: "", rawText: "Amari, S. Natural gradient. 1998.", kind: "download", page: 9, bbox: [307, 405, 543, 427] },
+    ]);
+
+    expect(authorYear.map(target => target.referenceId)).toEqual(["agarwal-2019", "amari-1998"]);
+    expect(authorYear[0].regions).toEqual([
+      { page: 9, bbox: [307, 301, 543, 335] },
+      { page: 9, bbox: [307, 336, 543, 345] },
+    ]);
+    expect(authorYear[0].referenceKey).not.toBe(authorYear[1].referenceKey);
+  });
+
   it("groups all regions for one bibliography key in document order", () => {
     expect(groupPdfCitationTargets([
       { referenceId: "r12", referenceKey: "12", rawText: "Paper", kind: "download", page: 8, bbox: [20, 60, 300, 84] },

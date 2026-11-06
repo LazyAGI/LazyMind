@@ -21,6 +21,39 @@ function pdfDocument() {
   return { getPage: vi.fn(async (_page: number) => page), cleanup: vi.fn(), page };
 }
 
+function bibliographyPdf(
+  overrideItems?: Array<{ str: string; transform: number[] | Float32Array; width: number; height: number }>,
+  options: { referencePage?: number; numPages?: number; duplicatePage?: number } = {},
+) {
+  const referencePage = options.referencePage ?? 23;
+  const numPages = options.numPages ?? 23;
+  const document = pdfDocument();
+  const referenceItems = [
+    { str: "[45] Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo", transform: [1, 0, 0, 1, 80.7, 432.4], width: 450.6, height: 8 },
+    { str: "Gu. 2021. RTIC: Residual Learning for Text and Image Composition", transform: [1, 0, 0, 1, 97.8, 422.4], width: 430, height: 8 },
+    { str: "using Graph Convolutional Network. arXiv:2104.03015.", transform: [1, 0, 0, 1, 97.8, 412.4], width: 360, height: 8 },
+    { str: "[46] Another Author. The next paper.", transform: [1, 0, 0, 1, 80.7, 402.4], width: 280, height: 8 },
+  ];
+  const textContent = vi.fn(async (pageNumber: number) => ({ items: pageNumber === referencePage ? [
+    { str: "[45] Body citation with unrelated content.", transform: [1, 0, 0, 1, 80, 700], width: 300, height: 8 },
+    ...(overrideItems || referenceItems),
+  ] : pageNumber === options.duplicatePage ? referenceItems.slice(0, 3) : [] }));
+  const originalGetPage = document.getPage;
+  const getPage = vi.fn(async (pageNumber: number) => {
+    const page = await originalGetPage(pageNumber);
+    return {
+      ...page,
+      getViewport: vi.fn(({ scale }: { scale: number; rotation?: number }) => ({
+        width: 600 * scale,
+        height: 800 * scale,
+        convertToViewportPoint: (x: number, y: number): [number, number] => [x * scale, (800 - y) * scale],
+      })),
+      getTextContent: () => textContent(pageNumber),
+    };
+  });
+  return { numPages, getPage, textContent, render: document.page.render };
+}
+
 let canvases: HTMLCanvasElement[];
 let draws: ReturnType<typeof vi.fn>[];
 let blobSizes: number[];
@@ -66,6 +99,179 @@ describe("PDF citation preview", () => {
     expect(await createPdfCitationPreviewCache().get(document, target("empty", []))).toBeUndefined();
     expect(document.getPage).not.toHaveBeenCalled();
     expect(canvases).toHaveLength(0);
+  });
+
+  it("locates an old reference with no bbox on an offscreen bibliography page and crops only its lines", async () => {
+    const document = bibliographyPdf();
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network. arXiv:2104.03015 (2021)." };
+    const cache = createPdfCitationPreviewCache();
+    const preview = await cache.get(document, reference);
+    expect(preview).toBeDefined();
+    expect(preview?.region?.page).toBe(23);
+    expect(preview?.region?.bbox[0]).toBeGreaterThan(70);
+    expect(document.getPage).toHaveBeenCalledWith(23);
+    expect(document.render).toHaveBeenCalledTimes(1);
+    const crop = draws.flatMap(draw => draw.mock.calls).find(call => call.length === 9);
+    expect(crop).toBeDefined();
+    expect(crop![1]).toBeGreaterThan(90);
+    expect(crop![2]).toBeGreaterThan(500);
+    expect(crop![4]).toBeLessThan(80);
+    expect(await cache.get(document, reference)).toEqual(preview);
+    expect(document.textContent).toHaveBeenCalledTimes(1);
+    cache.dispose();
+  });
+
+  it("finds a reference before a long appendix even when its old record has no page or bbox", async () => {
+    const document = bibliographyPdf(undefined, { referencePage: 9, numPages: 69 });
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    const preview = await cache.get(document, reference);
+    expect(preview?.region?.page).toBe(9);
+    expect(document.render).toHaveBeenCalledTimes(1);
+    cache.dispose();
+  });
+
+  it("checks a verified native destination page first, then falls back if its hint is stale", async () => {
+    const document = bibliographyPdf(undefined, { referencePage: 9, numPages: 69 });
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    expect((await cache.get(document, { ...reference, fallbackPage: 9 }))?.region?.page).toBe(9);
+    expect(document.textContent.mock.calls.map(([page]) => page)).toEqual([9]);
+    cache.dispose();
+
+    const other = bibliographyPdf(undefined, { referencePage: 9, numPages: 69 });
+    const otherCache = createPdfCitationPreviewCache();
+    expect((await otherCache.get(other, { ...reference, fallbackPage: 2 }))?.region?.page).toBe(9);
+    expect(other.textContent.mock.calls[0]).toEqual([2]);
+    otherCache.dispose();
+  });
+
+  it("reuses extracted page candidates for later reference hovers after a full scan", async () => {
+    const document = bibliographyPdf(undefined, { referencePage: 9, numPages: 69 });
+    const cache = createPdfCitationPreviewCache();
+    const absent = { ...target("99", []), rawText: "Another Author. 2020. Contrasting Visual Features for Reliable Retrieval." };
+    const real = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    expect(await cache.get(document, absent)).toBeUndefined();
+    expect(document.textContent).toHaveBeenCalledTimes(69);
+    expect((await cache.get(document, real))?.region?.page).toBe(9);
+    expect(document.textContent).toHaveBeenCalledTimes(69);
+    cache.dispose();
+  });
+
+  it("prefers a bibliography list over the same complete citation repeated in a later appendix", async () => {
+    const document = bibliographyPdf(undefined, { referencePage: 9, numPages: 69, duplicatePage: 60 });
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    expect((await cache.get(document, reference))?.region?.page).toBe(9);
+    cache.dispose();
+  });
+
+  it("stops a long fallback scan when its PDF is disposed", async () => {
+    const document = bibliographyPdf(undefined, { referencePage: 9, numPages: 69 });
+    const originalGetPage = document.getPage;
+    let releaseFirstPage!: () => void;
+    document.getPage = vi.fn(async pageNumber => {
+      if (pageNumber === 69) await new Promise<void>(resolve => { releaseFirstPage = resolve; });
+      return originalGetPage(pageNumber);
+    });
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    const preview = cache.get(document, reference);
+    cache.disposeDocument(document);
+    releaseFirstPage();
+    expect(await preview).toBeUndefined();
+    expect(document.getPage).toHaveBeenCalledTimes(1);
+    expect(document.render).not.toHaveBeenCalled();
+    cache.dispose();
+  });
+
+  it("accepts bibliography text with a parenthesized year and no author-title full stop", async () => {
+    const document = bibliographyPdf();
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu (2021) RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    expect(await cache.get(document, reference)).toBeDefined();
+    cache.dispose();
+  });
+
+  it("keeps abbreviated author initials from splitting the title match", async () => {
+    const document = bibliographyPdf([
+      { str: "[45] M. Shin, Y. Cho, B. Ko, and G. Gu. 2021. RTIC: Residual Learning", transform: [1, 0, 0, 1, 80.7, 432.4], width: 450, height: 8 },
+      { str: "for Text and Image Composition using Graph Convolutional Network.", transform: [1, 0, 0, 1, 97.8, 422.4], width: 400, height: 8 },
+      { str: "[46] Another Author. The next paper.", transform: [1, 0, 0, 1, 80.7, 412.4], width: 280, height: 8 },
+    ]);
+    const reference = { ...target("45", []), rawText: "M. Shin, Y. Cho, B. Ko, and G. Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    expect(await cache.get(document, reference)).toBeDefined();
+    cache.dispose();
+  });
+
+  it("continues a left-column reference past an interleaved right-column numbered line", async () => {
+    const document = bibliographyPdf([
+      { str: "[45] Minchul Shin. 2021.", transform: [1, 0, 0, 1, 50, 430], width: 230, height: 8 },
+      { str: "[91] Unrelated right-column citation.", transform: [1, 0, 0, 1, 330, 425], width: 230, height: 8 },
+      { str: "Residual Learning for Text and Image Composition.", transform: [1, 0, 0, 1, 65, 420], width: 210, height: 8 },
+      { str: "[46] Next left-column reference.", transform: [1, 0, 0, 1, 50, 410], width: 230, height: 8 },
+    ]);
+    const reference = { ...target("45", []), rawText: "Minchul Shin. 2021. Residual Learning for Text and Image Composition." };
+    const cache = createPdfCitationPreviewCache();
+    expect(await cache.get(document, reference)).toBeDefined();
+    const crop = draws.flatMap(draw => draw.mock.calls).find(call => call.length === 9)!;
+    expect(crop[1]).toBeLessThan(100);
+    expect(crop[3]).toBeLessThan(400);
+    expect(crop[4]).toBeGreaterThan(30);
+    expect(crop[4]).toBeLessThan(65);
+    cache.dispose();
+  });
+
+  it("does not treat a continuation line starting with a publication year as the next reference", async () => {
+    const document = bibliographyPdf([
+      { str: "[45] Minchul Shin.", transform: [1, 0, 0, 1, 80.7, 432.4], width: 230, height: 8 },
+      { str: "2021. RTIC: Residual Learning for Text and Image Composition.", transform: [1, 0, 0, 1, 97.8, 422.4], width: 420, height: 8 },
+      { str: "[46] Another reference.", transform: [1, 0, 0, 1, 80.7, 412.4], width: 230, height: 8 },
+    ]);
+    const reference = { ...target("45", []), rawText: "Minchul Shin. 2021. RTIC: Residual Learning for Text and Image Composition." };
+    const cache = createPdfCitationPreviewCache();
+    expect(await cache.get(document, reference)).toBeDefined();
+    cache.dispose();
+  });
+
+  it("accepts PDF.js text transforms represented by typed arrays", async () => {
+    const document = bibliographyPdf([
+      { str: "[45] Minchul Shin. 2021. RTIC: Residual Learning", transform: new Float32Array([1, 0, 0, 1, 80.7, 432.4]), width: 430, height: 8 },
+      { str: "for Text and Image Composition using Graph Convolutional Network.", transform: new Float32Array([1, 0, 0, 1, 97.8, 422.4]), width: 430, height: 8 },
+      { str: "[46] Another reference.", transform: new Float32Array([1, 0, 0, 1, 80.7, 412.4]), width: 230, height: 8 },
+    ]);
+    const reference = { ...target("45", []), rawText: "Minchul Shin. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network." };
+    const cache = createPdfCitationPreviewCache();
+    expect(await cache.get(document, reference)).toBeDefined();
+    cache.dispose();
+  });
+
+  it("joins a split marker and author despite subpixel baseline order", async () => {
+    const document = bibliographyPdf([
+      { str: "[45]", transform: [7.9701, 0, 0, 7.9701, 80.697, 418.40099999999995], width: 13.0869042, height: 7.9701 },
+      { str: " ", transform: [7.9701, 0, 0, 7.9701, 93.7839042, 418.40099999999995], width: 3.9069567, height: 0 },
+      { str: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using", transform: [8.129502, 0, 0, 7.9701, 97.769, 418.401], width: 433.5300827, height: 7.9701 },
+      { str: "Graph Convolutional Network.", transform: [7.9701, 0, 0, 7.9701, 97.769, 408.438], width: 101.3318514, height: 7.9701 },
+      { str: "arXiv preprint arXiv:2104.03015 (2021).", transform: [7.9701, 0, 0, 7.9701, 201.97, 408.438], width: 130, height: 7.9701 },
+      { str: "[46] Another reference.", transform: [7.9701, 0, 0, 7.9701, 80.697, 398.476], width: 230, height: 7.9701 },
+    ]);
+    const reference = { ...target("45", []), rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. 2021. RTIC: Residual Learning for Text and Image Composition using Graph Convolutional Network. arXiv preprint arXiv:2104.03015 (2021)." };
+    const cache = createPdfCitationPreviewCache();
+    expect(await cache.get(document, reference)).toBeDefined();
+    cache.dispose();
+  });
+
+  it("does not crop a body citation or a same-number bibliography entry with the wrong author", async () => {
+    const document = bibliographyPdf();
+    const cache = createPdfCitationPreviewCache();
+    const wrong = { ...target("45", []), rawText: "Jane Doe. An unrelated paper about optimization." };
+    expect(await cache.get(document, wrong)).toBeUndefined();
+    expect(document.render).not.toHaveBeenCalled();
+    const scans = document.textContent.mock.calls.length;
+    expect(await cache.get(document, wrong)).toBeUndefined();
+    expect(document.textContent).toHaveBeenCalledTimes(scans);
+    cache.dispose();
   });
 
   it("crops every region in input order, clamps padding, and renders each distinct page once", async () => {

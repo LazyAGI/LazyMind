@@ -20,10 +20,10 @@ afterEach(() => {
   else Reflect.deleteProperty(Range.prototype, "getClientRects");
   window.getSelection()?.removeAllRanges();
 });
-function setup(preview: Promise<PdfCitationPreview | undefined> | (() => Promise<PdfCitationPreview | undefined>) = Promise.resolve(undefined), rawText?: string) {
+function setup(preview: Promise<PdfCitationPreview | undefined> | (() => Promise<PdfCitationPreview | undefined>) = Promise.resolve(undefined), rawText?: string, onAddToLibrary?: (target: typeof targets[number]) => Promise<void>) {
   const navigate = vi.fn();
   const cache = { get: vi.fn(() => typeof preview === "function" ? preview() : preview), dispose: vi.fn(), disposeDocument: vi.fn() } satisfies ReturnType<typeof createPdfCitationPreviewCache>;
-  const props = { targets: rawText === undefined ? targets : groupPdfCitationTargets([{ referenceId: "r12", referenceKey: "12", rawText, kind: "download", page: 8, bbox: [20, 60, 300, 84] }]), getDocument: () => pdf, previewCache: cache, onNavigate: navigate };
+  const props = { targets: rawText === undefined ? targets : groupPdfCitationTargets([{ referenceId: "r12", referenceKey: "12", rawText, kind: "download", page: 8, bbox: [20, 60, 300, 84] }]), getDocument: () => pdf, previewCache: cache, onNavigate: navigate, onAddToLibrary };
   const view = render(<div data-testid="page"><div className="react-pdf__Page__textContent"><span>[</span><span>12]</span></div><a href="#native">Native</a><PdfCitationLayer {...props}/></div>);
   const page = screen.getByTestId("page");
   return { ...view, props, page, navigate, cache };
@@ -34,7 +34,157 @@ async function hover(page: HTMLElement) {
   expect(screen.queryByRole("dialog")).toBeNull();
   await act(async () => { vi.advanceTimersByTime(1); });
 }
+
+function setupAuthorYearNativeLink(color: "green" | "red", destinationTop = 495.393) {
+  const source = { referenceId: "agarwal-2019", referenceKey: "", rawText: "Agarwal, A. Reinforcement learning: Theory and algorithms. 2019.", kind: "download" as const, page: 9, bbox: [307.44, 300.93, 543.18, 334.88] as [number, number, number, number] };
+  const authorYearTargets = groupPdfCitationTargets([source]);
+  const annotation = {
+    id: "208R",
+    subtype: "Link",
+    rect: [10, 762, 60, 782],
+    borderColor: new Uint8ClampedArray(color === "green" ? [0, 255, 0] : [255, 0, 0]),
+    dest: "cite.agarwal2019reinforcement",
+  };
+  const viewport = {
+    width: 612,
+    height: 792,
+    convertToViewportPoint: (x: number, y: number) => [x, 792 - y],
+    convertToViewportRectangle: ([x0, y0, x1, y1]: number[]) => [x0, 792 - y0, x1, 792 - y1],
+  };
+  const pdf = {
+    getPage: vi.fn(async (pageNumber: number) => ({
+      rotate: 0,
+      getAnnotations: async () => pageNumber === 1 ? [annotation] : [],
+      getViewport: () => viewport,
+    })),
+    getDestination: vi.fn(async () => [{ num: 705, gen: 0 }, { name: "XYZ" }, 287.515, destinationTop, null]),
+    getPageIndex: vi.fn(async () => 8),
+  } as unknown as PdfCitationPreviewDocument;
+  const cache = { get: vi.fn(async () => undefined), dispose: vi.fn(), disposeDocument: vi.fn() } satisfies ReturnType<typeof createPdfCitationPreviewCache>;
+  const navigate = vi.fn();
+  const view = render(<div className="react-pdf__Page" data-pdf-page-index="0" data-page-number="1" data-testid="author-year-page">
+    <div className="react-pdf__Page__textContent"><span>See Agarwal et al. (2019) for details.</span></div>
+    <div className="annotationLayer"><section className="linkAnnotation" data-annotation-id="208R" style={{ borderColor: color === "green" ? "rgb(0, 255, 0)" : "rgb(255, 0, 0)" }}><a data-element-id="208R" title="Agarwal et al. (2019)" href="#" /></section></div>
+    <PdfCitationLayer targets={authorYearTargets} getDocument={() => pdf} previewCache={cache} onNavigate={navigate} />
+  </div>);
+  const page = screen.getByTestId("author-year-page");
+  const link = page.querySelector<HTMLAnchorElement>(".linkAnnotation a")!;
+  vi.spyOn(page, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, right: 612, bottom: 792, width: 612, height: 792 } as DOMRect);
+  vi.spyOn(link, "getBoundingClientRect").mockReturnValue({ left: 10, top: 10, right: 60, bottom: 30, width: 50, height: 20 } as DOMRect);
+  return { ...view, page, link, navigate, cache, source, pdf };
+}
+
+function setupNumericNativeLink(getPageIndex: () => Promise<number> = async () => 22) {
+  const numericTargets = groupPdfCitationTargets([{
+    referenceId: "shin2021rtic", referenceKey: "45",
+    rawText: "Minchul Shin, Yoonjae Cho, Byungsoo Ko, and Geonmo Gu. Rtic: Residual Learning for Text and Image Composition using Graph Convolutional Network. 2021.",
+    kind: "download", page: 0,
+  }]);
+  const pdf = {
+    numPages: 30,
+    getPage: vi.fn(async () => ({ getAnnotations: async () => [{ id: "197R", dest: "cite.shin2021rtic" }] })),
+    getDestination: vi.fn(async () => [{ num: 880, gen: 0 }, { name: "XYZ" }, 80.697, 428.364, null]),
+    getPageIndex: vi.fn(getPageIndex),
+  } as unknown as PdfCitationPreviewDocument;
+  const cache = { get: vi.fn(async () => undefined), dispose: vi.fn(), disposeDocument: vi.fn() } satisfies ReturnType<typeof createPdfCitationPreviewCache>;
+  const navigate = vi.fn();
+  const view = render(<div data-pdf-page-index="0" data-testid="numeric-page">
+    <div className="annotationLayer"><section className="linkAnnotation" style={{ borderColor: "rgb(0, 255, 0)" }}>
+      <a data-element-id="197R" title="45" href="#reference-45" />
+    </section></div>
+    <PdfCitationLayer targets={numericTargets} getDocument={() => pdf} previewCache={cache} onNavigate={navigate} />
+  </div>);
+  return { ...view, pdf, cache, navigate, target: numericTargets[0], page: screen.getByTestId("numeric-page"), link: view.container.querySelector<HTMLAnchorElement>(".linkAnnotation a")! };
+}
+
 describe("citation preview interaction", () => {
+  it("uses a numeric native link destination to locate a reference with no stored region", async () => {
+    const { pdf, cache, navigate, target, link } = setupNumericNativeLink();
+    fireEvent.pointerMove(link, { clientX: 20, clientY: 20, buttons: 0 });
+    await act(async () => { vi.advanceTimersByTime(300); });
+    expect(screen.getByRole("dialog")).toHaveTextContent(target.rawText);
+    expect(cache.get).toHaveBeenCalledWith(pdf, { ...target, fallbackPage: 23 });
+    fireEvent.click(screen.getByRole("button", { name: "pdfCitation.jump [45]" }));
+    expect(navigate).toHaveBeenCalledWith({ ...target, fallbackPage: 23 });
+    fireEvent.click(link, { clientX: 20, clientY: 20 });
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a numeric preview after the pointer leaves during destination lookup", async () => {
+    let finish!: (pageIndex: number) => void;
+    const { cache, link, page } = setupNumericNativeLink(() => new Promise(resolve => { finish = resolve; }));
+    fireEvent.pointerMove(link, { clientX: 20, clientY: 20, buttons: 0 });
+    await act(async () => { vi.advanceTimersByTime(300); });
+    expect(cache.get).not.toHaveBeenCalled();
+    fireEvent.pointerLeave(page);
+    await act(async () => { finish(22); });
+    expect(cache.get).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("previews an author-year citation from its native green link destination and keeps native clicking", async () => {
+    const { link, navigate, cache, source } = setupAuthorYearNativeLink("green");
+    await act(async () => {});
+    fireEvent.pointerMove(link, { clientX: 20, clientY: 20, buttons: 0 });
+    await act(async () => { vi.advanceTimersByTime(300); });
+    expect(screen.getByRole("dialog").querySelector(".pdf-citation-raw")?.textContent).toBe(source.rawText);
+    expect(cache.get).toHaveBeenCalled();
+    fireEvent.click(link, { clientX: 20, clientY: 20 });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { color: "red" as const, destinationTop: 495.393 },
+    { color: "green" as const, destinationTop: 100 },
+  ])("does not preview a $color native link with destination top $destinationTop", async ({ color, destinationTop }) => {
+    const { link, cache } = setupAuthorYearNativeLink(color, destinationTop);
+    await act(async () => {});
+    fireEvent.pointerMove(link, { clientX: 20, clientY: 20, buttons: 0 });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(cache.get).not.toHaveBeenCalled();
+  });
+
+  it("shows the library action only when the current collection can accept papers", async () => {
+    const { page, unmount } = setup();
+    await hover(page);
+    expect(screen.queryByRole("button", { name: "pdfCitation.addToLibrary" })).toBeNull();
+    unmount();
+    const add = vi.fn().mockResolvedValue(undefined);
+    const other = setup(Promise.resolve(undefined), undefined, add);
+    await hover(other.page);
+    expect(screen.getByRole("button", { name: "pdfCitation.addToLibrary" })).toBeInTheDocument();
+  });
+
+  it("adds a reference once without navigating and keeps the success state in the card", async () => {
+    let complete!: () => void;
+    const add = vi.fn(() => new Promise<void>(resolve => { complete = resolve; }));
+    const { page, navigate } = setup(Promise.resolve(undefined), undefined, add);
+    await hover(page);
+    const button = screen.getByRole("button", { name: "pdfCitation.addToLibrary" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(add).toHaveBeenCalledWith(targets[0]);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(button).toBeDisabled();
+    await act(async () => complete());
+    expect(screen.getByRole("button", { name: "pdfCitation.addedToLibrary" })).toBeDisabled();
+  });
+
+  it("allows retry if adding a reference fails", async () => {
+    const add = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined);
+    const { page } = setup(Promise.resolve(undefined), undefined, add);
+    await hover(page);
+    const button = screen.getByRole("button", { name: "pdfCitation.addToLibrary" });
+    fireEvent.click(button);
+    await act(async () => {});
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    await act(async () => {});
+    expect(add).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "pdfCitation.addedToLibrary" })).toBeDisabled();
+  });
   it.each([
     "Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hinton. Layer normalization. arXiv preprint arXiv:1607.06450, 2016.",
     "J. R. Smith, A. Doe, et al. 2024. A title.",
@@ -72,6 +222,24 @@ describe("citation preview interaction", () => {
     fireEvent.click(screen.getByRole("button", { name: "pdfCitation.jump [12]" }));
     expect(navigate).toHaveBeenCalledWith(targets[0]);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("uses the located crop region to navigate an old reference with no stored bbox", async () => {
+    const region = { page: 23, bbox: [80, 360, 532, 386] as [number, number, number, number] };
+    const noBbox = groupPdfCitationTargets([{ referenceId: "r12", referenceKey: "12", rawText: "Paper", kind: "download", page: 0 }]);
+    let resolve!: (value: PdfCitationPreview) => void;
+    const cache = { get: vi.fn(() => new Promise<PdfCitationPreview>(done => { resolve = done; })), dispose: vi.fn(), disposeDocument: vi.fn() } satisfies ReturnType<typeof createPdfCitationPreviewCache>;
+    const navigate = vi.fn();
+    const view = render(<div data-testid="page"><div className="react-pdf__Page__textContent"><span>[12]</span></div>
+      <PdfCitationLayer targets={noBbox} getDocument={() => pdf} previewCache={cache} onNavigate={navigate}/></div>);
+    await hover(screen.getByTestId("page"));
+    expect(screen.getByRole("button", { name: "pdfCitation.jump [12]" })).toBeDisabled();
+    await act(async () => resolve({ url: "blob:found", width: 300, height: 60, region }));
+    expect(screen.getByRole("img")).toHaveAttribute("src", "blob:found");
+    expect(screen.getByRole("button", { name: "pdfCitation.jump [12]" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "pdfCitation.jump [12]" }));
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ referenceId: "r12", fallbackPage: 23, regions: [region] }));
+    view.unmount();
   });
 
   it("replaces the pending crop asynchronously", async () => {

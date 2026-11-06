@@ -323,6 +323,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/academic/library/papers/{library_paper_id}", []string{"document.read"}, academic.PatchLibraryPaper)
 	handleAPI(r, "POST", "/academic/library/papers:move", []string{"document.write"}, academic.MoveLibraryPapers)
 	handleAPI(r, "POST", "/academic/library/papers:remove", []string{"document.write"}, academic.RemoveLibraryPapers)
+	handleAPI(r, "POST", "/academic/library/papers:delete", []string{"document.write"}, academic.DeleteLibraryPapers)
 	handleAPI(r, "POST", "/academic/library/papers/{library_paper_id}/attachments/{attachment_id}:detach", []string{"document.write"}, academic.DetachLibraryAttachment)
 	handleAPI(r, "POST", "/academic/library/papers/{library_paper_id}/notes", []string{"document.write"}, academic.AddLibraryNote)
 	handleAPI(r, "POST", "/academic/library/folders", []string{"document.write"}, academic.CreateLibraryFolder)

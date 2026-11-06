@@ -10,7 +10,9 @@ function numericKey(value: string | undefined): string | undefined {
 export function groupPdfCitationTargets(actions: PdfReferenceAction[]): PdfCitationTarget[] {
   const targets = new Map<string, PdfCitationTarget>();
   for (const action of actions) {
-    const referenceKey = numericKey(action.referenceKey);
+    // Author-year bibliographies have no numeric key. Keep each entry by its
+    // server ID so native PDF destinations can still resolve to its regions.
+    const referenceKey = numericKey(action.referenceKey) ?? (action.referenceId ? `ref:${action.referenceId}` : undefined);
     if (referenceKey === undefined) continue;
     let target = targets.get(referenceKey);
     if (!target) {
@@ -64,7 +66,9 @@ function hasContinuousCitationGeometry(rects: DOMRect[]): boolean {
 // current layout so resizing and zooming never leave stale citation hit boxes.
 export function citationOccurrences(page: HTMLElement, targets: PdfCitationTarget[]): Array<{ target: PdfCitationTarget; rects: DOMRect[] }> {
   const occurrences: Array<{ target: PdfCitationTarget; rects: DOMRect[] }> = [];
-  const targetsByKey = new Map(targets.map(target => [target.referenceKey, target]));
+  const numberedTargets = targets.filter(target => /^\d{1,4}$/.test(target.referenceKey));
+  if (!numberedTargets.length) return occurrences;
+  const targetsByKey = new Map(numberedTargets.map(target => [target.referenceKey, target]));
   const doc = page.ownerDocument;
   for (const layer of page.querySelectorAll(".react-pdf__Page__textContent")) {
     const nodes: Array<{ node: Text; start: number; end: number }> = [];

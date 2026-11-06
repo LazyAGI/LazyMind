@@ -26,3 +26,25 @@ it('renders bare indexed variables from older explanations without changing snak
  expect(view.container.querySelectorAll('.katex')).toHaveLength(2);
  expect(view.container).toHaveTextContent('model_name');
 });
+
+it('maps legacy summary aliases back to their known canonical symbols',()=>{
+ const symbols=[String.raw`\theta_ {m d} ^ {(1)}`,String.raw`\theta_ {a g} ^ {(0)}`,String.raw`\hat {\theta} ^ {(0)}`,String.raw`\alpha ^ {(1)}`];
+ const view=render(<FormulaMathText text={'模型参数theta_md^{(1)}由theta_ag^{(0)}与hat_theta^{(0)}加权，权重为alpha^{(1)}；保留model_name、source_blocks、display_latex和pretheta_md^{(1)}suffix。'} knownSymbols={symbols}/>);
+ expect(Array.from(view.container.querySelectorAll('annotation'),node=>node.textContent)).toEqual(symbols);
+ expect(view.container).toHaveTextContent('model_name、source_blocks、display_latex和pretheta_md^{(1)}suffix');
+});
+
+it('matches the longest known expression before an inner indexed symbol',()=>{
+ const root=String.raw`\sqrt{d_k}`;
+ const view=render(<FormulaMathText text={'分别用sqrt(d_k)与√d_k缩放，普通model_name保持原样。'} knownSymbols={[String.raw`d_k`,root]}/>);
+ expect(Array.from(view.container.querySelectorAll('annotation'),node=>node.textContent)).toEqual([root,root]);
+ expect(view.container).toHaveTextContent('model_name');
+});
+
+it('keeps explicit delimiters authoritative and preserves invalid or unsafe input as inert content',()=>{
+ const root=String.raw`\sqrt{d_k}`;
+ const view=render(<FormulaMathText text={'显式 $\\sqrt{d_k}$；无效 broken^{；危险 $\\href{javascript:alert(1)}{click}$。'} knownSymbols={[root,'broken^{']}/>);
+ expect(Array.from(view.container.querySelectorAll('annotation'),node=>node.textContent)).toEqual([root,String.raw`\href{javascript:alert(1)}{click}`]);
+ expect(view.container).toHaveTextContent('broken^{');
+ expect(view.container.querySelector('a')).toBeNull();
+});

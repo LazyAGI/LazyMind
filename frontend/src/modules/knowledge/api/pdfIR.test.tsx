@@ -77,3 +77,14 @@ it('ignores an external refresh callback captured for a previous document', asyn
  expect(mocks.post).not.toHaveBeenCalled();
  view.unmount();
 });
+
+ it('distinguishes pending observation from an unparsed document', async () => {
+ let resolve!:(value:unknown)=>void;
+ mocks.get.mockReset().mockImplementation(()=>new Promise(done=>{resolve=done}));
+ const view=renderHook(()=>usePdfIR({dataset:'d',document:'pending'}));
+ expect(view.result.current.loading).toBe(true);
+ await act(async()=>resolve({data:{data:{status:'not_requested'}}}));
+ expect(view.result.current.loading).toBe(false);
+ expect(view.result.current.state.status).toBe('not_requested');
+ view.unmount();
+ });

@@ -1118,6 +1118,25 @@ def _register_steering_before_stream(request: ChatRequest) -> str:
     return run_id
 
 
+def _document_selection_contract(document_context: Dict[str, Any]) -> str:
+    target = 'The Selected text in Quoted Message is the exact target of the current user instruction. '
+    if document_context.get('expand_paper_context') is True:
+        return (
+            target
+            + 'Use the Surrounding passage as primary context. If explaining this selection requires a '
+            'paper-specific definition or its connection to the method, use KBToolkit_read_document '
+            'with the exact IDs in the Active Document Contract to read relevant passages from the '
+            'current document only. Keep the lookup focused on the selected text; distinguish what '
+            'the paper states from general background and do not invent details that the paper does not provide.'
+        )
+    return (
+        target
+        + 'Use the Surrounding passage only to disambiguate meaning. For direct translation, '
+        'transformation, explanation, definition, summary, or rewrite, answer from this supplied '
+        'content without searching the knowledge base.'
+    )
+
+
 async def _handle_chat_impl(
     request: ChatRequest,
     *,
@@ -1173,6 +1192,7 @@ async def _handle_chat_impl(
         resolved_context = resolve_document_selection_context(
             document_context,
             cited_message_context,
+            user_id=user_id,
         )
         cited_message_context = render_document_selection(selected_text, resolved_context)
     language_query = user_input.strip()
@@ -2025,12 +2045,8 @@ async def _handle_chat_impl(
         'database.intent', priority=30, content_kind='instruction',
     )
     prompt_builder.runtime(
-        'chat_document_selection_contract', 'Document Selection Contract', (
-            'The Selected text in Quoted Message is the exact target of the current user '
-            'instruction. Use the Surrounding passage only to disambiguate meaning. For direct '
-            'translation, transformation, explanation, definition, summary, or rewrite, answer '
-            'from this supplied content without searching the knowledge base.'
-        ),
+        'chat_document_selection_contract', 'Document Selection Contract',
+        _document_selection_contract(document_context),
         'backend.document_selection', priority=39, authoritative=True,
         content_kind='instruction', skip_if=lambda: not has_document_selection,
     )
