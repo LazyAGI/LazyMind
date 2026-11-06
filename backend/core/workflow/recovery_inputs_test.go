@@ -123,7 +123,7 @@ func TestRecoverySnapshotSurvivesRealRewindAndPinsTenRounds(t *testing.T) {
 				task := fmt.Sprintf("rerun-%d", round)
 				req := transitionCommandRequest{CommandID: fmt.Sprintf("rewind-%d", round), Operation: "rewind",
 					TargetStepID: "branch_b", TaskID: task, ExpectedStateVersion: session.StateVersion,
-					UserInput: "继续，使用已确认反馈", RetryOrigin: "user", HandOff: true, controlAuthorized: controlled}
+					UserInput: "继续，使用已确认反馈", RetryOrigin: "user", HandOff: true}
 				err := db.Transaction(func(tx *gorm.DB) error {
 					response, _, _, err := applyWorkflowTransition(context.Background(), tx, session.ID, req)
 					if err == nil && !response.Accepted {

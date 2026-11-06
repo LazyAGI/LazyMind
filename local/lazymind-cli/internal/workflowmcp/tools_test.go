@@ -119,6 +119,10 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 	if !containsAll(got["workflow.start"], "workflow.step.begin", "workflow_id", "revision_id") {
 		t.Fatalf("workflow.start description=%q", got["workflow.start"])
 	}
+	if !containsAll(got["workflow.start"], "inputs", "imported and bound", "absolute", "input_bindings") ||
+		!containsAll(got["workflow.input.import"], "absolute", "does not attach", "prefer workflow.start inputs") {
+		t.Fatalf("missing file handoff guidance: start=%q import=%q", got["workflow.start"], got["workflow.input.import"])
+	}
 	for _, hint := range []string{"interaction_url", "open_in_codex", "placement=bottom", "Do not open a duplicate browser panel"} {
 		if strings.Contains(got["workflow.start"], hint) {
 			t.Fatalf("incorrect Codex presentation scope for %q: %q", provider, got["workflow.start"])

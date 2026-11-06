@@ -28,6 +28,8 @@ export interface SendMessageParams {
   citeMessage?: string;
   citeMessages?: string[];
   citeHistoryIds?: (string | undefined)[];
+  /** Captures the paper selection before the request enters a chat queue. */
+  document_context?: Record<string, unknown>;
   clearInput?: boolean;
   fileList?: ChatFileList[];
   fileListRef?: RefObject<ImageUploadImperativeProps | null>;

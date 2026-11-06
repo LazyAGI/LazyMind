@@ -34,7 +34,7 @@ func (m *RuntimeManager) Reset(ctx context.Context, cfg RuntimeConfig, paths Run
 	if err := m.Down(ctx, cfg, paths); err != nil {
 		return fmt.Errorf("runtime must stop before %s reset: %w", scope, err)
 	}
-	if err := m.resetKBLocalState(ctx, paths); err != nil {
+	if err := m.resetKBLocalState(ctx, cfg, paths); err != nil {
 		return err
 	}
 	if scope == ResetScopeAll {
@@ -69,8 +69,8 @@ func (m *RuntimeManager) RunServiceAction(ctx context.Context, cfg RuntimeConfig
 	}
 }
 
-func (m *RuntimeManager) resetKBLocalState(ctx context.Context, paths RuntimePaths) error {
-	if err := m.resetLocalSQLiteKBState(ctx, paths); err != nil {
+func (m *RuntimeManager) resetKBLocalState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	if err := m.resetLocalSQLiteKBState(ctx, cfg, paths); err != nil {
 		return err
 	}
 	for _, path := range localKBResetPaths(paths) {
@@ -127,10 +127,14 @@ func (m *RuntimeManager) removeLocalPath(ctx context.Context, repoRoot string, p
 	return nil
 }
 
-func (m *RuntimeManager) resetLocalSQLiteKBState(ctx context.Context, paths RuntimePaths) error {
-	python, err := ensureLocalPythonRuntime(ctx, m.runner, paths, envText(localPythonVersionEnvVar, defaultLocalPythonVersion))
-	if err != nil {
-		return err
+func (m *RuntimeManager) resetLocalSQLiteKBState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	python := paths.AlgorithmPython
+	if cfg.Profile != "desktop" {
+		var err error
+		python, err = ensureLocalPythonRuntime(ctx, m.runner, paths, envText(localPythonVersionEnvVar, defaultLocalPythonVersion))
+		if err != nil {
+			return err
+		}
 	}
 	script := `
 import os

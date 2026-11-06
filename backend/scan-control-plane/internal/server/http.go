@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/lazymind/scan_control_plane/internal/access"
+	"github.com/lazymind/scan_control_plane/internal/coreclient"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	taskengine "github.com/lazymind/scan_control_plane/internal/sourceengine/task"
@@ -59,6 +60,10 @@ func writeError(w http.ResponseWriter, err error) {
 func errorPayload(err error) (string, string, map[string]any) {
 	if err == nil {
 		return "INTERNAL_ERROR", "internal error", emptyDetails()
+	}
+	var coreErr *coreclient.Error
+	if errors.As(err, &coreErr) && coreErr.StatusCode == http.StatusConflict && coreErr.Code == "2001102" {
+		return resolveErrorPayload("DATA_SOURCE_NAME_ALREADY_EXISTS", "a data source with this name already exists", nil)
 	}
 	var sourceErr *sourceengine.EngineError
 	if errors.As(err, &sourceErr) {

@@ -32,6 +32,16 @@ export interface Note {
     kind: NoteKind;
     createdAt: string;
     updatedAt: string;
+    source?: PdfNoteSource;
+}
+export type NoteColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'indigo' | 'purple' | 'rainbow';
+export interface PdfNoteSource {
+    attachmentId: string;
+    page: number;
+    rects?: Array<[number, number, number, number]>;
+    bbox?: [number, number, number, number];
+    quote?: string;
+    color?: NoteColor;
 }
 export function emptyLibrary(): import('./model').PaperLibraryData { return { folders: [], papers: [], attachments: [], notes: [] }; }
 export function readingSummary(data: import('./model').PaperLibraryData, paperId: string) { const paper = data.papers.find(item => item.id === paperId); return { attachments: paper?.attachmentIds.length || 0, notes: paper?.noteIds.length || 0 }; }

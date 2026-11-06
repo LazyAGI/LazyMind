@@ -75,7 +75,16 @@ func GetPaperLibrary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := loadLibraryView(r, store.DB(), dataset, nil, true)
+	// Notes need the paper/attachment relationship even when the independent
+	// document-processing status store is unavailable. Keep the existing full
+	// status view as the default for the library itself.
+	var view paperlibrary.View
+	var err error
+	if r.URL.Query().Get("include_processing") == "false" {
+		view, err = paperlibrary.Load(r.Context(), store.DB(), dataset, store.UserID(r), nil, true)
+	} else {
+		view, err = loadLibraryView(r, store.DB(), dataset, nil, true)
+	}
 	if err == nil {
 		var counts map[string]paperlibrary.Counts
 		counts, err = paperlibrary.Statistics(r.Context(), store.DB(), []string{dataset})

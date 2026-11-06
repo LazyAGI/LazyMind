@@ -299,6 +299,8 @@ describe("saved supplier models", () => {
     ).toBeNull();
     fireEvent.click(within(row).getByRole("button", { name: vision.name }));
     const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.closest(".ant-tooltip")).toHaveClass("saved-provider-model-tooltip");
+    expect(tooltip).toHaveStyle({ background: "#ffffff" });
     expect(tooltip).toHaveTextContent(vision.name);
     expect(tooltip).toHaveTextContent("LLM_CHAT");
     expect(tooltip).toHaveTextContent("modelProvider.visionSupported");

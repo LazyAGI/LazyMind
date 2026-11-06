@@ -1,0 +1,13 @@
+.paper-preparation-modal .ant-modal-content { border-radius: 18px; padding: 24px; }
+.paper-preparation-modal .ant-modal-body { max-height: calc(100dvh - 210px); overflow-y: auto; scrollbar-width: thin; }
+.paper-preparation-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 8px; }
+.paper-preparation-stage { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
+.paper-preparation-stage strong { font-size: 14px; font-weight: 500; }
+.paper-preparation-stage p { margin: 4px 0 0; font-size: 12px; opacity: .6; }
+.paper-preparation-stage .ant-tag { margin: 0; flex-shrink: 0; }
+.paper-preparation-batch { margin: 12px 0; padding: 12px 16px; background: rgba(128,128,128,.05); border-radius: 10px; }
+.paper-preparation-batch .ant-typography { margin-bottom: 6px; }
+.paper-preparation-options { margin-top: 20px; }
+.paper-preparation-options summary { cursor: pointer; font-weight: 500; margin-bottom: 12px; }
+.paper-preparation-modal .ant-typography { font-size: 13px; }
+.pdf-reader-header-start .paper-preparation-trigger { font-size: 12px; white-space: nowrap; padding: 0 8px; width: auto; }

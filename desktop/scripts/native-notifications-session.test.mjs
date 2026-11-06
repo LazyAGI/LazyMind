@@ -28,7 +28,7 @@ function fixture() {
       suspendSession: () => calls.push("suspend-notifications"),
       setSession: () => calls.push("start-notifications"),
     },
-    runConnectorJSON: async (args) => { calls.push(args[2]); await gate; return { ok: true }; },
+    runConnectorJSON: async (args) => { calls.push(args[2]); await gate; return { ok: true, cleared: true }; },
     ipcMain: { handle: (name, callback) => handlers.set(name, callback), on: (name, callback) => handlers.set(name, callback) },
   };
   const start = source.indexOf('ipcMain.handle("lazymind:assistantSessionSet"');
@@ -60,8 +60,8 @@ test("packaged renderer origin passes actual session IPC while other origins and
     h.finish();
     await h.handlers.get("lazymind:assistantSessionSet")(event, { access_token: "synthetic" });
     assert.ok(h.calls.includes("set"), "renderer login must reach the connector");
-    await h.handlers.get("lazymind:assistantSessionClear")(event);
-    assert.ok(h.calls.includes("clear"));
+    await h.handlers.get("lazymind:assistantSessionClear")(event, { expected_session: { server_url: origin, access_token: "synthetic", refresh_token: "refresh" } });
+    assert.ok(h.calls.includes("clear-if-current"));
 
     for (const url of [`http://127.0.0.1:${port}`, `http://localhost:${port + 1}`, "https://example.com"]) {
       frame.url = url;
@@ -89,17 +89,19 @@ test("packaged renderer origin passes actual session IPC while other origins and
 
 test("actual session IPC serializes credentials and a pending login cannot restart notifications after logout", async () => {
   const h = fixture();
-  const login = h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, { access_token: "synthetic" });
+  const session = { server_url: "http://127.0.0.1:50124", access_token: "synthetic", refresh_token: "refresh" };
+  const login = h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, session);
   await Promise.resolve();
   await Promise.resolve();
-  const logout = h.handlers.get("lazymind:assistantSessionClear")({ trusted: true });
+  const logout = h.handlers.get("lazymind:assistantSessionClear")({ trusted: true }, { expected_session: session });
   assert.ok(h.calls.includes("stop-recovery"));
   await new Promise(setImmediate);
   assert.equal(h.calls.filter((item) => item === "suspend-notifications").length, 1);
-  assert.equal(h.calls.filter((item) => item === "clear-notifications").length, 1);
+  assert.equal(h.calls.filter((item) => item === "clear-notifications").length, 0);
   h.finish();
   await Promise.all([login, logout]);
-  assert.deepEqual(h.calls.filter((item) => ["set", "clear"].includes(item)), ["set", "clear"]);
+  assert.deepEqual(h.calls.filter((item) => ["set", "clear-if-current"].includes(item)), ["set", "clear-if-current"]);
+  assert.equal(h.calls.filter((item) => item === "clear-notifications").length, 1);
   assert.ok(!h.calls.includes("start-notifications"));
   assert.ok(!h.calls.includes("start-recovery"));
 });
@@ -110,6 +112,56 @@ test("actual session IPC rejects untrusted calls before credential or notificati
     await assert.rejects(h.handlers.get(channel)({ trusted: false }, {}), /DESKTOP_SESSION_UNAVAILABLE/);
   }
   assert.deepEqual(h.calls, []);
+});
+
+test("a late clear for another login cannot stop current notifications or recovery", async () => {
+  const h = fixture();
+  h.finish();
+  const old = { server_url: "http://127.0.0.1:50124", access_token: "old", refresh_token: "old-refresh" };
+  const current = { ...old, access_token: "new", refresh_token: "new-refresh" };
+  await h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, current);
+  h.context.runConnectorJSON = async () => ({ ok: true, cleared: false });
+  const before = h.calls.length;
+  await h.handlers.get("lazymind:assistantSessionClear")({ trusted: true }, { expected_session: old });
+  assert.deepEqual(h.calls.slice(before), []);
+  assert.equal(h.context.notificationSession.restore(current).access_token, "new");
+});
+
+test("a new login during conditional credential deletion retains its notification session", async () => {
+  const h = fixture();
+  h.finish();
+  const old = { server_url: "http://127.0.0.1:50124", access_token: "old", refresh_token: "old-refresh" };
+  await h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, old);
+  let finishClear;
+  h.context.runConnectorJSON = async (args) => args[2] === "clear-if-current"
+    ? new Promise(resolve => { finishClear = resolve; }) : { ok: true };
+  const clearing = h.handlers.get("lazymind:assistantSessionClear")({ trusted: true }, { expected_session: old });
+  await new Promise(setImmediate);
+  const current = { ...old, access_token: "new", refresh_token: "new-refresh" };
+  const login = h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, current);
+  finishClear({ ok: true, cleared: true });
+  await Promise.all([clearing, login]);
+  assert.equal(h.context.notificationSession.restore(current).access_token, "new");
+  assert.equal(h.calls.filter(call => call === "clear-notifications").length, 0);
+});
+
+test("duplicate logout cleanup clears memory even when the first request removed the credential file", async () => {
+  const h = fixture();
+  h.finish();
+  const session = { server_url: "http://127.0.0.1:50124", access_token: "old", refresh_token: "old-refresh" };
+  await h.handlers.get("lazymind:assistantSessionSet")({ trusted: true }, session);
+  let exists = true;
+  h.context.runConnectorJSON = async () => {
+    const cleared = exists;
+    exists = false;
+    return { ok: true, cleared };
+  };
+  await Promise.all([
+    h.handlers.get("lazymind:assistantSessionClear")({ trusted: true }, { expected_session: session }),
+    h.handlers.get("lazymind:assistantSessionClear")({ trusted: true }, { expected_session: session, allow_renewed: true }),
+  ]);
+  assert.equal(h.context.notificationSession.restore(session), null);
+  assert.equal(h.calls.filter(call => call === "clear-notifications").length, 1);
 });
 
 test("actual pending login cannot start a notification poll after the application begins quitting", async () => {

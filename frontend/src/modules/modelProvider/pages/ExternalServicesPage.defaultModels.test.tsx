@@ -131,6 +131,12 @@ describe("default-model service configuration", () => {
       { id: "niutrans", name: "NiuTrans", category: "translation" },
     ] } });
     render(<ExternalServicesPage focusCategory="translation" variant="default-models" />);
+    const translation = await screen.findByRole("region", { name: "翻译服务" });
+    expect(within(translation).getAllByRole("button", { name: /^配置 / }).map((button) => button.getAttribute("aria-label"))).toEqual([
+      "配置 腾讯翻译君（网页）", "配置 DeepL 网页翻译", "配置 必应翻译（网页）",
+      "配置 谷歌翻译（网页）", "配置 搜狗翻译（网页）", "配置 百度翻译",
+      "配置 阿里云机器翻译", "配置 小牛翻译",
+    ]);
     for (const [name, icon] of [
       ["谷歌翻译（网页）", "google.svg"], ["必应翻译（网页）", "bing.png"],
       ["搜狗翻译（网页）", "sogou.png"], ["DeepL 网页翻译", "deepl.png"],

@@ -7,37 +7,45 @@ import (
 	"time"
 )
 
-func TestProcessStopTargetUsesVerifiedProcessGroup(t *testing.T) {
-	record := LocalProcessRecord{PID: 1234, PGID: 5678}
-	got := processStopTarget(record, 9999, func(pid int) int {
-		if pid != record.PID {
-			t.Fatalf("group lookup PID = %d, want %d", pid, record.PID)
-		}
-		return record.PGID
+func TestStopLocalProcessRecordsSignalsPIDInsteadOfGroup(t *testing.T) {
+	var target int
+	record := LocalProcessRecord{Service: "core", PID: 1234, PGID: 5678}
+	err := stopLocalProcessRecordsWith(context.Background(), []LocalProcessRecord{record}, processStopOptions{
+		interrupt:       func(pid int) error { target = pid; return nil },
+		forceKill:       func(int) error { t.Fatal("unexpected force kill"); return nil },
+		alive:           func(int) bool { return false },
+		gracefulTimeout: time.Second, forceTimeout: time.Second, pollInterval: time.Millisecond,
 	})
-	if got != record.PGID {
-		t.Fatalf("stop target = %d, want PGID %d", got, record.PGID)
+	if err != nil || target != record.PID {
+		t.Fatalf("signal target = %d, error = %v", target, err)
 	}
 }
 
-func TestProcessStopTargetFallsBackToPID(t *testing.T) {
-	tests := []struct {
-		name        string
-		record      LocalProcessRecord
-		currentPGID int
-		groupID     int
-	}{
-		{name: "missing PGID", record: LocalProcessRecord{PID: 1234}, currentPGID: 9999, groupID: 0},
-		{name: "manager group", record: LocalProcessRecord{PID: 1234, PGID: 5678}, currentPGID: 5678, groupID: 5678},
-		{name: "stale PGID", record: LocalProcessRecord{PID: 1234, PGID: 5678}, currentPGID: 9999, groupID: 6789},
+func TestStopLocalProcessRecordsRechecksIdentityBeforeEscalation(t *testing.T) {
+	record := LocalProcessRecord{Service: "core", PID: 1234, StartID: 10}
+	identity := record.StartID
+	err := stopLocalProcessRecordsWith(context.Background(), []LocalProcessRecord{record}, processStopOptions{
+		interrupt: func(int) error { identity++; return nil },
+		forceKill: func(int) error { t.Fatal("reused PID was force-killed"); return nil },
+		alive:     func(int) bool { return true }, identity: func(int) uint64 { return identity },
+		gracefulTimeout: time.Millisecond, forceTimeout: time.Second, pollInterval: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := processStopTarget(test.record, test.currentPGID, func(int) int { return test.groupID })
-			if got != test.record.PID {
-				t.Fatalf("stop target = %d, want PID %d", got, test.record.PID)
-			}
+}
+
+func TestStopLocalProcessRecordsRejectsMissingOrChangedIdentity(t *testing.T) {
+	for _, start := range []uint64{0, 9} {
+		err := stopLocalProcessRecordsWith(context.Background(), []LocalProcessRecord{{PID: 1234, StartID: start}}, processStopOptions{
+			interrupt: func(int) error { t.Fatal("unverified PID interrupted"); return nil },
+			forceKill: func(int) error { t.Fatal("unverified PID killed"); return nil },
+			alive:     func(int) bool { return true }, identity: func(int) uint64 { return 10 },
+			gracefulTimeout: time.Second, forceTimeout: time.Second, pollInterval: time.Millisecond,
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

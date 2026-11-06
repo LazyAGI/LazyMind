@@ -213,6 +213,7 @@ function windowStore() {
 
 //#endregion
 //#region src/presentation-config.ts
+const PRESENTATION_CONFIG_PATH = "/lazymind-workflow/config";
 const CONFIG_KEY = "__LAZYMIND_WORKFLOW_PRESENTATION__";
 function readPresentationConfig(scope) {
 	const value = object(object(scope)?.[CONFIG_KEY]);
@@ -222,28 +223,66 @@ function readPresentationConfig(scope) {
 		webUrl: value.webUrl
 	};
 }
+/** Optional connections must not prevent the rest of the DSH client from booting. */
+function observePresentationConfig(scope, update, request = fetch, interval = 3e3) {
+	const lifetime = new AbortController();
+	let timer;
+	try {
+		update(readPresentationConfig(scope));
+	} catch {
+		update(void 0);
+	}
+	const poll = async () => {
+		try {
+			const response = await request(PRESENTATION_CONFIG_PATH, {
+				signal: lifetime.signal,
+				cache: "no-store"
+			});
+			if (response.ok) {
+				const { config } = await response.json();
+				if (!lifetime.signal.aborted) if (config === null) update(void 0);
+				else update(readPresentationConfig({ [CONFIG_KEY]: config }));
+			}
+		} catch {}
+		if (!lifetime.signal.aborted) timer = setTimeout(() => {
+			poll();
+		}, interval);
+	};
+	if (typeof location !== "undefined" && /^https?:$/.test(location.protocol)) poll();
+	return () => {
+		lifetime.abort();
+		clearTimeout(timer);
+	};
+}
 
 //#endregion
 //#region src/client/index.tsx
 const interactiveRegion = { WebkitAppRegion: "no-drag" };
 const inject = ["uiConversation", "slots"];
 function apply(ctx) {
-	const config = readPresentationConfig(globalThis);
+	let config;
+	const configListeners = /* @__PURE__ */ new Set();
+	const subscribeConfig = (listener) => {
+		configListeners.add(listener);
+		return () => {
+			configListeners.delete(listener);
+		};
+	};
+	const configSnapshot = () => config;
 	const windows = windowStore();
-	const serverName = config.serverName;
 	ctx.effect(() => () => windows.dispose());
 	const definition = {
 		kind: "lazymind-workflow",
 		target: "chat",
 		match(event) {
-			const run = eventRun(event, serverName, config.webUrl);
+			const run = config ? eventRun(event, config.serverName, config.webUrl) : null;
 			return run ? {
 				id: `${run.runId}:${event.seq}`,
 				role: "start"
 			} : null;
 		},
 		start(_context, match) {
-			const run = eventRun(match.event, serverName, config.webUrl);
+			const run = config ? eventRun(match.event, config.serverName, config.webUrl) : null;
 			if (!run) throw new Error("Workflow presentation requires a valid standard tool result");
 			return run;
 		},
@@ -294,6 +333,7 @@ function apply(ctx) {
 		});
 	}
 	function WorkflowDock({ session }) {
+		const connection = (0, react.useSyncExternalStore)(subscribeConfig, configSnapshot, configSnapshot);
 		const current = (0, react.useSyncExternalStore)(windows.subscribe, windows.snapshot, windows.snapshot).entries[session.sessionId];
 		const frame = (0, react.useRef)(null);
 		const anchor = (0, react.useRef)(null);
@@ -302,7 +342,8 @@ function apply(ctx) {
 		const [collapsed, setCollapsed] = (0, react.useState)(false);
 		const collapseAnchor = (0, react.useRef)(null);
 		const runId = current?.run.runId;
-		const origin = current ? new URL(current.run.url).origin : void 0;
+		const link = current && connection ? presentationLink(current.run.runId, connection.webUrl) : null;
+		const origin = link ? new URL(link.url).origin : void 0;
 		(0, react.useLayoutEffect)(() => {
 			const seat = anchor.current?.closest("[data-composer-seat]");
 			const scroller = seat?.parentElement;
@@ -386,11 +427,22 @@ function apply(ctx) {
 			origin,
 			runId
 		]);
-		if (!current) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		if (!connection) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			ref: anchor,
+			hidden: true
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+			role: "status",
+			style: { padding: 8 },
+			children: ["LazyMind 尚未连接。请在 LazyMind 中恢复登录。", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				onClick: () => window.location.reload(),
+				children: "重新加载"
+			})]
+		})] });
+		if (!current || !link) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			ref: anchor,
 			hidden: true
 		});
-		const url = new URL(`${current.run.url.replace(/\/$/, "")}/embed`);
+		const url = new URL(`${link.url.replace(/\/$/, "")}/embed`);
 		url.searchParams.set("hostOrigin", window.location.origin);
 		const panel = /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
 			"aria-label": "LazyMind Workflow",
@@ -432,7 +484,10 @@ function apply(ctx) {
 					minHeight: 0,
 					border: 0
 				}
-			}, runKey(current.run))
+			}, runKey({
+				...current.run,
+				url: link.url
+			}))
 		});
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			ref: anchor,
@@ -445,7 +500,20 @@ function apply(ctx) {
 			children: panel
 		}), tail) : panel] });
 	}
-	ctx.uiConversation.events.register(definition);
+	ctx.effect(() => {
+		let unregister;
+		const stop = observePresentationConfig(globalThis, (next) => {
+			if (JSON.stringify(next) === JSON.stringify(config)) return;
+			config = next;
+			unregister?.();
+			unregister = config ? ctx.uiConversation.events.register(definition) : void 0;
+			for (const listener of configListeners) listener();
+		});
+		return () => {
+			stop();
+			unregister?.();
+		};
+	});
 	ctx.slots.inject("conversation.chat.node", () => ctx.slots.register({
 		name: "conversation.chat.node",
 		key: "lazymind-workflow"

@@ -286,3 +286,64 @@ func TestFailedParseStatusIsRetryable(t *testing.T) {
 		t.Fatal("successful document artifact must win over a stale failed Core task")
 	}
 }
+
+func TestEnsureDocumentParsedRunningLatchObservesCurrentRemoteFailure(t *testing.T) {
+	for _, upload := range []string{"WAITING", "WORKING", "FAILED"} {
+		t.Run(upload, func(t *testing.T) {
+			db := newDocumentTestDB(t)
+			now := time.Now().UTC()
+			seedDocumentServiceDataset(t, db, "dataset-1", "user-1", now)
+			seedDocumentServiceLazyDocument(t, db, "dataset-1", "doc-1", "lazy-doc-1", "user-1")
+			db.Create(&readonlyorm.LazyLLMDocRow{DocID: "lazy-doc-1", UploadStatus: upload, CreatedAt: now, UpdatedAt: now})
+			db.Create(&orm.Task{ID: "core-task", DatasetID: "dataset-1", DocID: "doc-1", LazyllmTaskID: "remote-task", TaskType: string(TaskTypeParse), Ext: mustJSON(taskExt{TaskState: "WORKING", ProcessingLevel: ProcessingLevelParsed}), BaseModel: orm.BaseModel{CreatedAt: now, UpdatedAt: now}})
+			state := newDocumentProcessingState("dataset-1", "doc-1", now)
+			state.ParseStatus = "running"
+			db.Create(&state)
+			seedCurrentParseSnapshot(t, db, "remote-task", "FAILED", now)
+			// The independently refreshed task projection can lag behind the parser's
+			// authoritative current-task snapshot, just like the Core running latch.
+			db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id = ?", "remote-task").Update("status", "WORKING")
+			installDocumentServiceTransport(t, nil)
+			result, err := mustDocumentService(t, db).EnsureDocumentParsed(httptest.NewRequest("POST", "/", nil), EnsureDocumentParsedRequest{UserID: "user-1", DatasetID: "dataset-1", DocumentID: "doc-1"})
+			if err != nil || result.Status != "failed" || result.TaskID != "core-task" || result.Error == nil || result.Error.Code != "READER_FAILED" {
+				t.Fatalf("stale running latch masked current failure: %+v err=%v", result, err)
+			}
+			var count int64
+			db.Model(&orm.Task{}).Count(&count)
+			if count != 1 {
+				t.Fatal("status observation started another parse")
+			}
+		})
+	}
+}
+
+func TestEnsureDocumentParsedCompletedReparseSupersedesFailedUpload(t *testing.T) {
+	for _, test := range []struct{ name, status, roots, want string }{
+		{"completed with roots", "SUCCESS", `{"items":[{"chunk_id":"root","content":"current text"}],"total":1}`, "parsed"},
+		{"completed before roots visible", "SUCCESS", `{"items":[],"total":0}`, "parsing"},
+		{"working cannot prove existing roots current", "WORKING", `{"items":[{"chunk_id":"old-root","content":"previous source"}],"total":1}`, "parsing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := newDocumentTestDB(t)
+			now := time.Now().UTC()
+			seedDocumentServiceDataset(t, db, "dataset-1", "user-1", now)
+			seedDocumentServiceLazyDocument(t, db, "dataset-1", "doc-1", "lazy-doc-1", "user-1")
+			db.Create(&readonlyorm.LazyLLMDocRow{DocID: "lazy-doc-1", UploadStatus: "FAILED", CreatedAt: now, UpdatedAt: now})
+			db.Create(&orm.Task{ID: "core-task", DatasetID: "dataset-1", DocID: "doc-1", LazyllmTaskID: "remote-task", TaskType: string(TaskTypeReparse), Ext: mustJSON(taskExt{TaskState: "WORKING", ProcessingLevel: ProcessingLevelParsed}), BaseModel: orm.BaseModel{CreatedAt: now, UpdatedAt: now}})
+			state := newDocumentProcessingState("dataset-1", "doc-1", now)
+			state.ParseStatus = "running"
+			db.Create(&state)
+			seedCurrentParseSnapshot(t, db, "remote-task", test.status, now)
+			requests := 0
+			installDocumentServiceTransport(t, func(r *http.Request) (int, string) { requests++; return 200, test.roots })
+			t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+			result, err := mustDocumentService(t, db).EnsureDocumentParsed(httptest.NewRequest("POST", "/", nil), EnsureDocumentParsedRequest{UserID: "user-1", DatasetID: "dataset-1", DocumentID: "doc-1"})
+			if err != nil || result.Status != test.want {
+				t.Fatalf("got %+v err=%v want %s", result, err, test.want)
+			}
+			if test.status == "WORKING" && requests != 0 {
+				t.Fatal("unversioned roots read before current reparse completed")
+			}
+		})
+	}
+}

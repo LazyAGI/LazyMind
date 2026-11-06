@@ -321,6 +321,7 @@ export interface AcademicExpansion {
     'discovery_mode'?: AcademicExpansionDiscoveryModeEnum;
     'goal'?: string;
     'id': string;
+    'material_progress'?: AcademicMaterialProgress;
     'preparation'?: AcademicExpansionPreparation;
     'preparation_revision': number;
     'progress'?: object;
@@ -707,6 +708,10 @@ export const AcademicInvestigationStatusEnum = {
 
 export type AcademicInvestigationStatusEnum = typeof AcademicInvestigationStatusEnum[keyof typeof AcademicInvestigationStatusEnum];
 
+export interface AcademicMaterialProgress {
+    'distinct_ready_count'?: number;
+    'processing_count': number;
+}
 export interface AcademicModelMetrics {
     'currency_cost'?: number | null;
     'model'?: string;
@@ -1409,12 +1414,14 @@ export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
     'chat_status'?: ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum;
     'contents'?: Array<object>;
     'handoffs'?: Array<AcademicHandoffLink>;
+    'material_progress'?: AcademicMaterialProgress;
     'paper_importance'?: { [key: string]: boolean; };
     'presence'?: Array<AcademicPresence>;
     'record'?: AcademicExpansion;
     'research_guidance'?: string;
     'rounds'?: Array<object>;
     'source_queries'?: Array<AcademicSourceQueryReceipt>;
+    'workflow_steps'?: Array<ApiCoreAcademicExpansionsExpansionIdGet200ResponseWorkflowStepsInner>;
 }
 
 export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = {
@@ -1426,6 +1433,11 @@ export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = 
 
 export type ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum];
 
+export interface ApiCoreAcademicExpansionsExpansionIdGet200ResponseWorkflowStepsInner {
+    'label'?: string;
+    'status': string;
+    'step_id': string;
+}
 export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
     'paper_ids': Array<string>;
 }
@@ -1536,6 +1548,7 @@ export interface ApiCoreAcademicLibraryFoldersPostRequest {
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
     'content': string;
     'id': string;
+    'source'?: PaperLibraryNoteSource;
 }
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
     'metadata'?: PaperLibraryMetadata;
@@ -1735,6 +1748,24 @@ export interface ApiCoreConversationsNameTitlePatchRequest {
     'display_name': string;
     'title_revision': number;
 }
+export interface ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response {
+    'status'?: ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum;
+    'task_id'?: string;
+}
+
+export const ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = {
+    NotRequested: 'not_requested',
+    Parsed: 'parsed',
+    Parsing: 'parsing',
+    Failed: 'failed',
+    Unknown: 'unknown'
+} as const;
+
+export type ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum = typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum[keyof typeof ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200ResponseStatusEnum];
+
+export interface ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response {
+    'data'?: ReadingPreparationStatus;
+}
 export interface ApiCoreKbGrantPrincipalsGet200Response {
     'code'?: number;
     'data'?: ListGrantPrincipalsResponse;
@@ -1836,6 +1867,9 @@ export interface ApiCoreTaskCenterTasksTaskIdNotificationsGet200Response {
 export interface ApiCoreUserNotificationPreferencesGet200Response {
     'code'?: number;
     'data'?: NotificationPreferences;
+}
+export interface ApiCoreUserReadingPreferencesGet200Response {
+    'data'?: ReadingPreparationPolicy;
 }
 export interface ApiCoreUserWechatNotificationTargetsGet200Response {
     'code'?: number;
@@ -4169,6 +4203,15 @@ export interface DatasetCapabilities {
     'read': boolean;
     'retrieve': boolean;
     'search': boolean;
+}
+export interface DatasetDeletionProgress {
+    'completed': number;
+    'dataset_id': string;
+    'display_name': string;
+    'error'?: string;
+    'failed': number;
+    'status': string;
+    'total': number;
 }
 export interface DatasetMember {
     'create_time'?: string;
@@ -6797,6 +6840,7 @@ export interface OrdinaryTaskView {
     'display_key': string;
     'execution_id': string;
     'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
+    'input_required'?: string;
     'knowledge_operations'?: Array<KnowledgeOperation>;
     'model_switch'?: ChatModelSwitchRecord;
     'order': number;
@@ -6851,6 +6895,163 @@ export interface OrdinaryWorkflowResponse {
     'code': number;
     'data': OrdinaryWorkflowData;
     'message': string;
+}
+export interface PDFBlockTranslation {
+    'block_id': string;
+    'language': PDFBlockTranslationLanguageEnum;
+    'model': string;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256': string;
+    'translated_text': string;
+}
+
+export const PDFBlockTranslationLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFBlockTranslationLanguageEnum = typeof PDFBlockTranslationLanguageEnum[keyof typeof PDFBlockTranslationLanguageEnum];
+
+export interface PDFBlockTranslationEnvelope {
+    'data': PDFBlockTranslation;
+}
+export interface PDFFormulaEvidence {
+    'bbox'?: Array<number>;
+    'id': string;
+    'page': number;
+    'text': string;
+}
+export interface PDFFormulaExplanation {
+    'display_latex'?: string;
+    'evidence': Array<PDFFormulaEvidence>;
+    'model'?: string;
+    'repair_note'?: string;
+    'steps': Array<PDFFormulaExplanationStepsInner>;
+    'summary': string;
+    'symbols': Array<PDFFormulaExplanationSymbolsInner>;
+    'warnings': Array<string>;
+}
+export interface PDFFormulaExplanationEnvelope {
+    'data': PDFFormulaExplanation;
+}
+export interface PDFFormulaExplanationRequest {
+    /**
+     * Optional nonblank exact substring of the target formula LaTeX; requests a focused symbol definition with a separate cache entry.
+     */
+    'focus_symbol'?: string;
+    'force'?: boolean;
+    'language'?: PDFFormulaExplanationRequestLanguageEnum;
+}
+
+export const PDFFormulaExplanationRequestLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFFormulaExplanationRequestLanguageEnum = typeof PDFFormulaExplanationRequestLanguageEnum[keyof typeof PDFFormulaExplanationRequestLanguageEnum];
+
+export interface PDFFormulaExplanationStepsInner {
+    'evidence_ids': Array<string>;
+    'inferred': boolean;
+    'text': string;
+}
+export interface PDFFormulaExplanationSymbolsInner {
+    'evidence_ids': Array<string>;
+    'inferred': boolean;
+    'meaning': string;
+    'symbol': string;
+}
+export interface PDFIRBlock {
+    /**
+     * [left, top, right, bottom], normalized to the original visible page with intrinsic rotation
+     */
+    'bbox'?: Array<number>;
+    'id': string;
+    'latex'?: string;
+    'page': number;
+    'text'?: string;
+    'type': string;
+}
+export interface PDFIRDocument {
+    'blocks': Array<PDFIRBlock>;
+    'coordinate_space': PDFIRDocumentCoordinateSpaceEnum;
+    'pages': Array<PDFIRDocumentPagesInner>;
+    'parser': PDFIRDocumentParser;
+    'source_sha256': string;
+    'version': number;
+    'warnings'?: Array<string>;
+}
+
+export const PDFIRDocumentCoordinateSpaceEnum = {
+    NormalizedTopLeft: 'normalized_top_left'
+} as const;
+
+export type PDFIRDocumentCoordinateSpaceEnum = typeof PDFIRDocumentCoordinateSpaceEnum[keyof typeof PDFIRDocumentCoordinateSpaceEnum];
+
+export interface PDFIRDocumentPagesInner {
+    'height'?: number;
+    'index': number;
+    'width'?: number;
+}
+export interface PDFIRDocumentParser {
+    'model': string;
+    'name': string;
+}
+export interface PDFIREnvelope {
+    'data': PDFIRState;
+}
+export interface PDFIRRequest {
+    'force'?: boolean;
+}
+export interface PDFIRState {
+    'document'?: PDFIRDocument;
+    'error_message'?: string;
+    'source_sha256'?: string;
+    'status': PDFIRStateStatusEnum;
+}
+
+export const PDFIRStateStatusEnum = {
+    NotRequested: 'not_requested',
+    Queued: 'queued',
+    Running: 'running',
+    Ready: 'ready',
+    Failed: 'failed',
+    Unavailable: 'unavailable'
+} as const;
+
+export type PDFIRStateStatusEnum = typeof PDFIRStateStatusEnum[keyof typeof PDFIRStateStatusEnum];
+
+export interface PDFPaperReadingRequest {
+    'force'?: boolean;
+    'language'?: PDFPaperReadingRequestLanguageEnum;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256'?: string;
+}
+
+export const PDFPaperReadingRequestLanguageEnum = {
+    Zh: 'zh',
+    En: 'en'
+} as const;
+
+export type PDFPaperReadingRequestLanguageEnum = typeof PDFPaperReadingRequestLanguageEnum[keyof typeof PDFPaperReadingRequestLanguageEnum];
+
+export interface PDFVisualExplanation {
+    'evidence': Array<PDFFormulaEvidence>;
+    'model': string;
+    'observations': Array<PDFFormulaExplanationStepsInner>;
+    /**
+     * Original PDF SHA-256; a supplied request hash must match the current source or the server returns409 before cache/model access.
+     */
+    'source_sha256': string;
+    'summary': string;
+    'warnings': Array<string>;
+}
+export interface PDFVisualExplanationEnvelope {
+    'data': PDFVisualExplanation;
 }
 export interface Pages {
     'knowledge_operations': CollectionPage;
@@ -6915,9 +7116,32 @@ export interface PaperLibraryNote {
     'id': string;
     'kind': string;
     'paperId': string;
+    'source'?: PaperLibraryNoteSource;
     'title': string;
     'updatedAt': string;
 }
+export interface PaperLibraryNoteSource {
+    'attachmentId': string;
+    'bbox'?: Array<number>;
+    'color'?: PaperLibraryNoteSourceColorEnum;
+    'page': number;
+    'quote'?: string;
+    'rects'?: Array<Array<number>>;
+}
+
+export const PaperLibraryNoteSourceColorEnum = {
+    Red: 'red',
+    Orange: 'orange',
+    Yellow: 'yellow',
+    Green: 'green',
+    Blue: 'blue',
+    Indigo: 'indigo',
+    Purple: 'purple',
+    Rainbow: 'rainbow'
+} as const;
+
+export type PaperLibraryNoteSourceColorEnum = typeof PaperLibraryNoteSourceColorEnum[keyof typeof PaperLibraryNoteSourceColorEnum];
+
 export interface PaperLibraryPaper {
     'academicWorkId'?: string;
     'arxivVersion'?: string;
@@ -7348,6 +7572,7 @@ export interface ProviderRequestConfigOpenAPIResponse {
 
 export const ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 
@@ -7478,6 +7703,92 @@ export interface QuestionTypeOption {
 }
 export interface QuestionTypeOptionsResponse {
     'items'?: Array<QuestionTypeOption>;
+}
+export interface ReadingPreparationPolicy {
+    'automatic_eligible_after'?: string;
+    'limits': ReadingPreparationPolicyLimits;
+    'modes': { [key: string]: ReadingPreparationPolicyModesEnum; };
+    'parser_ref'?: string;
+    'preset': ReadingPreparationPolicyPresetEnum;
+    'provider_selections'?: ReadingPreparationPolicyProviderSelections;
+    'study_model_ref'?: string;
+}
+
+export const ReadingPreparationPolicyModesEnum = {
+    OnDemand: 'on_demand',
+    Automatic: 'automatic',
+    Disabled: 'disabled'
+} as const;
+
+export type ReadingPreparationPolicyModesEnum = typeof ReadingPreparationPolicyModesEnum[keyof typeof ReadingPreparationPolicyModesEnum];
+export const ReadingPreparationPolicyPresetEnum = {
+    Demand: 'demand',
+    Advance: 'advance',
+    Full: 'full',
+    Custom: 'custom'
+} as const;
+
+export type ReadingPreparationPolicyPresetEnum = typeof ReadingPreparationPolicyPresetEnum[keyof typeof ReadingPreparationPolicyPresetEnum];
+
+export interface ReadingPreparationPolicyLimits {
+    'automatic_concurrency': ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum;
+    'daily_documents': number;
+    'study_items_per_document': number;
+}
+
+export const ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum = typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum[keyof typeof ReadingPreparationPolicyLimitsAutomaticConcurrencyEnum];
+
+export interface ReadingPreparationPolicyProviderSelections {
+    'parser'?: ReadingProviderSelection;
+    'study'?: ReadingProviderSelection;
+}
+export interface ReadingPreparationRequest {
+    'scopes': Array<ReadingPreparationRequestScopesEnum>;
+}
+
+export const ReadingPreparationRequestScopesEnum = {
+    PdfParse: 'pdf_parse',
+    Formula: 'formula',
+    Figure: 'figure',
+    Table: 'table'
+} as const;
+
+export type ReadingPreparationRequestScopesEnum = typeof ReadingPreparationRequestScopesEnum[keyof typeof ReadingPreparationRequestScopesEnum];
+
+export interface ReadingPreparationStatus {
+    'error_message'?: string;
+    'job_id'?: string;
+    'model_requests'?: number;
+    'progress_current'?: number;
+    'progress_total'?: number;
+    'scopes'?: Array<string>;
+    'status': ReadingPreparationStatusStatusEnum;
+}
+
+export const ReadingPreparationStatusStatusEnum = {
+    NotRequested: 'not_requested',
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ReadingPreparationStatusStatusEnum = typeof ReadingPreparationStatusStatusEnum[keyof typeof ReadingPreparationStatusStatusEnum];
+
+export interface ReadingProviderSelection {
+    'default_label'?: string;
+    'effective_label'?: string;
+    'options'?: Array<ReadingProviderSelectionOptionsInner>;
+    'unavailable_reason'?: string;
+}
+export interface ReadingProviderSelectionOptionsInner {
+    'id': string;
+    'label': string;
 }
 export interface RecoveryDeleteCountResponse {
     'deleted_count'?: number;
@@ -8664,6 +8975,7 @@ export interface SkillWriteOpenAPIResponse {
 export interface SlotDTO {
     'artifact_id': string;
     'artifact_value'?: any;
+    'attempt': number;
     'caption'?: string;
     'change_source'?: string;
     'content_type'?: string;
@@ -8676,6 +8988,7 @@ export interface SlotDTO {
     'last_synced_version'?: number;
     'list_index'?: number;
     'order_version'?: number;
+    'producer_attempt_id'?: string;
     'provider'?: string;
     'provider_document_id'?: string;
     'revision': number;
@@ -9255,13 +9568,14 @@ export interface UpdateProviderRequestConfigOpenAPIRequest {
     'advanced'?: ProviderRequestAdvanced;
     'default_protocol': UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum;
     /**
-     * Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+     * Optional API-root overrides keyed by openai, openai-responses or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
      */
     'endpoints'?: { [key: string]: string; };
 }
 
 export const UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = {
     Openai: 'openai',
+    OpenaiResponses: 'openai-responses',
     Anthropic: 'anthropic'
 } as const;
 
@@ -9436,6 +9750,127 @@ export interface VerifiedProviderOpenAPIResponse {
     'shared_by_id'?: string;
     'shared_by_name'?: string;
     'source'?: string;
+}
+export interface VocabularyCloudConnection {
+    'add_to_study': boolean;
+    'configured': boolean;
+    'enabled': boolean;
+    'failed': number;
+    'last_error': string;
+    'pending': number;
+    'provider': VocabularyCloudConnectionProviderEnum;
+    'succeeded': number;
+    'target_id': string;
+    'target_name': string;
+}
+
+export const VocabularyCloudConnectionProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+
+export type VocabularyCloudConnectionProviderEnum = typeof VocabularyCloudConnectionProviderEnum[keyof typeof VocabularyCloudConnectionProviderEnum];
+
+export interface VocabularyCloudConnectionRequest {
+    'add_to_study'?: boolean;
+    'enabled'?: boolean;
+    'target_id'?: string;
+    'target_name'?: string;
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudConnectionResponse {
+    'code': number;
+    'data': VocabularyCloudConnection;
+    'message': string;
+}
+export interface VocabularyCloudConnectionsResponse {
+    'code': number;
+    'data': VocabularyCloudConnectionsResponseData;
+    'message': string;
+}
+export interface VocabularyCloudConnectionsResponseData {
+    'items': Array<VocabularyCloudConnection>;
+}
+export interface VocabularyCloudDisconnectResponse {
+    'code': number;
+    'data': VocabularyCloudDisconnectResponseData;
+    'message': string;
+}
+export interface VocabularyCloudDisconnectResponseData {
+    'deleted': boolean;
+}
+export interface VocabularyCloudOperation {
+    'id': string;
+    'last_error': string;
+    'provider': VocabularyCloudOperationProviderEnum;
+    'status': VocabularyCloudOperationStatusEnum;
+    'term': string;
+    'updated_at': string;
+}
+
+export const VocabularyCloudOperationProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+
+export type VocabularyCloudOperationProviderEnum = typeof VocabularyCloudOperationProviderEnum[keyof typeof VocabularyCloudOperationProviderEnum];
+export const VocabularyCloudOperationStatusEnum = {
+    Pending: 'pending',
+    Failed: 'failed',
+    Succeeded: 'succeeded',
+    Canceled: 'canceled'
+} as const;
+
+export type VocabularyCloudOperationStatusEnum = typeof VocabularyCloudOperationStatusEnum[keyof typeof VocabularyCloudOperationStatusEnum];
+
+export interface VocabularyCloudOperationsResponse {
+    'code': number;
+    'data': VocabularyCloudOperationsResponseData;
+    'message': string;
+}
+export interface VocabularyCloudOperationsResponseData {
+    'items': Array<VocabularyCloudOperation>;
+}
+export interface VocabularyCloudSyncResponse {
+    'code': number;
+    'data': VocabularyCloudSyncResponseData;
+    'message': string;
+}
+export interface VocabularyCloudSyncResponseData {
+    'queued': number;
+}
+export interface VocabularyCloudTokenRequest {
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudWordbook {
+    'id': string;
+    'name': string;
+}
+export interface VocabularyCloudWordbookRequest {
+    'name': string;
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudWordbookResponse {
+    'code': number;
+    'data': VocabularyCloudWordbook;
+    'message': string;
+}
+export interface VocabularyCloudWordbooksResponse {
+    'code': number;
+    'data': VocabularyCloudWordbooksResponseData;
+    'message': string;
+}
+export interface VocabularyCloudWordbooksResponseData {
+    'items': Array<VocabularyCloudWordbook>;
 }
 export interface WeChatNotificationTargets {
     'items': Array<WeChatNotificationTargetsItemsInner>;
@@ -10544,12 +10979,13 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {string} targetDatasetId
+         * @param {boolean} [includeProcessing]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryGet: async (targetDatasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicLibraryGet: async (targetDatasetId: string, includeProcessing?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'targetDatasetId' is not null or undefined
             assertParamExists('apiCoreAcademicLibraryGet', 'targetDatasetId', targetDatasetId)
             const localVarPath = `/api/core/academic/library`;
@@ -10566,6 +11002,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (targetDatasetId !== undefined) {
                 localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            if (includeProcessing !== undefined) {
+                localVarQueryParameter['include_processing'] = includeProcessing;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -11456,13 +11896,14 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {string} targetDatasetId
+         * @param {boolean} [includeProcessing]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicLibraryGet(targetDatasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, options);
+        async apiCoreAcademicLibraryGet(targetDatasetId: string, includeProcessing?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, includeProcessing, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -11866,13 +12307,13 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read paper entries, logical folders and active materials
+         * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
-            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, requestParameters.includeProcessing, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -12205,6 +12646,8 @@ export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest {
  */
 export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
     readonly targetDatasetId: string
+
+    readonly includeProcessing?: boolean
 }
 
 /**
@@ -12528,13 +12971,13 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read paper entries, logical folders and active materials
+     * @summary Read paper entries, logical folders and active materials; include_processing=false skips independent processing status for note reads
      * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, requestParameters.includeProcessing, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18538,6 +18981,40 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Get dataset cleanup progress
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDeletionGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDeletionGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/deletion`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get dataset
          * @param {string} dataset
          * @param {*} [options] Override http request option.
@@ -18834,10 +19311,23 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsDatasetDelete(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+        async apiCoreDatasetsDatasetDelete(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ResourceOperationResult>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDelete(dataset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsDatasetDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get dataset cleanup progress
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDeletionGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DatasetDeletionProgress>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDeletionGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsDatasetDeletionGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -18956,8 +19446,18 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+        apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<ResourceOperationResult> {
             return localVarFp.apiCoreDatasetsDatasetDelete(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get dataset cleanup progress
+         * @param {DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDeletionGet(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DatasetDeletionProgress> {
+            return localVarFp.apiCoreDatasetsDatasetDeletionGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -19035,6 +19535,13 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
  * Request parameters for apiCoreDatasetsDatasetDelete operation in DatasetsApi.
  */
 export interface DatasetsApiApiCoreDatasetsDatasetDeleteRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDeletionGet operation in DatasetsApi.
+ */
+export interface DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest {
     readonly dataset: string
 }
 
@@ -19122,6 +19629,17 @@ export class DatasetsApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDelete(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeleteRequest, options?: RawAxiosRequestConfig) {
         return DatasetsApiFp(this.configuration).apiCoreDatasetsDatasetDelete(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get dataset cleanup progress
+     * @param {DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDeletionGet(requestParameters: DatasetsApiApiCoreDatasetsDatasetDeletionGetRequest, options?: RawAxiosRequestConfig) {
+        return DatasetsApiFp(this.configuration).apiCoreDatasetsDatasetDeletionGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -23518,6 +24036,44 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/parse-status`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {string} dataset
          * @param {string} document
@@ -23837,6 +24393,175 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost: async (block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFPaperReadingRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {string} block Formula block id from the current PDF IR
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFFormulaExplanationRequest} [pDFFormulaExplanationRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost: async (block: string, dataset: string, document: string, pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'block' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'block', block)
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation`
+                .replace(`{${"block"}}`, encodeURIComponent(String(block)))
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFFormulaExplanationRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFIRRequest} [pDFIRRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost: async (dataset: string, document: string, pDFIRRequest?: PDFIRRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-ir`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pDFIRRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {string} dataset
@@ -23994,6 +24719,49 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ReadingPreparationRequest} readingPreparationRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost: async (dataset: string, document: string, readingPreparationRequest: ReadingPreparationRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'document', document)
+            // verify required parameter 'readingPreparationRequest' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost', 'readingPreparationRequest', readingPreparationRequest)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:prepare-reading`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(readingPreparationRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {string} dataset
          * @param {string} document
@@ -24019,6 +24787,44 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/reading-preparation`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -29871,6 +30677,71 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/reading-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {ReadingPreparationPolicy} readingPreparationPolicy
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesPut: async (readingPreparationPolicy: ReadingPreparationPolicy, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'readingPreparationPolicy' is not null or undefined
+            assertParamExists('apiCoreUserReadingPreferencesPut', 'readingPreparationPolicy', readingPreparationPolicy)
+            const localVarPath = `/api/core/user/reading-preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(readingPreparationPolicy, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /v1/internal/provider-connections/{auth_connection_id}/access-token:report
          * @param {string} authConnectionId
          * @param {*} [options] Override http request option.
@@ -35570,6 +36441,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {string} dataset
          * @param {string} document
@@ -35687,6 +36572,67 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {string} block
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFPaperReadingRequest} [pDFPaperReadingRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(block: string, dataset: string, document: string, pDFPaperReadingRequest?: PDFPaperReadingRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFVisualExplanationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(block, dataset, document, pDFPaperReadingRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {string} block Formula block id from the current PDF IR
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFFormulaExplanationRequest} [pDFFormulaExplanationRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(block: string, dataset: string, document: string, pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFFormulaExplanationEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(block, dataset, document, pDFFormulaExplanationRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFIREnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {string} dataset
+         * @param {string} document
+         * @param {PDFIRRequest} [pDFIRRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(dataset: string, document: string, pDFIRRequest?: PDFIRRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PDFIREnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(dataset, document, pDFIRRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {string} dataset
@@ -35746,6 +36692,21 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {string} dataset
+         * @param {string} document
+         * @param {ReadingPreparationRequest} readingPreparationRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(dataset: string, document: string, readingPreparationRequest: ReadingPreparationRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(dataset, document, readingPreparationRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {string} dataset
          * @param {string} document
@@ -35756,6 +36717,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadGet(dataset, document, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -37985,6 +38960,31 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserEnvVarsPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserEnvVarsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserReadingPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserReadingPreferencesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserReadingPreferencesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {ReadingPreparationPolicy} readingPreparationPolicy
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserReadingPreferencesPut(readingPreparationPolicy: ReadingPreparationPolicy, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreUserReadingPreferencesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserReadingPreferencesPut(readingPreparationPolicy, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserReadingPreferencesPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -40809,6 +41809,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Observe chat parsing without submitting new work
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentParseStatusGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -40888,6 +41898,46 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
+         * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+         * @summary Explain a figure or table using extracted text and cells
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFVisualExplanationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+         * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFFormulaExplanationEnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFFormulaExplanationRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read PDF structure without triggering parsing or retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFIREnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PDFIREnvelope> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters.dataset, requestParameters.document, requestParameters.pDFIRRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          *
          * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
@@ -40929,6 +41979,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters.dataset, requestParameters.document, requestParameters.readingPreparationRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}:read
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -40936,6 +41996,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read durable preparation progress and accounted model requests
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet200Response> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -42585,6 +43655,25 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreUserEnvVarsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read personal AI reading preferences and capability registry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserReadingPreferencesGet200Response> {
+            return localVarFp.apiCoreUserReadingPreferencesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Replace personal preferences; never process historical documents
+         * @param {DefaultApiApiCoreUserReadingPreferencesPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserReadingPreferencesPut(requestParameters: DefaultApiApiCoreUserReadingPreferencesPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreUserReadingPreferencesGet200Response> {
+            return localVarFp.apiCoreUserReadingPreferencesPut(requestParameters.readingPreparationPolicy, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -44495,6 +45584,15 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentEnsureParsedPo
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest {
@@ -44579,6 +45677,55 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitie
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest {
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFPaperReadingRequest?: PDFPaperReadingRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest {
+    /**
+     * Formula block id from the current PDF IR
+     */
+    readonly block: string
+
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFFormulaExplanationRequest?: PDFFormulaExplanationRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly pDFIRRequest?: PDFIRRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest {
@@ -44619,9 +45766,29 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslation
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly readingPreparationRequest: ReadingPreparationRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest {
     readonly dataset: string
 
     readonly document: string
@@ -45529,6 +46696,13 @@ export interface DefaultApiApiCoreUserEnvVarsIdDeleteRequest {
  */
 export interface DefaultApiApiCoreUserEnvVarsIdPatchRequest {
     readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreUserReadingPreferencesPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreUserReadingPreferencesPutRequest {
+    readonly readingPreparationPolicy: ReadingPreparationPolicy
 }
 
 /**
@@ -47516,6 +48690,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Observe chat parsing without submitting new work
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentParseStatusGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentParseStatusGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -47603,6 +48788,50 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     * Requires document read permission and current source-matched PDF IR. Uses only the selected chat model, without retrieval. Optional source_sha256 binds the request to the displayed PDF and rejects stale sources with409; every response includes the authoritative source_sha256. Language defaults to zh; force refreshes the user/document/source/parser/model/language cache. Evidence quotes and zero-based page coordinates come only from the source IR. Figure/table explanations are contextual: no image pixels are supplied. Paragraph translation accepts only authoritative textual blocks up to 8000 Unicode characters.
+     * @summary Explain a figure or table using extracted text and cells
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrBlocksBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFPaperReadingRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Requires document read permission and current PDF IR. One model response may include a suggested display_latex repair and all symbol definitions. The original PDF formula remains authoritative. Source pages are zero based and bounding boxes use normalized visible-page coordinates. The backend supplies verbatim evidence; model paraphrases and derivations are marked inferred. Language defaults to zh. focus_symbol is retained for older clients; it optionally requests the exact clicked symbol with a separate cache entry. force refreshes the source/model/language/focus-specific cache.
+     * @summary Explain a formula from original PDF evidence using the selected chat model without retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrFormulasBlockExplanationPost(requestParameters.block, requestParameters.dataset, requestParameters.document, requestParameters.pDFFormulaExplanationRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read PDF structure without triggering parsing or retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Parse the original PDF using the selected MinerU service independently of retrieval
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfIrPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfIrPost(requestParameters.dataset, requestParameters.document, requestParameters.pDFIRRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      *
      * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
@@ -47648,6 +48877,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Explicitly prepare this document; scopes only; preserves existing outputs
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPrepareReadingPost(requestParameters.dataset, requestParameters.document, requestParameters.readingPreparationRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}:read
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -47655,6 +48895,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read durable preparation progress and accounted model requests
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadingPreparationGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -49475,6 +50726,27 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreUserEnvVarsPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreUserEnvVarsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read personal AI reading preferences and capability registry
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserReadingPreferencesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserReadingPreferencesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Replace personal preferences; never process historical documents
+     * @param {DefaultApiApiCoreUserReadingPreferencesPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserReadingPreferencesPut(requestParameters: DefaultApiApiCoreUserReadingPreferencesPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreUserReadingPreferencesPut(requestParameters.readingPreparationPolicy, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -70511,6 +71783,585 @@ export class UserApi extends BaseAPI {
     }
 }
 
+
+
+/**
+ * VocabularyCloudApi - axios parameter creator
+ */
+export const VocabularyCloudApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/cloud/connections`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderDelete: async (provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderDelete', 'provider', provider)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum} provider
+         * @param {VocabularyCloudConnectionRequest} vocabularyCloudConnectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderPut: async (provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum, vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderPut', 'provider', provider)
+            // verify required parameter 'vocabularyCloudConnectionRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderPut', 'vocabularyCloudConnectionRequest', vocabularyCloudConnectionRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudConnectionRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderSyncPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderSyncPost', 'provider', provider)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/sync`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum} provider
+         * @param {VocabularyCloudTokenRequest} vocabularyCloudTokenRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderTestPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum, vocabularyCloudTokenRequest: VocabularyCloudTokenRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderTestPost', 'provider', provider)
+            // verify required parameter 'vocabularyCloudTokenRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderTestPost', 'vocabularyCloudTokenRequest', vocabularyCloudTokenRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/test`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudTokenRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum} provider
+         * @param {VocabularyCloudWordbookRequest} vocabularyCloudWordbookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderWordbooksPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum, vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderWordbooksPost', 'provider', provider)
+            // verify required parameter 'vocabularyCloudWordbookRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderWordbooksPost', 'vocabularyCloudWordbookRequest', vocabularyCloudWordbookRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/wordbooks`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudWordbookRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudOperationsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/cloud/operations`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * VocabularyCloudApi - functional programming interface
+ */
+export const VocabularyCloudApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = VocabularyCloudApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudConnectionsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderDelete(provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudDisconnectResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderDelete(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum} provider
+         * @param {VocabularyCloudConnectionRequest} vocabularyCloudConnectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderPut(provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum, vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudConnectionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderPut(provider, vocabularyCloudConnectionRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderSyncPost(provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudSyncResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderSyncPost(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderSyncPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum} provider
+         * @param {VocabularyCloudTokenRequest} vocabularyCloudTokenRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderTestPost(provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum, vocabularyCloudTokenRequest: VocabularyCloudTokenRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudWordbooksResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderTestPost(provider, vocabularyCloudTokenRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderTestPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum} provider
+         * @param {VocabularyCloudWordbookRequest} vocabularyCloudWordbookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderWordbooksPost(provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum, vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudWordbookResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderWordbooksPost(provider, vocabularyCloudWordbookRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderWordbooksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudOperationsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudOperationsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudOperationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * VocabularyCloudApi - factory interface
+ */
+export const VocabularyCloudApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = VocabularyCloudApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudConnectionsResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudDisconnectResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderPut(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudConnectionResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderPut(requestParameters.provider, requestParameters.vocabularyCloudConnectionRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudSyncResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudWordbooksResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters.provider, requestParameters.vocabularyCloudTokenRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudWordbookResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters.provider, requestParameters.vocabularyCloudWordbookRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudOperationsResponse> {
+            return localVarFp.apiCoreVocabularyCloudOperationsGet(options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderDelete operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderPut operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum
+
+    readonly vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderSyncPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderTestPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum
+
+    readonly vocabularyCloudTokenRequest: VocabularyCloudTokenRequest
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderWordbooksPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum
+
+    readonly vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest
+}
+
+/**
+ * VocabularyCloudApi - object-oriented interface
+ */
+export class VocabularyCloudApi extends BaseAPI {
+    /**
+     *
+     * @summary List the current user\'s vocabulary cloud connections and sync counts
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Disconnect vocabulary cloud sync and cancel queued operations
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Save vocabulary cloud credentials and target settings
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderPut(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderPut(requestParameters.provider, requestParameters.vocabularyCloudConnectionRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Queue historical local English words and retry unsuccessful sync operations
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Test supplied or stored credentials and list wordbooks
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters.provider, requestParameters.vocabularyCloudTokenRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a remote vocabulary wordbook
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters.provider, requestParameters.vocabularyCloudWordbookRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudOperationsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum];
 
 
 /**

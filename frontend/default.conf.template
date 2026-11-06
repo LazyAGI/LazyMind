@@ -19,6 +19,13 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Module workers require a JavaScript MIME type; older nginx mime.types
+    # files do not include .mjs. Limit this override to bundled static assets.
+    location ~ ^/assets/.*\.mjs$ {
+        types { application/javascript mjs; }
+        try_files $uri =404;
+    }
+
     location /showcase-assets/ {
         alias /skills/.runtime/featured-skills/assets/;
         expires 1y;

@@ -54,10 +54,13 @@ vi.mock("react-i18next", async (importOriginal) => ({
 vi.mock("../ChatModelSelector", () => ({
   default: ({
     onSavingChange,
+    disabled,
   }: {
     onSavingChange?: (saving: boolean) => void;
+    disabled?: boolean;
   }) => (
     <>
+      <button type="button" aria-label="model selection" disabled={disabled}>model selection</button>
       <button type="button" onClick={() => onSavingChange?.(true)}>
         begin model save
       </button>
@@ -185,6 +188,23 @@ vi.mock("@/modules/memory/toolApi", () => ({
 describe("ChatInput model switch save lock", () => {
   beforeEach(() => {
     vi.mocked(getRuntimeMode).mockReturnValue("local");
+  });
+
+  it.each([
+    ["waiting", false, false],
+    ["active", false, true],
+    ["waiting", true, true],
+  ] as const)("model recovery for workflow %s, auto running %s", (status, autoRunning, blocked) => {
+    useWorkflowStore.setState({ sessionByConversation: { "model-recovery": {
+      session_id: "waiting-flow", conversation_id: "model-recovery", controller_host: "lazymind",
+      workflow_id: "workflow", workflow_mode: "dynamic", status, current_step_id: "step", created_at: "", updated_at: "",
+    } }, autoRunningByConversation: { "model-recovery": autoRunning } });
+    onTestFinished(() => useWorkflowStore.setState({ sessionByConversation: {}, autoRunningByConversation: {} }));
+    render(<ChatInput value="继续" onChange={vi.fn()} sessionId="model-recovery" isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false}
+      showSkillDeposit={false} showThinkingDepth={false} />);
+    if (blocked) expect(screen.getByRole("button", { name: "model selection" })).toBeDisabled();
+    else expect(screen.getByRole("button", { name: "model selection" })).toBeEnabled();
   });
 
   it.each([
@@ -891,4 +911,26 @@ describe("ChatInput optional reranking", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(info).not.toHaveBeenCalled();
   });
+});
+
+describe('paper composer scope',()=>{
+ it('keeps model selection and send while removing toolbar extras only in paper mode',()=>{
+  const props={value:'Read this paper',onChange:vi.fn(),isChatContent:true,showConversationConfig:false,showPromptSuggestions:false};
+  const view=render(<ChatInput {...props} composerVariant="paper"/>);
+  expect(screen.getByRole('button',{name:'begin model save'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'chat.send'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'chat.addResource'})).toBeNull();
+  expect(view.container.querySelector('.chat-core-actions .chat-add-resource-trigger')).toBeNull();
+  expect(view.container.querySelector('.chat-featured-capability')).toBeNull();
+  view.rerender(<ChatInput {...props}/>);
+  expect(screen.getByRole('button',{name:'chat.addResource'})).toBeInTheDocument();
+ });
+});
+
+it('paper draft uses its isolated model selection on the first send',async()=>{
+ const selected={mode:'fixed' as const,model_id:'paper-model',source:'own' as const,version:0};
+ useModelSelectionStore.getState().setSelection('pdf-draft',selected);
+ const send=vi.fn();render(<ChatInput composerVariant="paper" modelSelectionDraft sessionId="pdf-draft" value="Explain this paper" onChange={vi.fn()} onSend={send} isChatContent showConversationConfig={false}/>);
+ fireEvent.click(screen.getByRole('button',{name:'chat.send'}));
+ await waitFor(()=>expect(send).toHaveBeenCalledWith(expect.objectContaining({initial_model_selection:{mode:'fixed',model_id:'paper-model',source:'own'}})));
 });

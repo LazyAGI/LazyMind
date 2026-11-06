@@ -69,7 +69,7 @@ type SessionLifecycleInput struct {
 }
 
 type InputImportInput struct {
-	LocalPath string `json:"local_path" jsonschema:"required,File inside the current Agent workspace"`
+	LocalPath string `json:"local_path" jsonschema:"required,Absolute regular-file path on the Connector machine; resolve or download host attachments first"`
 }
 
 type InputGetInput struct {
@@ -98,7 +98,7 @@ type ArtifactGetResult struct {
 	Rendered bool     `json:"rendered_as_mcp_content,omitempty"`
 }
 
-const workflowStartDescription = "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. The host displays the Workflow panel automatically for the bound conversation. Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
+const workflowStartDescription = "Prepare a Workflow and create a durable session only when ready. Pass known startup answers as clarification_values using the exact declared question IDs; request_context is task text, not structured answers. With status=needs_input, no session or panel exists: ask the returned questions, merge returned clarification_values with the answers, preserve request_context and revision_id, and call workflow.start with a new idempotency_key for the changed payload. Preserve the key only for unchanged-payload retries. With status=started, returns session_id, workflow_id, and revision_id. For source files, pass inputs keyed by declared external material ID, each an ordered array of {local_path} or {resource_id, revision, content_hash}; local_path must be absolute on the Connector machine. Files are imported and bound before session creation; preparation failure does not start a run. Prefer inputs over separate import calls. Existing input_bindings remain supported for other material IDs. The host displays the Workflow panel automatically after session creation for the bound conversation. Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
 
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
@@ -110,13 +110,13 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.get", Title: "Get a LazyMind Workflow",
-		Description: "Read one published Workflow revision: identifiers plus declared tool_scripts as UTF-8 files. Omits compiled_graph, scenario, and yaml. Use when inspecting package scripts; step execution uses the contract returned by workflow.step.begin.", Annotations: readOnly},
+		Description: "Read one published Workflow revision: identifiers, startup_contract and declared tool_scripts as UTF-8 files. startup_contract.input_materials lists exact material_id values, types and cardinalities for workflow.start inputs; use these IDs instead of guessing input keys. startup_contract.clarification_fields declares startup answers. Omits compiled_graph, scenario, and yaml. Use when inspecting package scripts; step execution uses the contract returned by workflow.step.begin.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input GetInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.Get(ctx, input.WorkflowID, input.RevisionID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.input.import", Title: "Import a Workflow input",
-		Description: "Import one file from the current Agent workspace as an immutable LazyMind input resource. Use the returned binding under its material ID in workflow.start input_bindings.", Annotations: write},
+		Description: "Import one explicit absolute file path on the Connector machine as an immutable LazyMind input resource, subject to its system file permissions and configured workflow_input_roots. Resolve or download host attachments first. This does not attach the file to a run: use the returned binding under its material ID in workflow.start input_bindings. For starting with files, prefer workflow.start inputs to import and bind in one call.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input InputImportInput) (*mcp.CallToolResult, InputImportResult, error) {
 			file, err := readLocalFile(input.LocalPath)
 			if err != nil {
@@ -153,7 +153,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.state", Title: "Read LazyMind Workflow state",
-		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for one step in control.automatic_retry_steps when present, otherwise a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. A failed run may still have automatic retry budget; follow control admission. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review. With continuation=failed, automatic recovery is unavailable; yield for user recovery.", Annotations: readOnly},
+		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for one step in control.automatic_retry_steps when present, otherwise a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. A failed run may still have automatic retry budget; follow control admission. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review. With continuation=stopped and an explicit user request to continue, call workflow.session.resume. For requested changes use a projection.rewindable target with workflow.step.begin. With continuation=failed, automatic recovery is unavailable; an explicitly requested retry may use a projection.retryable target with retry_origin=user. Otherwise yield.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
 			value, err := client.State(ctx, input.SessionID)
 			return nil, value, err
@@ -171,13 +171,13 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.resume", Title: "Resume a stopped LazyMind Workflow session",
-		Description: "Resume a stopped legacy Workflow session so its interrupted step can be begun again under Runtime rules. Controlled workflows require the user to select Resume in the authenticated workflow page; this tool cannot bypass that decision. Safe to retry with the same command_id.", Annotations: write},
+		Description: "Resume a stopped Workflow using the same control rules as the Workflow panel. Human review remains required when pending. A returned execution_id is already scheduled: use workflow.step.claim to inspect or claim it, never begin a duplicate. Otherwise read workflow.state for the next action. Safe to retry with the same command_id.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionLifecycleInput) (*mcp.CallToolResult, SessionLifecycleResult, error) {
 			value, err := client.ResumeSession(ctx, input.SessionID, input.CommandID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Start one ready step, including auto steps, and return its contract and execution_handle. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
+		Description: "Advance one Runtime-returned ready, retryable or rewindable step using the same rules as the internal controller, and return its contract and execution_handle. Set retry_origin=user only for recovery explicitly requested by the user. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Begin(ctx, input)
 			return nil, value, err
@@ -285,7 +285,7 @@ func slotContentType(output Output) string {
 }
 
 func readLocalFile(path string) (localFile, error) {
-	return loadLocalFile(path, false)
+	return readLocalInputFile(path)
 }
 
 func loadLocalFile(path string, allowAbsoluteOutside bool) (localFile, error) {

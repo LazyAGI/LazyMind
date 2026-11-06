@@ -162,6 +162,14 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it('keeps the request-scoped paper selection when opening the chat stream', async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const selection = { dataset_id: 'paper-library', document_id: 'paper-1', selected_text: 'scaled attention', expand_paper_context: true };
+    await act(async () => { await result.current.sendMessage({ text: 'Explain this', document_context: selection }); });
+    expect(onOpenSSE).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ document_context: selection }));
+  });
   it('keeps terminal tool counts live and replaces them with zero on regeneration', async () => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
@@ -2666,4 +2674,12 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList[result.current.messageList.length - 1]?.delta).toBe("latest live text");
     unmount();
   });
+});
+
+it('forwards an explicit initial paper model binding to its stream request',async()=>{
+ const {stream}=createMockStream();
+ const onOpenSSE=vi.fn(()=>stream);const {result}=renderConversation({onOpenSSE});
+ const selection={mode:'fixed' as const,model_id:'paper-model',source:'own' as const};
+ await act(async()=>{await result.current.sendMessage({text:'Explain the paper',initial_model_selection:selection});});
+ expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array),expect.anything(),{},expect.objectContaining({initial_model_selection:selection}));
 });

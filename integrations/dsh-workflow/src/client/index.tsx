@@ -8,7 +8,8 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { createPortal } from 'react-dom'
 import { eventRun, type RunLink } from '../protocol'
 import { runKey, windowStore } from './window-store'
-import { readPresentationConfig } from '../presentation-config'
+import { observePresentationConfig, type PresentationConfig } from '../presentation-config'
+import { presentationLink } from '../events'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap { 'lazymind-workflow': RunLink }
@@ -20,20 +21,22 @@ const interactiveRegion = { WebkitAppRegion: 'no-drag' } as CSSProperties
 export const inject = ['uiConversation', 'slots']
 
 export function apply(ctx: ClientContext): void {
-  const config = readPresentationConfig(globalThis)
+  let config: PresentationConfig | undefined
+  const configListeners = new Set<() => void>()
+  const subscribeConfig = (listener: () => void) => { configListeners.add(listener); return () => { configListeners.delete(listener) } }
+  const configSnapshot = () => config
   const windows = windowStore()
-  const serverName = config.serverName
   ctx.effect(() => () => windows.dispose())
   const definition: ConversationNodeDefinition<RunLink> = {
     kind: 'lazymind-workflow', target: 'chat',
     match(event) {
-      const run = eventRun(event, serverName, config.webUrl)
+      const run = config ? eventRun(event, config.serverName, config.webUrl) : null
       // Each standard event is immutable. Reusing runId as a start identity would
       // make a repeated state/start result violate DSH's unique-start contract.
       return run ? { id: `${run.runId}:${event.seq}`, role: 'start' } : null
     },
     start(_context, match) {
-      const run = eventRun(match.event, serverName, config.webUrl)
+      const run = config ? eventRun(match.event, config.serverName, config.webUrl) : null
       if (!run) throw new Error('Workflow presentation requires a valid standard tool result')
       return run
     },
@@ -59,6 +62,7 @@ export function apply(ctx: ClientContext): void {
   }
 
   function WorkflowDock({ session }: { session: { sessionId: string } }) {
+    const connection = useSyncExternalStore(subscribeConfig, configSnapshot, configSnapshot)
     const state = useSyncExternalStore(windows.subscribe, windows.snapshot, windows.snapshot)
     const current = state.entries[session.sessionId]
     const frame = useRef<HTMLIFrameElement>(null)
@@ -68,7 +72,8 @@ export function apply(ctx: ClientContext): void {
     const [collapsed, setCollapsed] = useState(false)
     const collapseAnchor = useRef<{ bottom: number; scroller: HTMLElement; runId?: string; sessionId: string } | null>(null)
     const runId = current?.run.runId
-    const origin = current ? new URL(current.run.url).origin : undefined
+    const link = current && connection ? presentationLink(current.run.runId, connection.webUrl) : null
+    const origin = link ? new URL(link.url).origin : undefined
     useLayoutEffect(() => {
       // DSH rc.2 exposes the composer seat inside the shared conversation scroller.
       // Keep our own portal host before that seat: messages grow before the panel,
@@ -121,8 +126,9 @@ export function apply(ctx: ClientContext): void {
       if (origin) frame.current?.contentWindow?.postMessage({ type: 'lazymind.workflow.collapse', sessionId: runId, collapsed }, origin)
     }
     useEffect(syncExpansion, [expanded, collapsed, origin, runId])
-    if (!current) return <span ref={anchor} hidden />
-    const url = new URL(`${current.run.url.replace(/\/$/, "")}/embed`)
+    if (!connection) return <><span ref={anchor} hidden /><aside role='status' style={{ padding: 8 }}>LazyMind 尚未连接。请在 LazyMind 中恢复登录。<button onClick={() => window.location.reload()}>重新加载</button></aside></>
+    if (!current || !link) return <span ref={anchor} hidden />
+    const url = new URL(`${link.url.replace(/\/$/, "")}/embed`)
     url.searchParams.set('hostOrigin', window.location.origin)
     const panel = <section aria-label="LazyMind Workflow" style={{
       ...interactiveRegion,
@@ -133,7 +139,7 @@ export function apply(ctx: ClientContext): void {
       ...(expanded ? { position: 'fixed', inset: 'var(--dsh-frame-overlay-top, 16px) 16px 16px', width: 'auto', maxWidth: 'none', alignSelf: 'stretch', height: 'auto', zIndex: 1000 } as const : {}),
       background: '#fff', borderRadius: 10, overflow: 'hidden',
     }}>
-      <iframe ref={frame} key={runKey(current.run)} title="LazyMind Workflow" src={url.href}
+      <iframe ref={frame} key={runKey({ ...current.run, url: link.url })} title="LazyMind Workflow" src={url.href}
         onLoad={syncExpansion} style={{ ...interactiveRegion, width: '100%', height: '100%', flex: 1, minHeight: 0, border: 0 }} />
     </section>
     // Preserve the panel's place in the transcript while the same iframe is expanded.
@@ -141,7 +147,19 @@ export function apply(ctx: ClientContext): void {
       <div style={{ display: 'flow-root', height: expanded ? 'calc(min(900px, 75dvh) + 24px)' : undefined }}>{panel}</div>, tail,
     ) : panel}</>
   }
-  ctx.uiConversation.events.register(definition)
+  ctx.effect(() => {
+    let unregister: (() => void) | undefined
+    const stop = observePresentationConfig(globalThis, next => {
+      if (JSON.stringify(next) === JSON.stringify(config)) return
+      config = next
+      // Registry changes make DSH rebuild existing history, including receipts
+      // read before login/config recovery. No workflow event is fabricated.
+      unregister?.()
+      unregister = config ? ctx.uiConversation.events.register(definition) : undefined
+      for (const listener of configListeners) listener()
+    })
+    return () => { stop(); unregister?.() }
+  })
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({ name: 'conversation.chat.node', key: 'lazymind-workflow' }, Entry))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'lazymind-workflow', order: -10 }, WorkflowDock))
 }

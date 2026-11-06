@@ -79,6 +79,7 @@ func init() {
 		{2005079, http.StatusBadRequest, "Input and output token limits must not exceed the context window", []string{"model input and output token limits must not exceed the context window"}},
 		{2005080, http.StatusBadRequest, "This request protocol is not declared for the supplier service", []string{"request protocol is not declared for this supplier service"}},
 		{2005081, http.StatusConflict, "This embedding model is in use; remove indexed knowledge bases before removing the model", []string{"embedding model is in use; remove indexed knowledge bases before removing the model"}},
+		{2005082, http.StatusConflict, "A model supplier with this name already exists", []string{"model supplier name already exists"}},
 	} {
 		for _, source := range group.sources {
 			if strings.Contains(source, "%") {

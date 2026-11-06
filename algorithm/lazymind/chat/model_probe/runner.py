@@ -121,6 +121,13 @@ def _validate_response(kind: str, payload) -> tuple[str, str]:
         message = choice['message']
         valid = (choice.get('finish_reason') == 'length' or _nonempty_string(message.get('content'))
                  or _nonempty_string(message.get('reasoning_content')) or bool(message.get('tool_calls')))
+    elif kind == 'responses':
+        output = payload.get('output')
+        valid = isinstance(output, list) and any(
+            isinstance(item, dict) and (
+                item.get('type') == 'function_call' or item.get('type') == 'message' and any(
+                    isinstance(part, dict) and part.get('type') == 'output_text' and _nonempty_string(part.get('text'))
+                    for part in item.get('content') or [])) for item in output)
     elif kind == 'anthropic':
         blocks = payload.get('content')
         valid = payload.get('stop_reason') == 'max_tokens' or any(

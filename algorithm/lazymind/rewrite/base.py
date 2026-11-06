@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Dict, List, Literal, Optional
 
-from lazyllm import AutoModel
+from lazyllm import AutoModel, LOG
 from lazymind.common.skill.document import (
     SkillDocumentError,
     require_valid_skill_document,
@@ -357,13 +358,20 @@ def rewrite_content(
         raise BadRequestError("'user_instruct' must be a non-empty string.")
 
     error: Optional[str] = None
-    for _ in range(_MAX_REWRITE_ATTEMPTS):
+    attempts = _MAX_REWRITE_ATTEMPTS
+    for attempt in range(attempts):
         prompt = _PROMPT_BUILDERS[task_type](
             content=content,
             user_instruct=normalized_user_instruct,
             previous_error=error,
         )
-        raw = AutoModel(model='llm')(prompt)
+        started = time.monotonic()
+        try:
+            raw = AutoModel(model='llm')(prompt)
+        finally:
+            # No source text, prompts or model credentials in timing diagnostics.
+            LOG.info(f'structured_generation task={task_type} attempt={attempt + 1} '
+                     f'duration_ms={round((time.monotonic() - started) * 1000)}')
         try:
             parsed = _extract_json_object(raw)
             editor = _EDIT_DISPATCH.get(task_type)
@@ -382,5 +390,5 @@ def rewrite_content(
             error = str(exc)
 
     raise UnprocessableContentError(
-        f'Failed to generate valid content after {_MAX_REWRITE_ATTEMPTS} attempts: {error}'
+        f'Failed to generate valid content after {attempts} attempts: {error}'
     )

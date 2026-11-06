@@ -1059,6 +1059,7 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 // installs never have a scan source, so the scan source delete step is skipped.
 func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *orm.Dataset, userID string, install *orm.KnowledgeMarketInstall) {
 	externalDeleteFailed := false
+	result := ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "deleted", CleanupStatus: "submitted"}}}
 	err := corestore.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		current, err := LockMarketInstall(r.Context(), tx, userID, install.MarketItemID)
 		if err != nil {
@@ -1083,6 +1084,11 @@ func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *
 		if err := SnapshotMarketTaskHistory(r.Context(), tx, current); err != nil {
 			return err
 		}
+		var count int64
+		if err := tx.Model(&orm.Document{}).Where("dataset_id = ? AND deleted_at IS NULL AND document_type <> ?", ds.ID, "FOLDER").Count(&count).Error; err != nil {
+			return err
+		}
+		result.Items[0].DocumentCount = int(count)
 		if err := deleteDatasetAlgoKB(r.Context(), &currentDataset, userID); err != nil {
 			externalDeleteFailed = true
 			return err
@@ -1090,7 +1096,14 @@ func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *
 		if err := softDeleteDataset(r.Context(), tx, &currentDataset, userID, time.Now().UTC()); err != nil {
 			return err
 		}
-		return resetMarketInstallInTx(r.Context(), tx, userID, current.MarketItemID)
+		if err := resetMarketInstallInTx(r.Context(), tx, userID, current.MarketItemID); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		return tx.Create(&orm.ResourceOperationReceipt{TenantID: resourceTenant(datasetCatalogCallerFromRequest(r).TenantID), UserID: userID, OperationKey: "dataset-delete:" + ds.ID, Action: "knowledge.resource.delete", Result: raw, CreatedAt: time.Now().UTC()}).Error
 	})
 	if err != nil {
 		switch {
@@ -1107,7 +1120,7 @@ func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	common.ReplyJSON(w, result)
 }
 
 // deleteRegularDataset keeps the original delete flow for local upload and
@@ -1119,11 +1132,13 @@ func deleteRegularDataset(w http.ResponseWriter, r *http.Request, ds *orm.Datase
 		replyResourceError(w, err)
 		return
 	}
-	if _, err = service.Delete(r.Context(), op, DeleteResourcesRequest{Targets: []ResourceRef{{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}}}); err != nil {
+	op.OperationKey = "dataset-delete:" + ds.ID
+	result, err := service.Delete(r.Context(), op, DeleteResourcesRequest{Targets: []ResourceRef{{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}}})
+	if err != nil {
 		replyResourceError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	common.ReplyJSON(w, result)
 }
 
 func deleteDatasetAlgoKB(ctx context.Context, ds *orm.Dataset, userID string) error {
