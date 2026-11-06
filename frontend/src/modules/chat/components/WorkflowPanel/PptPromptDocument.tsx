@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import './PptPromptDocument.scss';
 
@@ -40,21 +40,20 @@ export function PptPromptDocument({ text, onEdit, maxHeight }: {
   maxHeight?: number;
 }) {
   const { t } = useTranslation();
-  const [source, setSource] = useState(false);
-  const sections = useMemo(() => splitPptPrompt(text), [text]);
+  const sections = useMemo(() => {
+    const parsed = splitPptPrompt(text);
+    const isLayout = (section: PromptSection) => /^(布局|页面布局|版式|构图)(?:$|[\s（(：:])/.test(section.title);
+    return [...parsed.filter(isLayout), ...parsed.filter(section => !isLayout(section))];
+  }, [text]);
   return <div className='ppt-prompt-document'>
     <div className='ppt-prompt-document__toolbar'>
       <strong>{t('chat.slots.pptDesignDocument')}</strong>
       <div className='ppt-prompt-document__actions'>
-        <div className='ppt-prompt-document__tabs' role='group' aria-label={t('chat.slots.pptDesignDocument')}>
-          <button type='button' aria-pressed={!source} onClick={() => setSource(false)}>{t('chat.slots.pptDesignView')}</button>
-          <button type='button' aria-pressed={source} onClick={() => setSource(true)}>{t('chat.slots.pptPromptSource')}</button>
-        </div>
         {onEdit && <button type='button' onClick={onEdit}>{t('chat.slots.editText')}</button>}
       </div>
     </div>
     <div className='ppt-prompt-document__body' style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}>
-      {source ? <pre className='ppt-prompt-document__source'>{text}</pre> : sections.map((section, index) => (
+      {sections.map((section, index) => (
         section.title ? <details className='ppt-prompt-document__section' key={index} open>
           <summary>{section.title}</summary>
           {section.body && <div className='ppt-prompt-document__text'>{section.body}</div>}

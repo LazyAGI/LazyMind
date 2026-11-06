@@ -4571,8 +4571,6 @@ const enUS = {
       applyVersionAria: "Apply version {{version}}",
       cancelDelete: "Cancel deletion",
       pptDesignDocument: "Page design",
-      pptDesignView: "Design document",
-      pptPromptSource: "Original prompt",
       clickToEdit: "Click to edit",
       clickToEditDescription: "Click to edit description",
       closeVersionHistory: "Close version history",

@@ -15,8 +15,7 @@
     padding: 14px 20px;
     border-bottom: 1px solid #e3e8ef;
   }
-  &__actions, &__tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  &__tabs { padding: 3px; background: #f3f6fb; border-radius: 7px; }
+  &__actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   button {
     border: 0;
     background: transparent;
@@ -26,7 +25,6 @@
     cursor: pointer;
     font: inherit;
     font-size: 13px;
-    &[aria-pressed='true'] { color: #365cff; background: #fff; box-shadow: 0 1px 4px #16264712; }
     &:hover { color: #365cff; background: #edf2ff; }
     &:focus-visible { outline: 2px solid #365cff; outline-offset: 2px; }
   }
@@ -45,7 +43,7 @@
       &:focus-visible { outline: 2px solid #365cff; outline-offset: 4px; }
     }
   }
-  &__text, &__source {
+  &__text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font: inherit;
@@ -54,7 +52,7 @@
     color: #424c5e;
   }
   &__text { margin-top: 12px; }
-  &__intro, &__source { margin: 0; padding: 18px 0; }
+  &__intro { margin: 0; padding: 18px 0; }
   @media (max-width: 640px) {
     &__toolbar { padding: 12px; }
     &__body { padding: 0 14px; }

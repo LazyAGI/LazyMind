@@ -4517,8 +4517,6 @@ const zhCN = {
       applyVersionAria: "应用版本 {{version}}",
       cancelDelete: "取消删除",
       pptDesignDocument: "每页设计稿",
-      pptDesignView: "设计稿",
-      pptPromptSource: "原始提示词",
       clickToEdit: "点击编辑",
       clickToEditDescription: "点击编辑描述",
       closeVersionHistory: "关闭版本历史",
