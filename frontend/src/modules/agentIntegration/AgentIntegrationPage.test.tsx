@@ -596,9 +596,9 @@ describe("AgentIntegrationPage", () => {
     expect(within(workbuddy).queryByText(/CodeBuddy/)).not.toBeInTheDocument();
     expect(within(workbuddy).queryByText(/OAuth|Client ID|Client Secret/)).not.toBeInTheDocument();
     expect(within(workbuddy).getByText("已检测到 WorkBuddy 内置 CLI")).toBeInTheDocument();
-    const login = within(workbuddy).getByRole("link", { name: /打开 WorkBuddy 登录/ });
-    expect(login).toHaveAttribute("href", "workbuddy://home");
+    const login = within(workbuddy).getByRole("button", { name: /打开 WorkBuddy 登录/ });
     fireEvent.click(login);
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("workbuddy", "login"));
 
     mocks.executorPolicies.mockResolvedValue({
       ok: true,
@@ -663,7 +663,7 @@ describe("AgentIntegrationPage", () => {
     expect(card).not.toHaveTextContent(/待完成信任|继续设置/);
   });
 
-  it.each(["zh-CN", "en-US"])("checks WorkBuddy setup independently of live sessions (%s)", async (language) => {
+  it.each(["zh-CN", "en-US"])("requires healthy WorkBuddy control before completing setup (%s)", async (language) => {
     await retryI18n.changeLanguage(language);
     const tr = (key: string) => retryI18n.t(`agentIntegration.workbuddyInstallGuide.${key}`);
     const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled",
@@ -685,9 +685,11 @@ describe("AgentIntegrationPage", () => {
     await within(dialog).findByText(tr("enableRequiredDescription"));
     mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true } } } });
     fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
+    await within(dialog).findByText(tr("notReadyTitle"));
+    expect(dialog).not.toHaveTextContent(tr("successTitle"));
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: { ...status, connection: { ...status.connection, mcp_trusted: true, mcp_enabled: true, control_ready: true } } } });
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryCheck") }));
     await within(dialog).findByText(tr("successTitle"));
-    expect(dialog).toHaveTextContent(tr("controlUnavailableTitle"));
-    expect(dialog).not.toHaveTextContent(tr("notReadyTitle"));
     expect(mocks.action).not.toHaveBeenCalled();
   });
 

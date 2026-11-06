@@ -31,7 +31,7 @@ return closingPIDs
 end run`
 	output, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script, application).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("close WorkBuddy normally and retry: %s: %w", output, err)
+		return setupError("quit_required", fmt.Errorf("close WorkBuddy normally and retry: %w", err))
 	}
 	// NSRunningApplication.isTerminated can remain stale in a script without an
 	// AppKit event loop. Check the exact returned PIDs at the OS instead.
@@ -40,7 +40,7 @@ end run`
 	for _, value := range strings.FieldsFunc(string(output), func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\r' }) {
 		pid, err := strconv.Atoi(value)
 		if err != nil || pid <= 0 {
-			return fmt.Errorf("invalid WorkBuddy process ID: %q", value)
+			return setupError("process_inspection_failed", fmt.Errorf("invalid WorkBuddy process ID: %q", value))
 		}
 		for {
 			err := syscall.Kill(pid, 0)
@@ -48,17 +48,17 @@ end run`
 				break
 			}
 			if err != nil {
-				return fmt.Errorf("check WorkBuddy shutdown: %w", err)
+				return setupError("process_inspection_failed", fmt.Errorf("check WorkBuddy shutdown: %w", err))
 			}
 			select {
 			case <-wait.Done():
-				return fmt.Errorf("WorkBuddy did not close; finish its pending dialog and retry: %w", wait.Err())
+				return setupError("quit_required", fmt.Errorf("WorkBuddy did not close: %w", wait.Err()))
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
 	}
 	if output, err := exec.CommandContext(ctx, "/usr/bin/open", "-n", "-a", application, "--args", "--remote-debugging-address=127.0.0.1", "--remote-debugging-port="+strconv.Itoa(port)).CombinedOutput(); err != nil {
-		return fmt.Errorf("start WorkBuddy: %s: %w", output, err)
+		return setupError("launch_failed", fmt.Errorf("start WorkBuddy: %s: %w", output, err))
 	}
 	return nil
 }

@@ -5,12 +5,13 @@ import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/
 
 import { workbuddyErrorMessage } from "./workbuddyErrors";
 
-type Stage = "prepare" | "installing" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
+type Stage = "prepare" | "installing" | "login" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
 
-export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus, onClose, agent = "workbuddy" }: {
+export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin, onStatus, onClose, agent = "workbuddy" }: {
   agent?: "workbuddy" | "codex";
   status?: DesktopAgentIntegrationStatus;
   onConnect: () => Promise<DesktopAgentIntegrationStatus | undefined>;
+  onLogin?: () => Promise<DesktopAgentIntegrationStatus | undefined>;
   onStatus: (status: DesktopAgentIntegrationStatus) => void;
   onClose: () => void;
 }) {
@@ -20,11 +21,11 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
   // An installed plugin survives a normal Codex launch without CDP. It must
   // still go through the explicit connection/restart step before confirmation.
   const [stage, setStage] = useState<Stage>(status?.state === "enabled" && status.connection?.mcp_configured
-    && (agent !== "codex" || status.connection.control_ready && !status.issue) ? confirmationStage : "prepare");
+    && (agent === "codex" ? status.connection.control_ready && !status.issue
+      : !status.issue || ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) ? confirmationStage : "prepare");
   const [error, setError] = useState("");
   const [zoomed, setZoomed] = useState(false);
-  const [controlUnavailable, setControlUnavailable] = useState(false);
-  const [controlError, setControlError] = useState("");
+  const [diagnostic, setDiagnostic] = useState("");
   const mounted = useRef(true);
   const busy = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -36,6 +37,14 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
     try {
       const result = await onConnect();
       if (!mounted.current) return;
+      setDiagnostic(result?.issue?.operation_id || "");
+      if (agent === "workbuddy" && result?.action?.kind === "login" && onLogin) {
+        setStage("login");
+        const login = await onLogin();
+        if (!mounted.current) return;
+        if (!login) { setError(text("loginFailed")); setStage("installFailed"); }
+        return;
+      }
       if (result?.state !== "enabled" || !result.connection?.mcp_configured) {
         setError(agent === "workbuddy" && result?.issue ? workbuddyErrorMessage(result, t) : result?.message || text("installFailedDescription"));
         setStage("installFailed"); return;
@@ -49,37 +58,70 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       }
     } finally { busy.current = false; }
   };
+  useEffect(() => {
+    if (stage !== "login") return;
+    let stopped = false, inFlight = false;
+    const poll = async () => {
+      if (inFlight || busy.current) return;
+      inFlight = true;
+      try {
+        const result = await agentIntegrationStatuses();
+        if (stopped || !mounted.current || !result.ok) return;
+        const current = result.data[agent];
+        if (current) onStatus(current);
+        if (current?.login?.state === "succeeded") { stopped = true; await install(); }
+        else if (current?.login && ["failed", "cancelled"].includes(current.login.state)) {
+          setError(text("loginFailed")); setStage("installFailed");
+        }
+      } catch { /* Keep waiting for the bounded native login operation. */ }
+      finally { inFlight = false; }
+    };
+    const timer = window.setInterval(() => void poll(), 1500);
+    const timeout = window.setTimeout(() => {
+      if (!stopped && mounted.current) { setError(text("loginFailed")); setStage("installFailed"); }
+    }, 130000);
+    return () => { stopped = true; window.clearInterval(timer); window.clearTimeout(timeout); };
+  }, [stage, agent]);
 
-  const check = async () => {
+  const check = async (automatic = false) => {
     if (busy.current) return;
     busy.current = true;
-    setStage("checking"); setError("");
+    if (!automatic) { setStage("checking"); setError(""); }
     try {
       const result = await agentIntegrationStatuses();
       if (!mounted.current) return;
-      if (!result.ok) { setError(text("checkFailedDescription")); setStage("notReady"); return; }
+      if (!result.ok) { if (!automatic) { setError(text("checkFailedDescription")); setStage("notReady"); } return; }
       const current = result.data[agent];
       if (current) onStatus(current);
       const connection = current?.connection;
       const configured = current?.state === "enabled" && connection?.mcp_configured;
       const connectorReady = configured && connection?.mcp_enabled && connection.mcp_trusted;
-      const ready = connectorReady && (agent !== "codex" || connection.control_ready && !current?.issue);
-      setControlUnavailable(Boolean(ready && (!connection?.control_ready || current?.issue)));
-      setControlError(current?.issue ? (agent === "codex" ? text("controlUnavailableDescription") : workbuddyErrorMessage(current, t)) : "");
+      const ready = connectorReady && connection.control_ready && !current?.issue;
+      if (automatic && !ready) return;
       if (!ready && agent === "codex") setError(connectorReady && current?.issue?.code === "capability_unavailable"
         ? t("agentIntegration.connectionErrors.capability_unavailable")
         : text(connectorReady ? "controlUnavailableDescription" : "notReadyDescription"));
       else if (!ready && current?.issue) setError(workbuddyErrorMessage(current, t));
+      else if (connectorReady && !connection?.control_ready) setError(text("controlUnavailableDescription"));
       else if (!ready) setError(text(!configured ? "configurationMissingDescription"
         : connection?.mcp_trusted === undefined || connection.mcp_enabled === undefined ? "checkFailedDescription"
           : !connection.mcp_trusted ? "trustRequiredDescription" : "enableRequiredDescription"));
       setStage(ready ? "success" : "notReady");
     } catch {
-      if (mounted.current) { setError(text("checkFailedDescription")); setStage("notReady"); }
+      if (mounted.current && !automatic) { setError(text("checkFailedDescription")); setStage("notReady"); }
     } finally { busy.current = false; }
   };
-  const installing = stage === "installing", checking = stage === "checking";
-  const current = stage === "prepare" ? 0 : ["installing", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
+  // Returning from native trust/enable settings should complete the flow
+  // without requiring another install or restart. These checks are read-only.
+  useEffect(() => {
+    if (!["entry", "trust", "enable", "verify", "notReady"].includes(stage)) return;
+    const recheck = () => { if (document.visibilityState === "visible") void check(true); };
+    const timer = window.setInterval(recheck, 3000);
+    window.addEventListener("focus", recheck);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", recheck); };
+  }, [stage, agent]);
+  const installing = stage === "installing", checking = stage === "checking", loggingIn = stage === "login";
+  const current = stage === "prepare" ? 0 : ["installing", "login", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
   let primary;
   if (stage === "prepare" || stage === "installFailed") primary = <Button type="primary" onClick={() => void install()}>{text(stage === "prepare" ? "saveAndContinue" : "retryInstall")}</Button>;
   else if (stage === "entry") primary = <Button type="primary" onClick={() => setStage(agent === "codex" ? "enable" : "trust")}>{text("next")}</Button>;
@@ -87,7 +129,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
   else if (stage === "enable") primary = <Button type="primary" onClick={() => setStage("verify")}>{text("enabledConfirmation")}</Button>;
   else if (stage === "verify" || stage === "notReady") primary = <Button type="primary" onClick={() => void check()}>{text(stage === "notReady" ? "retryCheck" : "check")}</Button>;
   else if (stage === "success") primary = <Button type="primary" onClick={onClose}>{text("done")}</Button>;
-  else primary = <Button type="primary" loading disabled>{text(installing ? "installing" : "checking")}</Button>;
+  else primary = <Button type="primary" loading disabled>{text(loggingIn ? "waitingForLogin" : installing ? "installing" : "checking")}</Button>;
 
   const imageStage = stage === "entry" ? "entry" : stage === "trust" ? "trust" : "enable";
   const imageURL = agent === "codex" ? "/installation-guides/codex/enable.png"
@@ -103,14 +145,17 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       <Space wrap key={stage}>
         {agent === "workbuddy" && (stage === "trust" || stage === "enable") && <Button onClick={() => setStage(stage === "trust" ? "entry" : "trust")}>{text("back")}</Button>}
         {["verify", "notReady"].includes(stage) && <Button onClick={() => setStage(agent === "codex" ? stage === "notReady" ? "prepare" : "enable" : "trust")}>{text(agent === "codex" && stage === "notReady" ? "reconnect" : "viewEnableSteps")}</Button>}
+        {agent === "workbuddy" && stage === "notReady" && <Button onClick={() => setStage("prepare")}>{text("reconnect")}</Button>}
         {primary}
       </Space>
     </div>}>
     <Steps size="small" current={current} items={["saveStep", "installStep", "checkStep"].map(key => ({ title: text(key) }))} />
     <div className="agent-integration-installation-content" aria-live="polite">
       {stage === "prepare" && <Typography.Paragraph>{text("saveDescription")}</Typography.Paragraph>}
+      {loggingIn && <Alert type="info" showIcon message={text("waitingForLogin")} description={text("loginDescription")} />}
       {(installing || checking) && <Space direction="vertical" align="center" className="agent-integration-installation-progress"><Spin /><Typography.Text>{text(installing ? "installingDescription" : "checkingDescription")}</Typography.Text></Space>}
       {stage === "installFailed" && <Alert type="error" showIcon message={text("installFailedTitle")} description={error} />}
+      {stage === "installFailed" && diagnostic && <Typography.Text type="secondary" copyable>{text("diagnosticID")}: {diagnostic}</Typography.Text>}
       {(stage === "entry" || stage === "trust" || stage === "enable") &&
         <Alert type="success" showIcon message={text("installedTitle")} description={text("installedDescription")} />
       }
@@ -124,7 +169,6 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onStatus
       {stage === "notReady" && <Alert type="warning" showIcon message={text("notReadyTitle")} description={error || text("notReadyDescription")} />}
       {stage === "success" && <>
         <Alert type="success" showIcon message={text("successTitle")} description={text("successDescription")} />
-        {controlUnavailable && <Alert type="warning" showIcon message={text("controlUnavailableTitle")} description={controlError || text("controlUnavailableDescription")} />}
       </>}
     </div>
   </Modal>

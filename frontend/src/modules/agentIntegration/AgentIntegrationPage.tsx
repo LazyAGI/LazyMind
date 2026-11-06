@@ -72,7 +72,7 @@ const AGENTS: AgentDefinition[] = [
   {
     id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.svg",
     installURL: "https://www.workbuddy.cn",
-    executorName: "WorkBuddy CLI", executorLoginURL: "workbuddy://home",
+    executorName: "WorkBuddy CLI", executorLoginMode: "automatic",
     mcpBindingTarget: "workbuddy-desktop",
   },
   {
@@ -351,7 +351,7 @@ export default function AgentIntegrationPage() {
       const result = await agentIntegrationAction(agent, nextAction);
       if (!result.ok) {
         const detail = agent === "deepseek-harness" ? t("agentIntegration.dshErrors.operation_failed") : result.error instanceof Error ? result.error.message : result.error ? String(result.error) : result.reason;
-        if (agent === "codex" && restartConfirmed) throw new Error(detail);
+        if (["codex", "workbuddy"].includes(agent) && restartConfirmed) throw new Error(detail);
         setError(detail);
         return;
       }
@@ -375,7 +375,7 @@ export default function AgentIntegrationPage() {
       return result.data;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
-      if (agent === "codex" && restartConfirmed) throw cause;
+      if (["codex", "workbuddy"].includes(agent) && restartConfirmed) throw cause;
     } finally {
       pendingAgentActions.current.delete(agent);
       setAction((current) => current === key ? "" : current);
@@ -525,6 +525,7 @@ export default function AgentIntegrationPage() {
       {workBuddyGuideOpen && <WorkBuddyInstallationGuide
         status={statuses.workbuddy}
         onConnect={() => runAction("workbuddy", "connect", true)}
+        onLogin={() => runAction("workbuddy", "login")}
         onStatus={(status) => setStatuses(current => ({ ...current, workbuddy: status }))}
         onClose={() => setWorkBuddyGuideOpen(false)}
       />}
@@ -997,6 +998,11 @@ function AgentConfigurationFlow({
 
   const mcpActions = (
     <Space wrap size={8}>
+      {agent.id === "workbuddy" && mcpStatus?.issue && mcpStatus?.can_connect && (
+        <Button size="small" disabled={busyAction !== ""} onClick={onOpenInstallationGuide}>
+          {t("agentIntegration.workbuddyInstallGuide.reconnect")}
+        </Button>
+      )}
       {!mcpPrepared && !mcpEnabled && (
         <Button size="small" icon={<LinkOutlined />} href={agent.installURL} target="_blank">
           {t("agentIntegration.viewInstallGuide")}
@@ -1057,7 +1063,7 @@ function AgentConfigurationFlow({
             disabled={busyAction !== "" || mcpStatus?.login?.state === "running"}
             onClick={() => void onMCPAction(agent.id, "login")}
           >
-            {t(agent.executorLoginMode === "interactive"
+            {t(agent.id === "workbuddy" ? "agentIntegration.openWorkBuddy" : agent.executorLoginMode === "interactive"
               ? "agentIntegration.openLoginTerminal"
               : "agentIntegration.login")}
           </Button>
@@ -1408,5 +1414,5 @@ function mcpCapabilityStatus(state: DesktopAgentIntegrationStatus["state"], t: T
 function executorAuthenticationRequired(reason = "") {
   const normalized = reason.toLowerCase();
   return normalized.includes("not signed in") || normalized.includes("not logged in") ||
-    normalized.includes("login required") || normalized.includes("authentication required");
+    normalized.includes("login required") || normalized.includes("authentication required") || normalized.includes("sign-in has expired");
 }

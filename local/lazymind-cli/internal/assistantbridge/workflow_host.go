@@ -8,10 +8,20 @@ import (
 	"strings"
 
 	"lazymind/agentconnector/internal/coreapi"
+	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func workflowHostError(w http.ResponseWriter, err error) {
+	if credentials.IsAuthenticationRequired(err) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "HOST_AUTH_REQUIRED", "error": "Sign in to LazyMind to restore the workflow connection"})
+		return
+	}
+	var pairingError *workflowhost.PairingError
+	if errors.As(err, &pairingError) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"code": pairingError.Code, "error": pairingError.Error()})
+		return
+	}
 	var apiError *coreapi.Error
 	if errors.As(err, &apiError) {
 		writeJSON(w, apiError.StatusCode, map[string]string{"code": apiError.Code, "error": apiError.Message})
@@ -38,7 +48,7 @@ func (s *Server) workflowHost(w http.ResponseWriter, r *http.Request) (workflowh
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	pair, err := workflowhost.Verify(s.store.Directory(), r.Header.Get("X-LazyMind-Connector-Id"), token, scope)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		workflowHostError(w, err)
 		return pair, nil, false
 	}
 	api, err := coreapi.New(s.store)

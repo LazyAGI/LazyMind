@@ -1,6 +1,6 @@
 import { AdmissionRejected, type RuntimeAdapter } from './adapter'
 import type { Coordinator } from './coordinator'
-import { BridgeError, type HostTransport, type HostAction } from './transport'
+import { BridgeError, isHostAuthorizationError, type HostTransport, type HostAction } from './transport'
 
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
 export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coordinator<A>, 'cacheClaim' | 'cancelSession'> | undefined, bridge: HostTransport,
@@ -54,7 +54,9 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
   }
 
   async function poll() {
+    let failures = 0, lastWarning = ''
     while (!signal.aborted) {
+      let retryMs = 1000
       try {
         let after = ''
         do {
@@ -62,13 +64,29 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
           for (const action of [...page.actions].sort((a, b) => Number(b.kind === 'cancel') - Number(a.kind === 'cancel'))) {
             try { await deliver(action) }
             catch (error) {
-              if (!(error instanceof BridgeError && ['DELIVERY_PENDING', 'ACTION_CONSUMED'].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`)
+              if (isHostAuthorizationError(error)) throw error
+              if (!(error instanceof BridgeError && ['DELIVERY_PENDING', 'ACTION_CONSUMED'].includes(error.code)) && !signal.aborted) runtime.warn('lazymind-workflow: delivery pending; checking the previous receipt before retrying')
             }
           }
           after = page.next_page_token ?? ''
         } while (after && !signal.aborted)
-      } catch (error) { if (!signal.aborted) runtime.warn(`lazymind-workflow: reconnecting Bridge: ${String(error)}`) }
-      try { await delay(1000, signal) } catch { break }
+        failures = 0
+        lastWarning = ''
+      } catch (error) {
+        if (signal.aborted) break
+        const needsAuthorization = isHostAuthorizationError(error)
+        // A renewed login or repaired pairing can recover without restarting the
+        // host. Probe slowly while waiting; never replay a claimed delivery.
+        retryMs = needsAuthorization ? 30_000 : Math.min(30_000, 1000 * 2 ** Math.min(failures, 5))
+        failures++
+        const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : 'BRIDGE_UNAVAILABLE'
+        const warning = needsAuthorization
+          ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind`
+          : `lazymind-workflow: reconnecting Bridge (${code})`
+        if (warning !== lastWarning) runtime.warn(warning)
+        lastWarning = warning
+      }
+      try { await delay(retryMs, signal) } catch { break }
     }
   }
   return { deliver, poll }

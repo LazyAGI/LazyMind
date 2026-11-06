@@ -16,6 +16,17 @@ var BridgeError = class extends Error {
 		this.status = status;
 	}
 };
+function isHostAuthorizationError(error) {
+	return error instanceof BridgeError && (error.status === 401 || error.status === 403 || [
+		"HOST_PAIRING_MISSING",
+		"HOST_PAIRING_DISABLED",
+		"HOST_ACCOUNT_MISMATCH",
+		"HOST_CREDENTIAL_MISMATCH",
+		"HOST_PAIRING_INVALID",
+		"HOST_PAIRING_UNREADABLE",
+		"HOST_AUTH_REQUIRED"
+	].includes(error.code));
+}
 var HostBridge = class {
 	base;
 	constructor(url, pairing) {
@@ -39,7 +50,11 @@ var HostBridge = class {
 			},
 			...body === void 0 ? {} : { body: JSON.stringify(body) }
 		});
-		const value = await response.json();
+		const decoded = await response.json().catch(() => {
+			if (!response.ok) return {};
+			throw new Error("Invalid Workflow Bridge response");
+		});
+		const value = decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : {};
 		if (!response.ok) throw new BridgeError(typeof value.code === "string" ? value.code : "BRIDGE_ERROR", typeof value.error === "string" ? value.error : "Workflow Bridge request failed", response.status);
 		return value;
 	}
@@ -123,7 +138,9 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 		await bridge.settle(action.id, instanceId, claim.dispatch_token, "accepted", seq, "", signal);
 	}
 	async function poll() {
+		let failures = 0, lastWarning = "";
 		while (!signal.aborted) {
+			let retryMs = 1e3;
 			try {
 				let after = "";
 				do {
@@ -131,15 +148,25 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
-						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
+						if (isHostAuthorizationError(error)) throw error;
+						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn("lazymind-workflow: delivery pending; checking the previous receipt before retrying");
 					}
 					after = page.next_page_token ?? "";
 				} while (after && !signal.aborted);
+				failures = 0;
+				lastWarning = "";
 			} catch (error) {
-				if (!signal.aborted) runtime.warn(`lazymind-workflow: reconnecting Bridge: ${String(error)}`);
+				if (signal.aborted) break;
+				const needsAuthorization = isHostAuthorizationError(error);
+				retryMs = needsAuthorization ? 3e4 : Math.min(3e4, 1e3 * 2 ** Math.min(failures, 5));
+				failures++;
+				const code = error instanceof BridgeError && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : "BRIDGE_UNAVAILABLE";
+				const warning = needsAuthorization ? `lazymind-workflow: authorization required (${code}); sign in or repair the connection in LazyMind` : `lazymind-workflow: reconnecting Bridge (${code})`;
+				if (warning !== lastWarning) runtime.warn(warning);
+				lastWarning = warning;
 			}
 			try {
-				await delay(1e3, signal);
+				await delay(retryMs, signal);
 			} catch {
 				break;
 			}
@@ -356,9 +383,10 @@ var WorkBuddyAdapter = class {
 		return id;
 	}
 	warn(message) {
+		const authorization = message.includes("authorization required");
 		this.log("connector.warning", {
-			kind: message.includes("reconnecting Bridge") ? "bridge-unavailable" : "delivery-pending",
-			status: "retrying"
+			kind: authorization ? "authorization-required" : message.includes("reconnecting Bridge") ? "bridge-unavailable" : "delivery-pending",
+			status: authorization ? "waiting-for-authorization" : "retrying"
 		});
 	}
 	probe(signal) {
@@ -1249,16 +1277,17 @@ function createDiagnostics(connectorId, sink = console.log) {
 		} catch {}
 	};
 }
-function diagnosedTransport(bridge, log) {
+function diagnosedTransport(bridge, log, health) {
+	const tracked = (request) => health ? health.track("workflow", request) : request();
 	return {
-		bind: (...args) => bridge.bind(...args),
-		state: (...args) => bridge.state(...args),
-		actions: (...args) => bridge.actions(...args),
-		action: (...args) => bridge.action(...args),
+		bind: (...args) => tracked(() => bridge.bind(...args)),
+		state: (...args) => tracked(() => bridge.state(...args)),
+		actions: (...args) => tracked(() => bridge.actions(...args)),
+		action: (...args) => tracked(() => bridge.action(...args)),
 		async claim(...args) {
 			const started = performance.now();
 			try {
-				const result = await bridge.claim(...args), a = result.action;
+				const result = await tracked(() => bridge.claim(...args)), a = result.action;
 				log("action.claim", {
 					action_id: a.id,
 					run_id: a.session_id,
@@ -1281,7 +1310,7 @@ function diagnosedTransport(bridge, log) {
 		async settle(...args) {
 			const started = performance.now();
 			try {
-				await bridge.settle(...args);
+				await tracked(() => bridge.settle(...args));
 				log("action.settle", {
 					action_id: args[0],
 					status: args[3],
@@ -1298,6 +1327,89 @@ function diagnosedTransport(bridge, log) {
 		}
 	};
 }
+
+//#endregion
+//#region src/bridge-health.ts
+const pairingIssues = {
+	HOST_PAIRING_MISSING: "pairing_required",
+	HOST_PAIRING_DISABLED: "pairing_disabled",
+	HOST_ACCOUNT_MISMATCH: "pairing_account_mismatch",
+	HOST_CREDENTIAL_MISMATCH: "pairing_credential_mismatch",
+	HOST_PAIRING_INVALID: "pairing_invalid",
+	HOST_PAIRING_UNREADABLE: "pairing_unreadable"
+};
+var BridgeHealth = class {
+	sources = {
+		workflow: {
+			issue: "lazymind_unavailable",
+			revision: 0,
+			failures: 0,
+			retryAt: 0
+		},
+		workbuddy: {
+			issue: "lazymind_unavailable",
+			revision: 0,
+			failures: 0,
+			retryAt: 0
+		}
+	};
+	constructor(changed = () => {}) {
+		this.changed = changed;
+	}
+	issue() {
+		const issues = Object.values(this.sources).map((value) => value.issue);
+		return issues.find((issue) => issue && issue !== "lazymind_unavailable") || issues.find(Boolean) || "";
+	}
+	retryAfter(source) {
+		return Math.max(0, this.sources[source].retryAt - Date.now());
+	}
+	async wait(source, signal) {
+		signal.throwIfAborted();
+		while (this.retryAfter(source) > 0) {
+			await new Promise((resolve, reject) => {
+				const stop = () => {
+					clearTimeout(timer);
+					reject(signal.reason);
+				};
+				const timer = setTimeout(() => {
+					signal.removeEventListener("abort", stop);
+					resolve();
+				}, this.retryAfter(source));
+				signal.addEventListener("abort", stop, { once: true });
+			});
+			signal.throwIfAborted();
+		}
+	}
+	async track(source, request) {
+		const state = this.sources[source], revision = state.revision;
+		const update = (issue, retry) => {
+			const before = this.issue();
+			state.issue = issue;
+			state.retryAt = retry ? Date.now() + retry : 0;
+			if (before !== this.issue()) try {
+				this.changed(this.issue());
+			} catch {}
+		};
+		try {
+			const result = await request();
+			if (state.revision === revision) {
+				state.failures = 0;
+				update("", 0);
+			}
+			return result;
+		} catch (error) {
+			if (isHostAuthorizationError(error)) {
+				state.revision++;
+				update(pairingIssues[error.code] || "lazymind_auth_required", 3e4);
+			} else if (!(error instanceof BridgeError) || error.status >= 500) {
+				state.revision++;
+				state.failures++;
+				update(state.issue && state.issue !== "lazymind_unavailable" ? state.issue : "lazymind_unavailable", Math.min(3e4, 1e3 * 2 ** Math.min(state.failures - 1, 5)));
+			}
+			throw error;
+		}
+	}
+};
 
 //#endregion
 //#region src/main.ts
@@ -1352,7 +1464,11 @@ async function main() {
 	const cdp = new Cdp(Number(values["cdp-port"]));
 	const log = createDiagnostics(pairing.connector_id);
 	const adapter = new WorkBuddyAdapter(cdp, log);
-	const transport = diagnosedTransport(bridge, log);
+	const bridgeHealth = new BridgeHealth((issue) => log("connector.warning", {
+		kind: "bridge-health",
+		status: issue || "connected"
+	}));
+	const transport = diagnosedTransport(bridge, log, bridgeHealth);
 	const instance = randomUUID();
 	const unlock = await dispatcherLock(path, instance);
 	const timer = setInterval(async () => {
@@ -1376,7 +1492,7 @@ async function main() {
 			try {
 				const probe = await adapter.probe(signal);
 				version = probe.version;
-				issue = probe.issue || "";
+				issue = probe.issue || bridgeHealth.issue();
 				ready = !issue;
 			} catch {}
 			try {
@@ -1400,19 +1516,26 @@ async function main() {
 		}
 	}
 	const request = async (route, body) => {
-		const response = await fetch(values["bridge-url"] + "/v1/workbuddy/" + route, {
-			method: body === void 0 ? "GET" : "POST",
-			redirect: "error",
-			signal: AbortSignal.any([signal, AbortSignal.timeout(15e3)]),
-			headers: {
-				Authorization: `Bearer ${pairing.token}`,
-				"X-LazyMind-Connector-Id": pairing.connector_id,
-				...body === void 0 ? {} : { "content-type": "application/json" }
-			},
-			...body === void 0 ? {} : { body: JSON.stringify(body) }
+		await bridgeHealth.wait("workbuddy", signal);
+		return bridgeHealth.track("workbuddy", async () => {
+			const response = await fetch(values["bridge-url"] + "/v1/workbuddy/" + route, {
+				method: body === void 0 ? "GET" : "POST",
+				redirect: "error",
+				signal: AbortSignal.any([signal, AbortSignal.timeout(15e3)]),
+				headers: {
+					Authorization: `Bearer ${pairing.token}`,
+					"X-LazyMind-Connector-Id": pairing.connector_id,
+					...body === void 0 ? {} : { "content-type": "application/json" }
+				},
+				...body === void 0 ? {} : { body: JSON.stringify(body) }
+			});
+			const value = await response.json().catch(() => {
+				if (!response.ok) return {};
+				throw new Error("Invalid WorkBuddy bridge response");
+			});
+			if (!response.ok) throw new BridgeError(typeof value?.code === "string" ? value.code : "BRIDGE_ERROR", "WorkBuddy bridge unavailable", response.status);
+			return value;
 		});
-		if (!response.ok) throw Object.assign(/* @__PURE__ */ new Error("WorkBuddy bridge unavailable"), { status: response.status });
-		return response.json();
 	};
 	async function identities() {
 		while (!signal.aborted) {

@@ -25,8 +25,10 @@ type Action struct {
 }
 
 type Issue struct {
-	Code string `json:"code"`
-	Path string `json:"path,omitempty"`
+	Code        string `json:"code"`
+	Path        string `json:"path,omitempty"`
+	Stage       string `json:"stage,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
 }
 
 type LoginStatus struct {

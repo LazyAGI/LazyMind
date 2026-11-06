@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	workbuddyadapter "lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/connectorconfig"
@@ -87,11 +88,13 @@ func New(kind Kind, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 }
 
 var workBuddyStartupHealth = workbuddyhost.StartupHealth
+var workBuddyAuthentication = workbuddyadapter.AuthenticationStatus
 
 func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
 	status := a.status(ctx)
 	if a.kind == WorkBuddy {
 		status = agentintegration.ApplyPreference(a.home, "workbuddy", status)
+		status.CanConnect = !agentintegration.MissingRequirement(status.Requirements) && status.State != agentintegration.Conflict && len(status.Requirements) > 0
 		if status.Enabled != nil && *status.Enabled && status.State == agentintegration.Enabled {
 			store, err := credentials.NewStore(a.home, "")
 			if err == nil {
@@ -109,11 +112,25 @@ func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
 }
 
 func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) {
+	var operation *workBuddyOperation
+	if a.kind == WorkBuddy {
+		operation = newWorkBuddyOperation(a.home)
+		defer func() { operation.finish(&result) }()
+		operation.enter("inspect")
+	}
 	defer func() {
 		if a.kind == WorkBuddy {
 			defer func() { result = agentintegration.ApplyPreference(a.home, "workbuddy", result) }()
 		}
 		if a.kind == WorkBuddy && result.State == agentintegration.Failed {
+			if result.Issue == nil {
+				code := map[string]string{"inspect": "configuration_failed", "probe": "lazymind_unavailable", "pairing": "pairing_required", "configuration": "configuration_failed", "restart": "launch_failed", "control": "host_unavailable"}[operation.stage]
+				if code == "" {
+					code = "operation_failed"
+				}
+				result.Issue = &agentintegration.Issue{Code: code}
+			}
+			result.Issue.Stage, result.Issue.OperationID = operation.stage, operation.id
 			sanitizeWorkBuddyFailure(&result)
 			// Installation may have written the owned entry before startup failed.
 			if state, err := readManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID); err == nil {
@@ -129,6 +146,11 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 		bounded, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
 		ctx = bounded
+		unlock, err := lockWorkBuddyOperation(ctx, a.home)
+		if err != nil {
+			return workBuddyFailure(agentintegration.Status{Agent: "workbuddy", DisplayName: "WorkBuddy"}, workBuddyLockError(err))
+		}
+		defer unlock()
 	}
 	status := a.Status(ctx)
 	if a.kind == WorkBuddy {
@@ -137,12 +159,13 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	if status.State != agentintegration.Ready && !(a.kind == WorkBuddy && status.State == agentintegration.Enabled) {
 		return status
 	}
-	if a.kind == WorkBuddy {
-		if err := integrationstate.Set(a.home, "workbuddy", true); err != nil {
-			return agentintegration.Fail(status, err.Error())
-		}
+	if operation != nil {
+		operation.enter("probe")
 	}
 	if _, err := a.bridge.Probe(ctx); err != nil {
+		if a.kind == WorkBuddy {
+			return workBuddyFailure(status, err)
+		}
 		return agentintegration.Fail(status, "LazyMind MCP is unavailable: "+err.Error())
 	}
 	if a.kind == Cursor {
@@ -158,19 +181,36 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 		return status
 	}
 	if a.kind == WorkBuddy {
+		operation.enter("compatibility")
 		if err := workbuddyhost.Preflight(); err != nil {
 			return workBuddyFailure(status, err)
 		}
+		operation.enter("login")
+		auth := workBuddyAuthentication()
+		if auth.LoginRequired {
+			status.State = agentintegration.ActionRequired
+			status.Action = &agentintegration.Action{Kind: "login"}
+			status.Issue = &agentintegration.Issue{Code: "workbuddy_login_required"}
+			status.Message = "Sign in to WorkBuddy to continue the connection."
+			return status
+		}
+		if !auth.Ready {
+			return workBuddyFailure(status, &workbuddyhost.SetupError{Code: "workbuddy_auth_unreadable", Err: errors.New(auth.Message)})
+		}
+		operation.enter("pairing")
 		store, err := credentials.NewStore(a.home, "")
 		if err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, err)
 		}
 		account, err := store.AccountScope()
 		if err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, &workbuddyhost.SetupError{Code: "lazymind_auth_required", Err: err})
+		}
+		if err := integrationstate.Set(a.home, "workbuddy", true); err != nil {
+			return workBuddyFailure(status, err)
 		}
 		if err := workbuddyhost.Install(ctx, a.home, userPath(".workbuddy"), account); err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, err)
 		}
 	}
 	controlled := false
@@ -181,7 +221,13 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 			return agentintegration.Fail(status, err.Error())
 		}
 	}
+	if operation != nil {
+		operation.enter("configuration")
+	}
 	if err := writeManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID, controlled); err != nil {
+		if a.kind == WorkBuddy {
+			return workBuddyFailure(status, err)
+		}
 		return agentintegration.Fail(status, err.Error())
 	}
 	if a.kind == WorkBuddy {
@@ -189,29 +235,52 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 		defer cancel()
 		store, err := credentials.NewStore(a.home, "")
 		if err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, err)
 		}
 		account, err := store.AccountScope()
 		if err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, err)
 		}
 		config, _, err := workbuddyhost.Load(a.home, account)
 		if err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, err)
 		}
 		// Reconnect also reloads the newly written MCP configuration.
+		operation.enter("restart")
 		if err := workbuddyhost.PrepareDesktop(setup, config.CDPPort, true); err != nil {
-			return agentintegration.Fail(status, err.Error())
+			return workBuddyFailure(status, err)
 		}
+		operation.enter("control")
 		if err := workbuddyhost.WaitReady(setup, a.home, account, time.Now()); err != nil {
 			return workBuddyFailure(status, err)
 		}
+	}
+	if operation != nil {
+		operation.enter("verify")
 	}
 	return a.status(ctx)
 }
 
 func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Status) {
 	if a.kind == WorkBuddy {
+		operation := newWorkBuddyOperation(a.home)
+		operation.enter("disconnect")
+		defer func() {
+			if result.State == agentintegration.Failed {
+				if result.Issue == nil {
+					result.Issue = &agentintegration.Issue{Code: "configuration_failed"}
+				}
+				result.RetryAction = "disconnect"
+				result.Issue.Stage, result.Issue.OperationID = operation.stage, operation.id
+				sanitizeWorkBuddyFailure(&result)
+			}
+			operation.finish(&result)
+		}()
+		unlock, err := lockWorkBuddyOperation(ctx, a.home)
+		if err != nil {
+			return workBuddyFailure(agentintegration.Status{Agent: "workbuddy", DisplayName: "WorkBuddy"}, workBuddyLockError(err))
+		}
+		defer unlock()
 		defer func() { result = agentintegration.ApplyPreference(a.home, "workbuddy", result) }()
 		if err := integrationstate.Set(a.home, "workbuddy", false); err != nil {
 			return agentintegration.Fail(a.Status(ctx), err.Error())
@@ -272,6 +341,8 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 	if a.kind == WorkBuddy && state.configured && state.owned && state.current {
 		state.current = false
 		status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, PresentationStatus: "host-offline"}
+		status.Connection.MCPTrusted, status.Connection.MCPEnabled = workbuddySetup(configPath(a.kind))
+		status.Issue = &agentintegration.Issue{Code: "pairing_required"}
 		status.Message = "Enable the connection to start WorkBuddy and connect Workflow session control."
 		store, err := credentials.NewStore(a.home, "")
 		if err == nil {
@@ -279,9 +350,14 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 			config, pair, configErr := workbuddyhost.Load(a.home, account)
 			if scopeErr != nil || configErr != nil {
 				state.current = false
-				status.Message = "Reconnect WorkBuddy to configure the independent Workflow connector."
+				if scopeErr != nil {
+					status.Issue.Code = "lazymind_auth_required"
+				} else if code := workBuddyPairingIssue(configErr); code != "" {
+					status.Issue.Code = code
+				}
+				status.Message = workBuddyIssueMessage(status.Issue.Code)
 			} else {
-				status.Connection.MCPTrusted, status.Connection.MCPEnabled = workbuddySetup(configPath(a.kind))
+				status.Issue = nil
 				// A temporary outage must not turn the user's enabled switch off
 				// or prevent disconnecting. Health is reported independently.
 				state.current = true
@@ -301,6 +377,16 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 				} else {
 					status.Issue = &agentintegration.Issue{Code: "host_unavailable"}
 					status.Message = workBuddyIssueMessage("host_unavailable")
+				}
+				// Persisted trust and enable choices are independent of CDP.
+				// Healthy control alone must never advertise a usable MCP connection.
+				if status.Issue == nil && (!status.Connection.MCPTrusted || !status.Connection.MCPEnabled) {
+					code := "mcp_enable_required"
+					if !status.Connection.MCPTrusted {
+						code = "mcp_trust_required"
+					}
+					status.Issue = &agentintegration.Issue{Code: code}
+					status.Message = workBuddyIssueMessage(code)
 				}
 			}
 		}

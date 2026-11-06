@@ -779,7 +779,7 @@ function startAgentLogin(agent) {
     login.child = child;
     login.timer = setTimeout(() => {
       finish("failed", "Login timed out. Try signing in again.");
-      stopAgentLoginProcess(child);
+      stopAgentLoginProcess(child, agent);
     }, agentConnectorLoginTimeoutMs);
     child.stdout?.on("data", (chunk) => { stdout = (stdout + chunk).slice(-65536); });
     child.stderr?.on("data", (chunk) => { stderr = (stderr + chunk).slice(-8192); });
@@ -830,11 +830,17 @@ function clearAgentLogin(agent) {
   agentLogins.delete(agent);
   if (!login) return;
   clearTimeout(login.timer);
-  if (login.status.state === "running") stopAgentLoginProcess(login.child);
+  if (login.status.state === "running") stopAgentLoginProcess(login.child, agent);
 }
 
-function stopAgentLoginProcess(child) {
+function stopAgentLoginProcess(child, agent) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  // WorkBuddy login opens the native desktop. Cancel only our waiter so its
+  // window and user sessions survive timeout/cancellation.
+  if (agent === "workbuddy") {
+    child.kill();
+    return;
+  }
   if (isWindows && Number.isInteger(child.pid) && child.pid > 0) {
     execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
       windowsHide: true,
