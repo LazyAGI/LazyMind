@@ -81,10 +81,21 @@ def test_retry_with_new_input_paths_and_three_images_preserves_every_material(ru
         assert all(f'../images/material_{n:02d}.png' in saved for n in range(1, 4))
 
 
-def test_missing_image_fails_after_one_repair_and_preserves_previous_page(runtime, deck):
+def test_prose_slash_before_registered_image_is_preserved(runtime, deck):
+    source = deck / 'images/material_01.png'
+    canonical = '../images/material_01.png'
+    prefix = 'Format landscape / 16:9, use '
+    code, result, calls = generate(runtime, deck, f'{prefix}{source}', [html([canonical])])
+    assert code == 0 and result['status'] == 'ok'
+    assert calls == [f'{prefix}{canonical}']
+    assert f'src="{canonical}"' in (deck / 'pages/page_001.html').read_text()
+
+
+@pytest.mark.parametrize('wrap', ['{}', '`{}`'])
+def test_missing_image_fails_after_one_repair_and_preserves_previous_page(runtime, deck, wrap):
     previous = html(['../images/material_01.png'])
     (deck / 'pages/page_001.html').write_text(previous)
-    code, result, calls = generate(runtime, deck, old_input(deck, 1), [html([])])
+    code, result, calls = generate(runtime, deck, wrap.format(old_input(deck, 1)), [html([])])
     assert code != 0 and result['status'] == 'failed'
     assert 'material_01.png' in result['error']
     assert len(calls) == 2 and 'MANDATORY CORRECTION' in calls[1]

@@ -8,10 +8,11 @@ from html import unescape
 from pathlib import Path
 from urllib.parse import unquote
 
-# Match local paths, including spaces, without matching paths inside HTTP URLs.
+# Keep spaces inside paths, but do not start at a standalone prose slash.
+# Quotes and backticks delimit paths without becoming part of the alias.
 _LOCAL_IMAGE = re.compile(
-    r'(?<![\w:/])(?:file://)?(?:/|[A-Za-z]:[\\/]|\.{1,2}/|images/)'
-    r"[^\n<>\"']+?\.(?:png|jpe?g|gif|webp|bmp|svg)(?=$|[\s\"'<>),;，。])", re.I,
+    r'(?<![\w:/])(?:file://)?(?:/(?!\s)|[A-Za-z]:[\\/]|\.{1,2}/|images/)'
+    r"[^\n<>\"'`]+?\.(?:png|jpe?g|gif|webp|bmp|svg)(?=$|[\s\"'`<>),;，。])", re.I,
 )
 _IMG_SRC = re.compile(r"(<img\b[^>]*?\bsrc\s*=\s*)([\"'])(.*?)\2", re.I)
 
