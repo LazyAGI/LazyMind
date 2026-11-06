@@ -115,6 +115,22 @@ def _reference_match_text(value: str) -> str:
     return ''.join(character.lower() for character in value if character.isalnum())
 
 
+def _has_two_text_columns(lines: list[dict[str, object]], page_width: float) -> bool:
+    midpoint = page_width / 2
+    gutter = page_width * 0.01
+    left = [line['bbox'] for line in lines
+            if line['bbox'][0] < midpoint - gutter and line['bbox'][2] <= midpoint + gutter]
+    right = [line['bbox'] for line in lines
+             if line['bbox'][0] >= midpoint - gutter and line['bbox'][2] > midpoint + gutter]
+    if len(left) < 2 or len(right) < 2 or (len(left) + len(right)) * 2 < len(lines):
+        return False
+    # Separate columns have independent text on the same horizontal rows.
+    # Right-aligned DOI/URL continuations in a single column follow the text
+    # above them, so they do not provide this evidence.
+    aligned = sum(any(a[1] < b[3] and b[1] < a[3] for a in left) for b in right)
+    return aligned >= 2 and aligned * 2 >= len(right)
+
+
 def _pdf_reference_lines(document: fitz.Document) -> list[dict[str, object]]:
     lines: list[dict[str, object]] = []
     for page_index, page in enumerate(document):
@@ -135,13 +151,15 @@ def _pdf_reference_lines(document: fitz.Document) -> list[dict[str, object]]:
                         'text': text,
                         'normalized': normalized,
                     })
-        # Scientific PDFs are commonly two-column. Reading the complete left
-        # column before the right column preserves bibliography entry order.
-        midpoint = float(page.rect.width) / 2
-        page_lines.sort(key=lambda item: (
-            0 if (item['bbox'][0] + item['bbox'][2]) / 2 < midpoint else 1,
-            item['bbox'][1], item['bbox'][0],
-        ))
+        if _has_two_text_columns(page_lines, float(page.rect.width)):
+            # Read the complete left column before the right column.
+            midpoint = float(page.rect.width) / 2
+            page_lines.sort(key=lambda item: (
+                0 if item['bbox'][0] < midpoint else 1,
+                item['bbox'][1], item['bbox'][0],
+            ))
+        else:
+            page_lines.sort(key=lambda item: (item['bbox'][1], item['bbox'][0]))
         lines.extend(page_lines)
     return lines
 
@@ -180,6 +198,15 @@ def _locate_reference_regions(document: fitz.Document, references: list[str]) ->
     for index, (needle, start) in enumerate(zip(needles, starts)):
         next_start = next((value for value in starts[index + 1:] if value >= 0), -1)
         end = next_start
+        if start >= 0 and next_start >= 0:
+            # The reference key ([46], for example) is present in the PDF
+            # line but removed from extracted reference text. Its match starts
+            # inside the next line, so stop at that line's beginning.
+            for line_start, line_end in offsets:
+                if line_start <= next_start < line_end:
+                    if line_start > start:
+                        end = line_start
+                    break
         if start >= 0 and end < 0:
             tail = needle[-min(28, max(12, len(needle) // 5)):]
             tail_at = stream.find(tail, start + min(12, len(needle)))

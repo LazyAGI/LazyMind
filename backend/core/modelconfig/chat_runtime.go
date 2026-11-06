@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/modelprovider"
 )
 
@@ -176,6 +177,7 @@ type ChatRuntimeConfig struct {
 	Models      []AvailableChatModel
 	Candidates  []ChatModelCandidate
 	credentials runtimeCredentials
+	db          *gorm.DB
 }
 
 type runtimeCredentialKey struct {
@@ -183,9 +185,11 @@ type runtimeCredentialKey struct {
 	revision int64
 }
 type runtimeCredentialResult struct {
-	key     string
-	baseURL string
-	err     error
+	key      string
+	baseURL  string
+	advanced credentialvault.ProviderRequestAdvanced
+	protocol string
+	err      error
 }
 type runtimeCredentials map[runtimeCredentialKey]runtimeCredentialResult
 
@@ -228,7 +232,7 @@ func loadChatModelCandidates(ctx context.Context, db *gorm.DB, userID string, ca
 	if err != nil {
 		return nil, err
 	}
-	result := &ChatRuntimeConfig{Models: models, credentials: cache}
+	result := &ChatRuntimeConfig{Models: models, credentials: cache, db: db}
 	cloudID := ""
 	if db != nil && db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
 		var selected orm.UserSelectedCloudModel
@@ -285,6 +289,20 @@ func (result *ChatRuntimeConfig) PrepareCandidate(ctx context.Context, model Ava
 			return nil
 		}
 		row.APIKey = key
+		cacheKey := runtimeCredentialKey{groupID: model.ProviderGroupID, revision: model.CredentialRevision}
+		cached := result.credentials[cacheKey]
+		if cached.protocol == "" && result.db != nil && model.ProviderID != "" {
+			var provider orm.UserModelProvider
+			if result.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", model.ProviderID).Take(&provider).Error == nil {
+				advanced, err := modelprovider.ResolveProviderRequestAdvanced(provider)
+				if err != nil {
+					return nil
+				}
+				cached.advanced, cached.protocol = advanced, modelprovider.RuntimeRequestProtocol(provider)
+				result.credentials[cacheKey] = cached
+			}
+		}
+		row.RequestAdvanced, row.RequestProtocol = cached.advanced, cached.protocol
 		// Match the regular runtime path for endpoints that do not require a key.
 		row.SkipAuth = strings.TrimSpace(key) == "" && strings.TrimSpace(row.BaseURL) != ""
 	}

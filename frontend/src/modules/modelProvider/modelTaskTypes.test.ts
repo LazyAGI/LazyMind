@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import zhCN from "@/i18n/locales/zh-CN";
 import {
   availableModelTaskTypes,
   getModelTaskDescriptionKey,
@@ -79,6 +80,11 @@ describe("model task types", () => {
     expect(getModelTaskDescriptionKey("unknown")).toBe(
       "modelProvider.taskTypeDescription.unknown",
     );
+  });
+
+  it("keeps optional visual and tool abilities out of the generic chat description", () => {
+    expect(zhCN.modelProvider.taskTypeDescription.chat).not.toMatch(/视觉|工具调用/);
+    expect(zhCN.modelProvider.visionSupported).toContain("视觉");
   });
 
   it("ships all task logos with their own solid backgrounds and white glyphs", () => {

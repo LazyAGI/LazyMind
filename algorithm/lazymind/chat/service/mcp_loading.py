@@ -10,7 +10,8 @@ _MAX_CONCURRENT_SERVICES = 4
 def mcp_naming_options(server):
     from lazyllm.tools.mcp.tool_adaptor import MCPToolNameError
     builtins = {'lazymind-knowledge': ('kbmanager', 'knowledge.'),
-                'lazymind-browser': ('browser', 'browser.')}
+                'lazymind-browser': ('browser', 'browser.'),
+                'lazymind-vocabulary': ('vocabulary', 'vocabulary.')}
     name, prefix = builtins.get(server.get('id'), (server.get('name'), ''))
     if not isinstance(name, str) or not name.strip():
         raise MCPToolNameError('MCP tool name requires a non-empty server name')

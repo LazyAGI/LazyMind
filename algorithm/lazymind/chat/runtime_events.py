@@ -46,6 +46,7 @@ class RunAccumulator:
     ask_pending: bool = False
     terminal_emitted: bool = False
     last_model_terminal: Optional[Dict[str, Any]] = None
+    failure_terminal: Optional[Dict[str, Any]] = None
     fallback_code: str = ''
 
     def observe_model_event(self, event: Dict[str, Any]) -> None:
@@ -66,7 +67,8 @@ class RunAccumulator:
             'partial_output': self.semantic_output,
         }
         if code: data['code'] = code
-        terminal = self.last_model_terminal or {}
+        terminal = (self.failure_terminal if outcome == RunOutcome.FAILED and self.fallback_code == 'model_failure'
+                    else None) or self.last_model_terminal or {}
         if terminal.get('model_call_id'):
             data['model_call_id'] = terminal['model_call_id']
         failure = terminal.get('failure')
@@ -84,7 +86,8 @@ class RunAccumulator:
             return 'failed', 'runtime_failure', 'runtime_failure'
         if self.fallback_code in {'model_fallback_exhausted', 'model_context_not_fit'}:
             return 'failed', 'model_failure', self.fallback_code
-        terminal = self.last_model_terminal or {}
+        terminal = (self.failure_terminal if self.fallback_code == 'model_failure' else None) \
+            or self.last_model_terminal or {}
         if terminal.get('kind') == 'finish':
             finish = str(terminal.get('finish') or 'unknown')
             if finish in INCOMPLETE_MODEL_FINISHES:

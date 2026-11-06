@@ -4,10 +4,10 @@ import { usePaperImports, PaperImportDialog } from './usePaperImports';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
 import { Alert, Button, Checkbox, Dropdown, Input, Modal, Popover, Pagination, Select, Spin, Tooltip, message } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
-import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, SettingOutlined, HolderOutlined, EllipsisOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, SettingOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, paperBelongsToFolders, paperFolderPath, filterPapers, filterLibraryView, formatCitation, paperLink, venueName, safePaperUrl, statusLabel, type PaperEdits, type CitationStyle, type LibraryView, type PaperRecord, type PaperLibraryData, type ReadingStatus } from "./model";
-import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, removeLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
+import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, deleteLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
 import { emptyLibrary } from "./libraryModel";
 import PaperDetailDrawer, { type PaperDetailTab } from "./PaperDetailDrawer";
 import RestartKnowledgeModal, { type IRestartKnowledgeProps } from "../pages/detail/components/RestartKnowledgeModal";
@@ -477,14 +477,26 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
         if (disabled || busyRef.current)
             return;
         const papers = dataRef.current.papers.filter(p => ids.includes(p.id));
-        try {
-            await mutate(() => removeLibraryPapers(datasetId, papers), { id: `paper-remove:${papers.map(paper => paper.id).sort().join(",")}`, title: `${papers.length} 篇论文移除失败` });
-            setSyncRevision(value => value + 1);
-            setSelected(current => current.filter(id => !ids.includes(id)));
-            if (editing && ids.includes(editing.id))
-                setEditing(null);
-        }
-        catch { /* The failed operation remains in paper notifications. */ }
+        await mutate(async () => {
+            const changes = await deleteLibraryPapers(datasetId, papers);
+            if (changes.cleanupPending)
+                notify({ id: "paper-delete-cleanup", title: "论文已删除，文件清理未完成", message: "论文已从本库删除；部分源文件或检索数据清理失败，请联系管理员检查。" });
+            return changes;
+        }, { id: `paper-delete:${papers.map(paper => paper.id).sort().join(",")}`, title: `${papers.length} 篇论文删除失败` });
+        setSyncRevision(value => value + 1);
+        setSelected(current => current.filter(id => !ids.includes(id)));
+        if (editing && ids.includes(editing.id))
+            setEditing(null);
+    };
+    const confirmDeletePapers = (ids: string[]) => {
+        const papers = dataRef.current.papers.filter(p => ids.includes(p.id));
+        if (!papers.length) return;
+        Modal.confirm({
+            title: `彻底删除 ${papers.length} 篇论文？`,
+            content: '将删除这些论文在本库中的原文件、附件和笔记，无法撤销。其他知识库中的副本不受影响。若只想整理目录，请选择“从此文件夹中移出”。',
+            okText: '彻底删除', cancelText: '取消', okButtonProps: { danger: true },
+            onOk: () => dropPapers(ids),
+        });
     };
     const placePapers = async (ids: string[], folder: string) => {
         if (disabled || busyRef.current)
@@ -687,7 +699,8 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
           <div className="paper-library-selection-summary"><Button type="text" size="small" aria-label="取消选择" icon={<CloseOutlined />} onClick={() => setSelected([])}/><span>已选 <strong>{selectedPapers.length}</strong> 篇</span></div>
           <Dropdown trigger={["click"]} menu={{ items: (Object.keys(statusLabel) as ReadingStatus[]).map(status => ({ key: status, label: `标为${statusLabel[status]}`, onClick: () => void updateReadingStatuses(selectedPapers, status) })) }}><Button type="text" size="small" disabled={personalDisabled}>阅读状态<DownOutlined/></Button></Dropdown>
           <Dropdown trigger={["click"]} menu={{ items: folderOptions.map((folder) => ({ key: folder.value, label: folder.label, onClick: () => placePapers(selected, folder.value) })) }}><Button type="text" size="small" disabled={disabled} icon={<FolderOutlined />}>移动到<DownOutlined /></Button></Dropdown>
-          <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇文献？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
+          <Button type="text" size="small" disabled={disabled || !selectedPapers.some(paper => paper.folderId || paper.collectionIds?.length)} onClick={() => void placePapers(selected, 'none')}>从文件夹中移出</Button>
+          <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => confirmDeletePapers(selected)}>彻底删除</Button>
           </div>)}
           <div className="paper-library-table-scroll" aria-busy={initialLoading || loading}>
           <table className="paper-library-table" aria-label="论文列表">
@@ -760,7 +773,8 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                         title: reparseDisabledReason(item), onClick: () => openReparse(item) },
                     { type: "divider" },
                     { key: "move", label: "移动到", disabled, children: folderOptions.map((option) => ({ key: option.value, label: option.label, onClick: () => placePapers([item.id], option.value) })) },
-                    { key: "remove", label: "从论文集移除", disabled, danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇文献？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
+                    { key: "unfile", label: "从文件夹中移出", disabled: disabled || !(item.folderId || item.collectionIds?.length), onClick: () => void placePapers([item.id], 'none') },
+                    { key: "delete", label: "彻底删除", disabled, danger: true, onClick: () => confirmDeletePapers([item.id]) },
                 ] }}>
                     <button type="button" className="paper-library-more" aria-label={`${item.metadata.title} 的更多操作`}><EllipsisOutlined /></button>
                   </Dropdown>

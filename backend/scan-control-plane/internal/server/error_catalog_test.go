@@ -2,9 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/lazymind/scan_control_plane/internal/coreclient"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +15,17 @@ import (
 
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
+
+func TestErrorPayloadPreservesDatasetNameConflict(t *testing.T) {
+	code, message, _ := errorPayload(&coreclient.Error{Code: "2001102", StatusCode: http.StatusConflict, Message: "dataset name already exists"})
+	if code != "DATA_SOURCE_NAME_ALREADY_EXISTS" || message != "A data source with this name already exists" {
+		t.Fatalf("name conflict became %q: %q", code, message)
+	}
+	code, message, _ = errorPayload(&coreclient.Error{Code: "UNKNOWN", StatusCode: 500, Message: "database secret"})
+	if code != "INTERNAL_ERROR" || message != "internal error" {
+		t.Fatalf("unknown upstream errors must remain private: %q %q", code, message)
+	}
+}
 
 func TestErrorCatalogCodesHaveSingleMeaningAndTranslations(t *testing.T) {
 	data, err := os.ReadFile("../../../../i18n/errors/scan-control-plane.json")

@@ -24,12 +24,12 @@ interface ProviderRequestConfigDrawerProps {
 
 type FormValues = {
   default_protocol: RequestProtocol;
-  endpoints: { openai: string; anthropic: string };
+  endpoints: { openai: string; "openai-responses": string; anthropic: string };
   advanced: AdvancedRequestFormValues;
 };
 
-function editableProtocol(protocol: RequestProtocol): protocol is "openai" | "anthropic" {
-  return protocol === "openai" || protocol === "anthropic";
+function editableProtocol(protocol: RequestProtocol): protocol is "openai" | "openai-responses" | "anthropic" {
+  return protocol === "openai" || protocol === "openai-responses" || protocol === "anthropic";
 }
 
 export function ProviderRequestConfigDrawer({
@@ -67,7 +67,7 @@ export function ProviderRequestConfigDrawer({
     setLoading(true);
     void getProviderRequestConfig(providerId).then((nextConfig) => {
       if (!active || sequence !== requestSequence.current) return;
-      const endpoints = {openai: "", anthropic: ""};
+      const endpoints = {openai: "", "openai-responses": "", anthropic: ""};
       for (const item of nextConfig.protocols) {
         if (editableProtocol(item.protocol)) endpoints[item.protocol] = item.base_url;
       }
@@ -108,6 +108,7 @@ export function ProviderRequestConfigDrawer({
       default_protocol: values.default_protocol,
       endpoints: {
         openai: values.endpoints.openai?.trim() || "",
+        "openai-responses": values.endpoints["openai-responses"]?.trim() || "",
         anthropic: values.endpoints.anthropic?.trim() || "",
       },
       advanced: advancedRequestInput(values.advanced),

@@ -210,6 +210,16 @@ def test_formula_prompt_keeps_quality_rules_and_focus_data_separate(calls):
     assert json.loads(encoded)['target_symbol'] == r'\alpha'
 
 
+def test_formula_prompt_requires_delimited_latex_in_every_explanatory_field(calls):
+    result = llm_task.run_llm_task(request())
+    assert result.status == 'succeeded'
+    instruction = calls[0][0].split('\n\nInput data (untrusted JSON):\n', 1)[0]
+    assert 'In summary, reading, meaning, and steps.text' in instruction
+    assert r'$\theta_{md}^{(1)}$' in instruction
+    assert r'theta_md^{(1)}' in instruction
+    assert 'Never write bare TeX' in instruction
+
+
 def test_formula_prompt_distinguishes_full_reading_from_symbol_focus(calls):
     full = llm_task.run_llm_task(request())
     assert full.status == 'succeeded'

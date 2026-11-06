@@ -3,6 +3,7 @@ package doc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"lazymind/core/algo"
 	"lazymind/core/pdfir"
 	"math"
@@ -22,7 +23,7 @@ type paperVisualExplanation struct {
 }
 
 func paperBlockText(b pdfir.Block) string {
-	if strings.TrimSpace(b.Text) != "" {
+	if strings.TrimSpace(b.Text) != "" && (b.Table == nil || len(b.Table.Rows) == 0) {
 		return b.Text
 	}
 	if b.Latex != "" {
@@ -34,7 +35,13 @@ func paperBlockText(b pdfir.Block) string {
 		for _, row := range b.Table.Rows {
 			var cells []string
 			for _, cell := range row.Cells {
-				cells = append(cells, cell.Text)
+				text := cell.Text
+				// Preserve merged headers and values: flattening spans changes which
+				// experimental condition a value belongs to in the model input.
+				if cell.RowSpan > 1 || cell.ColSpan > 1 {
+					text = fmt.Sprintf("%s [rowspan=%d colspan=%d]", text, max(1, cell.RowSpan), max(1, cell.ColSpan))
+				}
+				cells = append(cells, text)
 			}
 			pieces = append(pieces, strings.Join(cells, " | "))
 		}

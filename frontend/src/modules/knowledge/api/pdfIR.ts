@@ -84,5 +84,5 @@ export function usePdfIR(target?: PdfIRTarget) {
       if (startRequest.current === controller) startRequest.current = undefined;
     }
   }, [key,url]);
-  return {state: result.key === key ? result.state : initial, starting, start, refresh};
+  return {state: result.key === key ? result.state : initial, loading: !!key && result.key !== key, starting, start, refresh};
 }

@@ -20,5 +20,5 @@ export function isKnowledgeBaseNameDuplicatedError(error: unknown) {
   const errorCode = `${payload?.code || payload?.error_code || payload?.errorCode || ""}`.trim();
   const rawMessage = getDataSourceErrorMessage(error).toLowerCase();
 
-  return errorCode === "2001102" || rawMessage === "dataset name already exists";
+  return errorCode === "2001102" || errorCode === "DATA_SOURCE_NAME_ALREADY_EXISTS" || rawMessage === "dataset name already exists";
 }

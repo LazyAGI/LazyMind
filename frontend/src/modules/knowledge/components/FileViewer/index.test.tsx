@@ -155,3 +155,9 @@ it('keeps the library action when PDF data is absent',()=>{
  render(<FileViewer fileName="empty.pdf" pdfHeaderStart={<button>Library</button>}/>);
  expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
 });
+it('renders a document-menu slot during PDF loading without passing a function as a child',()=>{
+ const menu=vi.fn(()=> <button>Document menu</button>);
+ render(<FileViewer fileName="empty.pdf" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={menu}/>);
+ expect(screen.getByRole('button',{name:'Document menu'})).toBeInTheDocument();
+ expect(menu).toHaveBeenCalledWith(null);
+});

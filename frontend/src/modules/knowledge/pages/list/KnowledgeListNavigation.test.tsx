@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn() }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -24,8 +24,11 @@ vi.mock("@/modules/knowledge/components/CreateKnowledgeBaseModal", async () => (
 vi.mock("@/modules/knowledge/components/KnowledgeTag", () => ({ default: () => null }));
 vi.mock("@/modules/knowledge/components/KnowledgeBaseSyncNow", () => ({ default: () => null }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({}) } }));
-vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: vi.fn().mockResolvedValue({ data: { ready: true } }) } }));
-vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceListDatasets: mocks.list }) }));
+vi.mock("@/components/request", () => ({ BASE_URL: "", localizeErrorCode: (_code: string, fallback: string) => fallback,
+  axiosInstance: { get: vi.fn((url: string) => Promise.resolve({ data: url.endsWith("/deletion")
+    ? { dataset_id: "local-id", display_name: "本地手册", status: "cleaning", total: 5, completed: 2, failed: 0 }
+    : { ready: true } })) } }));
+vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceListDatasets: mocks.list, datasetServiceDeleteDataset: mocks.remove }) }));
 vi.mock("@/modules/dataSource/api/clients", () => ({ dataSourceScanApi: { listSources: mocks.scan } }));
 vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: vi.fn().mockResolvedValue({}), isImageEmbedRequired: () => false, MODEL_FEATURES_CHANGED_EVENT: "features-changed" }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
@@ -34,6 +37,7 @@ vi.mock("@/components/ui", () => ({
     {!props.loading && props.dataSource.length === 0 ? props.locale?.emptyText : null}
     {props.dataSource.map((row: any) => <div key={row.dataset_id || row.id} {...props.onRow?.(row)}>
       {props.columns[0].render(row[props.columns[0].dataIndex], row)}
+      {props.columns.find((column: any) => column.key === "action")?.render(row)}
     </div>)}
     {props.pagination && <>
       <span>第 {props.pagination.current} 页</span>
@@ -42,6 +46,7 @@ vi.mock("@/components/ui", () => ({
     </>}
   </div>,
 }));
+vi.mock("./KnowledgeLibraryActions", () => ({ default: ({ dataset, onDelete }: any) => <button onClick={(event) => { event.stopPropagation(); onDelete(); }}>delete-{dataset.dataset_id}</button> }));
 import KnowledgePage from "./index";
 
 const localResponse = { data: { datasets: [{ dataset_id: "local-id", display_name: "本地手册", tags: ["团队"] }], total_size: 55 } };
@@ -268,4 +273,23 @@ describe("knowledge list URL and data restoration", () => {
     expect(await screen.findByRole("button", { name: /查看知识库.*官方手册|查看.*官方手册.*详情/ })).toBeVisible();
     expect(screen.getByDisplayValue("手册")).toBeVisible();
   });
+});
+
+it("reports cleanup acceptance after confirming a knowledge base deletion", async () => {
+  localStorage.clear();
+  mocks.remove.mockResolvedValue({ data: { items: [{ cleanup_status: "submitted" }] } });
+  const { message } = await import("antd");
+  const success = vi.spyOn(message, "success");
+  const info = vi.spyOn(message, "info");
+  await mount("");
+  fireEvent.click(await screen.findByRole("button", { name: "delete-local-id" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: t("knowledge.deleteConfirmText", { name: "本地手册" }) } });
+  fireEvent.click(within(dialog).getByRole("button", { name: t("common.confirm") }));
+  await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith({ dataset: "local-id" }));
+  await waitFor(() => expect(info).toHaveBeenCalledWith(t("knowledge.cleanupAccepted")));
+  expect(await screen.findByText(t("knowledge.cleanupInProgress"))).toBeVisible();
+  expect(screen.getByText(t("knowledge.cleanupProgress", { completed: 2, total: 5 }))).toBeVisible();
+  expect(success).not.toHaveBeenCalledWith(t("knowledge.deleteSuccess"));
+  success.mockRestore(); info.mockRestore(); localStorage.clear();
 });

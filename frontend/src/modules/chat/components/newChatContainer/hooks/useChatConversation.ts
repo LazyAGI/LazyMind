@@ -2044,6 +2044,7 @@ export function useChatConversation({
           ? { thinking_depth: params.thinking_depth }
           : {}),
         ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+        ...(params.document_context ? { document_context: params.document_context } : {}),
         ...(paramsCiteHistoryIds?.length
           ? {
               cite_history_ids: paramsCiteHistoryIds.filter(

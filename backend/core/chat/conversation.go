@@ -666,7 +666,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
 		return
 	}
-	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	// Resolve persisted confirmation before loading credentials, so an unreadable
 	// variable can still be deleted and cannot be injected into this continuation.
 	if !target.IsRegeneration {

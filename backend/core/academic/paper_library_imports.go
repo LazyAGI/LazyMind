@@ -253,6 +253,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		items := []orm.PaperImportItem{}
 		for _, selected := range input.Items {
 			draft := selected.Paper
+			referenceIDs := []string{}
 			var work orm.AcademicWork
 			if input.EntryType == "paper_link" {
 				var match *PreviewItem
@@ -265,6 +266,16 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 				if match == nil || len(match.Candidates) > 0 && match.Disposition != "already_present" {
 					return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "链接导入与确认预览不同")
 				}
+				allowedReferences := make(map[string]bool, len(match.ReferenceIDs))
+				for _, id := range match.ReferenceIDs {
+					allowedReferences[id] = true
+				}
+				for _, id := range selected.ReferenceIDs {
+					if !allowedReferences[id] {
+						return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "参考文献与导入预览不同")
+					}
+				}
+				referenceIDs = selected.ReferenceIDs
 				if e = tx.Where("id=?", selected.WorkID).Take(&work).Error; e != nil {
 					return e
 				}
@@ -356,7 +367,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 				}
 				batch.Status = "pending"
 			}
-			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: stage, ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: stage, ReferenceIDsJSON: marshal(referenceIDs), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
 			ids = append(ids, row.ID)
 		}
 		batch.TotalItems = len(items)
