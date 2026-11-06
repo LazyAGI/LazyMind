@@ -193,6 +193,10 @@ def ppt_inspect_pptx(content_base64: str) -> dict[str, Any]:
             slide_targets = {}
             for relationship in relationships:
                 target = relationship.attrib.get('Target', '')
+                # OPC permits both presentation-relative and package-absolute
+                # targets. Artifact Tool uses /ppt/slides/slideN.xml.
+                if target.startswith('/ppt/slides/'):
+                    target = target[len('/ppt/'):]
                 if (relationship.attrib.get('Type', '').endswith('/slide')
                         and relationship.attrib.get('TargetMode') != 'External'
                         and re.fullmatch(r'slides/slide\d+\.xml', target)):

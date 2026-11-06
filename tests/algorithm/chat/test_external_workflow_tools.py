@@ -22,7 +22,7 @@ HTML = ('<html><head><meta charset="utf-8"></head><body>'
         '<div class="slide" style="width:1280px;height:720px">One page</div></body></html>')
 
 
-def pptx_bytes(order=(2, 1)):
+def pptx_bytes(order=(2, 1), absolute_targets=False):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w') as archive:
         archive.writestr('[Content_Types].xml', '<Types/>')
@@ -31,7 +31,8 @@ def pptx_bytes(order=(2, 1)):
                          '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
                          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
                          f'<p:sldIdLst>{slides}</p:sldIdLst></p:presentation>')
-        relationships = ''.join(f'<Relationship Id="rId{number}" Target="slides/slide{number}.xml" '
+        prefix = '/ppt/' if absolute_targets else ''
+        relationships = ''.join(f'<Relationship Id="rId{number}" Target="{prefix}slides/slide{number}.xml" '
                                 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide"/>'
                                 for number in order)
         archive.writestr('ppt/_rels/presentation.xml.rels', f'<Relationships>{relationships}</Relationships>')
@@ -60,13 +61,15 @@ def call(payload, name='ppt_inspect_pptx', arguments=None):
     return call_external_tool(ExternalToolCallRequest(**payload, tool_name=name, arguments=arguments or {}))
 
 
-def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order():
+@pytest.mark.parametrize('absolute_targets', [False, True])
+def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets):
     payload = request()
     catalog = list_external_tools(ExternalToolRequest(**payload))['tools']
     assert catalog[0]['available'] is True
     assert catalog[0]['name'] == 'ppt_inspect_pptx'
     assert catalog[0]['input_schema']['required'] == ['content_base64']
-    result = call(payload, arguments={'content_base64': base64.b64encode(pptx_bytes()).decode()})['result']
+    raw = pptx_bytes(absolute_targets=absolute_targets)
+    result = call(payload, arguments={'content_base64': base64.b64encode(raw).decode()})['result']
     assert result == {'page_count': 2, 'has_notes': False,
                       'pages': [{'page': 1, 'texts': ['Page 2']}, {'page': 2, 'texts': ['Page 1']}]}
 
