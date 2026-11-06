@@ -238,6 +238,52 @@ func TestTransitionUsesWorkflowModeLockedAtSessionCreation(t *testing.T) {
 	}
 }
 
+func TestAutomaticRetryRetainsCurrentEdit(t *testing.T) {
+	db, graphHash := setupBatchTransitionSession(t)
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
+		Update("intent_context", `{"text":"生成8页深色科研PPT"}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	previous, err := CreateSessionStep(t.Context(), db.DB, "batch-session", "branch_b", "failed-edit", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&previous).Update("status", StepStatusFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+	edit := "我不喜欢黑底ppt 给我换成 白底黑字"
+	params, _ := json.Marshal(map[string]string{
+		"current_user_input": edit, "retry_hint": "只修改配色，保留内容、页数和讲稿",
+	})
+	if err := db.Create(&orm.SubAgentTask{ID: "failed-edit", ConversationID: "batch-conversation",
+		AgentType: "workflow_step", Title: "edit", Objective: edit, Mode: "manual", Status: "failed",
+		Params: params, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := "FAILAttempt 2 failed with provider 503"
+	w, data := runBatchTransition(t, db, graphHash, "retry", []map[string]any{
+		{"target_step_id": "branch_b", "task_id": "retry-edit", "user_input": diagnostic},
+	})
+	if w.Code != http.StatusOK || data["accepted"] != true {
+		t.Fatalf("retry rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var task orm.SubAgentTask
+	if err := db.First(&task, "id = ?", "retry-edit").Error; err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(task.Params, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["current_user_input"] != edit || got["launch_user_input"] != "生成8页深色科研PPT" {
+		t.Fatalf("retry lost current/launch identity: %#v", got)
+	}
+	if !containsAll(got["retry_hint"].(string), edit, diagnostic, "保留内容、页数和讲稿") {
+		t.Fatalf("retry lost scope or diagnostics: %v", got["retry_hint"])
+	}
+}
+
 func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
 	db, graphHash := setupBatchTransitionSession(t)
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").

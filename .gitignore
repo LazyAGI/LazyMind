@@ -166,3 +166,8 @@ lazymind-history-injection*.zip
 /REPORT.md
 /RELEASE_AUDIT.md
 /RELEASE_CANDIDATE.md
+
+# Cloud-hosted presentation libraries (runtime cache only).
+/workflows/ppt-workflow/runtime/assets/presentation-assets/
+/output/fonts-library-*/
+/output/fonts-library-*.zip

@@ -105,9 +105,15 @@ and provider reason instead of silently falling back.
 
 ## Optional PPTX template
 
-The startup Ask card exposes a conditional `.pptx` upload. The file remains a
-normal conversation attachment and is bound to the external `template_pptx`
-material. It is never treated as source evidence.
+HTML is the default output. Startup never asks whether to use/upload a template
+or to choose quick/full generation. An already supplied template is bound to
+`template_pptx`; only then is the user asked for HTML or PPTX if unspecified.
+Both template routes skip style questions and AI backgrounds. HTML recreates
+the template style with components, without using full-slide background images.
+Native PPTX composition can repeat, omit and reorder source layouts to meet the
+requested page count. The template itself is never treated as source evidence.
+The selected route is saved as `presentation_output_format`; old sessions
+without that artifact retain their previous route.
 
 When a template is present, `generate_ppt` calls `ppt_analyze_template` first.
 The analyzer caches the original template plus a deterministic OOXML profile
@@ -199,6 +205,68 @@ deletion comes back: the rewriter keeps four columns and the generator invents a
 filler card. `ppt_patch_page_outline` warns about this, and both page prompts
 forbid padding a grid.
 
+## Batch partial edits
+
+After generation, requests such as “把第 2、3 页的卡片加宽”, “给这张表加一列负责人”,
+“删除第 4 行”, “把要点改为编号列表” use the existing presentation revision.
+No material collection, outline generation, or full slide generation runs.
+
+| Operation | Native PPTX | HTML deck |
+| --- | --- | --- |
+| Position and size | Move/resize selected shape IDs; exact boxes in inches | Explicit CSS size/position; relative numeric inline dimensions |
+| Layout | Align edges/centers, distribute, front/back, duplicate text/shapes/pictures | Scoped CSS changes and existing sibling insertion |
+| Add objects | Native text box, list, editable table | Text, ordered/unordered list, table inside an existing container |
+| List edits | Replace list; insert/change/delete items | Replace list; insert/change/delete items |
+| Table edits | Change cells; insert/delete rows and columns | Change cells; insert/delete rows and columns |
+| Delete objects | Delete selected shape IDs | Delete selected element IDs/groups |
+
+`inspect_current_pptx` exposes shape IDs, boxes, table values and paragraphs.
+`publish_pptx_edit(structure_edits=[...])` applies ordered operations in memory and
+publishes one revision after validating the inspected source hash. Untouched ZIP
+parts retain their bytes, including notes and font resources. Row/column insertion
+keeps the table box and redistributes dimensions; existing cell styles are reused.
+Merged tables reject structural edits. Removing the final row/column/item requires
+an explicit whole-object deletion. New content may need a preview check for fit.
+
+For HTML, inspect each page with `ppt_read_page_html`, then submit
+`ppt_edit_pages_html(deck_dir, edits_json=[{page,expected_sha256,ops}])`.
+A single operation may use `els` for several targets. Every page is validated
+before writing; publication failure restores local originals and attempts to
+republish them. Preview rollback failures are reported explicitly. This is
+compensating recovery, not a server transaction across multiple page revisions.
+Table/list indices are 1-based in the sequentially edited state. Delete multiple
+indices in descending order. Preserve the outline when content changes so a later
+user-requested redesign can reuse the revised content.
+
+## Font replacement and portable exports
+
+Font-only follow-ups patch existing content; they never call page generation,
+rewrite the outline, move boxes or regenerate unselected pages. Examples:
+
+- “全文字体换成 Noto Sans SC”：`ppt_replace_deck_fonts`, no `pages` filter.
+- “第一页字体换成 Noto Sans SC”：`pages=[1]`.
+- “全部标题字体换成 Noto Serif SC”：`text_scope=titles`.
+- For selected text, inspect its current element/slot ID and patch only that selection.
+
+For native PPTX, title scope means title placeholders; custom text-box titles
+need inspected slot IDs. Chart/SmartArt parts and text baked into images are not
+rewritten by the native text editor and are disclosed in its result.
+
+Missing fonts from the 67-family cloud catalog download automatically; `allow_font_download=false` disables downloads. Other missing
+fonts fail without changing the document. User-provided
+TTF/OTF files can be imported with `ppt_import_font(filename=...)`; native edits
+also accept `font_filename`. System fonts are copied into the managed library
+only when their font metadata permits editable embedding. Restricted fonts and
+fonts missing the selected text's glyphs are rejected.
+
+HTML font edits contain full font data, so preview and editable export do not
+need the original font library or network. Native PPTX edits embed full font
+files without rebuilding slide content. Editable HTML-to-PPTX export validates
+the required font parts and relationships before replacing the exported file;
+failure preserves the previous export. This guarantees packaged font resources,
+not identical rendering in every presentation application. Existing export and
+artifact-size limits still apply; large fonts can cause an explicit size error.
+
 ## Defaults
 
 - Preview: iframe HTML (`preview_html`), auto-published after `page-html` stages
@@ -209,3 +277,30 @@ forbid padding a grid.
   browser raster PPTX. Local/Desktop enables editable export automatically after
   its dependency bundle is detected; container deployments use
   `LAZYMIND_OUTPUT_EDITABLE_PPT=true`.
+
+
+## Cloud font and presentation asset libraries
+
+`Font/fonts-20261105.zip` and `Ppt-assets/presentation-assets-20261105.zip`
+are hosted in the ModelScope `CarlosShaoting/lazymind-cst` dataset and mirrored
+in Hugging Face `LazyAGI/LazyMind`. Font and image binaries are not bundled in
+this workflow or committed to GitHub. The asset pack contains 318 named icons
+from 12 collections, with original license notices and per-file checksums.
+
+Preparing or resuming a PPT workflow starts background prefetch of both packs.
+The request returns without waiting for downloads. The first consumer waits for
+its pack if prefetch is still running. Downloads try ModelScope first, then
+Hugging Face; failures report the mirror and reason, and later use retries.
+Concurrent processes share a file lock. Exact byte count and SHA256 are verified
+before safe extraction and atomic publication; partial downloads are discarded.
+
+`LAZYMIND_PPT_RESOURCE_CACHE` overrides the disposable download cache (default:
+`~/.cache/lazymind/presentation-resources`). Selected fonts are converted to
+static faces in `LAZYMIND_FONT_DIR` for portable document embedding; downloading
+the catalog does not install all fonts into the operating system. Completed
+HTML/PPTX documents continue carrying their used fonts and asset license notices.
+
+Resource versions, sizes, SHA256 and supported font names are pinned in
+`algorithm/lazymind/presentation_resources.json`. Updating a pack requires
+uploading identical versioned archives to both mirrors and updating that file.
+Never commit archives or the extracted libraries to the code repository.

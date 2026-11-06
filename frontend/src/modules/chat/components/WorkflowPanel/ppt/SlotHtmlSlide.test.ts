@@ -6,6 +6,7 @@ import {
   fitSlideFrame,
   forwardSlideFrameWheel,
   markImplicitPptSelectionGroups,
+  measureSlideCanvas,
   pptClickedText,
   pptDomPath,
   resolvePptHoverCandidate,
@@ -25,6 +26,20 @@ function setScrollMetrics(
 }
 
 describe('fitSlideFrame', () => {
+  it('fills the preview with a 1280×720 canvas without a synthetic border', () => {
+    document.body.innerHTML = '<div class="wrapper" style="width:1280px;height:720px">Slide</div>';
+    const canvas = measureSlideCanvas(document);
+    expect(canvas).toEqual({ width: 1280, height: 720 });
+    expect(fitSlideFrame(800, 450, canvas)).toEqual({ scale: 0.625, left: 0, top: 0 });
+  });
+
+  it('falls back for missing or non-fixed canvas dimensions', () => {
+    document.body.innerHTML = '<div class="wrapper">Slide</div>';
+    expect(measureSlideCanvas(document)).toEqual({ width: 1600, height: 900 });
+    document.body.innerHTML = '<p>No canvas root</p>';
+    expect(measureSlideCanvas(document)).toEqual({ width: 1600, height: 900 });
+  });
+
   it('fits by width in a 16:9 material frame', () => {
     expect(fitSlideFrame(800, 450)).toEqual({ scale: 0.5, left: 0, top: 0 });
   });

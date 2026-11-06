@@ -389,3 +389,41 @@ async def test_ppt_export_keeps_all_pages_above_former_limit(monkeypatch, tmp_pa
     assert Path(response.path).read_bytes() == b'export-result'
     await response.background()
     assert not Path(response.path).exists()
+
+
+def test_ppt_selection_preview_loads_pinned_runtime_dependencies(monkeypatch, tmp_path):
+    routes = _load_workflow_routes(monkeypatch)
+    root = Path(__file__).resolve().parents[3] / 'workflows/ppt-workflow'
+    package = {'revision_id': 'ppt-action-runtime-test', 'tree_hash': 'ppt-action-runtime-test', 'files': {
+        path: base64.b64encode((root / path).read_bytes()).decode()
+        for path in ('workflow.yaml', 'scripts/tools.py', 'runtime/lib/html_structure.py')
+    }}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_workflow(self, workflow_id, revision_id):
+            assert workflow_id == 'ppt-workflow' and revision_id == package['revision_id']
+            return SimpleNamespace(result=package)
+
+    monkeypatch.setattr(routes, 'WorkflowClient', Client)
+    monkeypatch.setattr(routes, 'inject_model_config', lambda config: None)
+    monkeypatch.setattr(routes, 'inject_tool_config', lambda config: None)
+    monkeypatch.setattr('tempfile.gettempdir', lambda: str(tmp_path))
+    monkeypatch.delitem(sys.modules, 'html_structure', raising=False)
+    monkeypatch.setattr(sys, 'path', [p for p in sys.path if not p.endswith('/runtime/lib')])
+    original = ('<html><head></head><body><div class="wrapper"><div id="ct">'
+                '<h1 data-el="title">标题</h1><p data-el="footer">来源：资料.pdf</p>'
+                '</div></div><aside hidden data-el="speaker-notes">保留文稿</aside></body></html>')
+    encoded = base64.b64encode(original.encode()).decode()
+    request = routes.WorkflowActionInvokeRequest(
+        workflow_id='ppt-workflow', revision_id=package['revision_id'], tree_hash=package['tree_hash'],
+        action='rewrite_selection', phase='preview', slot='preview_html',
+        artifact={'path': f'data:text/plain;base64,{encoded}', 'type': 'text'}, artifact_store=str(tmp_path),
+        arguments={'instruction': '删除', 'selection': {'type': 'ppt_html', 'page': 2, 'el': 'footer'}},
+    )
+    result = routes.invoke_workflow_action(request)['result']
+    assert '来源：资料.pdf' not in result['candidate_html']
+    assert '标题' in result['candidate_html'] and '保留文稿' in result['candidate_html']
+    assert result['patch']['type'] == 'ppt_html_ops'

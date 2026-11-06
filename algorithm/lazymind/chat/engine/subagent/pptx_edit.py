@@ -23,6 +23,13 @@ class SpeakerNote(TypedDict):
     text: str
 
 
+class LayoutEdit(TypedDict):
+    page: int
+    shape_id: int
+    expected_box: List[float]
+    box: List[float]
+
+
 class StyleEdit(TypedDict, total=False):
     pages: List[int]
     slot_ids: List[str]
@@ -65,10 +72,11 @@ def _session() -> str:
 
 @fc_register(host_file='NONE')
 def inspect_current_pptx(page: int = 1) -> Dict[str, Any]:
-    """Read ONE page's editable text and speaker notes. Pages are 1-based.
+    """Read ONE page's text, shape geometry, chart colors and notes. Pages are 1-based.
 
     Copy exact slot IDs, never guess. For all-page speeches read each page using
-    next_page until null. Layout/font diagnostics are intentionally omitted.
+    next_page until null. Layout shape_ids differ from text slot IDs; copy the
+    inspected box as expected_box for a local geometry edit. Boxes use inches.
     """
     result = tools.edit_presentation('native_pptx', 'inspect_content', pages=page,
                                      workflow_session_id=_session())
@@ -78,14 +86,15 @@ def inspect_current_pptx(page: int = 1) -> Dict[str, Any]:
                        'slots': [{'id': s['id'], 'text': s['text'],
                                   **{k: s[k] for k in ('shape_name', 'shape_id') if s.get(k) is not None}}
                                  for s in p['slots']],
-                       'speaker_notes': p['speaker_notes']} for p in result['pages']]}
+                       'speaker_notes': p['speaker_notes'],
+                       'charts': p.get('charts', []), 'layout': p.get('layout')} for p in result['pages']]}
 
 
 @fc_register(host_file='NONE')
 def read_pptx_edit_material(slot: str = 'material_summary') -> Dict[str, Any]:
-    """Read existing evidence only: material_summary or requirement_analysis; no research."""
-    if slot not in {'material_summary', 'requirement_analysis'}:
-        raise ToolExecutionError('Only saved material_summary and requirement_analysis may be read')
+    """Read saved material_summary, requirement_analysis or presentation_timing; no research."""
+    if slot not in {'material_summary', 'requirement_analysis', 'presentation_timing'}:
+        raise ToolExecutionError('Only saved evidence, requirements and presentation timing may be read')
     rows = tools._public_workflow_artifacts(_session(), slot)
     rows = [row for row in rows if row.get('selected') and row.get('validity') == 'effective'
             and not row.get('deleted')]
@@ -107,8 +116,12 @@ def publish_pptx_edit(source_sha256: str,
                       pages: Optional[List[int]] = None,
                       slot_ids: Optional[List[str]] = None,
                       text_scope: str = 'all',
-                      allow_font_download: bool = False,
-                      style_edits: Optional[List[StyleEdit]] = None) -> Dict[str, Any]:
+                      allow_font_download: bool = True,
+                      font_filename: Optional[str] = None,
+                      style_edits: Optional[List[StyleEdit]] = None,
+                      chart_edits: Optional[List[Dict[str, Any]]] = None,
+                      layout_edits: Optional[List[LayoutEdit]] = None,
+                      structure_edits: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Publish sparse text edits and/or notes once, then finish the task.
 
     Use the inspected source_sha256. text_edits: [{id,expected_text,text}],
@@ -120,7 +133,10 @@ def publish_pptx_edit(source_sha256: str,
     for page one, or exact inspected slot_ids for selected text. text_scope can
     be all/titles/body (titles matches native title placeholders; use slot_ids
     for custom text-box titles). Keep font size, weight and content unchanged.
-    Set allow_font_download only when user asks to download missing open fonts.
+    Missing allowlisted open fonts download by default as part of replacement.
+    Set allow_font_download=false when the user disables downloads.
+    font_filename imports a user-uploaded TTF/OTF before changing fonts. Font
+    resources are embedded in the resulting PPTX; failure must not regenerate.
     style_edits applies differently scoped text formatting in ONE revision, e.g.
     [{pages:[1],text_scope:'titles',font_size_pt:28,bold:true},
      {slot_ids:['4:3'],italic:true,underline:false,text_color:'#CC0000'}].
@@ -128,6 +144,33 @@ def publish_pptx_edit(source_sha256: str,
     to preserve it; false explicitly cancels bold/italic/underline. PPTX sizes
     are points (pt), never pixels. Inspect exact slots for custom titles/parts.
     Do not regenerate text or resize boxes to satisfy a formatting-only request.
+    chart_edits: [{page, chart_index, palette}] recolors only an inspected chart.
+    palette is blue/teal/orange/purple or a list of distinct #RRGGBB colors.
+    It preserves chart values, workbook, labels, positions and other pages.
+    layout_edits: [{page,shape_id,expected_box,box}] moves/resizes only inspected
+    shapes; boxes are [x,y,width,height] in inches. Copy expected_box from layout.
+    Use this for local layout changes instead of rebuilding the deck. Top-level
+    groups move/resize as a unit. Content and all unmentioned shapes are retained.
+    structure_edits is an ordered batch, published atomically. Every op has page.
+    Existing targets use inspected shape_id or shape_ids (batch). Supported ops:
+    add_text(box,text,font_size_pt?), add_list(box,values,ordered?,font_size_pt?),
+    add_table(box,rows,font_size_pt?) create editable native objects. box uses inches,
+    rows is a rectangular list of lists of strings. values is a list of strings.
+    delete_shape; duplicate_shape(box); bring_to_front; send_to_back;
+    resize(dw,dh) changes width/height by inches, move(dx,dy) offsets coordinates;
+    align(shape_ids,edge=left|right|top|bottom|center|middle),
+    distribute(shape_ids,axis=horizontal|vertical) needs at least three shapes.
+    set_list(values,ordered?), list_insert_item(index,text), list_set_item(index,text),
+    list_delete_item(index); table_set_cell(row,column,text),
+    table_insert_row(index,values), table_delete_row(index),
+    table_insert_column(index,values), table_delete_column(index).
+    All row/column/item indices are 1-based in the sequentially edited state;
+    insertion index length+1 appends. Delete several indices from largest first.
+    Tables retain their box; insertion redistributes space and preserves cell styles.
+    Merged tables reject structural operations; deleting the last row/column/item
+    requires explicit delete_shape. No chart/image regeneration. Inspect all target
+    pages before publishing one batch. Example: [{op:'resize',page:1,shape_id:4,dw:1},
+    {op:'table_insert_row',page:2,shape_id:6,index:3,values:['A','B']}].
     """
     session = _session()
     ctx = require_context()
@@ -139,7 +182,11 @@ def publish_pptx_edit(source_sha256: str,
         require_all_notes=require_all_notes, workflow_session_id=session,
         target_font=target_font, pages=pages, slot_ids=slot_ids,
         text_scope=text_scope, allow_font_download=allow_font_download,
+        font_filename=font_filename,
         style_edits=style_edits,
+        chart_edits=chart_edits,
+        layout_edits=layout_edits,
+        structure_edits=structure_edits,
     )
     if result.get('status') != 'ok' or not result.get('workflow_artifact'):
         raise ToolExecutionError('PPTX publication did not return a successful artifact revision')

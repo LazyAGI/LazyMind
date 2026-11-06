@@ -151,7 +151,7 @@ func TestLaunchWorkflowAttemptRollsBackSessionWhenTaskCenterCreateFails(t *testi
 	}
 }
 
-func TestBuildWorkflowArtifactsSummaryExecutesJoinQuery(t *testing.T) {
+func TestBuildWorkflowArtifactsSummaryUsesOnlyCurrentEffectiveRevisions(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
 	if err := db.Create(&orm.WorkflowSessionStep{ID: "attempt-1", SessionID: "session-1", StepID: "step-1",
@@ -162,11 +162,28 @@ func TestBuildWorkflowArtifactsSummaryExecutesJoinQuery(t *testing.T) {
 		ContentType: "text", Value: json.RawMessage(`{"value":"done"}`), Seq: 1, CreatedAt: now}).Error; err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
+	seq := 1
+	for _, row := range []orm.WorkflowSlotRevision{
+		{ID: "selected", SessionID: "session-1", SlotID: "output", Slot: "output", Revision: 4, StepID: "step-1", Attempt: 1, ArtifactSeq: &seq, Selected: true, Validity: "effective"},
+		{ID: "old", SessionID: "session-1", SlotID: "old", Slot: "old", Revision: 1, Selected: true, Validity: "stale", ContentSnapshot: json.RawMessage(`{"value":"outdated missing evidence"}`)},
+	} {
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A superseded but otherwise effective revision must also be excluded.
+	old := orm.WorkflowSlotRevision{ID: "unselected", SessionID: "session-1", SlotID: "output", Slot: "output", Revision: 2, Validity: "effective", ContentSnapshot: json.RawMessage(`{"value":"superseded claim"}`)}
+	if err := db.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&old).Update("selected", false).Error; err != nil {
+		t.Fatal(err)
+	}
 	summary, err := buildWorkflowArtifactsSummary(t.Context(), db.DB, "session-1", "step-1")
 	if err != nil {
 		t.Fatalf("build summary: %v", err)
 	}
-	if !strings.Contains(summary, "output: done") {
+	if !strings.Contains(summary, `"value":"done"`) || strings.Contains(summary, "outdated") || strings.Contains(summary, "superseded") {
 		t.Fatalf("unexpected summary: %q", summary)
 	}
 }

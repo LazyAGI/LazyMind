@@ -16,6 +16,74 @@ def policy(name):
     return yaml.safe_load((ROOT / name / 'workflow.yaml').read_text(encoding='utf-8'))['runtime']
 
 
+def test_startup_card_stops_unmodified_agent_without_displaying_receipt(monkeypatch, tmp_path):
+    import uuid
+    from unittest.mock import MagicMock
+
+    import lazyllm
+    from lazyllm.tools import ReactAgent
+    from lazymind.chat.service.component import AgentEventFrameTranslator
+    from lazymind.chat.workflow import workflow_manager as manager
+
+    runtime = policy('ppt-workflow')
+    item = {'workflow_id': 'ppt-workflow', 'workflow_ref': 'builtin:ppt-workflow',
+            'revision_id': 'r1', 'runtime': runtime, 'tool_name': 'trigger_ppt_workflow'}
+    client = MagicMock()
+    client.get_workflow.return_value.result = item
+    monkeypatch.setattr(manager, '_client', lambda: client)
+    toolkit = MagicMock()
+    monkeypatch.setattr(manager, 'HostWorkflowToolkit', lambda *a, **kw: toolkit)
+    events = []
+    monkeypatch.setattr('lazyllm.tools.agent.base._write_agent_data',
+                        lambda tag, **data: events.append({'tag': tag, **data}))
+    contribution = manager.resolve_workflow_injection(
+        None, current_query='做一个PPT', workflow_catalog=[item],
+        allowed_workflow_refs=['builtin:ppt-workflow'], workflow_activations=[item],
+    )
+    pending, triggers = list(contribution.tools), []
+    while pending:
+        tool = pending.pop()
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        elif tool.__name__ == 'trigger_ppt_workflow':
+            triggers.append(tool)
+    assert len(triggers) == 1
+
+    class Model:
+        def __init__(self):
+            self._module_id = uuid.uuid4().hex
+            self.calls = 0
+
+        def share(self, **kwargs):
+            return self
+
+        def used_by(self, module_id):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            self.calls += 1
+            assert self.calls == 1, 'A startup question must wait for the user'
+            return {'content': '', 'tool_calls': [{
+                'id': 'startup', 'type': 'function',
+                'function': {'name': 'trigger_ppt_workflow', 'arguments': '{}'},
+            }]}
+
+    with lazyllm.locals._scope():
+        model = Model()
+        agent = ReactAgent(model, triggers, workspace=str(tmp_path), force_summarize=True,
+                           enable_builtin_tools=False, sandbox=None)
+        receipt = agent('做一个PPT')
+        assert isinstance(receipt, str) and receipt.strip()
+        assert model.calls == 1
+        assert 'workspace' not in lazyllm.locals['_lazyllm_agent']
+    toolkit.prepare_workflow.assert_not_called()
+    cards = [event for event in events if event['tag'] == 'ask_pending']
+    assert len(cards) == 1 and cards[0]['questions']
+    translator = AgentEventFrameTranslator(query='做一个PPT')
+    assert translator.feed(cards[0])[0]['ask_pending']['questions']
+    assert translator.finish(receipt) == []
+
+
 def test_multiple_one_and_other_are_preserved():
     card = question_card_payload([{'id': 'style', 'text': 'Style?', 'type': 'multiple',
                                   'reason': 'Changes appearance.', 'choices': ['A', 'B']}])
@@ -137,19 +205,19 @@ def test_typed_template_binding_skips_style_and_background_questions():
     values, missing = resolve_fields(policy('ppt-workflow'), '用上传模板做8页关于气候变化的PPT', {
         'topic': '气候变化', 'template_pptx': 'template.pptx',
     })
-    assert not missing
+    assert [field['id'] for field in missing] == ['presentation_output_format']
     assert values['template_mode'] == 'upload'
     assert 'generate_background_images' not in values
     assert 'visual_style' not in values
 
 
-def test_academic_batches_reuse_answers_and_default_only_delivery():
+def test_academic_card_includes_all_missing_fields_and_reuses_answers():
     runtime = policy('academic_research_pipeline')
     values, missing = resolve_fields(runtime, '写论文')
     assert values == {'output_format': 'docx'}
     assert len(missing) == 5
     card = startup_card(missing, startup_metadata('builtin:academic_research_pipeline', 'r1', '写论文', values))
-    assert len(card['questions']) == 3
+    assert [q['id'] for q in card['questions']] == [field['id'] for field in missing]
     values, missing = resolve_fields(runtime, '写论文', previous={
         'research_topic': 'RAG可靠性', 'paper_type': '文献综述', 'word_target': '8000',
     })
@@ -206,7 +274,8 @@ def test_model_cannot_fill_unstated_academic_decisions():
     assert values == {'research_topic': 'RAG', 'output_format': 'docx'}
 
 
-def test_owned_continuation_returns_only_remaining_questions_without_prepare(monkeypatch):
+@pytest.mark.parametrize('explicit_activation', [False, True])
+def test_owned_continuation_returns_only_remaining_questions_without_prepare(monkeypatch, explicit_activation):
     from unittest.mock import MagicMock
     from lazymind.chat.workflow import workflow_manager as manager
     runtime = policy('academic_research_pipeline')
@@ -221,7 +290,7 @@ def test_owned_continuation_returns_only_remaining_questions_without_prepare(mon
         }], workflow_activations=[{
             'workflow_id': 'academic', 'workflow_ref': 'builtin:academic', 'revision_id': 'r2',
             'tool_name': 'trigger_academic_workflow', 'runtime': runtime,
-        }], clarification={
+        }] if explicit_activation else [], clarification={
             'workflow_ref': 'builtin:academic', 'revision_id': 'r1', 'startup_request_id': 'launch',
             'original_request': '写论文', 'values': {
                 'research_topic': 'RAG', 'paper_type': '文献综述', 'word_target': '8000',
@@ -234,6 +303,56 @@ def test_owned_continuation_returns_only_remaining_questions_without_prepare(mon
     assert card['workflow']['revision_id'] == 'r1'
     client.get_workflow.assert_called_once_with('academic', 'r1')
     toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('authorized', [False, True])
+def test_discovered_startup_answer_restores_only_authorized_trigger(monkeypatch, authorized):
+    from unittest.mock import MagicMock
+    from lazymind.chat.workflow import workflow_manager as manager
+    runtime = policy('ppt-workflow')
+    values, _ = resolve_fields(runtime, '制作个人答辩PPT，12页，15分钟，不生成AI底图', {
+        'topic': '个人答辩', 'slide_count': '12', 'template_pptx': 'template.pptx',
+        'presentation_output_format': 'html',
+    })
+    values['presentation_output_format'] = 'html'
+    client = MagicMock()
+    client.get_workflow.return_value.result = {'revision_id': 'r1', 'runtime': runtime}
+    client.get_state.return_value = {'session_id': 'session-1', 'state_version': 1,
+                                     'projection': {'reachable': ['analysis'], 'ready': ['analysis']}}
+    monkeypatch.setattr(manager, '_client', lambda: client)
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['analysis']}
+    monkeypatch.setattr(manager, 'HostWorkflowToolkit', lambda *a, **kw: toolkit)
+    contribution = manager.resolve_workflow_injection(
+        None, current_query='HTML', workflow_catalog=[{
+            'workflow_id': 'ppt-workflow', 'workflow_ref': 'builtin:ppt-workflow',
+            'revision_id': 'r2', 'runtime': runtime,
+        }] if authorized else [], workflow_activations=[], clarification={
+            'workflow_ref': 'builtin:ppt-workflow', 'revision_id': 'r1',
+            'original_request': '制作个人答辩PPT，12页，15分钟，不生成AI底图', 'values': values,
+        },
+    )
+    pending, triggers = list(contribution.tools), []
+    while pending:
+        tool = pending.pop()
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        elif tool.__name__ == 'trigger_ppt_workflow':
+            triggers.append(tool)
+    if not authorized:
+        assert not triggers
+        client.get_workflow.assert_not_called()
+        toolkit.prepare_workflow.assert_not_called()
+        return
+    assert len(triggers) == 1
+    assert 'trigger_ppt_workflow' in contribution.required_tool_names
+    result = triggers[0]()
+    assert result['session_id'] == 'session-1'
+    submitted = toolkit.prepare_workflow.call_args.kwargs
+    assert submitted['revision_id'] == 'r1'
+    assert submitted['clarification_values']['presentation_output_format'] == 'html'
+    assert submitted['clarification_values']['slide_count'] == '12'
+    assert '15分钟' in submitted['request_context']
 
 
 @pytest.fixture

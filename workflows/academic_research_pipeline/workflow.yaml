@@ -136,7 +136,7 @@ slots:
   - {id: generation_parameters, user_visible: false, label: 已确认研究参数, type: json, cardinality: single, exposed: true}
   - {id: research_question_brief, user_visible: true, label: 研究问题简报, type: text, cardinality: single, exposed: true}
   - {id: methodology_blueprint, user_visible: true, label: 方法论蓝图, type: text, cardinality: single, exposed: true}
-  - {id: literature_evidence, user_visible: false, label: 已注册检索证据, type: text, cardinality: single, exposed: true}
+  - {id: literature_evidence, user_visible: true, label: 已注册检索证据, type: text, cardinality: single, exposed: true}
   - {id: search_log, user_visible: false, label: 检索策略与执行记录, type: text, cardinality: single, exposed: true}
   - {id: annotated_bibliography, user_visible: true, label: 注释书目与来源核验, type: text, cardinality: single, exposed: true}
   - {id: research_synthesis, user_visible: true, label: 主题综合、矛盾与研究空白, type: text, cardinality: single, exposed: true}
@@ -153,7 +153,7 @@ slots:
   - {id: draft_document, user_visible: true, label: 论文初稿, type: file, cardinality: single, exposed: true}
   - {id: writing_context_after_draft, user_visible: false, label: 初稿后写作上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: pre_integrity_report, user_visible: false, label: 审稿前完整性报告, type: text, cardinality: single, exposed: true}
+  - {id: pre_integrity_report, user_visible: true, label: 审稿前完整性报告, type: text, cardinality: single, exposed: true}
   - {id: pre_integrity_summary, user_visible: false, label: 审稿前检查摘要, type: json, cardinality: single, exposed: true}
   - {id: reviewer_configuration, user_visible: false, label: 审稿视角配置, type: text, cardinality: single, exposed: true}
   - {id: review_reports, user_visible: true, label: 五视角审稿报告, type: text, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
@@ -184,7 +184,7 @@ slots:
   - {id: final_paper_markdown, user_visible: true, label: 最终论文 Markdown, type: file, cardinality: single, exposed: true}
   - {id: final_paper, user_visible: true, label: 最终交付文件, type: file, cardinality: single, exposed: true}
   - {id: delivery_metadata, user_visible: false, label: 交付元数据, type: json, cardinality: single, exposed: true}
-  - {id: process_record, user_visible: false, label: 研究与论文创建过程记录, type: text, cardinality: single, exposed: true}
+  - {id: process_record, user_visible: true, label: 研究与论文创建过程记录, type: text, cardinality: single, exposed: true}
 
 ui:
   slots:

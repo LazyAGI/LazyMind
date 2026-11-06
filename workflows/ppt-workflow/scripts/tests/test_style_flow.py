@@ -41,6 +41,11 @@ def _import_stubs() -> dict[str, types.ModuleType]:
         'algorithm/lazymind/chat/engine/tools/file_resources/text_format.py')
     text_format = importlib.util.module_from_spec(format_spec)
     format_spec.loader.exec_module(text_format)
+    artifacts_spec = importlib.util.spec_from_file_location(
+        'ppt_test_document_artifacts', Path(__file__).resolve().parents[4]
+        / 'algorithm/lazymind/document_tools/artifacts.py')
+    artifacts = importlib.util.module_from_spec(artifacts_spec)
+    artifacts_spec.loader.exec_module(artifacts)
     static_file = types.ModuleType('lazymind.chat.service.utils.static_file_url')
     static_file._upload_root = lambda: Path(tempfile.gettempdir())
     static_file.file_relative_path = lambda value: value
@@ -48,6 +53,10 @@ def _import_stubs() -> dict[str, types.ModuleType]:
     static_file.local_path_from_static_file_url = lambda value: value
     model_config = types.ModuleType('lazymind.model_config')
     model_config.is_model_role_available = lambda _role: True
+    model_config.get_model_role_runtime_identity = lambda role: {'role': role, 'source': 'test', 'model': 'test'}
+    vision_model = types.ModuleType('lazymind.vision_model')
+    vision_model.select_vision_model_role = lambda: 'vlm'
+    vision_model.VisionModelUnavailable = RuntimeError
     requests = types.ModuleType('requests')
     requests.RequestException = RuntimeError
     requests.exceptions = types.SimpleNamespace(Timeout=TimeoutError)
@@ -57,6 +66,8 @@ def _import_stubs() -> dict[str, types.ModuleType]:
         'lazyllm.tools': lazyllm_tools,
         'lazyllm.tools.agent': lazyllm_agent,
         'lazymind': types.ModuleType('lazymind'),
+        'lazymind.document_tools': types.ModuleType('lazymind.document_tools'),
+        'lazymind.document_tools.artifacts': artifacts,
         'lazymind.chat': types.ModuleType('lazymind.chat'),
         'lazymind.chat.engine': types.ModuleType('lazymind.chat.engine'),
         'lazymind.chat.engine.subagent': types.ModuleType('lazymind.chat.engine.subagent'),
@@ -73,6 +84,7 @@ def _import_stubs() -> dict[str, types.ModuleType]:
         'lazymind.chat.service.utils': types.ModuleType('lazymind.chat.service.utils'),
         'lazymind.chat.service.utils.static_file_url': static_file,
         'lazymind.model_config': model_config,
+        'lazymind.vision_model': vision_model,
         'requests': requests,
     }
     return modules
@@ -87,6 +99,98 @@ with mock.patch.dict(sys.modules, _import_stubs()):
 
 
 class StyleFlowCombinationTest(unittest.TestCase):
+    def test_complete_deck_followup_cannot_use_full_generation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = Path(temp)
+            (deck / 'pages').mkdir()
+            original = '<html><body>Keep this evidence</body></html>'
+            (deck / 'pages/page_001.html').write_text(original)
+            (deck / 'outline.json').write_text(json.dumps({'pages': [{'page_no': 1}]}))
+            context = types.SimpleNamespace(task_id='edit-current', emit=mock.Mock(), params={
+                'launch_user_input': '生成8页深色科研PPT',
+                'current_user_input': '给我换成 白底黑字，并重排布局',
+            })
+            with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), mock.patch.object(
+                TOOLS, 'require_context', return_value=context,
+            ), mock.patch.object(TOOLS, '_pending_page_insertion', return_value=None), mock.patch.object(
+                TOOLS, '_require_html_output', return_value=None,
+            ), mock.patch.object(TOOLS, '_run_stage_inprocess') as model_stage:
+                with self.assertRaisesRegex(TOOLS.ToolExecutionError, 'ppt_restyle_pages'):
+                    TOOLS.ppt_generate_pages(str(deck))
+            model_stage.assert_not_called()
+            self.assertEqual((deck / 'pages/page_001.html').read_text(), original)
+
+    def test_palette_edit_publishes_without_model_calls_and_is_reversible(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = Path(temp)
+            (deck / 'pages').mkdir()
+            html = ('<html><body><p>保留结论 89 TFLOPS</p><img src="paper.png">'
+                    '<script>const data=[32,89]</script></body></html>')
+            (deck / 'pages/page_001.html').write_text(html)
+            (deck / 'pages/page_002.html').write_text(html)
+            with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), mock.patch.object(
+                TOOLS, '_publish_pages_from_disk', return_value={'published_count': 1}), mock.patch.object(
+                    TOOLS, '_run_stage_inprocess') as model:
+                TOOLS.ppt_restyle_pages(str(deck), '换成白底黑字，不改内容', pages=[1])
+                changed = (deck / 'pages/page_001.html').read_text()
+                self.assertIn('data-lazymind-theme="light"', changed)
+                self.assertIn('const data=[32,89]', changed)
+                self.assertIn('<img src="paper.png">', changed)
+                self.assertEqual((deck / 'pages/page_002.html').read_text(), html)
+                TOOLS.ppt_recolor_pages(str(deck), 'dark', pages=[1])
+                changed = (deck / 'pages/page_001.html').read_text()
+                self.assertEqual(changed.count('id="lazymind-palette-override"'), 1)
+                self.assertIn('data-lazymind-theme="dark"', changed)
+                model.assert_not_called()
+
+    def test_palette_edit_rolls_back_when_preview_publish_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = Path(temp)
+            (deck / 'pages').mkdir()
+            path = deck / 'pages/page_001.html'
+            path.write_text('<html><body>原文</body></html>')
+            with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), mock.patch.object(
+                    TOOLS, '_publish_pages_from_disk', return_value={'published_count': 0, 'failed': ['offline']}):
+                with self.assertRaisesRegex(TOOLS.ToolExecutionError, 'rolled back'):
+                    TOOLS.ppt_recolor_pages(str(deck))
+            self.assertEqual(path.read_text(), '<html><body>原文</body></html>')
+            self.assertFalse((deck / 'style_spec.json').exists())
+
+    def test_complete_deck_palette_followup_uses_script_even_if_agent_calls_generate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = Path(temp)
+            (deck / 'pages').mkdir()
+            (deck / 'pages/page_001.html').write_text('<html><body>结论89</body></html>')
+            (deck / 'outline.json').write_text('{"pages":[{"page_no":1}]}')
+            context = types.SimpleNamespace(task_id='edit', emit=mock.Mock(), params={
+                'launch_user_input': '生成深色科研PPT', 'current_user_input': '我不喜欢黑底 给我换成 白底黑字'})
+            with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), mock.patch.object(
+                TOOLS, 'require_context', return_value=context), mock.patch.object(
+                TOOLS, '_pending_page_insertion', return_value=None), mock.patch.object(
+                TOOLS, '_require_html_output'), mock.patch.object(
+                TOOLS, '_publish_pages_from_disk', return_value={'published_count': 1}), mock.patch.object(
+                    TOOLS, '_run_stage_inprocess') as model:
+                TOOLS.ppt_generate_pages(str(deck))
+                model.assert_not_called()
+            self.assertIn('data-lazymind-theme="light"', (deck / 'pages/page_001.html').read_text())
+
+    def test_builtin_research_style_persists_white_canvas_and_black_text(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(
+            TOOLS, '_conversation_root', return_value=Path(temp),
+        ), mock.patch.object(TOOLS, '_attach_material_images_to_deck', return_value={'attached': 0}):
+            for hint in ('科研风格', '科研风格，深蓝底白字'):
+                result = TOOLS.ppt_init_deck('两篇论文组会', style_hint=hint)
+                deck = Path(result['deck_dir'])
+                pack = json.loads((deck / 'task_pack.json').read_text(encoding='utf-8'))
+                info = json.loads((deck / 'info_pack.json').read_text(encoding='utf-8'))
+                constraints = pack['params']['explicit_visual_constraints']
+                if hint == '科研风格':
+                    self.assertIn('白底 #FFFFFF', constraints)
+                    self.assertIn('黑字 #111111', constraints)
+                    self.assertIn(constraints, info['user_query'])
+                else:
+                    self.assertEqual(constraints, hint)
+
     def test_uploaded_template_never_requires_image_model(self):
         with mock.patch.object(TOOLS, 'is_model_role_available') as check:
             result = TOOLS.check_ppt_workflow_capabilities(
@@ -373,7 +477,7 @@ class StyleFlowCombinationTest(unittest.TestCase):
                                    return_value={'published_count': 1}) as publish:
                 result = TOOLS.ppt_publish_outline(page_prompts=['红金配色，标题置顶，左右习俗插画，正文大字'])
             self.assertEqual(result['published_count'], 1)
-            publish.assert_called_once_with(deck, None, ['红金配色，标题置顶，左右习俗插画，正文大字'])
+            publish.assert_called_once_with(deck, None, ['红金配色，标题置顶，左右习俗插画，正文大字'], None, None, None)
             find.assert_not_called()
 
     def test_publish_outline_reports_missing_binding_without_search(self):
@@ -387,7 +491,8 @@ class StyleFlowCombinationTest(unittest.TestCase):
         outline = '## 春节习俗\n贴春联、吃年夜饭'
         prompt = '标题“春节快乐”置顶，红金配色；左侧春联插画，右侧年夜饭插画；短句大字，无 AI 底图。'
         with tempfile.TemporaryDirectory() as temp, \
-             mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=(outline, 'text')), \
+             mock.patch.object(TOOLS, '_resolve_artifact_text',
+                               side_effect=lambda ctx, slot: (outline if slot == 'deck_outline' else '', 'text')), \
              mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]), \
              mock.patch.object(TOOLS, '_publish_ordered_ppt_artifact', return_value={'status': 'ok'}) as publish:
             for invalid in (None, [], [outline], ['']):
@@ -398,7 +503,7 @@ class StyleFlowCombinationTest(unittest.TestCase):
             self.assertEqual(result['published_count'], 1)
             self.assertEqual(publish.call_args.kwargs['value'], prompt)
 
-    def test_complete_prompts_skip_structure_generation_but_quick_mode_keeps_it(self):
+    def test_complete_prompts_skip_structure_generation_but_legacy_sessions_keep_it(self):
         for complete in (True, False):
             with self.subTest(complete=complete), tempfile.TemporaryDirectory() as temp:
                 deck = Path(temp)
@@ -523,16 +628,21 @@ class StyleFlowCombinationTest(unittest.TestCase):
                 TOOLS, '_publish_pages_from_disk', return_value={
                     'published_count': 1, 'failed_count': 0,
                 },
+            ), mock.patch.object(TOOLS, 'available_font_families', return_value={'宋体'}), mock.patch(
+                'lazymind.chat.engine.tools.file_resources.presentation_edit.available_font_families',
+                return_value={'宋体'},
+            ), mock.patch.object(TOOLS, '_prepare_portable_font', return_value=('宋体', [])), mock.patch.object(
+                TOOLS, '_package_edited_html_fonts', side_effect=lambda html, *args: html,
             ):
                 result = TOOLS.ppt_replace_deck_fonts(
-                    str(deck), '宋体', pages=1, text_scope='titles',
+                    str(deck), '宋体', pages=1, text_scope='titles', allow_font_download=False,
                 )
 
             self.assertEqual(result['target_font'], '宋体')
             changed = (pages / 'page_001.html').read_text(encoding='utf-8')
             untouched = (pages / 'page_002.html').read_text(encoding='utf-8')
-            self.assertIn('lazymind-font-override-titles', changed)
-            self.assertIn('font-family: "宋体"', changed)
+            self.assertIn('font-family: &quot;宋体&quot; !important', changed)
+            self.assertIn('<p data-el="bullet-1">Body</p>', changed)
             self.assertEqual(untouched, page_html)
             self.assertEqual(
                 json.loads((deck / 'style_spec.json').read_text(encoding='utf-8')),
@@ -553,9 +663,14 @@ class StyleFlowCombinationTest(unittest.TestCase):
                 TOOLS, '_publish_pages_from_disk', return_value={
                     'published_count': 1, 'failed_count': 0,
                 },
+            ), mock.patch.object(TOOLS, 'available_font_families', return_value={'SimSun'}), mock.patch(
+                'lazymind.chat.engine.tools.file_resources.presentation_edit.available_font_families',
+                return_value={'SimSun'},
+            ), mock.patch.object(TOOLS, '_prepare_portable_font', return_value=('SimSun', [])), mock.patch.object(
+                TOOLS, '_package_edited_html_fonts', side_effect=lambda html, *args: html,
             ):
                 result = TOOLS.ppt_replace_deck_fonts(
-                    str(deck), 'SimSun', text_scope='all',
+                    str(deck), 'SimSun', text_scope='all', allow_font_download=False,
                 )
 
             style = json.loads((deck / 'style_spec.json').read_text(encoding='utf-8'))

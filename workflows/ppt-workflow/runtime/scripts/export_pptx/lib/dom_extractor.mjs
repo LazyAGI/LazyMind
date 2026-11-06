@@ -24,8 +24,9 @@ const BROWSER_EXTRACT_FN = () => {
     'border-radius', 'box-shadow',
     'border-top', 'border-right', 'border-bottom', 'border-left',
     'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+    'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
     'opacity', 'text-align', 'line-height', 'letter-spacing',
-    'text-decoration', 'display', 'overflow',
+    'text-decoration', 'display', 'overflow', 'align-items', 'flex-direction',
     'object-fit', 'vertical-align',
     'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
     'filter', 'backdrop-filter', 'text-shadow',
@@ -58,6 +59,7 @@ const BROWSER_EXTRACT_FN = () => {
         styles[kebabToCamel(prop)] = val;
       }
     }
+    if (el.__pptExportFontFamily) styles.fontFamily = el.__pptExportFontFamily;
     return styles;
   }
 
@@ -97,29 +99,6 @@ const BROWSER_EXTRACT_FN = () => {
       w: r.width,
       h: r.height,
     };
-  }
-
-  /**
-   * 提取表格数据。
-   * @param {HTMLTableElement} table
-   * @returns {Array<Array<{text:string, isHeader:boolean, colspan:number, rowspan:number, styles:Object}>>}
-   */
-  function extractTableData(table) {
-    const rows = [];
-    for (const tr of table.rows) {
-      const cells = [];
-      for (const cell of tr.cells) {
-        cells.push({
-          text: cell.innerText || '',
-          isHeader: cell.tagName === 'TH',
-          colspan: cell.colSpan || 1,
-          rowspan: cell.rowSpan || 1,
-          styles: extractStyles(cell),
-        });
-      }
-      rows.push(cells);
-    }
-    return rows;
   }
 
   /**
@@ -199,6 +178,8 @@ const BROWSER_EXTRACT_FN = () => {
       'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
       'stroke-dasharray', 'stroke-miterlimit',
       'opacity', 'fill-opacity', 'stroke-opacity',
+      'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing',
+      'text-anchor', 'dominant-baseline', 'stop-color', 'stop-opacity',
     ];
     const clone = svgEl.cloneNode(true);
     const origNodes = [svgEl, ...svgEl.querySelectorAll('*')];
@@ -211,8 +192,8 @@ const BROWSER_EXTRACT_FN = () => {
       for (const attr of SVG_PRESENTATION_ATTRS) {
         let val = cs.getPropertyValue(attr);
         if (!val || val === 'normal' || val === 'auto') continue;
-        // Skip if attribute already explicitly set (HTML wins over computed)
-        if (target.hasAttribute(attr)) continue;
+        // Computed CSS wins over presentation attributes and resolves variables.
+        target.style.setProperty(attr, val);
         // SVG presentation attrs use unitless lengths (vs CSS px). Strip 'px'
         // suffix so PowerPoint's strict SVG parser accepts the value.
         if (/-(?:width|miterlimit|offset)$/.test(attr) || attr === 'stroke-dasharray') {
@@ -221,7 +202,7 @@ const BROWSER_EXTRACT_FN = () => {
         target.setAttribute(attr, val);
       }
     }
-    return clone.outerHTML;
+    return new XMLSerializer().serializeToString(clone);
   }
 
   function hasOwnDecoration(el) {
@@ -262,7 +243,7 @@ const BROWSER_EXTRACT_FN = () => {
             italic: cs.getPropertyValue('font-style') === 'italic',
             fontSize: cs.getPropertyValue('font-size'),
             color: cs.getPropertyValue('color'),
-            fontFamily: cs.getPropertyValue('font-family'),
+            fontFamily: node.parentElement?.__pptExportFontFamily || cs.getPropertyValue('font-family'),
             // I-vi: 用 text-decoration-line（非继承）代替 text-decoration（继承），
 // 避免父节点的 underline 误传给子文本 run（如 company-11th p2 黄色下划线 bug）
 underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
@@ -300,7 +281,12 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
         const text = node.innerText || '';
         if (!text) return;
 
-        const isBlock = ['block', 'flex', 'grid', 'table', 'list-item'].includes(display);
+        // Flex items are blockified by computed style even in a horizontal
+        // row. That must not turn an inline formula into a new paragraph.
+        const parentStyle = window.getComputedStyle(node.parentElement || el);
+        const inFlexRow = ['flex', 'inline-flex'].includes(parentStyle.display)
+          && !parentStyle.flexDirection.startsWith('column');
+        const isBlock = !inFlexRow && ['block', 'flex', 'grid', 'table', 'list-item'].includes(display);
 
         runs.push({
           text,
@@ -310,7 +296,7 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
           // R5: 装饰子元素的文字在父 textbox 中用透明色占位（不实际渲染），
           // 真正的文字由它独立的 IR child shape+textbox 显示。
           color: isDecorated ? 'rgba(0, 0, 0, 0)' : cs.getPropertyValue('color'),
-          fontFamily: cs.getPropertyValue('font-family'),
+          fontFamily: node.__pptExportFontFamily || cs.getPropertyValue('font-family'),
           // I-vi: 用 text-decoration-line（非继承）代替 text-decoration（继承），
           // 避免父节点的 underline 误传给子文本 run（如 company-11th p2 黄色下划线 bug）
           underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
@@ -575,14 +561,24 @@ underline: cs.getPropertyValue('text-decoration-line').includes('underline'),
       return node;
     }
 
-    // TABLE: 提取 tableData，不递归子节点
+    // TABLE: preserve each measured cell as editable text and geometry.
     if (tag === 'TABLE') {
-      node.tableData = extractTableData(el);
+      // Keep measured cell geometry, including unequal columns and spans.
+      // Native addTable reflows rows and cannot reproduce browser sizing.
+      node.children = Array.from(el.rows).flatMap(row => Array.from(row.cells))
+        .map(cell => extractNode(cell, wrapperRect)).filter(Boolean);
       return node;
     }
 
-    // UL/OL: 提取 listData，不递归子节点
+    // Plain lists use native bullets; styled lists retain their DOM layout.
     if (tag === 'UL' || tag === 'OL') {
+      const customLayout = cs.listStyleType === 'none'
+        || ['grid', 'flex', 'inline-grid', 'inline-flex'].includes(cs.display)
+        || Array.from(el.children).some(child => ['grid', 'flex', 'inline-grid', 'inline-flex'].includes(getComputedStyle(child).display));
+      if (customLayout) {
+        node.children = Array.from(el.children).map(child => extractNode(child, wrapperRect)).filter(Boolean);
+        return node;
+      }
       node.listData = extractListData(el);
       node.listType = tag === 'OL' ? 'ordered' : 'unordered';
       // F-ii: 若 list bounds 被 flex 容器折叠（h < 4px），用 listData 估算高度。
@@ -745,9 +741,10 @@ export async function extractPage(page, htmlPath) {
   // 先用较大 viewport 加载，以便检测实际画布尺寸
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(fileUrl, { waitUntil: 'load' });
-  const { localFontCss } = await import('./local_fonts.mjs');
+  const { localFontCss, installMissingFontFallbacks } = await import('./local_fonts.mjs');
   const managedFontCss = await localFontCss(await page.content());
   if (managedFontCss) await page.addStyleTag({ content: managedFontCss });
+  await installMissingFontFallbacks(page);
   await page.waitForTimeout(200);
 
   // CSS @import web fonts may finish after the document load event. Waiting
@@ -812,8 +809,17 @@ export async function extractPage(page, htmlPath) {
         const inst = window.echarts.getInstanceByDom(el);
         if (!inst) continue;
         const opt = inst.getOption();
+        let renderedImageDataUri;
+        // ECharts' SVG string exporter can emit unescaped quotes in font-family.
+        // SVG charts use the styled DOM serialization below; canvas charts use PNG.
+        if (!el.querySelector('svg')) {
+          try { renderedImageDataUri = inst.getDataURL({ type: 'png', pixelRatio: 2 }); } catch { /* keep native option */ }
+        }
         result[el.id] = {
           option: opt,
+          // Keep an exact visual for features the native mapper cannot express.
+          // SVG renderers return a vector image; canvas renderers return PNG.
+          renderedImageDataUri,
           bounds: (() => {
             const r = el.getBoundingClientRect();
             return { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -826,7 +832,23 @@ export async function extractPage(page, htmlPath) {
     return result;
   });
 
+  await resolveRenderedFonts(page);
   const ir = await page.evaluate(BROWSER_EXTRACT_FN);
+
+  // Reuse the computed-style SVG clone, whose attributes are safely escaped by
+  // DOM serialization. This also preserves fonts and colors outside page CSS.
+  const attachChartSvg = node => {
+    if (!node) return;
+    const entry = chartOptionsMap[node.id];
+    if (entry && !entry.renderedImageDataUri) {
+      const findSvg = current => current?.svgContent || (current?.children || []).map(findSvg).find(Boolean);
+      const svg = findSvg(node);
+      if (svg) entry.renderedImageDataUri = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
+    }
+    for (const child of node.children || []) attachChartSvg(child);
+  };
+  for (const key of ['bg', 'header', 'ct', 'footer']) attachChartSvg(ir?.[key]);
+  for (const node of [...(ir?.overlays || []), ...(ir?.rest || [])]) attachChartSvg(node);
 
   // Attach chart options to the IR so pptx_builder can emit native charts.
   if (Object.keys(chartOptionsMap).length > 0 && ir) {
@@ -930,4 +952,38 @@ export async function extractPages(htmlPaths) {
   }
 
   return results;
+}
+
+/** Record the fonts Chromium actually used, not the first CSS fallback name.
+ * Per-node glyph counts also handle Latin headings containing Chinese text.
+ * Only annotates the DOM; it does not change the measured page layout.
+ */
+export async function resolveRenderedFonts(page) {
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send('DOM.enable');
+    await client.send('CSS.enable');
+    const { root } = await client.send('DOM.getDocument', { depth: -1 });
+    const nodes = [];
+    const visit = node => {
+      if (node.nodeType === 1 && node.children?.some(child => child.nodeType === 3 && child.nodeValue?.trim())) nodes.push(node.nodeId);
+      for (const child of node.children || []) visit(child);
+    };
+    visit(root);
+    for (let i = 0; i < nodes.length; i += 12) {
+      await Promise.all(nodes.slice(i, i + 12).map(async nodeId => {
+        const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId });
+        const font = fonts.filter(font => font.glyphCount > 0).sort((a, b) => b.glyphCount - a.glyphCount)[0];
+        if (!font) return;
+        const { object } = await client.send('DOM.resolveNode', { nodeId });
+        try {
+          await client.send('Runtime.callFunctionOn', {
+            objectId: object.objectId,
+            functionDeclaration: 'function(family) { this.__pptExportFontFamily = family; }',
+            arguments: [{ value: font.familyName }],
+          });
+        } finally { await client.send('Runtime.releaseObject', { objectId: object.objectId }); }
+      }));
+    }
+  } finally { await client.detach(); }
 }

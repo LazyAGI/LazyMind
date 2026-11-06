@@ -22,12 +22,12 @@ steps:
   label: Implement and review
 slots:
 - id: brief
-  user_visible: false
+  user_visible: true
   label: Dispatch Brief
   type: json
   cardinality: single
 - id: admission
-  user_visible: false
+  user_visible: true
   label: Checked Brief
   type: json
   cardinality: single

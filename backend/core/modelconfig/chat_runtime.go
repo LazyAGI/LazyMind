@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,13 @@ import (
 	"lazymind/core/credentialvault"
 	"lazymind/core/modelprovider"
 )
+
+// ChatModelFallbackEnabled controls automatic recovery, not initial model selection.
+// Unset/invalid values preserve the default enabled behavior.
+func ChatModelFallbackEnabled() bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED")))
+	return err != nil || value
+}
 
 type AvailableChatModel struct {
 	CredentialRevision   int64    `gorm:"column:credential_revision"`
