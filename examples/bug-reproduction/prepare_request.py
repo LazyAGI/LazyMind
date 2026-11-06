@@ -41,14 +41,14 @@ def main():
     evidence = {'executor': 'external example script; not LazyMind internal execution',
                 'python': platform.python_version(), 'platform': platform.platform(),
                 'source_sha256': digest(fixture), 'runs': runs}
-    (args.output / 'execution-evidence.json').write_text(json.dumps(evidence, indent=2))
+    (args.output / 'execution-evidence.json').write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     report = ('# Synthetic discount bug\nExpected 80 for a 20 percent discount on 100; actual -1900.\n'
               'No repair requested. The fixed fixture was run twice by an external executor.\n'
               'These failing test exits prove the bug; they do not mean the reporting Workflow failed.\n'
               'Do not claim LazyMind executed commands. No additional execution is requested.\n'
               '```python\n' + fixture.decode() + '```\n```json\n' + json.dumps(evidence, indent=2) + '\n```\n')
-    (args.output / 'bug-report.md').write_text(report)
-    origin = json.loads((root / 'ORIGIN.json').read_text())
+    (args.output / 'bug-report.md').write_text(report, encoding="utf-8")
+    origin = json.loads((root / 'ORIGIN.json').read_text(encoding="utf-8"))
     files = {}
     for name, metadata in origin['files'].items():
         with urllib.request.urlopen(metadata['url'], timeout=30) as response:
@@ -72,7 +72,7 @@ def main():
                'input_files': [{'material_id': 'bug_report', 'name': 'bug-report.md', 'mime_type': 'text/plain',
                                 'content_base64': base64.b64encode(report.encode()).decode(),
                                 'content_hash': 'sha256:' + digest(report.encode())}]}
-    (args.output / 'request.json').write_text(json.dumps(request, indent=2))
+    (args.output / 'request.json').write_text(json.dumps(request, indent=2), encoding="utf-8")
     (args.output / 'skill.zip').write_bytes(archive.getvalue())
     print('Verified test exit codes:', [run['exit_code'] for run in runs])
     print('ZIP SHA256:', digest(archive.getvalue()))

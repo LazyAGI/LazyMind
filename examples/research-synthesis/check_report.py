@@ -10,8 +10,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('report', type=Path)
     args = parser.parse_args()
-    source = (Path(__file__).parent / 'research-data.md').read_text()
-    report = args.report.read_text()
+    source = (Path(__file__).parent / 'research-data.md').read_text(encoding="utf-8")
+    report = args.report.read_text(encoding="utf-8")
     quotes = re.findall(r'Quote: "([^"\n]+)"', source)
     participants = re.findall(r'^## (P\d+) —', source, re.MULTILINE)
     checks = {

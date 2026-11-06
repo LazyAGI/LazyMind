@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
-    origin = json.loads((root / 'ORIGIN.json').read_text())
+    origin = json.loads((root / 'ORIGIN.json').read_text(encoding="utf-8"))
     upstream = f"https://raw.githubusercontent.com/anthropics/knowledge-work-plugins/{origin['commit']}/"
     files = {}
     for target, source in [('SKILL.md', origin['path']),
@@ -41,7 +41,8 @@ def main():
             info = zipfile.ZipInfo(name, date_time=(2026, 11, 2, 0, 0, 0))
             info.external_attr = 0o644 << 16
             output.writestr(info, content)
-    scope = (root / 'research-scope.md').read_text().rstrip() + '\n\n' + (root / 'research-data.md').read_text()
+    scope = ((root / 'research-scope.md').read_text(encoding="utf-8").rstrip()
+             + '\n\n' + (root / 'research-data.md').read_text(encoding="utf-8"))
     inputs = []
     for material, name in [('research_data', 'research-data.md'),
                            ('research_scope', 'research-scope.md')]:
@@ -60,7 +61,7 @@ def main():
                'config': {'reuse_workflow': False}}
     args.output.mkdir(parents=True, exist_ok=True)
     # Never overwrite a request that might already have been submitted.
-    with (args.output / 'request.json').open('x') as output:
+    with (args.output / 'request.json').open('x', encoding='utf-8') as output:
         json.dump(request, output, ensure_ascii=False, indent=2)
     with (args.output / 'skill.zip').open('xb') as output:
         output.write(archive.getvalue())

@@ -26,7 +26,7 @@ def check(path):
     expected['combined_search_share_of_combined_spend_pct'] = {0: Fraction(50), 1: Fraction(60)}
     issues, seen = [], set()
     checked = 0
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         cells = [cell.strip() for cell in line.strip('|').split('|')]
         if not line.startswith('| ') or len(cells) != 5:
             continue
