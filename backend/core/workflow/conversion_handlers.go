@@ -261,24 +261,35 @@ func skillDependencyReferences(markdown string, byPath map[string]skillPackageFi
 	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
 	var prose []text.Segment
 	var refs []string
+	linkDepth := 0
 	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
+			switch node.(type) {
+			case *ast.Link, *ast.Image:
+				linkDepth--
+			}
 			return ast.WalkContinue, nil
 		}
 		var destination []byte
 		switch link := node.(type) {
 		case *ast.Link:
+			linkDepth++
 			destination = link.Destination
 		case *ast.Image:
+			linkDepth++
 			destination = link.Destination
 		case *ast.Text:
-			prose = append(prose, link.Segment)
+			if linkDepth == 0 {
+				prose = append(prose, link.Segment)
+			}
 			return ast.WalkContinue, nil
 		case *ast.RawHTML:
-			prose = append(prose, link.Segments.Sliced(0, link.Segments.Len())...)
+			if linkDepth == 0 {
+				prose = append(prose, link.Segments.Sliced(0, link.Segments.Len())...)
+			}
 			return ast.WalkContinue, nil
 		default:
-			if node.Type() == ast.TypeBlock && node.IsRaw() {
+			if linkDepth == 0 && node.Type() == ast.TypeBlock && node.IsRaw() {
 				prose = append(prose, node.Lines().Sliced(0, node.Lines().Len())...)
 				if html, ok := node.(*ast.HTMLBlock); ok && html.HasClosure() {
 					prose = append(prose, html.ClosureLine)
@@ -290,8 +301,8 @@ func skillDependencyReferences(markdown string, byPath map[string]skillPackageFi
 		if err == nil && u.Scheme == "" && u.Host == "" && u.Path != "" {
 			refs = append(refs, path.Clean(u.Path))
 		}
-		// Links are handled above; scan only non-link source spans below.
-		return ast.WalkSkipChildren, nil
+		// Inspect nested images too, while excluding label text from the prose scan.
+		return ast.WalkContinue, nil
 	})
 	for i := 0; i < len(prose); i++ {
 		segment := prose[i]
