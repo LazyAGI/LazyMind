@@ -168,10 +168,11 @@ class WorkflowClient:
                                       status_code=response.status_code) from exc
         if response.status_code >= 400 or (isinstance(body, dict) and (
                 body.get('ok') is False or body.get('code', 0) not in (0, '0', None))):
-            error = body.get('error', {}) if isinstance(body, dict) else {}
-            error = error if isinstance(error, dict) else {}
-            data = body.get('data', {}) if isinstance(body, dict) else {}
+            data = body.get('data', body.get('result', {})) if isinstance(body, dict) else {}
             data = data if isinstance(data, dict) else {}
+            error = body.get('error') if isinstance(body, dict) else {}
+            error = error or data.get('error') or {}
+            error = error if isinstance(error, dict) else {}
             raise WorkflowClientError(
                 str(data.get('error_code') or error.get('code') or 'WORKFLOW_REQUEST_FAILED'),
                 str(data.get('error_message') or error.get('message')

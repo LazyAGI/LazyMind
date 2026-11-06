@@ -251,7 +251,8 @@ def run(inputs: dict) -> dict:
     report_progress(15, '正在整理参考论文与摘要')
     prompt_limit = _prompt_token_limit()
     papers = prepare_papers(inputs.get('papers', []) or [], prompt_limit)
-    material = {key: inputs.get(key) for key in ('topic', 'request', 'papers', 'question', 'evidence', 'mode')}
+    material = {key: inputs.get(key) for key in (
+        'topic', 'request', 'papers', 'question', 'evidence', 'writing_materials', 'mode')}
     material['papers'] = [{key: paper[key] for key in ('id', 'title', 'abstract')} for paper in papers]
     from .material_bindings import MaterialBindings
     bindings = MaterialBindings(papers)

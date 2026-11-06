@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from .code_response import parse_code_response, normalize_response, json_body
 from . import transport
@@ -59,6 +60,9 @@ def request_model(prompt, json_output=True, *, output_format=None):
             raise
         diagnostics.response(raw)
     text = normalized.body
+    if isinstance(text, str):
+        text = re.sub(r'^\s*(?:<think(?:ing)?>.*?</think(?:ing)?>\s*)+', '', text,
+                      flags=re.IGNORECASE | re.DOTALL)
     if not text or isinstance(text, str) and not text.strip():
         raise PlotModelError('绘图模型未返回内容，请检查模型服务状态；不将空响应当作绘图代码错误重写')
     return text

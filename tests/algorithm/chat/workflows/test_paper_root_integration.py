@@ -15,6 +15,7 @@ def test_outline_binds_explicit_requirements_before_default(monkeypatch, prompt,
     pool = workflow.pool_from_business(dict(topic='Paper', request=prompt, writing_materials='Original notes'))
     original = copy.deepcopy(pool)
     seen = []
+
     def run(step, value):
         seen.append(value)
         return dict(outline='# Paper\n\n## 摘要\n\n## 方法\n\n## 结论', is_demo=False)
@@ -26,12 +27,18 @@ def test_outline_binds_explicit_requirements_before_default(monkeypatch, prompt,
     assert pool == original
 
 
-def test_review_receives_original_research_materials():
+def test_review_excludes_upstream_research_materials():
     notes = 'PT0005→PT0007; MiniMax: 3647→2831 字。'
-    pool = workflow.pool_from_business(dict(topic='Paper', writing_materials=notes,
-                                          manuscript='# Paper\n\n## 结果\n待核对。'))
+    pool = workflow.pool_from_business(dict(
+        topic='Paper', writing_materials=notes, manuscript='# Paper\n\n## 结果\n待核对。'))
+    original = copy.deepcopy(pool)
     value = contracts.validate_input('peer_review', workflow.business_input('peer_review', pool))
-    assert value['writing_materials'] == notes
+    assert value == {
+        'topic': 'Paper', 'request': '', 'manuscript': '# Paper\n\n## 结果\n待核对。',
+        'papers': [], 'charts': [],
+    }
+    assert workflow.material(pool, 'writing_materials')['content'] == notes
+    assert pool == original
 
 
 @pytest.mark.parametrize('sections', [['unknown'], ['abstract', 'abstract'], 'abstract', [None]])
@@ -55,14 +62,18 @@ def test_explicit_retry_is_single_use_and_stops_model_loop(conflict, handoff):
     if handoff:
         client.advance.side_effect = responses + [response, response]
     else:
-        toolkit.advance_step.side_effect = responses + [dict(status='active'), dict(status='active')]
-    with patch.object(manager, '_agentic_config', return_value=cfg), patch.object(manager, '_client', return_value=client):
+        waiting = dict(status='active', workflow_state={'display': {
+            'status': 'waiting', 'approval_step_id': 'data_analysis'}})
+        toolkit.advance_step.side_effect = responses + [waiting, waiting]
+    with (patch.object(manager, '_agentic_config', return_value=cfg),
+          patch.object(manager, '_client', return_value=client)):
         tool = (manager._handoff_tool('session', '重试') if handoff else
                 next(t for t in manager._safe_session_tools(toolkit, 'session', '重试') if t.__name__ == 'advance_step'))
         result = tool('data_analysis' if handoff else ['data_analysis'])
         assert result['_agent_control']['stop'] is True
         assert not cfg.get('user_authorized_workflow_retry')
-        tool('data_analysis' if handoff else ['data_analysis'])
+        result = tool('data_analysis' if handoff else ['data_analysis'])
+        assert result['_agent_control']['stop'] is True
     calls = client.advance.call_args_list if handoff else toolkit.advance_step.call_args_list
     origins = [c.args[0].retry_origin if handoff else c.kwargs['retry_origin'] for c in calls]
     assert origins == (['user', 'user', 'automatic'] if conflict else ['user', 'automatic'])
@@ -92,3 +103,25 @@ def test_missing_material_stops_only_current_failed_receipt(status, outcome, rea
     assert bool(result.get('_agent_control', {}).get('stop')) is stop
     assert result['retryable_steps'] == ['data_analysis']
     assert value == original
+
+
+@pytest.mark.parametrize('workflow_id,stop', [('paper-writing', True), ('other-workflow', False)])
+def test_paper_failure_stops_advance_tool_before_automatic_recovery(workflow_id, stop):
+    from lazymind.chat.workflow import workflow_manager as manager
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = dict(state_version=7, ready_steps=['experiment'])
+    receipt = dict(status='failed', outcome='step_failed',
+                   failure_reasons={'task': 'F3 材料超过当前模型预算，请缩小范围；未截断数据。'},
+                   retryable_steps=['experiment'], rewindable_steps=['literature_review'],
+                   workflow_state={'session_id': 'session', 'status': 'failed'})
+    original = copy.deepcopy(receipt)
+    toolkit.advance_step.return_value = receipt
+    context = {}
+    with patch.object(manager, '_agentic_config', return_value={}):
+        tools = manager._safe_session_tools(toolkit, 'session', '继续', workflow_context=context)
+        tool = next(t for t in tools if t.__name__ == 'advance_step')
+        context['workflow_id'] = workflow_id
+        result = tool(['experiment'])
+    assert bool(result.get('_agent_control', {}).get('stop')) is stop
+    toolkit.advance_step.assert_called_once()
+    assert receipt == original

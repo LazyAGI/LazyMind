@@ -17,16 +17,23 @@ OUTLINE = '# 方法比较\n\n## 方法\n\n## 结果\n\n## 局限'
 BODY = '仅比较单次得分。新方法得分高 15 分；不能推断统计显著性。'
 
 
+@pytest.mark.parametrize('word_target', [1, 10000])
 @pytest.mark.parametrize('defect', [None, 'structure', 'reference', 'chart'])
-def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect):
+def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect, word_target):
+    from lazymind.document_tools.paper import shared_facts, workflow
     from lazymind.document_tools.paper.writing import write_document
 
-    inputs = contracts.validate_input('write_document', {'topic': '方法比较', 'outline': OUTLINE})
-    prepared = dict(writing_task={'constraints': contracts.normalize_constraints({})},
+    inputs = contracts.validate_input('write_document', {
+        'topic': '方法比较', 'outline': OUTLINE, 'constraints': {'word_target': word_target}})
+    prepared = dict(writing_task={'constraints': inputs['constraints']},
                     writing_context={}, outline=OUTLINE,
-                    charts=[], reference_candidates=[])
+                    charts=[], reference_candidates=[], shared_facts=[shared_facts._fact(
+                        'source:1', 'status', 'The evidence still needs review.', 'writing_materials')])
+    forbidden_review = Mock(side_effect=AssertionError('Source review belongs to F6'))
+    monkeypatch.setattr(shared_facts, 'AutoModel', forbidden_review)
     monkeypatch.setattr(write_document, 'prepare_writer_context', lambda *a, **k: prepared)
     toolkit = Mock()
+    monkeypatch.setattr(write_document, 'WriterCreateToolkit', lambda: toolkit)
     toolkit.check_consistency.side_effect = AssertionError('Semantic review belongs to F6')
     toolkit.generate_section_instructions.return_value = json.dumps({'section_instructions': {
         'instructions': [dict(instruction_id=str(i), content_ref={'heading_path': ['方法比较', title]},
@@ -42,12 +49,19 @@ def test_draft_defers_semantic_review_but_keeps_hard_checks(monkeypatch, defect)
     elif defect == 'chart':
         body += '\n\n[图表:unknown]'
     toolkit.generate_draft_document_markdown.return_value = json.dumps({'draft_document': body})
+    pool = workflow.pool_from_business(dict(
+        topic=inputs['topic'], outline=inputs['outline'], constraints=inputs['constraints']))
     if defect:
         with pytest.raises(ValueError):
-            write_document._write_draft(inputs, toolkit=toolkit)
+            workflow.execute_step('write_document', pool)
     else:
-        assert write_document._write_draft(inputs, toolkit=toolkit)['manuscript'] == body
+        completed = workflow.execute_step('write_document', pool)['pool']
+        assert workflow.material(completed, 'manuscript')['content'] == body
+        assert workflow.routes_after(completed) == ['F6']
+        assert workflow.business_input('peer_review', completed)['manuscript'] == body
+    forbidden_review.assert_not_called()
     toolkit.check_consistency.assert_not_called()
+    toolkit.stream_draft_blocks_markdown.assert_called_once()
 
 
 @pytest.mark.parametrize('language,target', [('zh-CN', None), ('zh-CN', 1000), ('en', 1000)])
@@ -124,7 +138,8 @@ def revision():
     manuscript = '# 论文\n\n## 方法\n\n来源[SRC-001]。'
     reviewed = peer_review.build_output(peer_review.ReviewResult.model_validate(dict(
         summary='修改表述', limitations=[], issues=[dict(severity='minor', category='language',
-        location='方法', quote='来源[SRC-001]。', problem='表述不清', suggestion='澄清', action_type='text_revision')]
+                                                     location='方法', quote='来源[SRC-001]。', problem='表述不清',
+                                                     suggestion='澄清', action_type='text_revision')]
     )), dict(topic='论文', manuscript=manuscript, evidence=None, analysis=None, request=''))
     return dict(topic='论文', manuscript=manuscript, selected_issue_ids=['R1'],
                 papers=[dict(id='SRC-001', title='来源', text='来源正文', citation='来源文献[Z].')],
@@ -198,6 +213,7 @@ def test_chart_directory_reuses_one_index_and_keeps_exact_associations(monkeypat
     before = copy.deepcopy(source)
     indexes = []
     original = document._chart_directory
+
     def record(chart, findings):
         indexes.append(findings)
         return original(chart, findings)
@@ -209,6 +225,20 @@ def test_chart_directory_reuses_one_index_and_keeps_exact_associations(monkeypat
 
 
 # Scoped revision through the public Writer toolkit.
+def test_reader_material_registry_preserves_study_names_and_tracks_internal_ids():
+    title = 'ImageNet-1K'
+    inputs = contracts.validate_input('write_document', {
+        'topic': '方法比较', 'outline': OUTLINE, 'papers': [dict(
+            id='upload-test-records', title=title, text='Thirty observed tasks.',
+            review_role='background', attachment_key='test-attachment', content_type='excerpt')],
+    })
+    prepared = document.prepare_writer_inputs(inputs)
+    registry = prepared['material_identifiers']
+    assert 'upload-test-records' in registry
+    assert '[文献:upload-test-records]' in registry
+    assert title not in registry and '`' + title + '`' not in registry
+
+
 SOURCE = '# 论文\n\n## 方法\n\n原方法。\n\n## 结果\n\n原结果。\n\n## 局限\n\n保留原局限。'
 
 
@@ -228,8 +258,8 @@ def prepared(issues=None):
                 writing_task={'query': '只修改选中意见', 'meta': {'mode': 'revise', 'review_driven': True}},
                 writing_context={'context_id': 'scope-test'}, charts=[], reference_candidates=[],
                 selected_issues=[dict(id=key, action_type=action,
-                    location=section, quote=None)
-                    for key, section, action in issues])
+                                      location=section, quote=None)
+                                 for key, section, action in issues])
 
 
 def editor(operations, changes=()):
@@ -261,6 +291,16 @@ def test_replacements_cannot_escape_planned_scope():
             'replacements': [replacement('原结果。', '篡改结果。', '结果')]})
 
 
+def test_generated_citation_repair_precedes_effective_scope_validation():
+    change = replacement(new=r'修订方法。[\[1\](#paper-ref-ref-1)')
+    changes, located = revision_entry._validated_changes(
+        SOURCE, None, [(0, len(SOURCE))], {'replacements': [change]}, allow_repair=False,
+        candidates=[{'id': 'ref-1', 'citation': 'Author. Study. 2026.'}],
+    )
+    assert changes['replacements'][0]['new_string'] == r'修订方法。[\[1\]](#paper-ref-ref-1)'
+    assert located[0][2].new_string == changes['replacements'][0]['new_string']
+
+
 def test_replacements_reject_overlap():
     with pytest.raises(ValueError, match='overlapping'):
         revision_entry._bounded_replacements(SOURCE, [(0, len(SOURCE))], {'replacements': [
@@ -279,18 +319,43 @@ def test_reverse_application_preserves_child_references_when_title_changes():
         '原结果。', '修订结果。').replace('# 论文', '# 新论文')
 
 
+@pytest.mark.parametrize('new_title', ['# 论文的实证研究', '# 新论文'])
+def test_planned_title_revision_accepts_suffix_and_replacement(new_title):
+    changes = [dict(old_string='# 论文', new_string=new_title,
+                    content_ref={'heading_path': ['论文']}), replacement()]
+    tools = editor([instruction()], changes)
+    tools.generate_modify_plan.return_value = json.dumps({
+        'scope': 'document', 'title_instruction': '修改论文题目', 'instructions': [instruction()],
+    })
+    result = revision_entry._modify_manuscript(prepared(), {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('# 论文', new_title).replace('原方法。', '修订方法。')
+
+
+def test_planned_title_revision_keeps_other_edits_when_title_is_missing():
+    tools = editor([instruction()], [replacement()])
+    tools.generate_modify_plan.return_value = json.dumps({
+        'scope': 'document', 'title_instruction': '修改论文题目', 'instructions': [instruction()],
+    })
+    result = revision_entry._modify_manuscript(prepared(), {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('原方法。', '修订方法。')
+    assert any('标题' in item for item in result['_pending_edits'])
+
+
 @pytest.mark.parametrize('ids', [[], ['R2'], [1]])
 def test_review_plan_requires_selected_issue_ids(ids):
     data = prepared()
-    with pytest.raises(ValueError, match='selected issue_ids'):
-        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(),
-                                          editor=editor([instruction(ids=ids)]))
+    tools = editor([instruction(ids=ids)])
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE and result['_pending_edits']
+    tools.apply_string_replace.assert_not_called()
 
 
-def test_review_plan_requires_every_selected_text_revision():
+def test_partial_review_plan_saves_executable_edits():
     data = prepared([('R1', '方法', 'text_revision'), ('R2', '结果', 'text_revision')])
-    with pytest.raises(ValueError, match='does not cover all'):
-        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=editor([instruction()]))
+    result = revision_entry._modify_manuscript(
+        data, {'word_target': None}, Mock(), editor=editor([instruction()], [replacement()]))
+    assert result['manuscript'] == SOURCE.replace('原方法。', '修订方法。')
+    assert any('R2' in item for item in result['_pending_edits'])
 
 
 def test_move_ranges_include_public_writer_destination():
@@ -303,18 +368,19 @@ def test_move_ranges_include_public_writer_destination():
     assert [SOURCE[start:end].strip() for start, end in ranges[0]] == ['## 方法\n\n原方法。', '## 结果\n\n原结果。']
 
 
-def test_each_text_issue_requires_an_effective_replacement_before_application():
+def test_unresolved_issue_does_not_discard_other_effective_edits():
     data = prepared([('R1', '方法', 'text_revision'), ('R2', '结果', 'text_revision')])
     tools = editor([instruction(), instruction('结果', ['R2'])], [replacement()])
-    with pytest.raises(ValueError, match='no effective edit.*R2'):
-        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
-    tools.apply_string_replace.assert_not_called()
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('原方法。', '修订方法。')
+    assert any('R2' in item for item in result['_pending_edits'])
+    tools.apply_string_replace.assert_called_once()
 
 
 def test_invalid_generated_edit_is_rejected_before_application():
     tools = editor([instruction()], [replacement('原结果。', '篡改结果。', '结果')])
-    with pytest.raises(ValueError, match='exceeds the planned'):
-        revision_entry._modify_manuscript(prepared(), {'word_target': None}, Mock(), editor=tools)
+    result = revision_entry._modify_manuscript(prepared(), {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE and result['_pending_edits']
     tools.apply_string_replace.assert_not_called()
 
 
@@ -350,8 +416,9 @@ def test_selected_revision_preserves_unselected_sections_and_inputs(word_target)
     before = copy.deepcopy(data)
     tools = editor([instruction()], [replacement()])
     quality = Mock()
-    result = revision_entry._modify_manuscript(data, {'word_target': word_target, 'paper_language': 'zh-CN'}, quality, editor=tools)
-    assert result == dict(manuscript=SOURCE.replace('原方法。', '修订方法。'), is_demo=False)
+    result = revision_entry._modify_manuscript(
+        data, {'word_target': word_target, 'paper_language': 'zh-CN'}, quality, editor=tools)
+    assert result == dict(manuscript=SOURCE.replace('原方法。', '修订方法。'), is_demo=False, _pending_edits=[])
     assert data == before
     tools.apply_string_replace.assert_called_once()
     quality.check_consistency.assert_not_called()
@@ -399,7 +466,6 @@ def test_new_draft_still_checks_planned_headings():
             SOURCE.replace('## 方法', '## 研究方法'), signature=document._heading_signature(SOURCE))
 
 
-
 def test_inline_trace_failure_preserves_business_result_and_error(monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError('trace unavailable')
@@ -421,14 +487,17 @@ def test_completed_revision_streams_full_text_once_after_validation(monkeypatch,
     tools = editor([instruction()], changes)
     tools.locate_revision_target = Mock(return_value='{}')
     emitted = []
-    expected = SOURCE.replace('原方法。', '修订方法。')
+    candidate = SOURCE.replace('原方法。', '修订方法。')
+    expected = SOURCE if failure else candidate
+
     def validate(body, *args, **kwargs):
-        assert body == expected
+        assert body == candidate
         assert not any(e['type'].startswith('artifact_stream') for e in emitted)
         if failure == 'validation':
             raise ValueError('invalid candidate')
     monkeypatch.setattr(revision_entry, '_validate_manuscript', validate)
     slot = 'revise_document_document'
+
     def run():
         with bind_runtime_events(emitted.append, slot) as events:
             result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
@@ -439,23 +508,24 @@ def test_completed_revision_streams_full_text_once_after_validation(monkeypatch,
             assert [e['delta'] for e in emitted if 'delta' in e] == [expected]
             events.complete()
             return result
-    if failure:
-        with pytest.raises(ValueError):
-            run()
-        assert not any(e['type'].startswith('artifact_stream') for e in emitted)
-    else:
-        assert run()['manuscript'] == expected
-        assert len([e for e in emitted if e['type'] == 'artifact_stream_start']) == 1
-        assert not any(e['type'] == 'artifact_stream_abort' for e in emitted)
-        assert any(e['type'] == 'artifact_stream_end' for e in emitted)
+    result = run()
+    assert result['manuscript'] == expected
+    assert bool(result['_pending_edits']) == bool(failure)
+    assert len([e for e in emitted if e['type'] == 'artifact_stream_start']) == 1
+    assert not any(e['type'] == 'artifact_stream_abort' for e in emitted)
+    assert any(e['type'] == 'artifact_stream_end' for e in emitted)
     assert all(e['slot'] == slot for e in emitted if 'slot' in e)
     assert data['manuscript'] == SOURCE
 
 
-def test_new_draft_still_enforces_full_manuscript_length():
-    with pytest.raises(ValueError, match='outside target'):
-        document._validate_manuscript(SOURCE, None, [],
-            {'word_target': 10000, 'paper_language': 'zh-CN'}, Mock(), '{}', candidates=[])
+@pytest.mark.parametrize('language', ['zh-CN', 'en'])
+@pytest.mark.parametrize('target', [1, 10000])
+def test_manuscript_length_is_a_generation_target_not_a_failure(language, target):
+    toolkit = Mock()
+    document._validate_manuscript(
+        SOURCE, None, [], {'word_target': target, 'paper_language': language}, toolkit, '{}',
+        candidates=[], check_quality=False)
+    toolkit.check_consistency.assert_not_called()
 
 
 @pytest.mark.parametrize('action', ['needs_material', 'needs_experiment'])
@@ -464,8 +534,8 @@ def test_review_without_executable_edits_stops_before_replacement(action):
     tools = editor([])
     tools.generate_modify_plan.side_effect = ValueError(
         'modify_plan contains no operations for the located revision scope.')
-    with pytest.raises(contracts.MissingMaterials, match='补充材料或实验'):
-        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE and result['_pending_edits']
     tools.generate_string_replace_set.assert_not_called()
     tools.apply_string_replace.assert_not_called()
 
@@ -475,8 +545,8 @@ def test_pending_issue_stays_in_report_instead_of_inserting_a_manuscript_marker(
     data = prepared([('R1', '缺失内容：验证', action)])
     marker = '原结果。\n\n[待补实验：独立验证尚未完成。]'
     tools = editor([instruction('结果')], [replacement('原结果。', marker, '结果')])
-    with pytest.raises(contracts.MissingMaterials, match='没有可执行的文本修改'):
-        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE and result['_pending_edits']
     tools.locate_revision_target.assert_not_called()
     tools.generate_string_replace_set.assert_not_called()
     tools.apply_string_replace.assert_not_called()
@@ -488,8 +558,60 @@ def test_pending_only_without_writer_target_keeps_manuscript():
     before = copy.deepcopy(data)
     tools = editor([])
     tools.locate_revision_target.side_effect = ValueError('locate_result contains no revision targets.')
-    with pytest.raises(contracts.MissingMaterials, match='待补事项.*稿件未修改'):
-        revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE and result['_pending_edits']
     assert data == before
     tools.generate_modify_plan.assert_not_called()
     tools.apply_string_replace.assert_not_called()
+
+
+@pytest.mark.parametrize('action', ['needs_material', 'needs_experiment'])
+@pytest.mark.parametrize('clarify_pending', [False, True])
+def test_selected_pending_issues_allow_optional_text_clarification(action, clarify_pending):
+    data = prepared([('R1', '方法', 'text_revision'), ('R2', '局限', action)])
+    before = copy.deepcopy(data)
+    operations, changes = [instruction()], [replacement()]
+    expected = SOURCE.replace('原方法。', '修订方法。')
+    if clarify_pending:
+        operations.append(instruction('局限', ids=['R2']))
+        clarification = '保留原局限；仍需补充材料或实验，未声称完成。'
+        changes.append(replacement('保留原局限。', clarification, '局限'))
+        expected = expected.replace('保留原局限。', clarification)
+    tools = editor(operations, changes)
+    quality = Mock()
+    result = revision_entry._modify_manuscript(
+        data, {'word_target': None, 'paper_language': 'zh-CN'}, quality, editor=tools)
+    assert result['manuscript'] == expected
+    assert data == before
+    assert data['selected_issues'][1]['action_type'] == action
+    quality.check_consistency.assert_not_called()
+    assert tools.apply_string_replace.call_count == len(changes)
+
+
+def test_failed_locator_keeps_successful_revision(monkeypatch):
+    data = prepared([('R1', '方法', 'text_revision'), ('R2', '结果', 'text_revision')])
+    bad = instruction('不存在的章节', ids=['R2'])
+    tools = editor([instruction(), bad], [replacement()])
+    monkeypatch.setattr(revision_entry, 'repair_locators', Mock(side_effect=ValueError('cannot locate R2')))
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('原方法。', '修订方法。')
+    assert any('R2' in note for note in result['_pending_edits'])
+    tools.apply_string_replace.assert_called_once()
+
+
+def test_one_apply_failure_preserves_other_completed_edits():
+    data = prepared([('R1', '方法', 'text_revision'), ('R2', '结果', 'text_revision')])
+    tools = editor([instruction(), instruction('结果', ['R2'])], [
+        replacement(), replacement('原结果。', '修订结果。', '结果')])
+    apply = WriterRevisionToolkit().apply_string_replace
+
+    def fail_method_only(**kwargs):
+        if json.loads(kwargs['string_replace_set_json'])['replacements'][0]['old_string'] == '原方法。':
+            return json.dumps({'string_replace_result': {'success': False}})
+        return apply(**kwargs)
+
+    tools.apply_string_replace.side_effect = fail_method_only
+    result = revision_entry._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == SOURCE.replace('原结果。', '修订结果。')
+    assert result['_pending_edits']
+    assert tools.apply_string_replace.call_count == 2

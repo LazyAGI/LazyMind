@@ -4,6 +4,7 @@ import base64
 import contextlib
 import io
 import json
+import re
 import sys
 import traceback
 
@@ -21,12 +22,40 @@ def apply_export_fonts(figure, families):
         text.set_usetex(False)
 
 
+def validate_bar_positions(figure):
+    """Axes must enclose complete categories and every measured bar endpoint."""
+    from matplotlib.container import BarContainer
+
+    for axis in figure.axes:
+        for container in axis.containers:
+            if not isinstance(container, BarContainer):
+                continue
+            horizontal = container.orientation == 'horizontal'
+            low, high = sorted(axis.get_ylim() if horizontal else axis.get_xlim())
+            for bar in container.patches:
+                start = bar.get_y() if horizontal else bar.get_x()
+                end = start + (bar.get_height() if horizontal else bar.get_width())
+                if min(start, end) < low - 1e-9 or max(start, end) > high + 1e-9:
+                    dimension = 'y' if horizontal else 'x'
+                    raise ValueError(f'Bar is clipped on categorical {dimension} axis: bar spans '
+                                     f'{min(start, end):g}..{max(start, end):g}, limits are {low:g}..{high:g}. '
+                                     'Set categorical limits to enclose the complete bar and center single-row stacks.')
+                value = bar.get_x() + bar.get_width() if horizontal else bar.get_y() + bar.get_height()
+                value_low, value_high = sorted(axis.get_xlim() if horizontal else axis.get_ylim())
+                if not value_low - 1e-9 <= value <= value_high + 1e-9:
+                    dimension = 'x' if horizontal else 'y'
+                    raise ValueError(f'Measured bar endpoint {value:g} is outside numeric {dimension} limits '
+                                     f'{value_low:g}..{value_high:g}. Include every measured value and check '
+                                     'shared axes between quantities with different units.')
+
+
 def wrapped_text(value, text, renderer, width):
     lines = []
     for paragraph in value.split('\n'):
         current = ''
-        for word in paragraph.split(' '):
-            trial = (current + ' ' + word).strip()
+        for word in re.findall(r'\S+?(?:-|(?=\s|$))', paragraph):
+            separator = '' if current.endswith('-') else ' '
+            trial = (current + separator + word).strip()
             measured = renderer.get_text_width_height_descent(trial, text.get_fontproperties(), False)[0]
             if current and measured > width:
                 lines.append(current)
@@ -60,6 +89,33 @@ def wrap_category_labels(figure):
         wrapped = [wrapped_text(label, text, renderer, width) for label, text in zip(labels, texts)]
         if wrapped != labels:
             axis.set_xticks(ticks, wrapped)
+
+
+def place_figure_legends(figure):
+    """Reserve a compact row above the plot when a shared legend covers an axis."""
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    axes = [axis for axis in figure.axes if axis.get_visible()]
+    for axis in axes:
+        legend = axis.get_legend()
+        if legend is not None:
+            box = legend.get_window_extent(renderer)
+            if axis.bbox.contains(box.x0, box.y0) and axis.bbox.contains(box.x1, box.y1):
+                legend.set_loc('best')
+    top = max([1.02, *[axis.get_tightbbox(renderer).y1 / figure.bbox.height + .03 for axis in axes]])
+    for legend in list(figure.legends):
+        box = legend.get_window_extent(renderer)
+        if any(box.overlaps(axis.get_tightbbox(renderer)) for axis in axes):
+            labels = [text.get_text() for text in legend.get_texts()]
+            frame = legend.get_frame()
+            replacement = figure.legend(
+                legend.legend_handles, labels, loc='lower center', bbox_to_anchor=(.5, top),
+                ncol=min(5, len(labels)), fontsize=legend.get_texts()[0].get_fontsize(),
+                title=legend.get_title().get_text() or None, frameon=legend.get_frame_on(),
+                facecolor=frame.get_facecolor(), edgecolor=frame.get_edgecolor(), framealpha=frame.get_alpha())
+            legend.remove()
+            figure.canvas.draw()
+            top = replacement.get_window_extent(renderer).y1 / figure.bbox.height + .03
 
 
 def fit_external_text(figure):
@@ -137,9 +193,16 @@ def render(payload):
                 figure = namespace['draw'](payload['table'], payload['statistics'], payload['spec'])
             if not isinstance(figure, Figure):
                 raise ValueError('draw 必须返回 Matplotlib Figure')
+            if figure._suptitle is not None and figure._suptitle.get_text().strip() == payload['spec'].get('title'):
+                figure.suptitle('')
             if original != json.dumps([payload['table'], payload['statistics']], sort_keys=True, allow_nan=False):
                 raise ValueError('绘图代码修改了输入结果或原始数据，请使用局部副本')
+            validate_bar_positions(figure)
             apply_export_fonts(figure, families)
+            place_figure_legends(figure)
+            wrap_category_labels(figure)
+            fit_external_text(figure)
+            # Layout can narrow panels after the first label measurement.
             wrap_category_labels(figure)
             fit_external_text(figure)
             apply_export_fonts(figure, families)

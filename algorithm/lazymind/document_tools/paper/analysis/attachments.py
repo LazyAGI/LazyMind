@@ -10,10 +10,14 @@ from urllib.parse import urlsplit
 
 import lazyllm
 
-from .schema import ContractError
+from .schema import ContractError, Object, parse
 
 # Same source-file ceiling as the conversation text-resource reader.
 MAX_SOURCE_BYTES = 100 * 1024 * 1024
+
+
+class AnalysisEntryIntent(Object):
+    standalone_analysis: bool
 
 
 def describe_input_bindings(resources, bindings):
@@ -82,16 +86,24 @@ def _upload_requested(config, request):
 
 
 def standalone_f4_request(request):
-    return bool(re.search(r'(?:只|仅|单独).{0,30}(?:F4|data_analysis|数据分析)|'
-                          r'(?:only|standalone).{0,40}(?:F4|data_analysis|data analysis)', request, re.I))
+    from . import model
+    from ..model_context import model_prompt
+
+    prompt = '''Determine the scope of the complete user request. standalone_analysis is true when the requested
+workflow ends with data analysis and figures, and false when analysis is part of a broader research or writing
+workflow. Return JSON matching the schema.'''
+    answer = model.call_model(model_prompt(
+        prompt, facts={}, tables={}, shared=dict(schema=AnalysisEntryIntent.model_json_schema()),
+        task=dict(request=request)))
+    return parse(AnalysisEntryIntent, answer, 'input.analysis_entry')['standalone_analysis']
 
 
 def workflow_input_bindings(bindings, request):
     """Import a catalog reference for standalone F4 JSON analysis requests."""
-    if not standalone_f4_request(request) or any(key.endswith('_pool') for key in bindings):
+    if any(key.endswith('_pool') for key in bindings):
         return bindings
     config = lazyllm.globals.get('agentic_config') or {}
-    if not _upload_requested(config, request):
+    if not _upload_requested(config, request) or not standalone_f4_request(request):
         return bindings
     source = _select_attachment(config, request)
     if source is None:

@@ -107,7 +107,10 @@ def test_updated_research_materials_do_not_block_existing_manuscript(step):
     before = copy.deepcopy(pool)
     inputs = contracts.validate_input(step, workflow.business_input(step, pool, 'Use the updated evidence.'))
     assert inputs['manuscript'] == BODY
-    assert inputs['evidence'] == 'Additional verified evidence'
+    if step == 'peer_review':
+        assert 'evidence' not in inputs
+    else:
+        assert inputs['evidence'] == 'Additional verified evidence'
     assert pool == before
 
 
@@ -350,3 +353,21 @@ def test_revision_publication_reports_only_selected_pending_work(tmp_path, monke
             lazyllm.globals.pop('subagent_ctx', None)
         else:
             lazyllm.globals['subagent_ctx'] = previous
+
+
+def test_review_failure_does_not_discard_completed_revision(monkeypatch):
+    from unittest.mock import Mock
+    from lazymind.document_tools.paper import peer_review
+    inputs = contracts.validate_input('revise_document', dict(
+        topic='Paper', manuscript=BODY, request='Shorten the discussion.'))
+    revised = BODY.replace('Shorten this paragraph.', 'Short paragraph.')
+    monkeypatch.setattr(revise_document, 'prepare_writer_context', lambda *a, **k: {
+        'writing_task': {'constraints': {}}, 'charts': []})
+    monkeypatch.setattr(revise_document, '_modify_manuscript', lambda *a, **k: {
+        'manuscript': revised, 'is_demo': False, '_pending_edits': ['R2 尚待补充材料']})
+    monkeypatch.setattr(peer_review, 'run', Mock(side_effect=RuntimeError('review unavailable')))
+    output = revise_document.run(inputs)
+    contracts.validate_output('revise_document', output, inputs)
+    assert output['manuscript'] == revised
+    assert any('R2' in item for item in output['review_data']['limitations'])
+    assert any('复核未完成' in item for item in output['review_data']['limitations'])

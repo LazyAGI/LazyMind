@@ -62,11 +62,11 @@ def build_output(draft: ExperimentDraft, inputs: dict, execution=None) -> dict:
 def run(inputs: dict, *, on_event=None, allow_execution=False) -> dict:
     """Generate once, then use the Runtime's execution choice within the bounded executor."""
     inputs = validate_input('experiment', inputs)
-    from .preparation import prepare
+    from .preparation import model_input, prepare
     existing, inputs = prepare(inputs, on_event)
     if existing is not None:
         return existing
-    prompt = EXPERIMENT_PROMPT + '\n\nInput JSON:\n' + json.dumps(inputs, ensure_ascii=False)
+    prompt = EXPERIMENT_PROMPT + '\n\nInput JSON:\n' + json.dumps(model_input(inputs), ensure_ascii=False)
     writer = WriterToolBase(llm=AutoModel(model='llm'))
     system_prompt = writer._structured_output_prompt(GeneratedExperiment)
     prompt_tokens, prompt_limit = estimate_tokens(prompt + system_prompt), _prompt_token_limit()

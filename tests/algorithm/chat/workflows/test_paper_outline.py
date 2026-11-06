@@ -11,6 +11,31 @@ from lazymind.document_tools.paper.runtime_events import bind_runtime_events
 OUTLINE = '# Test paper\n\n## Method\n\n## Limitations'
 
 
+@pytest.mark.parametrize('marker', [
+    '', '<!-- paper-charts: ["chart1", "chart1"] -->', '<!-- paper-charts: ["unknown"] -->'])
+def test_generated_chart_ownership_is_corrected_inside_outline_step(marker):
+    from types import SimpleNamespace
+    damaged = '# Paper\n\n## Results\n' + marker
+    corrected = '# Paper\n\n## Results\n<!-- paper-charts: ["chart1"] -->'
+    generate = Mock(side_effect=[damaged, corrected])
+    prepared = dict(writing_task=dict(query='Create outline.', constraints={}), writing_context={}, outline='',
+                    charts=[dict(id='chart1')], chart_directory=[dict(id='chart1', title='Results')])
+    original = copy.deepcopy(prepared)
+    assert write_outline.prepare_outline(prepared, SimpleNamespace(generate_outline=generate)) == corrected
+    assert generate.call_count == 2
+    assert prepared == original
+
+
+def test_chart_ownership_correction_preserves_generated_heading_structure():
+    from types import SimpleNamespace
+    prepared = dict(writing_task=dict(query='Create outline.', constraints={}), writing_context={}, outline='',
+                    charts=[dict(id='chart1')], chart_directory=[dict(id='chart1', title='Results')])
+    generate = Mock(side_effect=[
+        '# Paper\n\n## Results', '# Paper\n\n## Other\n<!-- paper-charts: ["chart1"] -->'])
+    with pytest.raises(ValueError, match='changed the outline structure'):
+        write_outline.prepare_outline(prepared, SimpleNamespace(generate_outline=generate))
+
+
 @pytest.mark.parametrize('publication_fails', [False, True])
 def test_completed_revision_is_one_delta_and_still_supports_publication_failure(publication_fails):
     emitted = []
@@ -79,6 +104,7 @@ def test_finished_preview_can_restart_without_reusing_old_content():
 
 def test_outline_step_only_calls_public_outline_generation(monkeypatch):
     toolkit = Mock()
+
     def stream_outline(**kwargs):
         kwargs['on_delta']('# Test paper')
         kwargs['on_delta']('\n\n')
@@ -121,7 +147,8 @@ def test_edited_outline_slot_overrides_pool_and_preserves_request(monkeypatch):
     assert workflow.material(resumed, 'outline')['content'] == edited
     assert workflow.material(resumed, 'manuscript') is None
     assert workflow.material(result['pool'], 'outline')['content'] == OUTLINE
-    request = workflow._step_request('write_document', resumed, {'current_user_input': ''}, {'write_outline_pool': 'bound'})
+    request = workflow._step_request('write_document', resumed, {'current_user_input': ''},
+                                     {'write_outline_pool': 'bound'})
     assert request == 'Use Chinese; mark missing evidence'
 
 

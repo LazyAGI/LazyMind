@@ -71,6 +71,7 @@ def mark_analysis(output, meta):
     if notice not in output['analysis']['limitations']:
         output['analysis']['limitations'].append(notice)
     for chart in output['charts']:
-        chart['caption'] = (chart.get('caption') or chart['title']) + '\n' + notice
+        caption = chart.get('caption') or chart['title']
+        chart['caption'] = caption if notice in caption else caption + '\n' + notice
     output['is_demo'] = meta['data_origin'] == 'synthetic'
     return output

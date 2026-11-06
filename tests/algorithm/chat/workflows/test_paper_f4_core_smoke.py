@@ -74,10 +74,11 @@ def replay(monkeypatch, tmp_path, prepared_analysis_pool):
     repair = Mock()
     narrative = Mock(return_value=conclusion)
     monkeypatch.setattr(model, 'call_model', structured)
-    monkeypatch.setattr(model, 'call_code_model', analysis)
+    monkeypatch.setattr(model, 'call_code_model', lambda prompt: (
+        structured(prompt) if payload(prompt).get('previous_code') else analysis(prompt)))
     monkeypatch.setattr(model, 'call_markdown_model', narrative)
-    monkeypatch.setattr(plots, 'call_code_model', plot)
-    monkeypatch.setattr(plots, 'call_model', repair)
+    monkeypatch.setattr(plots, 'call_code_model', lambda prompt: (
+        repair(prompt) if payload(prompt).get('previous_code') else plot(prompt)))
     monkeypatch.setattr(lazyllm, 'AutoModel', Mock(side_effect=AssertionError('Unexpected live model call')))
     monkeypatch.setenv('LAZYMIND_PAPER_GENERATED_ANALYSIS_ATTEMPTS', '2')
     monkeypatch.setenv('LAZYMIND_PAPER_PLOT_ATTEMPTS', '2')
@@ -126,7 +127,7 @@ def published(replay):
 
 
 @pytest.mark.parametrize('fault', [
-    'none', 'plan', 'figure_plan', 'analysis', 'plot', 'fallback', 'missing_plot', 'no_figures'])
+    'none', 'plan', 'figure_plan', 'analysis', 'plot', 'exhausted_plot', 'missing_plot', 'no_figures'])
 def test_f4_workflow_publishes_executed_files(replay, fault, monkeypatch):
     if fault == 'plan':
         replay.structured.side_effect = [{}, replay.plan, replay.arrangement]
@@ -146,7 +147,7 @@ def test_f4_workflow_publishes_executed_files(replay, fault, monkeypatch):
         else:
             replay.plot.return_value = {'code': code}
             replay.repair.return_value = replacement
-    elif fault == 'fallback':
+    elif fault == 'exhausted_plot':
         replay.plot.return_value = {'code': PLOT_CODE.replace('return fig', 'return missing_name')}
         line = PLOT_CODE.splitlines().index('    return fig') + 1
         replay.repair.return_value = dict(replacements=[dict(
@@ -163,6 +164,13 @@ def test_f4_workflow_publishes_executed_files(replay, fault, monkeypatch):
     elif fault == 'no_figures':
         replay.arrangement['figures'] = []
 
+    if fault == 'exhausted_plot':
+        with pytest.raises(RuntimeError, match='missing_name'):
+            workflow.run_paper_step()
+        assert not any(event['type'] == 'artifact' for event in replay.events)
+        replay.narrative.assert_not_called()
+        assert replay.plot.call_count == replay.repair.call_count == 1
+        return
     assert workflow.run_paper_step()['status'] == 'completed'
     artifacts = [event for event in replay.events if event['type'] == 'artifact']
     expected_slots = replay.context.output_slots[:2] if fault == 'no_figures' else replay.context.output_slots
@@ -188,22 +196,38 @@ def test_f4_workflow_publishes_executed_files(replay, fault, monkeypatch):
         return
     assert len(charts) == 1 and charts[0]['title'] == 'Mean scores'
     assert charts[0]['finding_ids'] == [row['id'] for row in analysis['findings']]
-    assert bool(execution['figures'][0].get('fallback')) == (fault == 'fallback')
-    if fault in ('fallback', 'missing_plot'):
+    assert not execution['figures'][0].get('fallback')
+    if fault == 'missing_plot':
         assert '图表部分完成' in analysis['summary']
-        if fault == 'fallback':
-            assert execution['figures'][0]['fallback']['relationship_not_shown']
-            assert len(execution['figures'][0]['original_attempts']) == 2
-        else:
-            assert execution['figures'][1]['status'] == 'failed'
-            assert execution['plan']['failed_figures'][0]['id'] == 'fig2'
-            assert payload(replay.narrative.call_args.args[0])['unavailable_figures'] == ['Missing comparison']
+        assert execution['figures'][1]['status'] == 'failed'
+        assert execution['plan']['failed_figures'][0]['id'] == 'fig2'
+        assert payload(replay.narrative.call_args.args[0])['unavailable_figures'] == ['Missing comparison']
     assert '<svg' in paths['.svg'].read_text()
     assert paths['.png'].read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
     assert paths['.pdf'].read_bytes().startswith(b'%PDF-')
     assert replay.structured.call_count == 2 + (fault in ('plan', 'figure_plan', 'analysis'))
     assert replay.analysis.call_count == replay.plot.call_count == 1
-    assert replay.repair.call_count == (fault in ('plot', 'fallback'))
+    assert replay.repair.call_count == (fault == 'plot')
+
+
+@pytest.mark.parametrize('stage', ['analysis', 'plot'])
+def test_complete_program_correction_reaches_normal_f4_publication(replay, stage):
+    if stage == 'analysis':
+        replay.analysis.return_value = {'code': ANALYSIS_CODE.replace(
+            '    return dict(results=results)', '    return dict(results=results, broken="unfinished)')}
+        replay.structured.side_effect = [replay.plan, {'code': ANALYSIS_CODE}, replay.arrangement]
+    else:
+        replay.plot.return_value = {'code': PLOT_CODE.replace(
+            '    return fig', "    fig.set_title('')\n    return fig")}
+        replay.repair.return_value = {'code': PLOT_CODE}
+    assert workflow.run_paper_step()['status'] == 'completed'
+    analysis, charts, execution, _ = published(replay)
+    assert [row['value'] for row in analysis['findings']] == [2., 5.]
+    assert len(charts) == 1 and not execution['figures'][0].get('fallback')
+    attempts = execution['attempts'] if stage == 'analysis' else execution['figures'][0]['attempts']
+    assert len(attempts) == 2
+    assert attempts[0].get('outcome', attempts[0].get('status')) == 'failed'
+    assert attempts[-1].get('outcome', attempts[-1].get('status')) in {'passed', 'passed_execution_and_file_checks'}
 
 
 @pytest.mark.parametrize('stage', ['analysis', 'plot'])
@@ -220,7 +244,7 @@ def test_four_local_repairs_then_success_or_explicit_failure(replay, monkeypatch
 
     def repair(prompt):
         sent = payload(prompt)
-        assert f'{line} |     return missing_name' in sent['previous_code']
+        assert sent['previous_code'] == broken
         assert 'missing_name' in sent['error'] and f'line {line}' in sent['error']
         repairs.append(sent)
         code = statement if recover and len(repairs) == 4 else '    return missing_name'
@@ -234,12 +258,13 @@ def test_four_local_repairs_then_success_or_explicit_failure(replay, monkeypatch
 
     replay.structured.side_effect = structured
     replay.repair.side_effect = repair
-    if stage == 'analysis' and not recover:
-        with pytest.raises(ContractError, match='missing_name'):
+    if not recover:
+        failure = ContractError if stage == 'analysis' else RuntimeError
+        with pytest.raises(failure, match='missing_name'):
             workflow.run_paper_step()
         assert not any(event['type'] == 'artifact' for event in replay.events)
         replay.narrative.assert_not_called()
-        replay.plot.assert_not_called()
+        assert replay.plot.call_count == (0 if stage == 'analysis' else 1)
     else:
         assert workflow.run_paper_step()['status'] == 'completed'
         analysis, _, execution, _ = published(replay)
@@ -247,13 +272,9 @@ def test_four_local_repairs_then_success_or_explicit_failure(replay, monkeypatch
             'original_attempts', execution['figures'][0]['attempts'])
         assert len(attempts) == 5
         assert [row['value'] for row in analysis['findings']] == [2., 5.]
-        if recover:
-            field, status = ('outcome', 'passed') if stage == 'analysis' else (
-                'status', 'passed_execution_and_file_checks')
-            assert attempts[-1][field] == status and not execution['figures'][0].get('fallback')
-        else:
-            assert execution['figures'][0]['fallback']['relationship_not_shown']
-            assert '图表部分完成' in analysis['summary']
+        field, status = ('outcome', 'passed') if stage == 'analysis' else (
+            'status', 'passed_execution_and_file_checks')
+        assert attempts[-1][field] == status and not execution['figures'][0].get('fallback')
     assert len(repairs) == 4 and replay.analysis.call_count == 1
     assert replay.plot.call_count == (0 if stage == 'analysis' and not recover else 1)
 
@@ -491,6 +512,8 @@ def test_json_attachment_binding_stays_in_analysis(tmp_path, monkeypatch):
     from lazymind.chat.engine.tools.file_resources import resolver
     from lazymind.chat.engine.tools import host_file_resolution
 
+    monkeypatch.setattr(model, 'call_model', Mock(side_effect=[
+        {'standalone_analysis': False}, {'standalone_analysis': True}]))
     source = tmp_path / 'data.json'
     value = {'topic': 'Analysis', 'data': {'columns': ['score'], 'column_types': ['number'],
              'units': [None], 'rows': [[1], [2], [3]]}}

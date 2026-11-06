@@ -1652,8 +1652,6 @@ def test_paper_reference_explanation_does_not_change_runtime_binding(workflow_in
     assert 'binding_kind' not in resource
 
 
-
-
 def test_existing_empty_session_accepts_inputs_and_repeated_input_is_idempotent(workflow_input_runtime):
     trigger, toolkit, holder, _, resource = workflow_input_runtime
     holder['session_id'] = 'session'
@@ -1684,3 +1682,17 @@ def test_later_chat_turn_can_supply_inputs_to_pinned_session(workflow_input_runt
     repair({'paper_input': '{"topic":"Synthetic","request":"Write"}'})
     toolkit.bind_workflow_input.assert_called_once_with('session', 'paper_input', resource)
     toolkit.prepare_workflow.assert_not_called()
+
+
+@pytest.mark.parametrize('outcome', ['workflow_approval_required', 'workflow_input_required'])
+def test_workflow_waiting_notice_is_visible_in_the_rendered_preview(outcome):
+    import re
+    from lazymind.chat.service.component.tool_rendering import _tool_result_frame_text
+
+    notice = 'Review the current stage before continuing.'
+    frame = _tool_result_frame_text({
+        'id': 'workflow-notice', 'name': 'trigger_writer_workflow',
+        'result': {'ok': True, 'value': {'outcome': outcome, 'user_notice': notice}},
+    }, 'en')
+    preview = re.search(r'<trp id="workflow-notice">(.*?)</trp>', frame, re.S).group(1)
+    assert notice in preview

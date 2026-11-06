@@ -33,6 +33,7 @@ func paperGraph(t *testing.T, edit func(string) string) *CompiledStateGraph {
 func TestPaperGraphAllForwardScenarios(t *testing.T) {
 	graph := paperGraph(t, nil)
 	paths := [][]string{
+		{"research_topic", "literature_review", "refine_topic", "experiment", "data_analysis", "write_outline", "write_document", "peer_review", "revise_document"},
 		{"research_topic", "literature_review", "refine_topic"},
 		{"literature_review", "write_document", "peer_review", "revise_document"},
 		{"experiment", "data_analysis", "write_document"}, {"revise_document"}, {"write_document", "revise_document"}, {"reading_reflection"}, {"literature_review", "reading_reflection"},

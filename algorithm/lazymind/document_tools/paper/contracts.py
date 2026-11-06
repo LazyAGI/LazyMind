@@ -12,13 +12,13 @@ from .experiment.schema import ResultMeta, code_column_types, validate_code_file
 from .experiment.results import validate_table
 
 FIELDS = {
-    'research_topic': ('papers', 'question', 'evidence'),
+    'research_topic': ('papers', 'question', 'evidence', 'writing_materials'),
     'literature_review': ('papers', 'question', 'evidence'),
     'experiment': ('papers', 'question', 'evidence', 'data', 'source_data', 'writing_materials'),
     'data_analysis': ('data', 'experiment', 'data_context', 'study_design', 'result_meta'),
     'write_document': ('papers', 'question', 'evidence', 'analysis', 'charts', 'outline', 'manuscript',
                        'review', 'review_data', 'selected_issue_ids', 'writing_materials', 'media_assets'),
-    'peer_review': ('manuscript', 'evidence', 'analysis', 'charts', 'papers', 'result_meta', 'writing_materials'),
+    'peer_review': ('manuscript', 'papers', 'charts'),
     'reading_reflection': ('papers', 'evidence'),
 }
 FIELDS['write_outline'] = FIELDS['write_document']
@@ -266,6 +266,11 @@ def validate_input(step, value):
     text(value.get('topic'), 'topic')
     if not isinstance(value.get('request', ''), str):
         raise ValueError('request 必须是字符串')
+    if module == 'peer_review':
+        from .review.inputs import select_materials
+        if value.get('manuscript') is not None:
+            text(value['manuscript'], 'manuscript')
+        value = select_materials(value)
     result = {'topic': value['topic'], 'request': value.get('request', '')}
     if module == 'experiment' and 'input_is_demo' in value:
         if type(value['input_is_demo']) is not bool:
@@ -300,6 +305,15 @@ def validate_input(step, value):
                 raise ValueError('charts 必须是列表')
             for index, chart in enumerate(item):
                 parse(Chart, chart, f'input.charts[{index}]')
+            unique([chart['id'] for chart in item], 'chart.id')
+        elif module == 'peer_review' and field == 'charts':
+            if not isinstance(item, list):
+                raise ValueError('charts 必须是列表')
+            for chart in item:
+                if not isinstance(chart, dict):
+                    raise ValueError('chart 必须是对象')
+                for key in ('id', 'title', 'caption', 'svg'):
+                    text(chart.get(key), f'chart.{key}')
             unique([chart['id'] for chart in item], 'chart.id')
         elif item is not None or field in ('charts', 'selected_issue_ids'):
             validate_value(field, item, allow_metadata=module == 'peer_review')
