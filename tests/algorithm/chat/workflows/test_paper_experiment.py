@@ -674,42 +674,30 @@ def test_direct_entry_accepts_question_without_pool_and_missing_question_fails(t
         contracts.validate_input('experiment', {'topic': 'T'})
 
 
-def test_framework_ask_user_configuration_and_artifact_bindings():
+def test_experiment_question_is_dynamic_and_not_required_at_startup():
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
     package = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())
-    field = package['runtime']['clarification_fields'][0]
-    assert not field.get('ask_when')  # Startup preference also applies to review-first tasks.
-    governed = enforce_startup_clarification_policy(
-        [{'id': field['id'], 'text': field['question'], 'type': 'single', 'choices': ['wrong']}],
-        package['runtime'],
-    )
-    assert governed[0]['choices'] == field['choices']
-    assert governed[0]['allow_other'] is False
+    assert not package['runtime'].get('clarification_fields')
+    questions = [{'id': 'q1', 'text': '当前没有耗时实验数据，接下来如何准备？',
+                  'type': 'single', 'choices': ['我会补充真实数据', '使用模拟数据']}]
+    assert enforce_startup_clarification_policy(questions, package['runtime']) == questions
     state = yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())
     assert 'prepare' not in state['steps']
+    assert all(not item.get('required', True) for item in state['steps']['experiment']['inputs'])
     assert {'experiment_execution', 'experiment_question'} <= {
         item['material'] for item in state['steps']['experiment']['inputs']}
     assert {'experiment_code', 'experiment_results'} <= {
         item['material'] for item in state['steps']['experiment']['outputs']}
 
 
-def test_ask_user_answer_keeps_original_goal():
-    from lazymind.chat.workflow.workflow_manager import _merge_startup_clarification_context
-    runtime = yaml.safe_load((PACKAGE / 'workflow.yaml').read_text())['runtime']
-    field = runtime['clarification_fields'][0]
-    history = [
-        {'role': 'user', 'content': '比较均值和中位数，设计实验'},
-        {'role': 'assistant', 'content': '', 'tool_calls': [{
-            'id': 'ask-experiment', 'type': 'function', 'function': {
-                'name': 'ask_user', 'arguments': json.dumps({'questions': [{
-                    'id': field['id'], 'text': field['question'],
-                    'type': 'single', 'choices': field['choices']}]})}}]},
-        {'role': 'tool', 'name': 'ask_user', 'tool_call_id': 'ask-experiment',
-         'content': 'The user submitted the form.'},
-    ]
-    merged = _merge_startup_clarification_context(field['choices'][0], history, runtime)
+def test_f3_answer_keeps_original_goal():
+    pool = workflow.pool_from_business({'topic': '比较均值和中位数', 'request': '比较均值和中位数，设计实验'})
+    merged = workflow._step_request('experiment', pool, {
+        'step_id': 'experiment', 'current_user_input': '另做模拟实验',
+        'remote_inputs': {'literature_review_pool': 'pool.json'},
+    })
     assert '比较均值和中位数，设计实验' in merged
-    assert field['choices'][0] in merged
+    assert '另做模拟实验' in merged
 
 
 def test_dynamic_model_experiment_to_f4_contract_and_downloads(example, tmp_path, offline_paper_model):

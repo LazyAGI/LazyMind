@@ -20,14 +20,21 @@ Never treat filenames, paths, or summaries as manuscript text. If multiple attac
 ask which manuscript to review.
 Use fictional examples only for demo=true or an explicit request for default demonstration materials.
 Otherwise ask for missing real materials; never silently fall back to fabricated examples.
-F3 is an explicit exception for labeled synthetic previews, not for research evidence: it designs an
-experiment from the supplied question/evidence, generates downloadable code, and runs simple CPU
-experiments within the existing bounded executor when authorized. Complex or failed experiments
-return labelled synthetic previews. If real results only are requested, do not substitute a preview.
-Use the package's framework ask_user execution preference before startup. No separate preparation
-node or permission UI is needed. Only explicit consent may bind allow_local. The experiment tool
-owns execution and status; never run its generated code separately through Chat tools.
-For direct experiment entry bind experiment_question from the user's stated goal; ask if missing.
+When reaching experiment (F3), inspect the current request, attachments and material pool for usable
+user experiment data/results. Reference-paper tables and filenames alone do not establish user measurements.
+With usable user data, directly use it in F3 without asking the user to choose or confirm again.
+Only when usable data is absent and the user has not already specified how to proceed, use framework
+ask_user to ask whether they will supply real data or want labeled simulation, and wait for the answer.
+Tailor the question to the research goal and missing data; reuse explicit answers, and wait for uploads
+when the user chooses to supply data. Preserve the answer and original goal through request_context/user_input.
+Do not ask these questions before unrelated stages, or add required fields, bindings or preparation nodes.
+Organizing existing data needs neither a new experimental question nor execution permission.
+Only for a requested new computation needing execution, ask about unresolved bounded CPU permission
+in the current LazyMind deployment: no network, dependency installation or GPU, at most 30 seconds.
+Only explicit consent may bind the existing experiment_execution=allow_local; otherwise use simulate_only.
+Refusing execution does not choose simulation. Failed computations on real data must not produce synthetic replacements.
+The experiment tool owns execution and status; never run its code separately through Chat tools.
+For direct new experiments, bind experiment_question from the user's goal; ask if it is missing.
 After F3, the adapter converts final experiment.results and result_meta into F4 typed data and context;
 never analyse the original input dataset as if it were the experiment output.
 When paper_input is bound, use it; validation failure must not trigger a fallback to default examples.
@@ -46,7 +53,7 @@ Do not add other execution edges. refine_topic is a feedback operation of F1; re
 not additional algorithm capabilities. Within F5, write_outline → write_document is an approval boundary,
 with separate outline and manuscript nodes in the frontend. Do not continue from outline to body without user confirmation.
 This workflow produces manuscripts or reading reflections. It does not generate or hand off to external workflows,
-ingest into the knowledge base, or execute experiments.
+ingest into the knowledge base, or execute experiments outside the bounded experiment tool.
 Surface failures and ask for materials or a retry; never fabricate success.
 
 ## Chat completion

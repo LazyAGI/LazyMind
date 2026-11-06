@@ -13,7 +13,7 @@ import (
 	"lazymind/core/workflow/graphengine"
 )
 
-func TestPreparePaperWritingDoesNotRequireEveryAlternativeSource(t *testing.T) {
+func TestPreparePaperWritingDoesNotRequireExperimentSetupOrEveryAlternativeSource(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..", "workflows", "paper-writing")
 	config, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
 	if err != nil {
@@ -53,7 +53,7 @@ func TestPreparePaperWritingDoesNotRequireEveryAlternativeSource(t *testing.T) {
 	body, err := json.Marshal(map[string]any{
 		"workflow_id": "paper-writing", "revision_id": "paper-revision",
 		"idempotency_key": t.Name(), "input_bindings": map[string]any{},
-		"clarification_values": map[string]any{"experiment_execution": "不允许，仅生成代码和模拟数据"},
+		"clarification_values": map[string]any{},
 		"request_context":      "基于附件 paper-materials-v4.md，从研究选题开始逐阶段写作。已有实验结果，不开展新实验。",
 	})
 	if err != nil {

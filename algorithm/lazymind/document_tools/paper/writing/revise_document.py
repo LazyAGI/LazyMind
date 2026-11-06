@@ -22,6 +22,7 @@ from .common import (  # noqa: F401 - validate_* are public algorithm entries
     _json,
     _materialize_chart_insertions,
     _validate_manuscript,
+    _validate_reference_markers,
     prepare_writer_context,
     validate_inputs,
     validate_result,
@@ -233,21 +234,16 @@ def _bounded_replacements(source, allowed, generated):
 
 
 def _validate_review_plan(plan, issues):
-    """Check selected-issue coverage; public Writer owns manuscript locating."""
+    """Keep operation issue IDs inside the selected set; partial coverage is allowed."""
     selected = {issue['id'] for issue in issues}
-    covered = set()
     for item in plan.instructions:
         ids = item.meta.get('issue_ids')
         if (not isinstance(ids, list) or not ids
                 or any(not isinstance(key, str) or key not in selected for key in ids)):
             raise ValueError('Review plan operations must reference selected issue_ids.')
-        covered.update(ids)
-    required = {issue['id'] for issue in issues if issue['action_type'] == 'text_revision'}
-    if not required <= covered:
-        raise ValueError('Review plan does not cover all selected issues.')
 
 
-def _validated_ranges(source, plan):
+def _validated_ranges(source, plan, pending=None):
     plan = plan.model_copy(deep=True)
     for operation in plan.instructions:
         if operation.modify_type != 'update' or operation.target_scope not in {'fragment', 'paragraph'}:
@@ -272,11 +268,37 @@ def _validated_ranges(source, plan):
             failures[index] = str(error)
     if failures:
         report_progress(38, '正在纠正失败的原文定位')
-        plan = repair_locators(source, plan, failures)
-    return plan, _operation_ranges(source, plan), bool(failures)
+        try:
+            plan = repair_locators(source, plan, failures)
+        except Exception as error:
+            if pending is None:
+                raise
+            pending.append('部分原文定位未能纠正：' + str(error))
+    if pending is None:
+        return plan, _operation_ranges(source, plan), bool(failures)
+    accepted, ranges = [], []
+    for operation in plan.instructions:
+        try:
+            bounds = _operation_ranges(source, plan.model_copy(update={'instructions': [operation]}))[0]
+        except ValueError as error:
+            pending.append(f"{operation.meta.get('issue_ids', [])} 定位未完成：{error}")
+        else:
+            accepted.append(operation)
+            ranges.append(bounds)
+    return plan.model_copy(update={'instructions': accepted}), ranges, bool(failures)
 
 
-def _validated_changes(source, plan, allowed, generated, *, allow_repair):
+def _validated_changes(source, plan, allowed, generated, *, allow_repair, pending=None):
+    if pending is not None:
+        accepted = []
+        for raw in generated.get('replacements', []):
+            try:
+                StringReplaceSet.model_validate({'replacements': [raw]})
+            except ValueError as error:
+                pending.append('修改补丁格式未通过，已保留原文：' + str(error))
+            else:
+                accepted.append(raw)
+        generated = {'replacements': accepted}
     replacements = StringReplaceSet.model_validate(generated)
     failures = {}
     for index, replacement in enumerate(replacements.replacements):
@@ -286,14 +308,38 @@ def _validated_changes(source, plan, allowed, generated, *, allow_repair):
             failures[index] = str(error)
     if failures and allow_repair:
         report_progress(60, '正在纠正失败的修改补丁')
-        generated = repair_replacements(source, plan, allowed, replacements, failures)
-    # Recheck the entire set, including overlaps; the original guards remain authoritative.
-    return _bounded_replacements(source, allowed, generated)
+        try:
+            generated = repair_replacements(source, plan, allowed, replacements, failures)
+        except Exception as error:
+            if pending is None:
+                raise
+            pending.append('部分修改补丁未能纠正：' + str(error))
+    if pending is None:
+        return _bounded_replacements(source, allowed, generated)
+    accepted = []
+    for raw in generated.get('replacements', []):
+        try:
+            _bounded_replacements(source, allowed, {'replacements': accepted + [raw]})
+        except ValueError as error:
+            pending.append('修改补丁未应用，已保留原文：' + str(error))
+        else:
+            accepted.append(raw)
+    return (_bounded_replacements(source, allowed, {'replacements': accepted})
+            if accepted else ({'replacements': []}, []))
 
 
 def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
     """Apply request edits or review-bound edits with the same public toolkit."""
     source = prepared['manuscript']
+    pending = []
+
+    def finish(body):
+        if pending:
+            report_progress(85, f'已保留可执行的修改，另有 {len(pending)} 项待处理')
+        events = current_events()
+        if events:
+            events.completed_preview(body)
+        return {'manuscript': body, 'is_demo': False, '_pending_edits': pending}
     # Do not expand pre-existing insertion directives outside the approved edit.
     _validate_chart_references(source, prepared['charts'])
     _heading_signature(source)
@@ -305,8 +351,8 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
         if not issues:
             raise ValueError('Review revision requires selected issues; empty is not all.')
         if not any(issue['action_type'] == 'text_revision' for issue in issues):
-            raise contracts.MissingMaterials('所选意见仍需补充材料或实验，已保留为待补事项；'
-                                             '本轮没有可执行的文本修改，稿件未修改。')
+            pending.extend(f"{issue['id']}：仍需补充材料或实验，保留为待补事项" for issue in issues)
+            return finish(source)
         task['query'] += REVIEW_REVISION_INSTRUCTIONS + _json(issues)
     editor = editor if editor is not None else WriterRevisionToolkit()
     try:
@@ -320,75 +366,72 @@ def _modify_manuscript(prepared: dict, constraints, toolkit, *, editor=None):
             writing_task_json=_json(task), writer_document_json=source,
             locate_result_json=located, writing_context_json=context_json,
         )))
-    except ValueError as exc:
-        if (reviewing and not any(i['action_type'] == 'text_revision' for i in issues)
-                and str(exc) in {'modify_plan contains no operations for the located revision scope.',
-                                 'locate_result contains no revision targets.'}):
-            raise contracts.MissingMaterials(
-                '所选意见仍需补充材料或实验，已保留为待补事项；本轮没有可执行的文本修改，稿件未修改。') from exc
-        raise
-    if reviewing:
-        _validate_review_plan(plan, issues)
-        if not plan.instructions and not plan.title_instruction:
-            raise contracts.MissingMaterials('所选意见仍需补充材料或实验，稿件未修改。')
+    except Exception as error:
+        pending.append('本轮修改计划未能生成，已保留原稿：' + str(error))
+        return finish(source)
+    accepted = []
+    for operation in plan.instructions:
+        try:
+            if reviewing:
+                _validate_review_plan(plan.model_copy(update={'instructions': [operation]}), issues)
+            if operation.visual_instruction:
+                raise ValueError('论文文字修订不生成视觉素材')
+        except ValueError as error:
+            pending.append(f"{operation.meta.get('issue_ids', [])} 修改计划未执行：{error}")
+        else:
+            accepted.append(operation)
+    plan = plan.model_copy(update={'instructions': accepted})
+    covered = {key for item in plan.instructions for key in item.meta.get('issue_ids', [])}
+    pending.extend(f"{issue['id']}：本轮未生成可执行修改，保留原文"
+                   for issue in issues if issue['action_type'] == 'text_revision' and issue['id'] not in covered)
+    plan, operation_ranges, repaired = _validated_ranges(source, plan, pending)
     if not plan.title_instruction and not plan.instructions:
-        raise ValueError('Writer must return explicit manuscript modification operations.')
-    if any(item.visual_instruction for item in plan.instructions):
-        raise ValueError('Paper manuscript editing does not generate visual assets.')
-    plan, operation_ranges, repaired = _validated_ranges(source, plan)
+        if not pending:
+            pending.append('本轮没有可执行的文本修改，已保留原稿')
+        return finish(source)
     allowed = [bounds for ranges in operation_ranges for bounds in ranges]
     if plan.title_instruction:
         title = next(re.finditer(r'^#[ \t]+[^\r\n]+', _markdown_prose(source), re.MULTILINE))
         allowed.append(title.span())
     report_progress(50, '正在生成修改内容')
-    changes, located_changes = _validated_changes(source, plan, allowed, json.loads(editor.generate_string_replace_set(
-        markdown_document=source, modify_plan_json=plan.model_dump_json(), writing_context_json=context_json,
-    )), allow_repair=not repaired)
-    if plan.title_instruction:
-        title_changes = [(start, end, replacement) for start, end, replacement in located_changes
-                         if start < title.end() and end >= title.start()]
-        if not title_changes:
-            raise ValueError('Writer did not apply the planned title change.')
-        for start, end, replacement in title_changes:
-            if (not title.start() <= start <= end <= title.end()
-                    or replacement.new_string.count('\n') != replacement.old_string.count('\n')
-                    or replacement.new_string.count('\r') != replacement.old_string.count('\r')):
-                raise ValueError('A paper title change must stay within its original heading line.')
+    try:
+        generated = json.loads(editor.generate_string_replace_set(
+            markdown_document=source, modify_plan_json=plan.model_dump_json(), writing_context_json=context_json))
+        changes, located_changes = _validated_changes(
+            source, plan, allowed, generated, allow_repair=not repaired, pending=pending)
+    except Exception as error:
+        pending.append('修改内容未能生成，已保留原稿：' + str(error))
+        return finish(source)
     if reviewing:
-        # Every selected text revision needs an edit in its associated operations. This is
-        # mechanical coverage, not proof that the semantic problem was solved.
-        for issue in prepared['selected_issues']:
-            if issue['action_type'] != 'text_revision':
+        for issue in issues:
+            if issue['action_type'] != 'text_revision' or issue['id'] not in covered:
                 continue
-            allowed = [bounds for item, ranges in zip(plan.instructions, operation_ranges)
-                       if issue['id'] in item.meta['issue_ids'] for bounds in ranges]
-            effective = any(
-                replacement.old_string.replace('\r\n', '\n').replace('\r', '\n')
-                != replacement.new_string.replace('\r\n', '\n').replace('\r', '\n')
-                and _within_range(start, end, allowed)
-                for start, end, replacement in located_changes
-            )
-            if not effective:
-                raise ValueError('Writer produced no effective edit for selected issue: ' + issue['id'])
-    report_progress(80, '正在应用稿件修改')
-    applied = json.loads(editor.apply_string_replace(
-        markdown_document=source, string_replace_set_json=_json(changes),
-        writing_context_json=context_json,
-    ))
-    if not applied['string_replace_result']['success']:
-        raise ValueError('Writer failed to apply manuscript edits.')
-    body = _materialize_chart_insertions(applied['revised_document'], prepared['charts'])
-    # Toolkit reads Markdown with universal newlines; normalization alone is not an edit.
-    if body == source.replace('\r\n', '\n').replace('\r', '\n'):
-        raise ValueError('Writer produced no manuscript change.')
-    # Targeted edits preserve unrelated defects; full-paper review is a separate user choice.
-    _validate_manuscript(body, None, prepared['charts'], constraints, toolkit, context_json,
-                         candidates=prepared['reference_candidates'], original=source,
-                         check_quality=False, check_length=False)
-    events = current_events()
-    if events:
-        events.completed_preview(body)
-    return {'manuscript': body, 'is_demo': False}
+            bounds = [bounds for item, ranges in zip(plan.instructions, operation_ranges)
+                      if issue['id'] in item.meta.get('issue_ids', []) for bounds in ranges]
+            if not any(_within_range(start, end, bounds) for start, end, _ in located_changes):
+                pending.append(f"{issue['id']}：本轮未产生有效修改，保留原文")
+    report_progress(80, '正在逐项应用可执行的修改')
+    body = source
+    for raw in changes['replacements']:
+        try:
+            # Each patch retains the original scope/source checks; one failed patch cannot roll back others.
+            _validate_reference_markers(raw['new_string'], prepared['reference_candidates'], raw['old_string'])
+            _validate_chart_references(raw['new_string'], prepared['charts'])
+            applied = json.loads(editor.apply_string_replace(
+                markdown_document=body, string_replace_set_json=_json({'replacements': [raw]}),
+                writing_context_json=context_json))
+            if not applied['string_replace_result']['success']:
+                raise ValueError('Writer 未能应用此项修改')
+            candidate = _materialize_chart_insertions(applied['revised_document'], prepared['charts'])
+            _validate_manuscript(candidate, None, prepared['charts'], constraints, toolkit, context_json,
+                                 candidates=prepared['reference_candidates'], original=body, check_quality=False)
+        except Exception as error:
+            pending.append('修改未应用，已保留对应原文：' + str(error))
+        else:
+            body = candidate
+    if body == source and not pending:
+        pending.append('本轮未产生有效文字修改，已保留原稿')
+    return finish(body)
 
 
 def run(inputs):
@@ -398,6 +441,7 @@ def run(inputs):
     prepared = prepare_writer_context(inputs, toolkit=toolkit)
     prepared['writing_task']['constraints']['visual_policy'] = {'allow_visuals': False}
     output = _modify_manuscript(prepared, inputs['constraints'], toolkit)
+    pending = output.pop('_pending_edits', [])
     from ..publication import publish_citations, resolve_chart_sources
     from .. import peer_review
     from ..review.schema import ReviewResult, ReviewIssue
@@ -410,12 +454,19 @@ def run(inputs):
     review_inputs.update(topic=inputs['topic'], manuscript=body,
                          request='核对修订后稿件的五类事实，特别检查改动是否引入新错误；不得把文字修改等同于事实已验证。')
     report_progress(88, '正在核对修订后的事实')
-    fresh = peer_review.run(review_inputs)
+    try:
+        fresh = peer_review.run(review_inputs)
+    except Exception as error:
+        pending.append('修订稿已保留；修订后复核未完成：' + str(error))
+        fresh = peer_review.build_output(ReviewResult(
+            summary='本轮已交付可执行的修订；其余事项仍待处理，未声称通过复核。',
+            issues=[], limitations=pending), review_inputs)
     reviewed = ReviewResult.model_validate({
         **{key: fresh['review_data'][key] for key in ReviewResult.model_fields if key != 'issues'},
         'issues': [{key: issue[key] for key in ReviewIssue.model_fields}
                    for issue in fresh['review_data']['issues']],
     })
+    reviewed.limitations.extend('本轮未完成：' + item for item in pending)
     # Missing experiments/materials cannot be supplied by editing prose. Keep them
     # visible even if their old quotation disappeared from the revised manuscript.
     previous = inputs.get('review_data') or {}

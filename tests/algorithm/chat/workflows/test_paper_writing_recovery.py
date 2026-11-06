@@ -200,19 +200,14 @@ def test_recovery_applies_all_validated_edits_once_and_never_publishes_invalid_r
     requests = correction_model(monkeypatch, lambda items: {'repairs': [dict(index=1, old_string=old, new_string=new)]})
     emitted = []
     with bind_runtime_events(emitted.append, 'revise_document_document'):
-        if invalid:
-            message = {True: 'exceeds the planned', 'citation': 'reference marker',
-                       'chart': 'unknown chart', 'noop': 'old_string and new_string must differ'}[invalid]
-            with pytest.raises(ValueError, match=message):
-                revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
-            assert not any(event['type'].startswith('artifact_stream') for event in emitted)
-            if invalid is True or invalid == 'noop':
-                tools.apply_string_replace.assert_not_called()
-        else:
-            result = revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
-            assert result['manuscript'] == data['manuscript'].replace('Original', 'Clarified')
-            tools.apply_string_replace.assert_called_once()
-            assert len([event for event in emitted if event['type'] == 'artifact_stream_end']) == 1
+        result = revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+        expected = data['manuscript'].replace('Original method.', 'Clarified method.')
+        if not invalid:
+            expected = expected.replace('Original result.', 'Clarified result.')
+        assert result['manuscript'] == expected
+        assert bool(result['_pending_edits']) == bool(invalid)
+        assert tools.apply_string_replace.call_count == (1 if invalid else 2)
+        assert len([event for event in emitted if event['type'] == 'artifact_stream_end']) == 1
     assert data == before
     assert len(requests) == 1
     tools.generate_modify_plan.assert_called_once()
@@ -224,10 +219,11 @@ def test_locator_and_patch_correction_share_one_attempt(monkeypatch):
     operations[0]['locator_text'] = 'Paraphrased method.'
     tools.generate_modify_plan.return_value = json.dumps({'scope': 'document', 'instructions': operations})
     requests = correction_model(monkeypatch, lambda items: {'repairs': [dict(index=0, locator_text='Original method.')]})
-    with pytest.raises(ValueError, match='exceeds the planned'):
-        revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    result = revise_document._modify_manuscript(data, {'word_target': None}, Mock(), editor=tools)
+    assert result['manuscript'] == data['manuscript'].replace('Original method.', 'Clarified method.')
+    assert result['_pending_edits']
     assert len(requests) == 1
-    tools.apply_string_replace.assert_not_called()
+    tools.apply_string_replace.assert_called_once()
 
 
 def test_oversized_local_correction_stops_before_model_request(record):

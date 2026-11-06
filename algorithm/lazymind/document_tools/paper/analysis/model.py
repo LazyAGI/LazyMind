@@ -181,7 +181,8 @@ Write concise, distinguishable terminology for category/series/facet values and 
 terminology is ONE FLAT top-level object mapping an exact source VALUE to a display-label STRING.
 For example {"before": "修订前", "after": "修订后"}; NEVER {"version": {"before": "修订前"}}.
 Do not put terminology inside individual figures. Every terminology value must be a string, never an object or list.
-Supply a short caption in the paper language explaining this figure's observed comparison and essential limits.
+Write each caption in the paper language as 1-2 concise sentences, at most 300 characters INCLUDING spaces
+and punctuation. State the observed comparison and only essential limits; keep detailed explanations in the analysis.
 Do not include a per-result provenance inventory. Use category and series only for actual coordinates or descriptive
 string fields present in every selected row. category MUST be an ordered numeric coordinate for a line chart;
 independent tasks or unordered conditions need bars or points, never an invented trajectory.
@@ -214,7 +215,8 @@ Tables marked rows_omitted provide row counts, column profiles and sample rows; 
 The catalog is a collection of reusable skills, not a limit on geometry. Use custom with a suitable base_style only
 when specialized geometry is necessary, not to bypass ordinary estimate templates. Figure requirements name the
 question, comparison, metric and uncertainty meaning, with source and denominator limits when material; bound
-evidence supplies actual numbers. Keep full explanations in captions, not long ticks. Use the paper language for labels.
+evidence supplies actual numbers. Keep ticks brief and captions within 300 characters.
+Use the paper language for labels.
 Plan the label hierarchy as part of the geometry: ticks identify categories briefly; shared factor names, units,
 definitions and sample support are stated once in an axis heading, group header, legend or external caption.
 Axis titles name the axis briefly; put lengthy factor-order keys and metric definitions in a horizontal header or

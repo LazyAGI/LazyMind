@@ -27,7 +27,6 @@ from ..publication import (
     figure_catalog,
     normalize_source_citations,
     protect_reference_region,
-    split_references,
     validate_citations,
     validate_unmanaged_additions,
     markdown_prose as _markdown_prose,
@@ -61,8 +60,6 @@ LOG = logging.getLogger(__name__)
 
 
 _CHART_OWNERS = re.compile(r'<!-- paper-charts:\s*(\[[^\n]*?\])\s*-->')
-HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
-WORD = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 
 
 def _safe(function, *args, **kwargs):
@@ -480,14 +477,6 @@ def _prepare_sections(plan, outline, constraints):
     return plan
 
 
-def count_academic_units(text: str, count_unit: str) -> int:
-    """Count Chinese characters or English words using the declared paper language."""
-    value = str(text or '')
-    if count_unit == 'words':
-        return len(WORD.findall(value))
-    return len(HAN.findall(value)) + len(re.findall(r'\b[A-Za-z][A-Za-z0-9_-]*\b', value))
-
-
 def _validate_manuscript_structure(body, *, signature=None, charts=None,
                                    candidates=None, original=None):
     """Shared mechanical checks for generation and the API result boundary."""
@@ -502,17 +491,11 @@ def _validate_manuscript_structure(body, *, signature=None, charts=None,
 
 
 def _validate_manuscript(body, signature, charts, constraints, toolkit, context_json, *,
-                         candidates, original=None, check_quality=True, check_length=True):
+                         candidates, original=None, check_quality=True):
     """Validate generated Markdown before the optional model quality check."""
     report_progress(87, '正在校验稿件结构与引用')
     _trace_call('validate_structure', _validate_manuscript_structure, body,
                 signature=signature, charts=charts, candidates=candidates, original=original)
-    target = constraints['word_target']
-    if check_length and target is not None:
-        unit = 'words' if constraints['paper_language'] == 'en' else 'chinese_characters'
-        actual = count_academic_units(split_references(body)[0], unit)
-        if not target * 0.9 <= actual <= target * 1.1:
-            raise ValueError(f'Manuscript length {actual} {unit} is outside target {target} ±10%.')
     if not check_quality:
         return
     report_progress(90, '正在检查全文一致性')
