@@ -6,6 +6,7 @@ import (
 )
 
 func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "")
 	body := map[string]any{"system_mcp_config": []any{map[string]any{"id": "untrusted"}}}
@@ -31,6 +32,7 @@ func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
 }
 
 func TestKnowledgeDisabledOnlyAffectsRunConfiguration(t *testing.T) {
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "true")
 	body := map[string]any{"disabled_tools": []string{"knowledge_management"}}

@@ -950,7 +950,16 @@
   display: grid;
   grid-template-rows: minmax(0, 2fr) minmax(220px, 1fr);
 }
-.settings-system-tools-stack > .model-provider-service-category { margin: 0; }
+.settings-system-tools-dependencies {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+.settings-system-tools-dependencies > .model-provider-service-category { flex: 0 0 auto; }
+.settings-system-tools-stack > .model-provider-service-category,
+.settings-system-tools-dependencies > .model-provider-service-category { margin: 0; }
 .settings-integrated-surface.is-system-tools .model-provider-tool-management-section {
   min-height: 0;
   display: flex;
@@ -1374,6 +1383,7 @@
   .settings-integrated-page.is-system-tools-page > .settings-integrated-surface.is-system-tools { display: block; overflow: visible; }
   .settings-system-tools-stack,
   .settings-system-tools-stack.has-local-dependencies { display: flex; overflow: visible; }
+  .settings-system-tools-dependencies { overflow: visible; }
   .settings-integrated-surface.is-system-tools .model-provider-tool-management-section { overflow: visible; }
   .settings-integrated-surface.is-system-tools .model-provider-tool-management-section > .ant-spin-nested-loading { overflow: visible; flex: none; }
   .settings-integrated-surface.is-system-tools .model-provider-tool-management-section > .ant-spin-nested-loading > .ant-spin-container { height: auto; overflow: visible; }

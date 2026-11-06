@@ -70,11 +70,13 @@ func TestExternalToolResultPublishesObjectSchemaForStrictClients(t *testing.T) {
 	t.Fatal("tool.call was not published")
 }
 
-func (f *mcpFakePorts) ListVocabularyWordbooks(context.Context, capability.InvocationContext) (capability.ListVocabularyWordbooksResult, error) {
-	return capability.ListVocabularyWordbooksResult{}, nil
+func (f *mcpFakePorts) ListVocabularyWordbooks(_ context.Context, call capability.InvocationContext) (capability.ListVocabularyWordbooksResult, error) {
+	f.call = call
+	return capability.ListVocabularyWordbooksResult{Items: []capability.VocabularyWordbook{}}, nil
 }
-func (f *mcpFakePorts) ListVocabularyWords(context.Context, capability.InvocationContext, capability.ListVocabularyWordsInput) (capability.ListVocabularyWordsResult, error) {
-	return capability.ListVocabularyWordsResult{}, nil
+func (f *mcpFakePorts) ListVocabularyWords(_ context.Context, call capability.InvocationContext, _ capability.ListVocabularyWordsInput) (capability.ListVocabularyWordsResult, error) {
+	f.call = call
+	return capability.ListVocabularyWordsResult{Items: []capability.VocabularyWord{}}, nil
 }
 func (f *mcpFakePorts) NextVocabularyReview(context.Context, capability.InvocationContext, capability.NextVocabularyReviewInput) (capability.NextVocabularyReviewResult, error) {
 	return capability.NextVocabularyReviewResult{}, nil

@@ -850,7 +850,9 @@ function SettingsPageContent() {
               title={t("settingsPage.systemTools.builtinTitle")}
               view="builtin"
             />
-            <DependencyInstallSection />
+            <div className="settings-system-tools-dependencies">
+              <DependencyInstallSection />
+            </div>
           </div>,
           "is-system-tools",
         )}

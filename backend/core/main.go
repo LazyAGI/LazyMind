@@ -1040,6 +1040,9 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
+	if capabilityRuntime.VocabularyMCP != nil {
+		r.Handle("/internal/mcp/vocabulary", capabilityRuntime.VocabularyMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
+	}
 	if capabilityRuntime.KnowledgeInternal != nil {
 		for _, action := range []string{"credential", "prepare", "status", "claim", "supersede"} {
 			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)
