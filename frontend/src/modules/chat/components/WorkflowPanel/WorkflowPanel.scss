@@ -776,7 +776,12 @@
         min-height: 0;
         overflow: hidden;
 
-        > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
+        > .workflow-panel__document-item {
+          flex: 1 1 auto;
+        }
+
+        > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error),
+        > .workflow-panel__document-item > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
           flex: 1 1 auto;
           min-height: 0;
         }
