@@ -62,7 +62,35 @@ def _rows(spec):
     return rows
 
 
-def _layout(spec, rows):
+def _merges(spec, rows):
+    merges = spec.get('merges', [])
+    if not isinstance(merges, list):
+        raise ValueError('TABLE_MERGE_INVALID: merges must be a list')
+    occupied, result = set(), []
+    for merge in merges:
+        if not isinstance(merge, dict):
+            raise ValueError('TABLE_MERGE_INVALID: each merge requires row and column bounds')
+        bounds = [merge.get(k) for k in ('start_row', 'end_row', 'start_column', 'end_column')]
+        if any(type(v) is not int for v in bounds):
+            raise ValueError('TABLE_MERGE_INVALID: bounds must be 1-based integers including headers')
+        r0, r1, c0, c1 = [v - 1 for v in bounds]
+        if not (0 <= r0 <= r1 < len(rows) and 0 <= c0 <= c1 < len(rows[0])) or (r0 == r1 and c0 == c1):
+            raise ValueError('TABLE_MERGE_INVALID: range must cover at least two cells within the table')
+        if spec.get('headers') is not None and r0 == 0 and r1 > 0:
+            raise ValueError('TABLE_MERGE_INVALID: cannot merge header and body rows')
+        cells = {(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)}
+        if occupied & cells:
+            raise ValueError('TABLE_MERGE_INVALID: ranges overlap')
+        text = rows[r0][c0]
+        if not text.strip() or any(rows[r][c] not in ('', text) for r, c in cells):
+            raise ValueError('TABLE_MERGE_CONTENT_CONFLICT: keep shared text in the top-left cell; '
+                             'covered cells must be empty or identical, never discard distinct data')
+        occupied.update(cells)
+        result.append((r0, r1, c0, c1))
+    return result
+
+
+def _layout(spec, rows, merges=()):
     x, y, w, h = _box(spec.get('box'))
     size = spec.get('font_size', 18)
     minimum = spec.get('min_font_size', size)
@@ -85,8 +113,16 @@ def _layout(spec, rows):
         candidates.insert(0, spec['_recovered_widths'])
     while True:
         for widths in candidates:
-            heights = [max(_lines(cell, widths[c] * 72 - 12, size) for c, cell in enumerate(row))
-                       * size * 1.25 + 8 for row in rows]
+            covered = {(r, c) for r0, r1, c0, c1 in merges
+                       for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)}
+            heights = [max(_lines(cell if (r, c) not in covered else '', widths[c] * 72 - 12, size)
+                           for c, cell in enumerate(row))
+                       * size * 1.25 + 8 for r, row in enumerate(rows)]
+            for r0, r1, c0, c1 in merges:
+                needed = _lines(rows[r0][c0], sum(widths[c0:c1 + 1]) * 72 - 12, size) * size * 1.25 + 8
+                extra = max(0, needed - sum(heights[r0:r1 + 1])) / (r1 - r0 + 1)
+                for r in range(r0, r1 + 1):
+                    heights[r] += extra
             if sum(heights) <= h * 72:
                 extra = (h * 72 - sum(heights)) / len(rows)
                 return widths, [(height + extra) / 72 for height in heights], size
@@ -105,7 +141,8 @@ def add_tables(prs, slide, specs):
         if not isinstance(spec, dict):
             raise ValueError('Each table requires box and rows')
         rows = _rows(spec)
-        widths, heights, size = _layout(spec, rows)
+        merges = _merges(spec, rows)
+        widths, heights, size = _layout(spec, rows, merges)
         x, y, w, h = spec['box']
         if x + w > prs.slide_width / 914400 + .00001 or y + h > prs.slide_height / 914400 + .00001:
             raise ValueError('TABLE_BOX_INVALID: table is outside the slide; choose a free content region')
@@ -118,10 +155,15 @@ def add_tables(prs, slide, specs):
             column.width = Inches(width)
         for row, height in zip(table.rows, heights):
             row.height = Inches(height)
+        covered = set()
+        for r0, r1, c0, c1 in merges:
+            table.cell(r0, c0).merge(table.cell(r1, c1))
+            covered.update((r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)
+                           if (r, c) != (r0, c0))
         for r, row in enumerate(rows):
             for c, value in enumerate(row):
                 cell = table.cell(r, c)
-                cell.text = value
+                cell.text = '' if (r, c) in covered else value
                 cell.margin_left = cell.margin_right = Pt(6)
                 cell.margin_top = cell.margin_bottom = Pt(3)
                 cell.vertical_anchor = MSO_ANCHOR.MIDDLE

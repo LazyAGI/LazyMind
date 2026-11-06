@@ -102,7 +102,7 @@ function errorCode(error: unknown): string | undefined {
   };
   const response = typed.response;
   const data = response?.data;
-  return [typed.code, data?.data?.error_code, data?.data?.code, data?.error_code, data?.code]
+  return [data?.data?.error_code, data?.data?.code, data?.error_code, data?.code, typed.code]
     .find((code): code is string => typeof code === 'string');
 }
 

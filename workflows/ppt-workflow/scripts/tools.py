@@ -1252,6 +1252,13 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
     otherwise widths and row heights are derived from content. min_font_size
     explicitly permits bounded fitting (e.g. 16); omitted preserves font_size.
     Use native tables, never pipes/spaces or one text box per cell. Tables do not
+    require repeated shared labels: optional merges=[{start_row:2,end_row:6,
+    start_column:3,end_column:3}] combines those five body status cells. Bounds
+    are 1-based inclusive including headers. Horizontal merges use the same
+    bounds. Keep the shared text in the top-left cell and empty/identical text
+    in covered cells. Ranges cannot overlap, cross header/body, or discard distinct
+    facts. Plan semantic merges during generation, never merge equal values blindly.
+    Native tables do not
     consume the 20-text-box limit. Keep baseline and result in their correct
     columns; do not combine "24 → 0.013" in baseline. Recovery preserves values,
     not their meaning. On TABLE_LAYOUT_OVERFLOW enlarge/rebalance the table or

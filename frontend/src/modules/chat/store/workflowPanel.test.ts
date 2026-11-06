@@ -43,12 +43,12 @@ describe('runtime skipped tab visibility', () => {
     const visible = (projection: WorkflowRuntimeProjection) =>
       filterWorkflowTabs(paper.tabs, [], undefined, projection, true).map(tab => tab.id);
 
-    expect(visible({ completed: true, past: ['research_topic', 'finish'] })).toEqual(['research_topic']);
-    expect(visible({ completed: true, past: ['peer_review', 'finish'] })).toEqual(['peer_review']);
+    expect(visible({ completed: true, past: ['research_topic', 'finish'] })).toEqual(['research_topic', 'finish']);
+    expect(visible({ completed: true, past: ['peer_review', 'finish'] })).toEqual(['peer_review', 'finish']);
     expect(visible({ completed: false, past: ['research_topic'] })).toContain('revise_document');
     expect(visible({ completed: false, past: ['research_topic', 'finish'] })).toContain('revise_document');
     expect(visible({ completed: true, past: ['research_topic', 'revise_document', 'finish'] }))
-      .toEqual(['research_topic', 'revise_document']);
+      .toEqual(['research_topic', 'revise_document', 'finish']);
   });
 
   it('keeps a completed unexecuted tab when it has a selected artifact', () => {
@@ -79,7 +79,7 @@ describe('runtime skipped tab visibility', () => {
     const hidden = ['research_topic', 'literature_review', 'experiment', 'data_analysis', 'write_outline', 'write_document', 'reading_reflection'];
     const selected: WorkflowRuntimeProjection = { pruned: hidden, past: ['peer_review'] };
     const visible = () => filterWorkflowTabs(paper.tabs, [], undefined, selected, true).map(t => t.id);
-    expect(visible()).toEqual(['peer_review', 'revise_document']);
+    expect(visible()).toEqual(['peer_review', 'revise_document', 'finish']);
     selected.past = ['peer_review', 'refine_topic'];
     expect(visible()).toContain('refine_topic');
     selected.past = [];

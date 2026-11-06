@@ -160,7 +160,8 @@ def test_separate_scripts_publish_hidden_file_and_visual_only_prompts(tmp_path, 
     tools = _load_ppt_tools()
     monkeypatch.setattr(tools, 'require_context', lambda: object())
     monkeypatch.setattr(tools, '_resolve_artifact_text',
-                        lambda *_: ('## Page A\nShort A\n## Page B\nShort B', 'text'))
+                        lambda _, slot: ('## Page A\nShort A\n## Page B\nShort B', 'text')
+                        if slot == 'deck_outline' else (None, 'text'))
     monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _: [])
     files, prompts = [], []
     monkeypatch.setattr(tools, '_save_artifact', lambda **kw: (files.append(kw), {'ok': True})[1])

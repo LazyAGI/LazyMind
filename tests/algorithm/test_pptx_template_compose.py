@@ -485,3 +485,57 @@ def test_resize_existing_body_box_without_moving_brand(template):
     assert body.width == Inches(8) and body.left == Inches(1)
     brand = next(s for s in slide.shapes if s.name == 'Brand mark')
     assert brand.left == Inches(.1)
+
+
+def test_native_table_merges_are_editable_and_preserve_shared_text_once(template):
+    from pptx.enum.text import MSO_ANCHOR
+    source, output, digest, page = template
+    page['charts'] = []
+    page['tables'] = [{'headers': ['工作', '状态'],
+                       'rows': [['A', '阶段交付'], ['B', '阶段交付'], ['C', '']],
+                       'box': [1, 2, 8, 3], 'font_size': 18,
+                       'merges': [{'start_row': 2, 'end_row': 4, 'start_column': 2, 'end_column': 2}]}]
+    before = deepcopy(page)
+    compose_template(source, output, digest, [page])
+    slide = Presentation(output).slides[0]
+    table = next(s.table for s in slide.shapes if s.has_table)
+    cell = table.cell(1, 1)
+    assert cell.is_merge_origin and cell.span_height == 3
+    assert cell.text == '阶段交付'
+    assert cell.vertical_anchor == MSO_ANCHOR.MIDDLE
+    assert cell.text_frame.paragraphs[0].font.size.pt == 18
+    assert table.cell(2, 1).is_spanned and table.cell(2, 1).text == ''
+    assert [table.cell(r, 0).text for r in range(1, 4)] == ['A', 'B', 'C']
+    assert page == before
+    assert page['notes'] in slide.notes_slide.notes_text_frame.text
+
+
+def test_native_horizontal_merge_uses_combined_width(template):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['tables'] = [{'rows': [['LongGroupHeading', '', ''], ['A', 'B', 'C']],
+                       'box': [1, 2, 6, 2], 'column_widths': [1, 2, 3], 'font_size': 20,
+                       'merges': [{'start_row': 1, 'end_row': 1, 'start_column': 1, 'end_column': 3}]}]
+    compose_template(source, output, digest, [page])
+    table = next(s.table for s in Presentation(output).slides[0].shapes if s.has_table)
+    assert table.cell(0, 0).span_width == 3
+    assert table.cell(0, 0).text == 'LongGroupHeading'
+    assert table.cell(0, 2).is_spanned
+
+
+@pytest.mark.parametrize('merges, rows, error', [
+    ([{'start_row': 2, 'end_row': 9, 'start_column': 2, 'end_column': 2}], [['A', 'X'], ['B', 'X']], 'INVALID'),
+    ([{'start_row': True, 'end_row': 3, 'start_column': 2, 'end_column': 2}], [['A', 'X'], ['B', 'X']], 'INVALID'),
+    ([{'start_row': 1, 'end_row': 3, 'start_column': 2, 'end_column': 2}], [['A', 'X'], ['B', 'X']], 'INVALID'),
+    ([{'start_row': 2, 'end_row': 3, 'start_column': 2, 'end_column': 2}] * 2, [['A', 'X'], ['B', 'X']], 'INVALID'),
+    ([{'start_row': 2, 'end_row': 3, 'start_column': 2, 'end_column': 2}],
+     [['A', 'X'], ['B', 'Y']], 'CONTENT_CONFLICT'),
+])
+def test_invalid_native_merge_does_not_publish(template, merges, rows, error):
+    source, output, digest, page = template
+    page['charts'] = []
+    page['tables'] = [{'headers': ['Work', 'Status'], 'rows': rows,
+                       'box': [1, 2, 8, 3], 'merges': merges}]
+    with pytest.raises(ValueError, match='TABLE_MERGE_' + error):
+        compose_template(source, output, digest, [page])
+    assert not output.exists()

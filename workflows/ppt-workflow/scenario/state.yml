@@ -1288,6 +1288,18 @@ steps:
       slide needs readable short copy, cheerful illustration subjects and their
       placement, not just a list of Spring Festival customs.
 
+      For both HTML and native PPTX tables, plan semantic cell merging before generation. In layout,
+      explicitly identify the column, contiguous body-row range (excluding the
+      header), shared text and vertical alignment for each merge. For example,
+      five work items sharing the status "列入阶段交付" should keep five distinct
+      work rows but use one vertically centered status cell spanning those rows.
+      Use rowspan for shared categories/statuses and colspan for grouped headers.
+      Merge only a genuine shared semantic group, never merely equal numbers or
+      coincidentally equal text; preserve every row's information and association.
+      Respect explicit user/source merge constraints. Keep these instructions in
+      layout, not visible slide copy; Markdown is the design brief, not a reason
+      to flatten the generated HTML table into repeated cells.
+
       Call ppt_publish_outline once with output_format as specified above and
       global_style=<shared audience, language, canvas, typography, colors and output rules>,
       page_components=[{"content": <exact title and body copy>,
@@ -1665,6 +1677,15 @@ steps:
       box:[x,y,w,h],font_size:18}]. Omit headers for a key/value list. Use the same
       number of cells in every row. Do not use pipes, spaces or independent text
       boxes to simulate cells; native tables do not consume the text-box limit.
+      For shared statuses/categories, explicitly supply table merges:
+      merges=[{start_row:2,end_row:6,start_column:3,end_column:3}] merges five
+      body rows in the third column when headers exist. Bounds are 1-based,
+      inclusive, and include the header row. Horizontal/group-header merging uses
+      the same bounds. Put shared text in the top-left cell; covered cells must
+      be empty or identical. Preserve rectangular rows, all distinct facts and
+      group boundaries; never merge merely coincidentally equal values, overlap
+      ranges or span header and body. The renderer creates editable native merges
+      and vertically centers their text; do not imitate merges with text boxes.
       Put each value in its named column; units belong in headers or cells,
       qualifications remain attached to the correct metric. Never put both
       baseline and result into one baseline cell. Automatic legacy conversion
