@@ -33,6 +33,8 @@ var ToolNames = []string{
 	"workflow.step.claim",
 	"workflow.step.resume",
 	"workflow.step.complete",
+	"workflow.tool.list",
+	"workflow.tool.call",
 	"workflow.artifact.publish",
 	"workflow.artifact.list",
 	"workflow.artifact.get",
@@ -41,7 +43,7 @@ var ToolNames = []string{
 func IsReadOnlyTool(name string) bool {
 	switch name {
 	case "workflow.list", "workflow.get", "workflow.input.get", "workflow.state", "workflow.session.list",
-		"workflow.artifact.list", "workflow.artifact.get":
+		"workflow.artifact.list", "workflow.artifact.get", "workflow.tool.list":
 		return true
 	default:
 		return false
@@ -102,6 +104,7 @@ const workflowStartDescription = "Prepare a Workflow and create a durable sessio
 
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
+	registerExecutionTools(server, client)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
 		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}},

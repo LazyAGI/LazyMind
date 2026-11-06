@@ -159,6 +159,10 @@ type BeginInput struct {
 }
 
 type StepContract struct {
+	ExternalExecution       map[string]any    `json:"external_execution,omitempty"`
+	KnowledgeScope          map[string]any    `json:"knowledge_scope,omitempty"`
+	LaunchRequest           string            `json:"launch_request,omitempty"`
+	UserRequest             string            `json:"user_request,omitempty"`
 	DeclaredInputTypes      map[string]string `json:"declared_input_types,omitempty"`
 	DeclaredInputTransports map[string]string `json:"declared_input_transports,omitempty"`
 	DeclaredOutputTypes     map[string]string `json:"declared_output_types,omitempty"`

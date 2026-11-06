@@ -35,6 +35,8 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		}
 	}
 	value.ContractVersion, value.SessionID, value.AttemptID, value.StepID, value.AttemptNo = attempt.ContractVersion, row.SessionID, row.ID, row.StepID, row.Attempt
+	// External policy is authoritative only in the immutable compiled revision.
+	value.ExternalExecution = nil
 	var session orm.WorkflowSession
 	if err := loader.DB.WithContext(ctx).Where("id = ?", row.SessionID).First(&session).Error; err != nil {
 		return AttemptContext{}, err
@@ -70,6 +72,12 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.TerminalTools = node.TerminalTools
 					value.ToolsOnly = node.ToolsOnly
 					value.TerminalToolsOnly = node.TerminalToolsOnly
+					// Only the persisted external executor may select the new policy.
+					// Native runs of the same revision keep their original contract.
+					value.ExternalExecution = nil
+					if controlstore.Controlled(session) && row.ExecutorHost == "external-agent" {
+						ApplyExternalExecution(&value, node)
+					}
 				}
 			}
 			cardinality, err := loader.loadOutputCardinality(ctx, revision.ID, value.DeclaredOutputs)
@@ -78,6 +86,9 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 			}
 			value.OutputCardinality = cardinality
 		}
+	}
+	if err := loadExternalSkillFiles(ctx, loader.DB, &value); err != nil {
+		return AttemptContext{}, err
 	}
 	if controlstore.Controlled(session) && value.Metadata[frozenInputsKey] == "true" {
 		return value, nil

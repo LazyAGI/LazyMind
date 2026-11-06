@@ -3,6 +3,72 @@ name: 论文自动拓展
 description: 承接已确认的研究范围，检索并交付论文清单，深入研究进一步生成研究报告与论文关系。
 when_to_use: 仅在拓展记录已经确定方向后执行（按启动时所选策略全选方向或等待人工确认）；继续同一范围或调整结果表达沿用原记录。
 runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
+      to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      expand_and_screen:
+        prompt: Read scenario/external.md and its expand_and_screen step contract from this pinned package. Retrieve real
+          candidates for every confirmed direction; preserve all seed papers. Generate and validate with your own host
+          capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: academic_expansion
+          source: package
+        - name: academic_search_papers
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: academic_resolve_papers
+          source: package
+        required_outputs:
+        - candidate_set
+        acceptance_criteria:
+        - 保留确认范围、全部种子和真实登记的候选；快速档交付带理由的有序清单，标准和深入交接待筛选候选。 The external agent authors and validates report prose; no native
+          publication wrapper or hidden LLM call is used.
+      screen_and_supplement:
+        prompt: Read scenario/external.md and its screen_and_supplement step contract from this pinned package. Screen
+          the frozen candidates and make only targeted evidence-backed additions. Generate and validate with your own host
+          capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: academic_expansion
+          source: package
+        - name: academic_search_papers
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: academic_resolve_papers
+          source: package
+        required_outputs:
+        - screened_candidates
+        acceptance_criteria:
+        - 保留全部种子与确认方向；筛选及定点补查后按方向交付真实论文及推荐理由。 The external agent authors and validates report prose; no native publication
+          wrapper or hidden LLM call is used.
+      analyze_relations:
+        prompt: Read scenario/external.md and its analyze_relations step contract from this pinned package. Analyze supported
+          relationships and write the actual cited research report from the same findings. Generate and validate with your
+          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools:
+        - name: academic_expansion
+          source: package
+        - name: academic_search_papers
+          source: package
+        - name: academic_read_paper
+          source: package
+        - name: academic_resolve_papers
+          source: package
+        required_outputs:
+        - relation_analysis
+        - expansion_result
+        - expansion_report
+        acceptance_criteria:
+        - 沿用确认范围和完整清单，仅为关键结论定点补读；引用真实版本与已读位置，事实与推断明确区分；无证据不画关系边，正常局限和未覆盖范围如实写入报告；不要求穷尽调查或耗尽预算后才交付；不得自动入库。 The external
+          agent authors and validates report prose; no native publication wrapper or hidden LLM call is used.
   transactional_outputs: true
   publisher_owned_slots:
   - candidate_set

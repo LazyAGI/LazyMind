@@ -1018,6 +1018,9 @@ func isBareRetryInput(input string) bool {
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
 	objective := workflowStepObjectiveWithRuntimeBoundaries(node.Prompt, target.Objective, target.UserInput, node.Capabilities, node.LegacyTools, node.TerminalTools)
+	if node.ExternalExecution.Supported() {
+		objective = workflowStepObjective(node.ExternalExecution.Prompt, target.Objective, target.UserInput)
+	}
 	refOrID := session.WorkflowRef
 	if refOrID == "" {
 		refOrID = session.WorkflowID
@@ -1029,11 +1032,13 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 	}
 	value := executor.AttemptContext{ContractVersion: attempt.ContractVersion, SessionID: session.ID,
 		AttemptID: target.TaskID, StepID: target.TargetStepID, AttemptNo: int(count) + 1, Operation: "execute",
+		LaunchRequest: sessionIntentText(session.IntentContext), UserRequest: target.UserInput,
 		Objective: objective, Prompt: node.Prompt, Acceptance: node.Acceptance,
 		Instruction: target.RuntimeInstruction, PartialSelector: target.PartialIndices,
 		WorkflowRevision: session.WorkflowRevisionID, DeclaredOutputs: node.Outputs, DeclaredOutputTypes: outputTypes, RequiredOutputs: node.RequiredOutputs,
 		Capabilities: node.Capabilities, LegacyTools: node.LegacyTools, TerminalTools: node.TerminalTools,
 		ToolsOnly: node.ToolsOnly, TerminalToolsOnly: node.TerminalToolsOnly}
+	executor.ApplyExternalExecution(&value, node)
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err

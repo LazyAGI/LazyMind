@@ -210,6 +210,20 @@ export interface WorkflowToolScript {
 }
 
 export interface WorkflowRuntimePolicy {
+  /** Pinned host instructions; editing preserves these alongside native runtime policy. */
+  external_execution?: {
+    version: '1';
+    skills?: string[];
+    constraints?: string[];
+    steps: Record<string, {
+      prompt: string;
+      skills?: string[];
+      constraints?: string[];
+      tools?: Array<{ name: string; source: 'package' | 'global' }>;
+      acceptance_criteria?: string[];
+      required_outputs?: string[];
+    }>;
+  };
   publisher_owned_slots?: string[];
   collects_knowledge?: boolean;
   completed_edit_step?: string;

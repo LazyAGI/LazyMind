@@ -13,7 +13,7 @@ const __dirname = dirname(__filename);
 // missing browser → 优雅跳过，不抛异常。
 
 // 依赖就绪后再 import 业务模块
-const { ensureDependencies } = await import('./lib/browser_setup.mjs');
+const { assertOfflineIR, ensureDependencies, externalOfflineMode } = await import('./lib/browser_setup.mjs');
 const { ensureDeckPreconditions } = await import('./lib/cli_guards.mjs');
 const { downloadRemoteImages } = await import('./lib/image_downloader.mjs');
 
@@ -66,7 +66,7 @@ async function main() {
 
   // 先下载远程图片并规范化 deck 结构；顺带把 echarts.min.js 落到 assets/，
   // 否则 chart_* 页面在 Playwright 里脚本 404，导出后柱状图变空白卡片。
-  if (args.deckDir && !args.batch) {
+  if (args.deckDir && !args.batch && !externalOfflineMode()) {
     await downloadRemoteImages(args.deckDir);
     const { ensureEchartsAsset } = await import('./lib/ensure_echarts.mjs');
     ensureEchartsAsset(args.deckDir);
@@ -86,6 +86,7 @@ async function main() {
   // DOM 提取
   console.error('步骤 1/2: 提取 DOM...');
   const pages = await extractPages(htmlFiles);
+  if (externalOfflineMode()) pages.forEach(page => assertOfflineIR(page.ir));
 
   // --debug: dump IR 到 <deck_dir>/_debug/<page>.ir.json，便于诊断转换问题。
   // 不污染 deck 根目录；每页一个文件，避免单文件巨大。

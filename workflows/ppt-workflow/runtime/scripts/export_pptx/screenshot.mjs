@@ -20,7 +20,7 @@
 import { resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
-import { hiddenChromiumLaunchOptions, installHiddenProcessHooks } from './lib/browser_setup.mjs';
+import { externalOfflineMode, hiddenChromiumLaunchOptions, installHiddenProcessHooks, loadOfflineSlide } from './lib/browser_setup.mjs';
 
 installHiddenProcessHooks();
 const { chromium } = await import('playwright');
@@ -61,9 +61,11 @@ try {
   const ctx = await browser.newContext({
     viewport: { width: vw, height: vh },
     deviceScaleFactor: 1,
+    ...(externalOfflineMode() ? { serviceWorkers: 'block' } : {}),
   });
   const page = await ctx.newPage();
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+  if (externalOfflineMode()) await loadOfflineSlide(page, htmlPath);
+  else await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
   if (waitMs > 0) await page.waitForTimeout(waitMs);
 
   let chosen = null;

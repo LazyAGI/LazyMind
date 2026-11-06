@@ -53,7 +53,51 @@ func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	sort.Strings(names)
-	want := "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list,workflow.artifact.get,workflow.artifact.list,workflow.artifact.publish,workflow.get,workflow.input.get,workflow.input.import,workflow.list,workflow.session.list,workflow.session.resume,workflow.session.stop,workflow.start,workflow.state,workflow.step.begin,workflow.step.complete,workflow.step.resume"
+	wantNames := []string{
+		"cloud_document.get",
+		"cloud_document.list",
+		"cloud_document.read",
+		"cloud_document.search",
+		"knowledge.create",
+		"knowledge.document.aggregate",
+		"knowledge.document.get",
+		"knowledge.document.list",
+		"knowledge.document.reparse",
+		"knowledge.document.upload",
+		"knowledge.folder.create",
+		"knowledge.list",
+		"knowledge.resource.delete",
+		"knowledge.resource.move",
+		"knowledge.resource.update_metadata",
+		"knowledge.search",
+		"model.chat",
+		"model.list",
+		"skill.get",
+		"skill.list",
+		"tool.call",
+		"tool.list",
+		"vocabulary.word.list",
+		"vocabulary.wordbook.list",
+		"workflow.artifact.get",
+		"workflow.artifact.list",
+		"workflow.artifact.publish",
+		"workflow.get",
+		"workflow.input.get",
+		"workflow.input.import",
+		"workflow.list",
+		"workflow.session.list",
+		"workflow.session.resume",
+		"workflow.session.stop",
+		"workflow.start",
+		"workflow.state",
+		"workflow.step.begin",
+		"workflow.step.claim",
+		"workflow.step.complete",
+		"workflow.step.resume",
+		"workflow.tool.call",
+		"workflow.tool.list",
+	}
+	want := strings.Join(wantNames, ",")
 	if strings.Join(names, ",") != want {
 		t.Fatalf("bridged tools = %v, want %s", names, want)
 	}

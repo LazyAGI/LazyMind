@@ -54,6 +54,10 @@ sequenceDiagram
 
 内部通过回调启动 Controller 下一轮，外部通过 HostAction 与 Host Connector 唤醒；同一 Agent 兼任 Executor 时，直接根据提交回执继续推进。
 
+新版工作流可以声明 `runtime.external_execution.version: '1'`。此时外部宿主负责创建全部 subagent、生成内容与语义/视觉验证，LazyMind 提供固定版本的 Skill、步骤、约束和可选工具，并保存状态和产物。Core 只执行权限、租约、输入/输出类型、版本与存储一致性检查，不将服务端模型或语义验证回执作为完成前提。原生 LazyMind 运行继续使用原来的模型执行器；旧 revision 的归属规则不变。
+
+根 Controller 保留 `execution_handle`，子代理只接收固定契约、输入与输出目录。工具调用由根代理通过 `workflow.tool.list/call` 代理；生成与验证完成后，根代理发布真实产物并提交 outcome。宿主缺少某项能力时可调用契约允许的 LazyMind 工具；工具也不可用时提示用户在 LazyMind 配置相应功能后重试。完整接入说明见 [外部工作流开发接入](../dev/external-workflow.md)。
+
 </div>
 
 </div>

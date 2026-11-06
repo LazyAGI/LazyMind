@@ -16,3 +16,70 @@ slots:
   - {id: evidence, user_visible: true, label: Execution evidence, type: json, cardinality: single}
   - {id: completion, user_visible: true, label: Completion checks, type: json, cardinality: single}
   - {id: result, user_visible: true, label: Result, type: json, cardinality: single}
+
+runtime:
+  external_execution:
+    version: '1'
+    skills:
+    - scenario/external.md
+    constraints:
+    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall
+      back to a LazyMind text or vision model.
+    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
+      capabilities must be configured in LazyMind before retry.
+    steps:
+      prepare:
+        prompt: Read scenario/external.md and its prepare step contract from this pinned package. Complete Prepare
+          task using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - preparation
+        acceptance_criteria:
+        - Receipt contains the observed nonempty brief hash, task id, expected base SHA and recorded in_progress event.
+      validate_dispatch:
+        prompt: Read scenario/external.md and its validate_dispatch step contract from this pinned package. Complete
+          Validate dispatch preconditions using the bound evidence and the domain rules above. Generate and validate
+          with your own host capabilities; return the real declared artifacts and verification evidence for hosted
+          publication.
+        tools: []
+        required_outputs:
+        - admission
+        acceptance_criteria:
+        - All actual prerequisites pass; absent evidence must fail the attempt.
+      dispatch:
+        prompt: Read scenario/external.md and its dispatch step contract from this pinned package. Complete Dispatch
+          SubAgent using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - execution
+        acceptance_criteria:
+        - A real child was started after revalidation and returned zero with a terminal turn completion.
+      collect:
+        prompt: Read scenario/external.md and its collect step contract from this pinned package. Complete Collect
+          execution evidence using the bound evidence and the domain rules above. Generate and validate with your
+          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - evidence
+        acceptance_criteria:
+        - Evidence links the actual execution to the resulting files.
+      validate_completion:
+        prompt: Read scenario/external.md and its validate_completion step contract from this pinned package. Complete
+          Validate completion using the bound evidence and the domain rules above. Generate and validate with your
+          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - completion
+        acceptance_criteria:
+        - The exact coverage set is DONE, fixed tests are unchanged and all pass.
+      record:
+        prompt: Read scenario/external.md and its record step contract from this pinned package. Complete Record result
+          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
+          return the real declared artifacts and verification evidence for hosted publication.
+        tools: []
+        required_outputs:
+        - result
+        acceptance_criteria:
+        - Final status and observable Todo both agree with validated execution.
