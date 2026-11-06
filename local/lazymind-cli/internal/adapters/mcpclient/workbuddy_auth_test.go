@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,19 +13,29 @@ import (
 	workbuddyadapter "lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/integrationstate"
+	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workbuddyhost"
 )
 
+type workBuddyTestProbe struct{ err error }
+
+func (p workBuddyTestProbe) Probe(context.Context) (mcpbridge.ProbeResult, error) {
+	return mcpbridge.ProbeResult{}, p.err
+}
+
 func TestWorkBuddyConnectChecksAuthenticationBeforeConfigurationOrRestart(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		auth  workbuddyadapter.AuthenticationResult
-		state agentintegration.State
-		issue string
-		login bool
-		stage string
+		name     string
+		auth     workbuddyadapter.AuthenticationResult
+		state    agentintegration.State
+		issue    string
+		login    bool
+		stage    string
+		probeErr error
 	}{
+		{name: "LazyMind signed out during probe", probeErr: fmt.Errorf("connect MCP: %w", credentials.ErrAuthenticationRequired), state: agentintegration.Failed, issue: "lazymind_auth_required", stage: "probe"},
 		{name: "signed out", auth: workbuddyadapter.AuthenticationResult{LoginRequired: true, Message: "signed out"}, state: agentintegration.ActionRequired, issue: "workbuddy_login_required", login: true, stage: "login"},
 		{name: "expired", auth: workbuddyadapter.AuthenticationResult{LoginRequired: true, Message: "expired"}, state: agentintegration.ActionRequired, issue: "workbuddy_login_required", login: true, stage: "login"},
 		{name: "unreadable", auth: workbuddyadapter.AuthenticationResult{Message: "fixture private diagnostic"}, state: agentintegration.Failed, issue: "workbuddy_auth_unreadable", stage: "login"},
@@ -49,9 +60,13 @@ func TestWorkBuddyConnectChecksAuthenticationBeforeConfigurationOrRestart(t *tes
 			adapter := testAdapter(WorkBuddy)
 			adapter.self, _ = os.Executable()
 			adapter.home = home
-			adapter.bridge = dshTestProbe{}
+			adapter.bridge = workBuddyTestProbe{err: tc.probeErr}
 			status := adapter.Connect(context.Background())
-			if calls != 1 || status.State != tc.state || status.Issue == nil || status.Issue.Code != tc.issue {
+			wantCalls := 1
+			if tc.probeErr != nil {
+				wantCalls = 0
+			}
+			if calls != wantCalls || status.State != tc.state || status.Issue == nil || status.Issue.Code != tc.issue {
 				t.Fatalf("calls=%d status=%+v issue=%+v", calls, status, status.Issue)
 			}
 			if tc.login {

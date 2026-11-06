@@ -17,14 +17,13 @@ var BridgeError = class extends Error {
 	}
 };
 function isHostAuthorizationError(error) {
-	return error instanceof BridgeError && (error.status === 401 || error.status === 403 || [
+	return error instanceof BridgeError && (error.status === 401 || [
 		"HOST_PAIRING_MISSING",
 		"HOST_PAIRING_DISABLED",
 		"HOST_ACCOUNT_MISMATCH",
 		"HOST_CREDENTIAL_MISMATCH",
 		"HOST_PAIRING_INVALID",
-		"HOST_PAIRING_UNREADABLE",
-		"HOST_AUTH_REQUIRED"
+		"HOST_PAIRING_UNREADABLE"
 	].includes(error.code));
 }
 var HostBridge = class {

@@ -21,9 +21,11 @@ export class BridgeError extends Error {
 }
 
 export function isHostAuthorizationError(error: unknown): error is BridgeError {
-  return error instanceof BridgeError && (error.status === 401 || error.status === 403
+  // Core can reject an individual action or receipt with 403 (including HOST_AUTH_REQUIRED).
+  // The Bridge reports a missing LazyMind session with 401 and pairing failures with explicit codes.
+  return error instanceof BridgeError && (error.status === 401
     || ['HOST_PAIRING_MISSING', 'HOST_PAIRING_DISABLED', 'HOST_ACCOUNT_MISMATCH',
-      'HOST_CREDENTIAL_MISMATCH', 'HOST_PAIRING_INVALID', 'HOST_PAIRING_UNREADABLE', 'HOST_AUTH_REQUIRED'].includes(error.code))
+      'HOST_CREDENTIAL_MISMATCH', 'HOST_PAIRING_INVALID', 'HOST_PAIRING_UNREADABLE'].includes(error.code))
 }
 
 export class HostBridge {

@@ -3,12 +3,14 @@ package mcpclient
 import (
 	"context"
 	"errors"
-	"lazymind/agentconnector/internal/agentintegration"
-	"lazymind/agentconnector/internal/coreapi"
-	"lazymind/agentconnector/internal/workbuddyhost"
-	"lazymind/agentconnector/internal/workflowhost"
 	"log"
 	"os"
+
+	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/coreapi"
+	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/workbuddyhost"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func workBuddyIssueMessage(code string) string {
@@ -74,7 +76,8 @@ func workBuddyFailure(status agentintegration.Status, err error) agentintegratio
 		code = workBuddyPairingIssue(err)
 	}
 	var api *coreapi.Error
-	if code == "" && errors.As(err, &api) && (api.StatusCode == 401 || api.StatusCode == 403) {
+	if code == "" && (credentials.IsAuthenticationRequired(err) ||
+		errors.As(err, &api) && (api.StatusCode == 401 || api.StatusCode == 403)) {
 		code = "lazymind_auth_required"
 	}
 	if code == "" && errors.Is(err, os.ErrPermission) {

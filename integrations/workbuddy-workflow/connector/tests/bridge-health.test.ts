@@ -41,7 +41,7 @@ it('gates identity/presentation retries for authorization and resets after a rea
   expect(health.retryAfter('workbuddy')).toBe(0)
 })
 
-it('backs off temporary failures and does not mark action conflicts as offline', async () => {
+it('backs off temporary failures and keeps the bridge healthy on action-level errors', async () => {
   vi.useFakeTimers()
   const health = new BridgeHealth()
   for (const expected of [1000, 2000, 4000]) {
@@ -51,6 +51,13 @@ it('backs off temporary failures and does not mark action conflicts as offline',
   }
   await health.track('workflow', async () => ({}))
   await health.track('workbuddy', async () => ({}))
-  await expect(health.track('workflow', async () => { throw new BridgeError('HOST_ACTION_PENDING', 'private', 409) })).rejects.toThrow()
-  expect(health.issue()).toBe('')
+  for (const error of [
+    new BridgeError('HOST_ACTION_PENDING', 'private', 409),
+    new BridgeError('PERMISSION_DENIED', 'private', 403),
+    new BridgeError('HOST_AUTH_REQUIRED', 'private', 403),
+  ]) {
+    await expect(health.track('workflow', async () => { throw error })).rejects.toThrow()
+    expect(health.issue()).toBe('')
+    expect(health.retryAfter('workflow')).toBe(0)
+  }
 })

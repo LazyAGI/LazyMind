@@ -42,14 +42,31 @@ it('backs off temporary outages and resets after a successful poll', async () =>
   await vi.advanceTimersByTimeAsync(1000); expect(f.bridge.actions).toHaveBeenCalledTimes(5)
   f.lifetime.abort(); await polling
 })
-it('also waits when authorization fails during claim, without sending a prompt', async () => {
+it.each([
+  [401, 'HOST_AUTH_REQUIRED'],
+  [403, 'HOST_CREDENTIAL_MISMATCH'],
+] as const)('waits when claim reports connection authorization failure (%s, %s)', async (status, code) => {
   const f = fixture()
   f.bridge.actions.mockResolvedValue({ actions: [{ id: 'a', kind: 'continue', status: 'pending', session_id: 'run', native_session_id: 'native' }] })
-  f.bridge.claim.mockRejectedValue(new BridgeError('HOST_AUTH_REQUIRED', 'denied', 403))
+  f.bridge.claim.mockRejectedValue(new BridgeError(code, 'denied', status))
   const polling = f.poll(); await vi.advanceTimersByTimeAsync(0)
   await vi.advanceTimersByTimeAsync(29_999)
   expect(f.bridge.claim).toHaveBeenCalledTimes(1)
   expect(f.runtime.prompt).not.toHaveBeenCalled()
+  f.lifetime.abort(); await polling
+})
+
+it.each(['PERMISSION_DENIED', 'HOST_AUTH_REQUIRED'])('continues dispatch after a scoped 403 (%s)', async code => {
+  const f = fixture()
+  const actions = ['a', 'b'].map(id => ({ id, kind: 'continue' as const, status: 'pending', session_id: id, native_session_id: id }))
+  f.bridge.actions.mockResolvedValue({ actions })
+  f.bridge.claim
+    .mockRejectedValueOnce(new BridgeError(code, 'action denied', 403))
+    .mockResolvedValueOnce({ action: { ...actions[1], status: 'dispatching' }, dispatch_token: 'receipt' })
+  const polling = f.poll(); await vi.advanceTimersByTimeAsync(0)
+  expect(f.bridge.claim).toHaveBeenCalledTimes(2)
+  expect(f.runtime.prompt).toHaveBeenCalledOnce()
+  expect(f.runtime.prompt).toHaveBeenCalledWith('b', expect.objectContaining({ actionId: 'b' }), f.lifetime.signal)
   f.lifetime.abort(); await polling
 })
 
