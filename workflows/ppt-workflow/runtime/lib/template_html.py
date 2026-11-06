@@ -621,6 +621,19 @@ def _typography_css(style, family_only=False):
     return css
 
 
+def remove_legacy_narrative_override(html):
+    def repair_css(match):
+        css = match[2].replace(',#ct [data-el="narrative"]', '')
+        css = re.sub(r'(#ct \[data-template-shape-id="\d+"\](?: \*)?)(?=[,{])',
+                     r'\1:not(svg):not(svg *)', css)
+        return match[1] + css + match[3]
+    return re.sub(
+        r'(<style data-lazymind-template-typography>)(.*?)(</style>)',
+        repair_css,
+        html, flags=re.S,
+    )
+
+
 def apply_typography(html, context):
     """Restore template text styles by explicit shape binding or semantic title roles.
 
@@ -654,13 +667,14 @@ def apply_typography(html, context):
     if subtitle is None and role(title or {}) == 'ctrTitle' and len(content) == 2:
         subtitle = body
     if subtitle:
-        rules.append('#ct [data-el="subtitle"],#ct [data-el="narrative"]{'
+        rules.append('#ct [data-el="subtitle"]{'
                      + _typography_css(_shape_typography(subtitle)) + '}')
     for shape in shapes:
         identity = str(shape.get('id', ''))
         if re.fullmatch(r'\d+', identity):
             selector = f'#ct [data-template-shape-id="{identity}"]'
-            rules.append(selector + ',' + selector + ' *{' + _typography_css(_shape_typography(shape)) + '}')
+            rules.append(selector + ':not(svg):not(svg *),' + selector + ' *:not(svg):not(svg *){'
+                         + _typography_css(_shape_typography(shape)) + '}')
     html = re.sub(r'<style data-lazymind-template-typography>.*?</style>', '', html, flags=re.S)
     if not rules:
         return html

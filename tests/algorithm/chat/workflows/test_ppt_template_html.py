@@ -252,3 +252,30 @@ def test_template_typography_does_not_invent_missing_title_or_body_roles():
 
 # Template rendering uses the cloud asset resolver with local test payloads.
 pytestmark = pytest.mark.usefixtures('ppt_asset_library')
+
+
+def test_template_subtitle_does_not_resize_body_caption():
+    shape = {'id': '9', 'placeholder': {'type': 'subTitle'}, 'text': {'paragraphs': [{'runs': [
+        {'text': 'Subtitle', 'style': {'font_size_px': 36.667}}]}]}}
+    html = ('<html><head></head><body><p data-el="narrative" '
+            'style="font-size:24px;line-height:30px">限制条件</p></body></html>')
+    result = template.apply_typography(html, {'page': {'shapes': [shape]}})
+    css = result.split('<style data-lazymind-template-typography>')[1].split('</style>')[0]
+    assert '[data-el="narrative"]' not in css
+    assert 'font-size:24px;line-height:30px' in result
+    legacy = ('<style data-lazymind-template-typography>#ct [data-el="subtitle"],'
+              '#ct [data-el="narrative"]{font-size:36px!important}</style>')
+    repaired = template.remove_legacy_narrative_override(legacy)
+    assert '[data-el="narrative"]' not in repaired
+    assert '[data-el="subtitle"]{font-size:36px!important}' in repaired
+
+
+def test_legacy_template_shape_style_leaves_svg_text_sizes_intact():
+    old = ('<style data-lazymind-template-typography>'
+           '#ct [data-template-shape-id="9"],#ct [data-template-shape-id="9"] *{font-size:36px!important}'
+           '</style><svg data-template-shape-id="9"><text font-size="24">时间线</text></svg>')
+    repaired = template.remove_legacy_narrative_override(old)
+    assert '#ct [data-template-shape-id="9"]:not(svg):not(svg *)' in repaired
+    assert '#ct [data-template-shape-id="9"] *:not(svg):not(svg *)' in repaired
+    assert '<text font-size="24">时间线</text>' in repaired
+    assert template.remove_legacy_narrative_override(repaired) == repaired

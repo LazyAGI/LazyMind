@@ -1825,7 +1825,7 @@ class DeferredTextOutlineTest(unittest.TestCase):
             model.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
-    def test_modular_publication_and_generation_reads_latest_components(self):
+    def test_page_document_publication_and_generation_reads_latest_edits(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
             artifacts = {'deck_outline': '## 标题\n已确认事实'}
@@ -1846,21 +1846,33 @@ class DeferredTextOutlineTest(unittest.TestCase):
                     page_components=[{'content': '标题与事实', 'layout': '左文右图', 'assets': '图1'}],
                     global_style='浅色背景')
                 self.assertEqual(result['published_count'], 1)
-                self.assertEqual(artifacts['slide_outline'], '标题与事实')
+                self.assertEqual(set(artifacts), {'deck_outline', 'slide_outline'})
                 prompt = TOOLS._load_slide_outline_briefs([1])[1]
                 for value in ('标题与事实', '左文右图', '图1', '浅色背景'):
                     self.assertIn(value, prompt)
-                with self.assertRaisesRegex(ValueError, 'uses components'):
-                    TOOLS._publish_text_page_briefs(deck, None, ['旧格式覆盖'])
-                artifacts['page_layout'] = '上下布局'
+                self.assertLess(prompt.index('## 风格'), prompt.index('## 布局'))
+                self.assertEqual(TOOLS._page_prompt_title(prompt), '标题与事实')
+                artifacts['slide_outline'] = prompt.replace('左文右图', '上下布局')
+                # Old split artifacts must not override this document after conversion.
+                artifacts.update(presentation_style='旧风格', page_layout='旧布局', page_assets='旧素材')
                 edited = TOOLS._load_slide_outline_briefs([1])[1]
                 self.assertIn('上下布局', edited)
                 self.assertNotIn('左文右图', edited)
-                del artifacts['page_assets']
-                with self.assertRaisesRegex(ValueError, 'incomplete prompt components'):
-                    TOOLS._load_slide_outline_briefs([1])
-                del artifacts['presentation_style'], artifacts['page_layout']
-                self.assertEqual(TOOLS._load_slide_outline_briefs([1]), {1: '标题与事实'})
+                self.assertNotIn('旧风格', edited)
+                self.assertEqual(edited, artifacts['slide_outline'])
+
+    def test_legacy_split_prompts_still_read_current_components(self):
+        artifacts = {'presentation_style': '浅色背景', 'page_layout': '左右布局', 'page_assets': '图1'}
+        with mock.patch.object(TOOLS, '_resolve_artifact_text',
+                               side_effect=lambda ctx, key, **kw: (artifacts.get(key), 'text')):
+            self.assertIn('左右布局', TOOLS._assemble_page_prompt(object(), 1, '正文'))
+            artifacts['page_layout'] = '上下布局'
+            self.assertIn('上下布局', TOOLS._assemble_page_prompt(object(), 1, '正文'))
+            del artifacts['page_assets']
+            with self.assertRaisesRegex(ValueError, 'incomplete prompt components'):
+                TOOLS._assemble_page_prompt(object(), 1, '正文')
+            artifacts.clear()
+            self.assertEqual(TOOLS._assemble_page_prompt(object(), 1, '正文'), '正文')
 
     def test_text_cards_use_edited_artifact_not_original_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2162,3 +2174,16 @@ class PageGenerationRecoveryTests(unittest.TestCase):
             self.assertEqual(generated, [1, 2])
             self.assertEqual((deck / 'outline.json').read_text(encoding='utf-8'), outline)
             self.assertEqual(len(list((deck / 'pages').glob('*.html'))), 2)
+
+
+def test_saved_notes_move_visible_sources_below_script_and_keep_business_footer():
+    html = ('<html><body><div class="wrapper"><p data-el="narrative">结果受样本范围限制</p>'
+            '<p class="source" data-el="footer">来源：<a href="ref.pdf">资料.pdf 第1页</a></p>'
+            '<p data-el="footer">欢迎交流</p></div><aside hidden data-el="speaker-notes">旧文稿</aside></body></html>')
+    updated = TOOLS._insert_saved_notes_html(html, '我的讲稿')
+    visible = updated.split('<aside hidden')[0]
+    assert '资料.pdf' not in visible
+    assert '结果受样本范围限制' in visible and '欢迎交流' in visible
+    assert '我的讲稿\n\n【知识来源｜不朗读】\n来源：资料.pdf 第1页' in updated
+    assert updated.count('data-el="speaker-notes"') == 1
+    assert '旧文稿' not in updated

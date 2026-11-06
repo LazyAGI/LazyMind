@@ -24,3 +24,12 @@ it('keeps code fences and literal HTML intact without a duplicate original-promp
   expect(screen.queryByRole('button', { name: '原始提示词' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '编辑文本' })).not.toBeInTheDocument();
 });
+
+
+it('shows one marked page document with style before the page prompt', () => {
+  const text = '<!-- ppt-page-prompt:v1 -->\n\n## 风格\n浅色背景\n\n## 布局\n左右双栏\n\n## 页面正文\n正文';
+  const { container } = render(<PptPromptDocument text={text} />);
+  expect([...container.querySelectorAll('summary')].map(item => item.textContent)).toEqual(['风格', '布局', '页面正文']);
+  expect(container.textContent).not.toContain('ppt-page-prompt:v1');
+  expect(container.textContent).toContain('浅色背景');
+});

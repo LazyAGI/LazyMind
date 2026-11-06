@@ -199,7 +199,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             self.assertEqual(tab['slot_scope'], 'step')
         self.assertEqual(
             page_prompts['composite_layout']['children'],
-            [{'slot': name} for name in ('presentation_style', 'slide_outline', 'page_layout', 'page_assets')],
+            [{'slot': 'slide_outline'}],
         )
         self.assertIn(
             'rewind to plan_background_prompts',

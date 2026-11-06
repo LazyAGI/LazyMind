@@ -3386,6 +3386,26 @@ _SPEAKER_NOTES_SLOT = 'speaker_notes_source'
 
 def _insert_saved_notes_html(html: str, script: str) -> str:
     """Attach export/presenter notes after rendering; never ask the renderer to write them."""
+    tree = _HtmlTree(html)
+    sources, spans = [], []
+    for node in tree.nodes:
+        if node['tag'] not in {'p', 'div', 'footer', 'small'}:
+            continue
+        source_class = bool(set(node['classes']) & {'source', 'sources', 'citation', 'source-note'})
+        source_role = node['el'] in {'source', 'sources', 'citation', 'source-note', 'footer'}
+        if not (source_class or source_role):
+            continue
+        fragment = html[node['open_end']:node['end']]
+        text = _html_unescape(re.sub(r'<[^>]*>', '', fragment)).strip()
+        if text and (source_class or re.search(r'(?:来源|资料出处|参考资料|\bSources?\s*:)', text, re.I)):
+            if not spans or node['start'] >= spans[-1][1]:
+                sources.append(text)
+                spans.append((node['start'], node['end']))
+    for start, end in reversed(spans):
+        html = html[:start] + html[end:]
+    additional = [source for source in dict.fromkeys(sources) if source not in script]
+    if additional:
+        script += '\n\n【知识来源｜不朗读】\n' + '\n'.join(additional)
     html = re.sub(r'<aside\b(?=[^>]*\bdata-el\s*=\s*[\"\']speaker-notes[\"\'])[^>]*>.*?</aside\s*>',
                   '', html, flags=re.IGNORECASE | re.DOTALL)
     aside = '<aside hidden data-el="speaker-notes">' + _html_escape(script) + '</aside>'
@@ -3538,13 +3558,13 @@ def _publish_text_page_briefs(
         raise ValueError('Provide page_prompts: one authored visual generation prompt per target page; '
                          'do not copy deck_outline')
     old_style, _ = _resolve_artifact_text(ctx, 'presentation_style')
-    if old_style and page_components is None:
+    if old_style and page_components is None and not all(
+        isinstance(prompt, str) and prompt.lstrip().startswith(_PAGE_PROMPT_MARKER) for prompt in prompts
+    ):
         raise ValueError('This plan uses components; update content/layout/assets instead of legacy page_prompts')
     if page_components is not None:
         if len(page_components) != len(targets):
             raise ValueError('Provide one content/layout/assets object per target page')
-        if pages is not None and not old_style:
-            raise ValueError('Convert every page together before editing modular page components')
     for number, prompt in zip(targets, prompts):
         if number < 1 or number > len(briefs):
             raise ValueError(f'Page {number} outside approved outline')
@@ -3557,31 +3577,11 @@ def _publish_text_page_briefs(
     published = []
     if saved_notes is not None:
         _save_notes_source(deck, saved_notes)
-    if page_components is not None:
-        saved = _save_artifact(key='presentation_style', value=global_style.strip(),
-                               content_type='text', source_tool='ppt_publish_outline', internal_publish=True)
-        if _tool_failed(saved):
-            raise ValueError(_tool_fail_reason(saved) or 'Global style publication failed')
-        for field, slot in (('layout', 'page_layout'), ('assets', 'page_assets')):
-            component_order = _ui_slot_order_list(slot)
-            for number, component in zip(targets, page_components):
-                saved = _publish_ordered_ppt_artifact(
-                    slot=slot, page_no=number, value=component[field].strip(),
-                    content_type='text', source_tool='ppt_publish_outline',
-                    caption=briefs[number - 1].splitlines()[0].lstrip('# ').strip(),
-                    order_list=component_order, expected_total=len(briefs),
-                )
-                if _tool_failed(saved):
-                    raise ValueError(_tool_fail_reason(saved) or 'Page component publication failed')
-            if pages is None:
-                for position in range(len(component_order), len(briefs), -1):
-                    deleted = _delete_ui_slot_item(slot, position)
-                    if _tool_failed(deleted):
-                        raise ValueError('Cannot remove stale page component')
     for index, (number, prompt) in enumerate(zip(targets, prompts)):
         brief = prompt.strip()
         if page_components is not None:
-            brief = page_components[index]['content'].strip()
+            component = page_components[index]
+            brief = _compose_page_prompt(global_style, component['content'], component['layout'], component['assets'])
         saved = _publish_ordered_ppt_artifact(
             slot='slide_outline', page_no=number, value=brief,
             content_type='text', source_tool='ppt_publish_outline',
@@ -3616,7 +3616,7 @@ def _prepare_deferred_outline(deck: Path) -> dict[str, Any]:
         # Only build an execution index. The approved prompts go directly to the
         # HTML model; no content-outline or prompt-writing model call is needed.
         index = {'pages': [
-            {'page_no': number, 'title': brief.splitlines()[0].lstrip('# ').strip()[:120],
+            {'page_no': number, 'title': _page_prompt_title(brief),
              'page_kind': 'content'}
             for number, (_, brief) in enumerate(items, 1)
         ]}
@@ -3797,16 +3797,29 @@ def _load_slide_outline_briefs(page_nos: list[int]) -> dict[int, str]:
     return briefs
 
 
+_PAGE_PROMPT_MARKER = '<!-- ppt-page-prompt:v1 -->'
+
+
+def _page_prompt_title(brief: str) -> str:
+    if brief.lstrip().startswith(_PAGE_PROMPT_MARKER):
+        content = re.split(r'^## 页面正文\s*$', brief, maxsplit=1, flags=re.MULTILINE)
+        if len(content) == 2:
+            brief = content[1].strip()
+    return brief.splitlines()[0].lstrip('# ').strip()[:120]
+
+
 def _compose_page_prompt(style: str, content: str, layout: str, assets: str) -> str:
-    return content.strip() + '\n\n' + '\n\n'.join(
+    return _PAGE_PROMPT_MARKER + '\n\n' + '\n\n'.join(
         f'## {label}\n{body.strip()}' for label, body in (
-            ('全局风格', style), ('页面布局', layout), ('页面素材', assets),
+            ('风格', style), ('布局', layout), ('页面正文', content), ('页面素材', assets),
         )
     )
 
 
 def _assemble_page_prompt(ctx: Any, page_no: int, content: str) -> str:
-    """Resolve current editable artifacts each time; never reuse a stale merge."""
+    """Read a complete page document, or assemble legacy split artifacts."""
+    if content.lstrip().startswith(_PAGE_PROMPT_MARKER):
+        return content
     style, _ = _resolve_artifact_text(ctx, 'presentation_style')
     layout, _ = _resolve_artifact_text(ctx, 'page_layout', sort_order=page_no)
     assets, _ = _resolve_artifact_text(ctx, 'page_assets', sort_order=page_no)
@@ -8911,10 +8924,10 @@ def ppt_publish_outline(
             target-page order. Saved as a hidden file artifact; do not include these
             scripts in page_prompts. Downstream tools need only notes_ref.
         page_components: Preferred array of objects with non-empty content, layout,
-            assets strings, one per target page. Each field is independently editable.
+            assets strings, one per target page. Saved together in one editable Markdown page.
             Use assets="无外部素材" when the page needs no external image.
         global_style: Shared typography, colors, canvas and output rules. Required
-            with page_components; saved once and assembled with each page at generation.
+            with page_components; placed before the page prompt in the same Markdown artifact.
         pages: Optional 1-based page filter. Omit = all outline pages.
         insert_before: For an incremental whole-slide insertion, the one page
             position to insert into the UI list while preserving later items.

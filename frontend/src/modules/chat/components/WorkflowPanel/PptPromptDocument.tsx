@@ -14,6 +14,7 @@ export function splitPptPrompt(text: string): PromptSection[] {
   let current: PromptSection = { title: '', body: '' };
   let fence = '';
   for (const line of text.split('\n')) {
+    if (!fence && line.trim() === '<!-- ppt-page-prompt:v1 -->') continue;
     const fenceMatch = line.trim().match(/^(`{3,}|~{3,})/);
     if (fenceMatch) {
       fence = fence ? '' : fenceMatch[1][0];
@@ -43,6 +44,7 @@ export function PptPromptDocument({ text, onEdit, maxHeight }: {
   const sections = useMemo(() => {
     const parsed = splitPptPrompt(text);
     const isLayout = (section: PromptSection) => /^(布局|页面布局|版式|构图)(?:$|[\s（(：:])/.test(section.title);
+    if (text.trimStart().startsWith('<!-- ppt-page-prompt:v1 -->')) return parsed;
     return [...parsed.filter(isLayout), ...parsed.filter(section => !isLayout(section))];
   }, [text]);
   return <div className='ppt-prompt-document'>

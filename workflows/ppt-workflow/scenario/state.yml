@@ -893,8 +893,9 @@ steps:
       Presentation copy policy: visible slides must explain the problem, concrete
       method, personal contribution and supported outcome in concise natural
       language. Never display PR/issue/work-log identifiers such as #1189 or
-      Markdown heading markers. Keep identifiers only in a separate source section
-      of speaker notes, not in the spoken script. Do not display production rules
+      Markdown heading markers. Keep identifiers, knowledge sources, filenames, URLs and source page numbers
+      only below the speaker-note script in a separate non-spoken source section.
+      Never place these citations in visible slide footers or captions. Do not display production rules
       such as "不虚构性能数字", "待补充图表", "工作日志口径" as slide content.
       Unsupported quantitative results are omitted; describe supported qualitative
       effects without inventing measurements. Prefer a process diagram, comparison
@@ -1138,8 +1139,9 @@ steps:
       Presentation copy policy: visible slides must explain the problem, concrete
       method, personal contribution and supported outcome in concise natural
       language. Never display PR/issue/work-log identifiers such as #1189 or
-      Markdown heading markers. Keep identifiers only in a separate source section
-      of speaker notes, not in the spoken script. Do not display production rules
+      Markdown heading markers. Keep identifiers, knowledge sources, filenames, URLs and source page numbers
+      only below the speaker-note script in a separate non-spoken source section.
+      Never place these citations in visible slide footers or captions. Do not display production rules
       such as "不虚构性能数字", "待补充图表", "工作日志口径" as slide content.
       Unsupported quantitative results are omitted; describe supported qualitative
       effects without inventing measurements. Prefer a process diagram, comparison
@@ -1297,11 +1299,12 @@ steps:
       Omit deck_dir: the tool reads the bound deck automatically. Do not search
       for a deck or invent task_ref. If the tool reports a missing bound deck,
       stop and report that build_outline must be resumed.
-      These become presentation_style, slide_outline (content), page_layout and
-      page_assets. Generation reads their current versions and concatenates them
-      into a complete prompt automatically. Do not duplicate shared style in each
-      component, and do not put speaker notes into any visual component. The
-      assembled prompts guide the selected native
+      These become ONE slide_outline Markdown artifact per page, with shared
+      style first, then layout, page copy and assets separated by Markdown headings.
+      The publisher adds the format marker; do not produce separate style/layout/assets
+      artifacts or duplicate shared style inside page_components. Do not put speaker
+      notes in the visual prompt. Generation reads the current edited document directly.
+      The assembled prompts guide the selected native
       PPTX or HTML generation route. Generate only builds a page execution index; it must not ask
       another model to rewrite these prompts into an internal content outline.
 
@@ -1352,10 +1355,10 @@ steps:
         required: false
     acceptance_criteria: |
       slide_outline must contain exactly one non-empty, editable generation
-      prompt per requested page with aligned sort_order. For new decks publish
-      presentation_style once and page_layout/page_assets once per page, aligned
-      with slide_outline. Optional schema flags preserve older saved sessions.
-      Existing monolithic prompts remain supported; never silently mix formats.
+      prompt per requested page with aligned sort_order. Each slide_outline is one
+      Markdown document: style first, then layout, copy and assets. Do not publish
+      extra presentation_style/page_layout/page_assets artifacts. Those optional
+      outputs remain only for compatibility with older saved sessions.
 
   plan_background_prompts:
     label: Plan Background Prompts
@@ -1534,8 +1537,9 @@ steps:
       Presentation copy policy: visible slides must explain the problem, concrete
       method, personal contribution and supported outcome in concise natural
       language. Never display PR/issue/work-log identifiers such as #1189 or
-      Markdown heading markers. Keep identifiers only in a separate source section
-      of speaker notes, not in the spoken script. Do not display production rules
+      Markdown heading markers. Keep identifiers, knowledge sources, filenames, URLs and source page numbers
+      only below the speaker-note script in a separate non-spoken source section.
+      Never place these citations in visible slide footers or captions. Do not display production rules
       such as "不虚构性能数字", "待补充图表", "工作日志口径" as slide content.
       Unsupported quantitative results are omitted; describe supported qualitative
       effects without inventing measurements. Prefer a process diagram, comparison

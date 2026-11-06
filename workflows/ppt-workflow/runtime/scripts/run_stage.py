@@ -2195,6 +2195,7 @@ def _write_page_html_from_query(
 
     current_path = deck / 'pages' / f'page_{page_no:03d}.html'
     current_html = current_path.read_text(encoding='utf-8') if edit_instruction and current_path.exists() else ''
+    current_html = template_html.remove_legacy_narrative_override(current_html)
     if edit_instruction:
         if not current_html:
             return _fail('Cannot revise a missing page; no original HTML to preserve', page_no=page_no)
@@ -2350,6 +2351,7 @@ def _write_page_html_from_query(
             html = template_html.apply_typography(html, template_context)
         except ValueError as exc:
             return _fail(f'page-html template p{page_no}: {exc}', page_no=page_no)
+    html = template_html.remove_legacy_narrative_override(html)
     if edit_instruction and html.strip() == current_html.strip():
         return _fail('Revision remained unchanged after repair; not publishing', page_no=page_no)
     out_path = deck / 'pages' / f'page_{page_no:03d}.html'
