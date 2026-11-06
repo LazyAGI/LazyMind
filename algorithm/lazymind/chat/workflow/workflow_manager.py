@@ -301,6 +301,9 @@ def _handoff_tool(
                     }
                 return _result_text(result)
             except WorkflowClientError as exc:
+                pending = _approval_blocked_result(exc)
+                if pending:
+                    return pending
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
                 state_refreshed = True
@@ -417,7 +420,7 @@ def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return compact
 
 
-def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
+def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') -> Dict[str, Any]:
     pending = _input_required_result(result)
     if pending:
         return {**result, **pending}
@@ -432,6 +435,17 @@ def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
         }}
     workflow_state = result.get('workflow_state')
     workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
+    if (workflow_id == 'paper-writing'
+            and result.get('status') == 'failed' and result.get('outcome') == 'step_failed'):
+        return {**result, '_agent_control': {
+            'stop': True, 'reason': 'workflow_step_failed',
+            'final_text': '论文步骤执行失败，已保留当前材料并停止自动重试和回退。请在工作流查看原因，修复后重试。',
+        }}
+    display = workflow_state.get('display') or {}
+    if isinstance(display, dict) and display.get('status') == 'waiting' and display.get('approval_step_id'):
+        notice = '本阶段结果已保存，请在工作流面板审核后点击“继续执行”。'
+        return {**result, 'status': 'waiting', 'outcome': 'workflow_approval_required',
+                '_agent_control': {'stop': True, 'reason': 'workflow_approval_required', 'final_text': notice}}
     projection = result.get('projection')
     if not isinstance(projection, dict):
         projection = workflow_state.get('projection')
@@ -451,6 +465,14 @@ def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
             'final_text': '工作流已完成，最终产物已生成。',
         },
     }
+
+
+def _approval_blocked_result(error: WorkflowClientError) -> Optional[Dict[str, Any]]:
+    if error.code != 'WORKFLOW_APPROVAL_REQUIRED':
+        return None
+    notice = '当前阶段等待审批，请在工作流面板点击“继续执行”后继续。'
+    return {'status': 'waiting', 'outcome': 'workflow_approval_required', 'user_notice': notice,
+            '_agent_control': {'stop': True, 'reason': 'workflow_approval_required', 'final_text': notice}}
 
 
 def _input_required_result(
@@ -490,6 +512,7 @@ def _safe_session_tools(
     session: Union[str, Callable[[], str]],
     user_input: Optional[Union[str, Callable[[], str]]] = None,
     checkpoint: Optional[InputCheckpoint] = None,
+    workflow_context: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     """Model tools whose protocol and concurrency parameters are Host-injected."""
     capability = (
@@ -602,7 +625,7 @@ def _safe_session_tools(
                     waiting = checkpoint.guard(selected_session_id, completed_step=requested[0])
                     if waiting:
                         return waiting
-                result = _with_terminal_agent_control(result)
+                result = _with_terminal_agent_control(result, str((workflow_context or {}).get('workflow_id') or ''))
                 if user_retry:
                     # One user retry must not authorize further model-initiated attempts.
                     cfg.pop('user_authorized_workflow_retry', None)
@@ -614,6 +637,9 @@ def _safe_session_tools(
                     result = _compact_transition_result(result)
                 return _compact_model_frontier(result)
             except WorkflowClientError as exc:
+                pending = _approval_blocked_result(exc)
+                if pending:
+                    return pending
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
                 state_refreshed = True
@@ -1777,7 +1803,7 @@ def _workflow_trigger_tools(
                         # translator hides it after displaying ask_pending.
                         return {'status': 'needs_input', 'missing_clarification_fields': [f['id'] for f in missing],
                                 '_agent_control': {'stop': True, 'reason': 'awaiting_user',
-                                                   'final_text': '等待用户回答工作流启动问题。'}}
+                                                   'final_text': '请补充问题卡片中的必要信息后继续。'}}
                     # Never append a second, model-guessed copy of fields after
                     # the resolver's canonical values (especially explicit opt-ins).
                     input_bindings = {key: value for key, value in input_bindings.items()
@@ -1884,7 +1910,7 @@ def _workflow_trigger_tools(
                         ))
                         _write_agent_data('ask_pending', **card)
                         return {**prepared, '_agent_control': {
-                            'stop': True, 'reason': 'awaiting_user', 'final_text': '',
+                            'stop': True, 'reason': 'awaiting_user', 'final_text': '请补充问题卡片中的必要信息后继续。',
                         }}
                     return {
                         **prepared,
@@ -2034,6 +2060,9 @@ def _workflow_trigger_tools(
                     'The Host reads the complete original file. Never transcribe, summarize, repair, '
                     'or embed the uploaded JSON in tool arguments; pass only its filename, or omit '
                     'paper_input when the request unambiguously selects one JSON attachment.'
+                    ' For research-topic entry and drafting, Markdown background materials are imported '
+                    'directly from conversation attachments. Omit paper_input for these Markdown materials. '
+                    'Do not read or transcribe them before launching the research-topic step.'
                 )
         trigger_workflow.__doc__ = (
             'Initialize this Workflow. The only argument names are input_bindings and request_context. '
@@ -2182,7 +2211,9 @@ def resolve_workflow_injection(
                 if str(item.get('tool_name') or '') not in activation_names
             ],
         ]
-    session_holder: Dict[str, Any] = {'session_id': session_id, 'runtime_policy': runtime_policy}
+    session_holder: Dict[str, Any] = {
+        'session_id': session_id, 'runtime_policy': runtime_policy, 'workflow_id': workflow_id,
+    }
 
     def bind_successor(result: Dict[str, Any]) -> None:
         target = str(result.get('session_id') or '')
@@ -2281,6 +2312,7 @@ def resolve_workflow_injection(
                 selected_session_id,
                 user_input=launch_user_input,
                 checkpoint=checkpoint,
+                workflow_context=session_holder,
             ),
             handoff,
         ]
@@ -2305,6 +2337,7 @@ def resolve_workflow_injection(
                     selected_session_id,
                     user_input=selected_request_context,
                     checkpoint=checkpoint,
+                    workflow_context=session_holder,
                 ),
                 _handoff_tool(
                     selected_session_id,
@@ -2335,6 +2368,7 @@ def resolve_workflow_injection(
     if session_id:
         tools = [*trigger_tools, *_safe_session_tools(
             toolkit, selected_session_id, user_input=current_query, checkpoint=checkpoint,
+            workflow_context=session_holder,
         )]
         patch.update({
             'workflow_id': workflow_id,

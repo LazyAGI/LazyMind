@@ -22,8 +22,10 @@ OPERATIONS = {'numbers': NUMERIC, 'comparison': {'direction'}, 'literature': {'c
 def _pointer(inputs, path):
     parts = path.split('/')[1:]
     if not path.startswith('/') or not parts or parts[0] not in {
-            'analysis', 'evidence', 'writing_materials', 'charts', 'papers', 'result_meta'}:
-        raise ValueError('来源必须指向已提供材料的 JSON Pointer，不能引用稿件自身或模型结论。')
+            'manuscript', 'analysis', 'evidence', 'writing_materials', 'charts', 'papers', 'result_meta'}:
+        raise ValueError('来源必须指向成稿、已提供文献或图表的 JSON Pointer，不能引用模型结论。')
+    if parts[0] == 'manuscript' and path != '/manuscript':
+        raise ValueError('成稿来源必须引用可定位的正文摘录，不能当作结构化上游材料。')
     value = inputs
     for part in parts:
         if isinstance(value, str):
@@ -503,6 +505,27 @@ def _check(claim, inputs, reading=None):
         line = manuscript[:manuscript.index(claim.quote)].count('\n') + 1
         checked['location'] = f'{claim.location}（原文第 {line} 行）'
         locations.insert(0, f'manuscript:L{line}')
+        manuscript_sources = set()
+        for source in claim.sources:
+            if source.path != '/manuscript':
+                continue
+            _source(inputs, source, numeric=False)
+            if manuscript.count(source.quote) != 1:
+                raise ValueError('成稿内依据不能唯一定位，需更明确的连续摘录。')
+            token = source.value_text or source.quote
+            if source.quote.count(token) != 1 or (source.quote, token) in manuscript_sources:
+                raise ValueError('成稿内运算依据不能重复使用或含有歧义。')
+            manuscript_sources.add((source.quote, token))
+            start = manuscript.index(source.quote) + source.quote.index(token)
+            target = manuscript.index(claim.quote) + claim.quote.index(claim.asserted_text)
+            if start < target + len(claim.asserted_text) and target < start + len(token):
+                raise ValueError('不能以待核对语句自身证明其数值或数据状态。')
+            if claim.operation in {'value', 'status', 'denominator'}:
+                start = manuscript.index(source.quote)
+                end = start + len(source.quote)
+                target = manuscript.index(claim.quote)
+                if start < target + len(claim.quote) and target < end:
+                    raise ValueError('不能以待核对语句自身证明其数值或数据状态。')
         if claim.operation not in OPERATIONS[claim.category]:
             raise ValueError('此类别与运算不匹配，未执行核对。')
         if claim.operation in NUMERIC:
@@ -548,15 +571,16 @@ def _check(claim, inputs, reading=None):
             values = _ordered_values(claim, inputs, values)
             if claim.category == 'figure':
                 # Check rendered text, not a chart's self-reported provenance alone.
-                if (len(values) != 2 or not claim.sources[0].path.startswith('/analysis/')
+                if (len(values) != 2 or not (
+                        claim.sources[0].path == '/manuscript' or claim.sources[0].path.startswith('/analysis/'))
                         or not claim.sources[1].path.startswith('/charts/')
                         or not claim.sources[1].path.endswith('/svg')):
-                    raise ValueError('图文核对需要分析数值及 SVG 实际文字标注；缺图或只有图注/元数据不足以核实。')
+                    raise ValueError('图文核对需要成稿中的数值及 SVG 实际文字标注；只有图注或元数据不足以核实。')
                 expected = values[0]
                 if not _close(values[1], expected, claim.sources[1].value_text,
                               _unit_info(_source_unit(inputs, claim.sources[1]))[1]):
                     checked.update(status='conflict',
-                                   calculation=f'图中标注 {values[1]:g}，分析来源为 {expected:g}，两者不一致。',
+                                   calculation=f'图中标注 {values[1]:g}，给定文字来源为 {expected:g}，两者不一致。',
                                    suggestion=f'按来源 {claim.sources[0].path} 修正图中标注及对应图注/正文，再核对。')
                     return CheckedFact.model_validate(checked)
             else:
@@ -603,6 +627,7 @@ def check_facts(result, inputs, readings=None):
     readings = {reading.claim_index: reading for reading in (readings or [])}
     checks = [_check(claim, inputs, readings.get(index)) for index, claim in enumerate(result.fact_claims)]
     manuscript = inputs['manuscript']
+    manuscript_review = not any(inputs.get(key) for key in ('analysis', 'evidence', 'writing_materials', 'result_meta'))
     applicable = {
         'numbers': bool(re.search(r'\d', manuscript)),
         'comparison': bool(re.search(r'高于|低于|提高|降低|增加|减少|优于|更差|higher|lower|better|increase|decrease',
@@ -629,12 +654,15 @@ def check_facts(result, inputs, readings=None):
         if category in pending:
             states.add('insufficient')
         status = ('conflict' if 'conflict' in states else 'insufficient' if 'insufficient' in states else
-                  'verified' if selected else 'insufficient' if applicable[category] else 'not_applicable')
+                  'verified' if selected else
+                  'insufficient' if applicable[category] and not manuscript_review else 'not_applicable')
         reason = ('本类有格式未能修复的事实提案，原始提案及原因保留在限制中；未形成可自动修订事实。'
                   if category in pending else
                   '状态仅覆盖下面已执行的摘录核对；未列出的主张未核实。' if selected else
                   '稿件涉及本类事实，但未取得可独立执行的原文—来源核对；需补充材料或可定位的核对项。'
-                  if applicable[category] else '未识别出本类适用主张；本类没有执行核对。')
+                  if applicable[category] and not manuscript_review else
+                  '本轮未单列本类事实核对项；不据此要求上游实验或分析材料。' if manuscript_review else
+                  '未识别出本类适用主张；本类没有执行核对。')
         coverage.append(FactCheck(category=category, status=status, reason=reason,
                                   evidence_locations=list(dict.fromkeys(
                                       path for item in selected for path in item.evidence_locations)), checks=selected))

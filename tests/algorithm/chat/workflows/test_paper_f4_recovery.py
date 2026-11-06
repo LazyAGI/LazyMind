@@ -116,6 +116,24 @@ def test_recovery_snapshot_wins_same_sequence_tie(package, snapshots, tmp_path):
     assert workflow.material(restored, 'manuscript')['content'] == saved['write_document_document']
 
 
+def test_revision_recovery_uses_latest_selected_manuscript_instead_of_original_draft(package, snapshots, tmp_path):
+    plugin, state = package
+    _, _, saved = snapshots
+    bindings = plugin['runtime']['recovery_inputs']['revise_document']
+    declared = {item['material'] for item in state['steps']['revise_document']['inputs']}
+    assert set(bindings) <= declared
+    assert set(bindings.values()) == {'revise_document_pool', 'revise_document_document'}
+    edited = saved['revise_document_document'] + '\nLatest human edit retained.'
+    available = {**saved, 'revise_document_document': edited}
+    bound = {'peer_review_pool': saved['peer_review_pool']}
+    for target, source in bindings.items():
+        bound[target] = available[source]
+    restored = workflow.pool_from_inputs(bound)
+    assert workflow.material(restored, 'manuscript')['content'] == edited
+    original_version = saved['write_document_pool']['current']['manuscript']['version']
+    assert restored['current']['manuscript']['version'] > original_version
+
+
 def test_real_runtime_redraw_uses_declared_snapshots_and_preserves_latest_manuscript(
         package, snapshots, tmp_path, monkeypatch):
     inputs, output, saved = snapshots

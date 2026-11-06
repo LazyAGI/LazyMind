@@ -1,7 +1,7 @@
 """Early code diagnostics; OS/container isolation, not AST checks, is the security boundary."""
 import ast
 
-ALLOWED_IMPORTS = {'matplotlib', 'numpy', 'scipy', 'pandas', 'seaborn', 'math', 'statistics'}
+ALLOWED_IMPORTS = {'matplotlib', 'numpy', 'scipy', 'pandas', 'seaborn', 'math', 'statistics', 're'}
 FORBIDDEN = {'open', 'exec', 'eval', 'compile', '__import__', 'getattr', 'setattr', 'delattr',
              'globals', 'locals', 'vars', 'input', 'breakpoint', 'help', 'exit', 'quit'}
 FORBIDDEN_ATTRIBUTES = {'savefig', 'show', 'save', 'savez', 'load', 'loads', 'dump', 'dumps',
@@ -44,7 +44,9 @@ def validate_code(code: str) -> None:
                                  f'允许的模块: {", ".join(sorted(ALLOWED_IMPORTS))}')
         elif isinstance(node, ast.Name) and (node.id in FORBIDDEN or node.id.startswith('__')):
             raise ValueError(f'绘图代码不允许访问 {node.id}')
-        elif isinstance(node, ast.Attribute) and (node.attr.startswith('_') or node.attr in FORBIDDEN_ATTRIBUTES):
+        elif isinstance(node, ast.Attribute) and (
+                (node.attr.startswith('_') and node.attr not in {'_paper_title', '_paper_caption', '_paper_analysis'})
+                or node.attr in FORBIDDEN_ATTRIBUTES):
             raise ValueError(f'绘图代码不允许访问属性 {node.attr}')
         elif isinstance(node, ast.FunctionDef) and node.decorator_list:
             raise ValueError('绘图函数不允许装饰器')

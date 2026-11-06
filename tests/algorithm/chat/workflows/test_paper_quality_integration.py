@@ -33,29 +33,32 @@ def materials(prepared_analysis_pool):
     return pool
 
 
-def test_review_receives_supplied_chart_sources_and_status(materials):
+def test_review_receives_only_manuscript_references_and_used_figures(materials):
     root = Path(__file__).resolve().parents[4] / 'tests/fixtures/paper-writing'
     status = json.loads((root / 'experiment.json').read_text())['output']['result_meta']
     papers = [{'id': 'ref1', 'title': 'Source', 'abstract': 'Only an abstract.'}]
     workflow.add_material(materials, 'result_meta', status, [], [])
     workflow.add_material(materials, 'papers', papers, [], [])
+    workflow.add_material(materials, 'manuscript', '# Manuscript\nMean score is 2. [ref1]\n'
+                          '<a id="block-score"></a>\n![Score](media-placeholder://score)', [], [])
     value = workflow.business_input('peer_review', materials)
-    assert value['charts'] == workflow.material(materials, 'charts')['content']
+    original = workflow.material(materials, 'charts')['content'][0]
+    assert value['charts'] == [{key: original[key] for key in ('id', 'title', 'caption', 'svg')}]
     assert value['papers'] == papers
-    assert value['result_meta'] == status
+    assert set(value) == {'topic', 'request', 'manuscript', 'papers', 'charts'}
     checked = contracts.validate_input('peer_review', value)
-    assert checked['result_meta']['data_origin'] == status['data_origin']
+    assert set(checked) == set(value)
     checked['papers'][0]['title'] = 'Changed copy'
     assert workflow.material(materials, 'papers')['content'] == papers
 
 
 def test_review_accepts_bibliographic_metadata_without_fabricating_fulltext():
     value = contracts.validate_input('peer_review', {
-        'topic': 'T', 'manuscript': '# Manuscript\nExisting citation.',
+        'topic': 'T', 'manuscript': '# Manuscript\nExisting citation [ref1].',
         'papers': [{'id': 'ref1', 'title': 'Only bibliographic metadata'}], 'charts': [],
     })
     assert value['papers'][0] == {'id': 'ref1', 'title': 'Only bibliographic metadata'}
-    assert value['result_meta'] is None
+    assert 'result_meta' not in value
     with pytest.raises(contracts.MissingMaterials):
         contracts.validate_value('papers', value['papers'])
 
@@ -103,6 +106,7 @@ def test_redraw_updates_existing_manuscript_and_invalidates_stale_review(materia
     workflow.add_material(materials, 'manuscript', body, [], [])
     workflow.add_material(materials, 'review', '# Old review', [], [])
     monkeypatch.setattr(data_analysis, 'redraw_requested', lambda request: True)
+
     def redraw(inputs, analysis, charts):
         charts[0]['svg'] = '<svg xmlns="http://www.w3.org/2000/svg"><text fill="blue">2</text></svg>'
         return dict(analysis=analysis, charts=charts, is_demo=False)
@@ -129,6 +133,7 @@ def test_redraw_publisher_saves_new_image_for_old_and_new_graphs(materials, tmp_
     path = tmp_path / 'pool.json'
     path.write_text(json.dumps(materials))
     monkeypatch.setattr(data_analysis, 'redraw_requested', lambda request: True)
+
     def redraw(inputs, analysis, charts):
         charts[0]['svg'] = '<svg xmlns="http://www.w3.org/2000/svg"><text fill="blue">2</text></svg>'
         return dict(analysis=analysis, charts=charts, is_demo=False)
@@ -138,10 +143,13 @@ def test_redraw_publisher_saves_new_image_for_old_and_new_graphs(materials, tmp_
         slots.append('redrawn_manuscript_document')
     events = []
     previous = lazyllm.globals.get('subagent_ctx')
-    set_context(SubAgentContext(task_id='redraw-repair', conversation_id='paper-test', agent_type='workflow_step',
-        objective='Change layout only', params=dict(step_id='data_analysis', current_user_input='Only improve layout',
+    set_context(SubAgentContext(
+        task_id='redraw-repair', conversation_id='paper-test', agent_type='workflow_step',
+        objective='Change layout only', params=dict(
+            step_id='data_analysis', current_user_input='Only improve layout',
             remote_inputs={'data_analysis_pool': str(path)}, output_slot_types={slot: 'file' for slot in slots}),
-        workspace_path=str(tmp_path), input_slots=['data_analysis_pool'], output_slots=slots, db=None, emit=events.append))
+        workspace_path=str(tmp_path), input_slots=['data_analysis_pool'], output_slots=slots,
+        db=None, emit=events.append))
     try:
         assert workflow.run_paper_step()['status'] == 'completed'
         artifacts = {item['slot']: item['value'] for item in events if item['type'] == 'artifact'}

@@ -6,8 +6,11 @@ import copy
 import json
 import re
 import tempfile
+from concurrent.futures import CancelledError
 from pathlib import Path
 from typing import Any
+
+from lazyllm import LOG
 
 from ..artifacts import markdown_filename, persist_artifact_json
 from . import contracts, reading_reflection, research_topic
@@ -154,7 +157,7 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
     value = {'topic': pool['topic'], 'request': request}
     if module in contracts.CONSTRAINED_MODULES:
         value['constraints'] = copy.deepcopy(pool.get('constraints', {}))
-    if step in {'peer_review', 'revise_document'}:
+    if step == 'revise_document':
         # New research materials may inform the existing manuscript. Review freshness
         # is checked against manuscript/report digests by the revision contract.
         from .publication import validate_chart_references, figure_catalog
@@ -196,6 +199,9 @@ def business_input(step: str, pool: dict, request: str = '') -> dict:
     if module == 'data_analysis' and value.get('result_meta') is not None:
         from .experiment.handoff import to_analysis
         value = to_analysis(value)
+    if module == 'peer_review':
+        from .review.inputs import select_materials
+        return select_materials(value)
     return value
 
 
@@ -378,7 +384,7 @@ def routes_after(pool: dict) -> list[str]:
 
 
 def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *,
-                 on_event=None, allow_execution=False) -> dict:
+                 on_event=None, allow_execution=False, skip_revision=False) -> dict:
     """Infrastructure owns lineage and atomic validation; algorithms own content."""
     validate_pool(pool)
     node = STEP_NODE[step]
@@ -444,6 +450,26 @@ def execute_step(step: str, pool: dict, request: str = '', fail: bool = False, *
     elif module == 'experiment':
         output = run_algorithm(step, business_input(step, pool, request), on_event=on_event,
                                allow_execution=allow_execution)
+    elif module == 'revise_document':
+        from .writing.revise_document import retain_manuscript
+        optional_inputs = business_input(step, pool, request)
+        retained_inputs = {**optional_inputs, **{
+            kind: (material(pool, kind) or {}).get('content') for kind in ('review', 'review_data')}}
+        if skip_revision:
+            output = retain_manuscript(retained_inputs)
+        else:
+            try:
+                output = run_algorithm(step, optional_inputs)
+            except CancelledError:
+                raise
+            except Exception as error:
+                if not optional_inputs.get('manuscript') or not optional_inputs.get('selected_issue_ids'):
+                    raise
+                LOG.warning(f'Optional paper step {module} retained the current manuscript '
+                            f'{diagnostics.safe_error(error)}')
+                output = retain_manuscript(retained_inputs)
+        output = {key: output[key] for key in ('is_demo', *contracts.OUTPUTS[module])}
+        contracts.validate_output(module, output, inputs=optional_inputs)
     else:
         output = run_algorithm(step, business_input(step, pool, request), on_event=on_event) \
             if on_event is not None else run_algorithm(step, business_input(step, pool, request))
@@ -575,7 +601,9 @@ def pool_from_inputs(inputs: dict[str, Any]) -> dict:
                     from .publication import protect_reference_region, publish_citations
                     protect_reference_region(content, document)
                     papers = material(pool, 'papers')
-                    document = publish_citations(document, papers['content'] if papers else [])
+                    document = publish_citations(
+                        document, papers['content'] if papers else [],
+                        paper_language=(pool.get('constraints') or {}).get('paper_language', 'zh-CN'))
                 updated = {**content,
                            'report': document} if kind == 'experiment' and isinstance(content, dict) else document
                 add_material(pool, kind, updated, [pool['current'][kind]],
@@ -586,7 +614,10 @@ def pool_from_inputs(inputs: dict[str, Any]) -> dict:
 def _business_request(value: Any) -> str:
     """UI retry commands control execution; they are not algorithm requirements."""
     text = str(value or '').strip()
-    if text.rstrip('。.!！').lower() in {'重试', '重新执行', 'retry', 're-run', 'rerun', 'try again'}:
+    if text.rstrip('。.!！').lower() in {
+        '重试', '重新执行', 'retry', 're-run', 'rerun', 'try again',
+        '继续', '继续执行', '下一步', 'continue', 'proceed', 'next',
+    }:
         return ''
     if re.fullmatch(r'(?:请重新执行步骤|Please re-run step)\s+[A-Za-z0-9_.:-]+', text, re.IGNORECASE):
         return ''
@@ -603,7 +634,7 @@ def _runtime_request(params: dict) -> tuple[str, str]:
         values = (recovery, params.get('user_input'), params.get('launch_user_input'))
         request = next((text for value in values if (text := _business_request(value))), '')
     elif 'current_user_input' in params:
-        request = str(params['current_user_input'] or recovery or '').strip()
+        request = _business_request(recovery) or str(params['current_user_input'] or '').strip()
     elif contracts.ALIASES.get(params.get('step_id'), params.get('step_id')) in contracts.CURRENT_REQUEST_MODULES:
         request = recovery
     else:
@@ -746,6 +777,8 @@ def _step_request(step: str, pool: dict, params: dict, bound: dict | None = None
         base = saved
     if retry and not base:
         base = _business_request(params.get('user_input'))
+    if not base and not current:
+        base = saved or _business_request(pool.get('request'))
     if not base or not current:
         return base or current
     if base.strip() == current.strip():
@@ -952,6 +985,7 @@ def _run_paper_step(context, stream=None) -> dict:
             if current is None or current['content'] != papers:
                 add_material(pool, 'papers', papers, [pool['current']['papers']] if current else [],
                              paper_source_ids(papers))
+        skip_revision = False
         if step == 'revise_document':
             from .writing.revise_document import resolve_review_issues
             review = material(pool, 'review_data')
@@ -961,20 +995,31 @@ def _run_paper_step(context, stream=None) -> dict:
             matches = bool(review and manuscript and report
                            and review['content']['manuscript_sha256'] == text_digest(manuscript['content'])
                            and review['content']['review_sha256'] == text_digest(report['content']))
-            pool['selected_issue_ids'] = resolve_review_issues(
-                request, review['content'] if review else None,
-                workflow_context={'current_step': step,
-                                  'previous_completed_step': (
-                                      'peer_review' if previous in {'peer_review', 'F6'} else previous),
-                                  'review_matches_manuscript': matches},
-            )
+            continuing_review = (matches and previous in {'peer_review', 'F6'}
+                                 and not _business_request(context.params.get('current_user_input', request)))
+            try:
+                pool['selected_issue_ids'] = resolve_review_issues(
+                    request, review['content'] if review else None,
+                    workflow_context={'current_step': step,
+                                      'previous_completed_step': (
+                                          'peer_review' if previous in {'peer_review', 'F6'} else previous),
+                                      'review_matches_manuscript': matches},
+                )
+            except CancelledError:
+                raise
+            except Exception as error:
+                if not continuing_review:
+                    raise
+                LOG.warning(f'Optional paper revision scope was unavailable {diagnostics.safe_error(error)}')
+                pool['selected_issue_ids'] = []
+                skip_revision = True
         fail = '[mock:fail]' in request + instruction and '[mock:retry]' not in request + instruction
         if (step == 'write_document' and 'write_outline_document' in getattr(context, 'input_slots', [])
                 and not material(pool, 'manuscript') and 'write_outline_document' not in bound):
             raise MissingMaterials('请先生成并确认论文大纲，再继续写作。')
         preference = _read_bound(bound['experiment_execution']) if 'experiment_execution' in bound else 'simulate_only'
         result = execute_step(step, pool, request, fail=fail, on_event=stream,
-                              allow_execution=preference == 'allow_local')
+                              allow_execution=preference == 'allow_local', skip_revision=skip_revision)
         if stream:
             output = {kind: material(result['pool'], kind)['content'] for kind in contracts.OUTPUTS['experiment']}
             output['is_demo'] = result['mock']
@@ -984,7 +1029,9 @@ def _run_paper_step(context, stream=None) -> dict:
             manuscript = material(result['pool'], 'manuscript')
             charts = material(result['pool'], 'charts')
             papers = material(result['pool'], 'papers')
-            original = publish_citations(manuscript['content'], papers['content'] if papers else [])
+            original = publish_citations(
+                manuscript['content'], papers['content'] if papers else [],
+                paper_language=(result['pool'].get('constraints') or {}).get('paper_language', 'zh-CN'))
             media = material(result['pool'], 'media_assets')
             published = publish_charts(original, figure_catalog(
                 charts['content'] if charts else [], media['content'] if media else None))

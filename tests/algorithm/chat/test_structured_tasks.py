@@ -156,6 +156,9 @@ def test_structured_tasks_isolate_model_config_between_sessions(monkeypatch):
     from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
 
     class Supplier:
+        def used_by(self, _):
+            return self
+
         def forward(self, prompt, **options):
             assert options['model'] == lazyllm.globals.config['openai_api_key']
             return json.dumps({'summary': options['model'], 'symbols': []})
@@ -167,6 +170,8 @@ def test_structured_tasks_isolate_model_config_between_sessions(monkeypatch):
             'source': 'openai', 'model': user, 'api_key': user, 'base_url': 'https://invalid.example/v1/'}}))
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(run, ['one', 'two']))
+    for result in results:
+        assert result.status == 'succeeded', result.error
     assert [r.output['summary'] for r in results] == ['one', 'two']
     assert results[0].task_id != results[1].task_id
 

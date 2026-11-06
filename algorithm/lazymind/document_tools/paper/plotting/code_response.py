@@ -1,4 +1,5 @@
-"""Normalize initial Python answers and apply repairs to numbered source lines."""
+"""Normalize Python answers and validate complete-program or legacy range repairs."""
+import ast
 from dataclasses import dataclass
 import json
 import re
@@ -82,33 +83,22 @@ def parse_code_response(raw):
     return {'code': text}
 
 
-REPAIR_INSTRUCTION = '''Repair the supplied previous_code using the actual error and full numbered source.
-Return ONE JSON object: {"replacements":[{"start_line":12,"end_line":13,"code":"    corrected_statement\\n"}]}.
-Each inclusive, 1-based range refers to the SAME supplied source version. The "N | " prefixes are line numbers,
-not source text. Return raw replacement code as JSON strings, preserving indentation; do not include line prefixes.
-Replace coherent complete statements, loops or functions needed to fix the root cause. When dictionary keys or
-variable dependencies change, update the entire affected logical block and all its uses together, not just the
-throwing line. For a repeated binding error, replace the affected block/function instead of accumulating one-line
-edits. Keep definitions needed by later uses and include matching brackets. Use the current numbered source to
-choose ranges; an error line is not automatically the right replacement range.
-A traceback may point inside an injected helper: fix the incorrect arguments in previous_code, not the
-read-only helper. Do not blindly replace only the throwing line. Multiple ranges must not overlap; the host applies
-them from bottom to top. To insert code, replace an adjacent source line with that line plus the insertion; use an
-empty code string to delete a range. Preserve all other lines, scientific methods, input scope and calculations.
-Do not return a complete script, an old/new text patch, a diff or explanation. A figure caption, only if changed,
-may be included as a "caption" string in the same JSON object. Do not wrap Python or captions in separate blocks.
+REPAIR_INSTRUCTION = CODE_INSTRUCTION + '''
+Correct previous_code using the actual error and return the complete corrected program.
+Preserve the scientific methods, source data, selected comparisons and output contract. Keep variable definitions
+and dependent uses coherent. For an injected-helper traceback, correct its arguments in the supplied program.
 '''
 
 
-def numbered_source(source):
-    return '\n'.join(f'{number} | {line}' for number, line in enumerate(source.splitlines(), 1))
-
-
 def repair_response(answer, previous, error=''):
-    """Apply nonoverlapping inclusive ranges against one immutable source version."""
+    """Validate a corrected program or legacy ranges against one immutable source version."""
+    if isinstance(answer, dict) and 'code' in answer:
+        if 'replacements' in answer:
+            raise ValueError('修复响应须选择 code 或 replacements 一种格式')
+        answer = dict(replacements=[dict(start_line=1, end_line=len(previous.splitlines()), code=code_response(answer))])
     replacements = answer.get('replacements') if isinstance(answer, dict) else None
     if not isinstance(replacements, list) or not replacements:
-        raise ValueError('修复请返回非空 replacements 列表，每项含 start_line、end_line、code；不要返回完整脚本')
+        raise ValueError('修复请返回非空 code 字段或 replacements 列表，每项含 start_line、end_line、code')
     lines = previous.splitlines(keepends=True)
     ranges = []
     for item in replacements:
@@ -136,6 +126,7 @@ def repair_response(answer, previous, error=''):
         if error:
             message += '；原错误仍未解决：\n' + error
         raise ValueError(message)
+    ast.parse(source)
     return source
 
 

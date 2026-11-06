@@ -158,7 +158,7 @@ class WriterDocumentConvertRequest(BaseModel):
     target_format: Literal['markdown', 'lmd', 'latex']
     content: str
     document_id: str = 'writer-document'
-    language: Literal['zh-CN', 'en-US'] = 'zh-CN'
+    language: Literal['zh-CN', 'en-US'] | None = None
     materialized_numbering: bool = True
 
 
