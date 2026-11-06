@@ -473,6 +473,8 @@ export interface TabDef {
   /** Artifact producer scope. `selected` lets a composite join adjacent workflow steps. */
   slot_scope?: 'step' | 'selected';
   status_step_ids?: string[];
+  /** Explain the route decision only when this tab is authoritatively skipped. */
+  skip_reason?: string;
   label: string;
   layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
   slots: SlotDef[];
@@ -708,6 +710,32 @@ interface WorkflowStore {
 const workflowStreams = new Map<string, { refs: number; subscription: WorkflowEventStreamSubscription }>();
 const ordinaryLoads = new Map<string, Promise<void>>();
 const ordinaryReloads = new Set<string>();
+const workflowUILoads = new Map<string, Promise<WorkflowUI>>();
+
+/** Share immutable definitions and concurrent reads; failed reads remain retryable. */
+export function loadWorkflowUI(
+  workflowId: string,
+  pinnedRevisionId?: string,
+  options: { language?: string; silentError?: boolean } = {},
+): Promise<WorkflowUI> {
+  const lang = options.language ?? i18n.language ?? '';
+  const cacheKey = workflowUICacheKey(workflowId, pinnedRevisionId, lang);
+  const cached = useWorkflowStore.getState().workflowUIByWorkflow[cacheKey];
+  if (pinnedRevisionId && cached) return Promise.resolve(cached);
+  const pending = workflowUILoads.get(cacheKey);
+  if (pending) return pending;
+  const request = WorkflowInfoApi().getWorkflow(workflowId, {
+    params: pinnedRevisionId ? { revision_id: pinnedRevisionId } : undefined,
+    headers: lang ? { 'Accept-Language': lang } : undefined,
+    ...(options.silentError ? { silentError: true } : {}),
+  }).then(res => {
+    const ui = hydrateWorkflowUI(res?.data?.data ?? res?.data ?? {}, workflowId);
+    useWorkflowStore.setState(state => ({ workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui } }));
+    return ui;
+  }).finally(() => { workflowUILoads.delete(cacheKey); });
+  workflowUILoads.set(cacheKey, request);
+  return request;
+}
 
 export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   sessionByConversation: {},
@@ -837,6 +865,10 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
           requestOptions,
         );
         const session: WorkflowSession | null = res?.data?.data?.session ?? null;
+        // The pinned UI definition does not depend on the runtime projection.
+        // Warm its shared cache while reading runtime state, rather than making
+        // the panel start another serial request after this load completes.
+        if (session?.workflow_id) void get().fetchWorkflowUI(session.workflow_id, session.pinned_revision_id);
         // Runtime controls and rollback candidates come from Go's projection.
         // Steps are attempt history only; they never define Past/Ready locally.
         if (session?.session_id) {
@@ -941,22 +973,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   },
 
   fetchWorkflowUI: async (workflowId, pinnedRevisionId) => {
-    const lang = i18n.language || "";
-    const cacheKey = workflowUICacheKey(workflowId, pinnedRevisionId, lang);
-    // Only pinned revisions are immutable. Legacy/catalog head reads must refetch.
-    const cached = get().workflowUIByWorkflow[cacheKey];
-    if (pinnedRevisionId && cached) return cached;
     try {
-      const res = await WorkflowInfoApi().getWorkflow(workflowId, {
-        params: pinnedRevisionId ? { revision_id: pinnedRevisionId } : undefined,
-        headers: lang ? { "Accept-Language": lang } : undefined,
-      });
-      const payload = res?.data?.data ?? res?.data ?? {};
-      const ui = hydrateWorkflowUI(payload, workflowId);
-      set((state) => ({
-        workflowUIByWorkflow: { ...state.workflowUIByWorkflow, [cacheKey]: ui },
-      }));
-      return ui;
+      return await loadWorkflowUI(workflowId, pinnedRevisionId);
     } catch {
       return {};
     }

@@ -458,16 +458,18 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   );
   const subscribeConvEvents = useTaskCenterStore((s) => s.subscribeConvEvents);
   const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
+  const executionConversationId = routeConversationId || sessionId;
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!executionConversationId) return;
     useTaskCenterStore.getState().setViewMode(developerModeActive ? "developer" : "ordinary");
-    subscribeConvEvents(sessionId);
-    void refreshConversationExecution(sessionId);
+    // Start execution/session loading alongside history on the initial visit too.
+    subscribeConvEvents(executionConversationId);
+    void refreshConversationExecution(executionConversationId);
     return () => {
-      unsubscribeConvEvents(sessionId);
+      unsubscribeConvEvents(executionConversationId);
     };
-  }, [sessionId, developerModeActive, refreshConversationExecution, subscribeConvEvents, unsubscribeConvEvents]);
+  }, [executionConversationId, developerModeActive, refreshConversationExecution, subscribeConvEvents, unsubscribeConvEvents]);
 
   // A workflow may reveal the overview once. User collapse wins over later updates.
   const revealedWorkflowsRef = useRef(new Set<string>());
@@ -773,16 +775,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     const owner = AgentAppsAuth.getUserInfo()?.userId;
     windowRequestRef.current += 1;
     try {
-      let isGenerating = false;
-      try {
-        const status = await ChatServiceApi().conversationServiceGetChatStatus({ conversationId });
-        isGenerating = !!status.data?.is_generating;
-      } catch {
-        isGenerating = false;
-      }
-      const [detailRes, historyRes] = await Promise.all([
+      const [detailRes, historyRes, isGenerating] = await Promise.all([
         ChatServiceApi().conversationServiceGetConversationDetail({ conversation: conversationId }),
         loadConversationHistory(conversationId, anchorHistoryId),
+        ChatServiceApi().conversationServiceGetChatStatus({ conversationId })
+          .then(status => !!status.data?.is_generating, () => false),
       ]);
       if (requestId !== loadConversationRequestRef.current || owner !== AgentAppsAuth.getUserInfo()?.userId) return;
       const conversation = detailRes.data.conversation;

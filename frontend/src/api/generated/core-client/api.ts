@@ -8045,6 +8045,23 @@ export const TaskCenterTaskResponseConversationStateEnum = {
 
 export type TaskCenterTaskResponseConversationStateEnum = typeof TaskCenterTaskResponseConversationStateEnum[keyof typeof TaskCenterTaskResponseConversationStateEnum];
 
+export interface TaskCenterWorkbenchGroup {
+    'items': Array<TaskCenterTaskResponse>;
+    'page': number;
+    'total': number;
+}
+export interface TaskCenterWorkbenchResponse {
+    'groups': TaskCenterWorkbenchResponseGroups;
+    'page_size': number;
+}
+export interface TaskCenterWorkbenchResponseGroups {
+    'attention': TaskCenterWorkbenchGroup;
+    'canceled': TaskCenterWorkbenchGroup;
+    'failed': TaskCenterWorkbenchGroup;
+    'paused': TaskCenterWorkbenchGroup;
+    'recent': TaskCenterWorkbenchGroup;
+    'running': TaskCenterWorkbenchGroup;
+}
 export interface TaskDocumentInfo {
     'display_name'?: string;
     'document_id'?: string;
@@ -8824,29 +8841,6 @@ export interface WorkflowHostedExecutionReply {
     'contract_version': string;
     'ok': boolean;
     'result': Execution;
-}
-export interface WorkflowReadiness {
-    'editable': boolean;
-    'issues'?: Array<WorkflowReadinessIssue>;
-    'name': string;
-    'ready': boolean;
-    'repair_url': string;
-    'revision_id': string;
-    'revision_no': number;
-    'workflow_ref': string;
-}
-export interface WorkflowReadinessIssue {
-    'code': string;
-    'details'?: { [key: string]: object; };
-    'message': string;
-    'node_id'?: string;
-    'path'?: string;
-    'repair_url'?: string;
-}
-export interface WorkflowReadinessResponse {
-    'code': number;
-    'data': WorkflowReadiness;
-    'message': string;
 }
 export interface WorkflowReviewCheckpoint {
     'accepted_at'?: string;
@@ -27821,6 +27815,56 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Summarize task categories with four previews per page
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
+         * @param {number} [page]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkbenchGet: async (taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/workbench`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (taskType !== undefined) {
+                localVarQueryParameter['task_type'] = taskType;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (category !== undefined) {
+                localVarQueryParameter['category'] = category;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /task-center/workflow-events
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -36046,6 +36090,22 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Summarize task categories with four previews per page
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {ApiCoreTaskCenterWorkbenchGetCategoryEnum} [category]
+         * @param {number} [page]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterWorkbenchGet(taskType?: string, keyword?: string, category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum, page?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterWorkbenchResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkbenchGet(taskType, keyword, category, page, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkbenchGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /task-center/workflow-events
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -40594,6 +40654,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Summarize task categories with four previews per page
+         * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterWorkbenchResponse> {
+            return localVarFp.apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /task-center/workflow-events
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -43488,6 +43558,19 @@ export interface DefaultApiApiCoreTaskCenterTasksTaskIdRemovePostRequest {
     readonly taskId: string
 
     readonly taskRemovalRequest?: TaskRemovalRequest
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterWorkbenchGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterWorkbenchGetRequest {
+    readonly taskType?: string
+
+    readonly keyword?: string
+
+    readonly category?: ApiCoreTaskCenterWorkbenchGetCategoryEnum
+
+    readonly page?: number
 }
 
 /**
@@ -47293,6 +47376,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Summarize task categories with four previews per page
+     * @param {DefaultApiApiCoreTaskCenterWorkbenchGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterWorkbenchGet(requestParameters: DefaultApiApiCoreTaskCenterWorkbenchGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkbenchGet(requestParameters.taskType, requestParameters.keyword, requestParameters.category, requestParameters.page, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /task-center/workflow-events
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -48754,6 +48848,15 @@ export const ApiCoreConversationsTrashGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
+export const ApiCoreTaskCenterWorkbenchGetCategoryEnum = {
+    Attention: 'attention',
+    Running: 'running',
+    Paused: 'paused',
+    Failed: 'failed',
+    Recent: 'recent',
+    Canceled: 'canceled'
+} as const;
+export type ApiCoreTaskCenterWorkbenchGetCategoryEnum = typeof ApiCoreTaskCenterWorkbenchGetCategoryEnum[keyof typeof ApiCoreTaskCenterWorkbenchGetCategoryEnum];
 export const ApiCoreTasksTaskIdArtifactsGetViewEnum = {
     Ordinary: 'ordinary',
     Developer: 'developer'
@@ -69621,48 +69724,6 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
     return {
         /**
          *
-         * @summary Check the published Workflow revision and current runtime configuration without creating a run
-         * @param {string} workflowRef
-         * @param {string} [conversationId]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreChatWorkflowReadinessGet: async (workflowRef: string, conversationId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'workflowRef' is not null or undefined
-            assertParamExists('apiCoreChatWorkflowReadinessGet', 'workflowRef', workflowRef)
-            const localVarPath = `/api/core/chat/workflow-readiness`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (workflowRef !== undefined) {
-                localVarQueryParameter['workflow_ref'] = workflowRef;
-            }
-
-            if (conversationId !== undefined) {
-                localVarQueryParameter['conversation_id'] = conversationId;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -70805,20 +70866,6 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary Check the published Workflow revision and current runtime configuration without creating a run
-         * @param {string} workflowRef
-         * @param {string} [conversationId]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreChatWorkflowReadinessGet(workflowRef: string, conversationId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WorkflowReadinessResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreChatWorkflowReadinessGet(workflowRef, conversationId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreChatWorkflowReadinessGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -71243,16 +71290,6 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
     return {
         /**
          *
-         * @summary Check the published Workflow revision and current runtime configuration without creating a run
-         * @param {WorkflowApiApiCoreChatWorkflowReadinessGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreChatWorkflowReadinessGet(requestParameters: WorkflowApiApiCoreChatWorkflowReadinessGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<WorkflowReadinessResponse> {
-            return localVarFp.apiCoreChatWorkflowReadinessGet(requestParameters.workflowRef, requestParameters.conversationId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {WorkflowApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -71553,15 +71590,6 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
 };
 
 /**
- * Request parameters for apiCoreChatWorkflowReadinessGet operation in WorkflowApi.
- */
-export interface WorkflowApiApiCoreChatWorkflowReadinessGetRequest {
-    readonly workflowRef: string
-
-    readonly conversationId?: string
-}
-
-/**
  * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsActiveGet operation in WorkflowApi.
  */
 export interface WorkflowApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest {
@@ -71815,17 +71843,6 @@ export interface WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteB
  * WorkflowApi - object-oriented interface
  */
 export class WorkflowApi extends BaseAPI {
-    /**
-     *
-     * @summary Check the published Workflow revision and current runtime configuration without creating a run
-     * @param {WorkflowApiApiCoreChatWorkflowReadinessGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreChatWorkflowReadinessGet(requestParameters: WorkflowApiApiCoreChatWorkflowReadinessGetRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowApiFp(this.configuration).apiCoreChatWorkflowReadinessGet(requestParameters.workflowRef, requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
     /**
      *
      * @summary Read Workflow artifacts with document descriptors

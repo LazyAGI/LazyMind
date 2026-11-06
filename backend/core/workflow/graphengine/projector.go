@@ -176,6 +176,25 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 		}
 	}
 
+	// A pruned edge does not skip a shared downstream node. The selected branch
+	// may still reach that node after its intermediate steps finish.
+	possibleTargets := map[string]bool{}
+	var visitPossible func(string)
+	visitPossible = func(id string) {
+		if possibleTargets[id] {
+			return
+		}
+		possibleTargets[id] = true
+		for _, edge := range edgesByFrom[id] {
+			if edgeStates[projectedEdgeKey(edge)] != "pruned" {
+				visitPossible(edge.To)
+			}
+		}
+	}
+	for id := range activeTargets {
+		visitPossible(id)
+	}
+
 	for id := range graph.Nodes {
 		attempt, hasAttempt := latest[id]
 		nodeMode := graph.Nodes[id].Mode
@@ -203,7 +222,7 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 			node.Branch = "bypassed"
 			projection.Bypassed = append(projection.Bypassed, id)
 		}
-		if prunedTargets[id] && !activeTargets[id] {
+		if prunedTargets[id] && !possibleTargets[id] {
 			node.Branch = "pruned"
 			projection.Pruned = append(projection.Pruned, id)
 		}

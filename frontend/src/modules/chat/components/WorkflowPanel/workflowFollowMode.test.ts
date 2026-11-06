@@ -66,8 +66,19 @@ describe('workflow runtime position', () => {
   it('locates the effective failed attempt and ignores obsolete failed branches', () => {
     expect(resolveWorkflowRealTabIndex(session({ status: 'failed', current_step_id: 'write',
       steps: [step('plan', 'failed', 1), step('write', 'failed', 2)],
-      projection: { stale: ['write'] },
+      projection: { stale: ['write'], nodes: { write: { ...node('failed'), validity: 'stale' } } },
     }), tabs)).toBe(0);
+  });
+  it.each([
+    ['active', 'pending'], ['active', 'running'], ['waiting', 'waiting'],
+    ['failed', 'failed'], ['stopped', 'interrupted'], ['completed', 'succeeded'],
+  ] as const)('keeps a valid %s/%s retry as the runtime position despite stale history', (status, execution) => {
+    expect(resolveWorkflowRealTabIndex(session({ status, current_step_id: status === 'completed' ? '' : 'write',
+      steps: [step('plan', 'succeeded', 1), { ...step('write', 'interrupted', 2), validity: 'stale' },
+        { ...step('write', execution, 3), attempt: 2 }],
+      projection: { stale: ['write'], current: execution === 'succeeded' ? [] : ['write'],
+        nodes: { plan: node('succeeded'), write: node(execution) } },
+    }), tabs)).toBe(1);
   });
   it('does not point at pruned, bypassed or unexecuted nodes', () => {
     expect(resolveWorkflowRealTabIndex(session({ current_step_id: 'plan', projection: {

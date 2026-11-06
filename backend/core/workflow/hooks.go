@@ -265,7 +265,7 @@ func stopWorkflowSession(
 	// parallel subtask behind. Waiting/failed/interrupted attempts have no live
 	// runner and therefore do not need a cancellation signal.
 	changed := false
-	var cancelledTaskIDs []string
+	var cancelledSteps []orm.WorkflowSessionStep
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current orm.WorkflowSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", session.ID).First(&current).Error; err != nil {
@@ -286,7 +286,7 @@ func stopWorkflowSession(
 				return err
 			}
 			for _, step := range pending {
-				cancelledTaskIDs = append(cancelledTaskIDs, step.TaskID)
+				cancelledSteps = append(cancelledSteps, step)
 			}
 			changed = true
 			return nil
@@ -329,7 +329,7 @@ func stopWorkflowSession(
 				return err
 			}
 			// Notify Python to cancel the ReAct loop for this task.
-			cancelledTaskIDs = append(cancelledTaskIDs, step.TaskID)
+			cancelledSteps = append(cancelledSteps, step)
 		}
 		if !live && current.Status != SessionStatusActive {
 			return nil
@@ -380,8 +380,12 @@ func stopWorkflowSession(
 		return err
 	}
 	var cancelErrors []error
-	for _, taskID := range cancelledTaskIDs {
-		if err := notifyTaskCancel(taskID); err != nil {
+	for _, step := range cancelledSteps {
+		stopped, err := notifyTaskCancel(ctx, step)
+		if err == nil && stopped && step.LeaseToken != "" {
+			err = ConfirmNativeStop(ctx, db, step.ID, step.LeaseToken)
+		}
+		if err != nil {
 			cancelErrors = append(cancelErrors, err)
 		}
 	}
@@ -402,27 +406,40 @@ func stopWorkflowSession(
 // notifyTaskCancel posts a cancel signal to the Python chat service so that
 // the SubAgent ReAct loop terminates at the next iteration boundary.
 // A failed notification leaves the durable pause pending and is returned to the caller.
-func notifyTaskCancel(taskID string) error {
-	body, _ := json.Marshal(map[string]string{
-		"task_id": taskID,
-	})
+func notifyTaskCancel(parent context.Context, step orm.WorkflowSessionStep) (bool, error) {
+	request := map[string]string{"task_id": step.TaskID}
+	if step.LeaseToken != "" {
+		request["attempt_id"] = step.ID
+		request["lease_token"] = step.LeaseToken
+	}
+	body, _ := json.Marshal(request)
 	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/workflow/task-cancel")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("task cancellation rejected: HTTP %d", resp.StatusCode)
+		return false, fmt.Errorf("task cancellation rejected: HTTP %d", resp.StatusCode)
 	}
-	return nil
+	if step.LeaseToken == "" {
+		return false, nil // Legacy runners confirm exit through their stream completion.
+	}
+	var receipt struct {
+		OK              bool `json:"ok"`
+		ExecutorStopped bool `json:"executor_stopped"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+		return false, err
+	}
+	return receipt.OK && receipt.ExecutorStopped, nil
 }
 
 // CancelRemovedTaskExecutions runs after committed removal. Restore is fenced

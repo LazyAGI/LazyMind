@@ -133,11 +133,10 @@ const NewChatPage = () => {
   const [chatLayoutMounted, setChatLayoutMounted] = useState(
     Boolean(routeConversationId),
   );
-  const workflowRepairDraft = useRef(!routeConversationId ? useChatInputStore.getState().workflowRepairDrafts[NEW_CHAT_INPUT_DRAFT_KEY] : undefined);
   const [runInBackground, setRunInBackground] = useState(
-    workflowRepairDraft.current?.runInBackground ?? (requestedShowcaseEntry
+    requestedShowcaseEntry
       ? requestedShowcaseEntry === "work"
-      : readRunInBackgroundMode()),
+      : readRunInBackgroundMode,
   );
   const [entryDefaults, setEntryDefaults] = useState<ChatEntryDefaults>(
     FALLBACK_CHAT_ENTRY_DEFAULTS,
@@ -155,13 +154,13 @@ const NewChatPage = () => {
   const [transferredDraft, setTransferredDraft] = useState<Omit<ChatModeDraft, "text"> | undefined>(incomingModeDraft.current);
   const entryModeRef = useRef(runInBackground);
   entryModeRef.current = runInBackground;
-  const freshEntryRef = useRef(!workflowRepairDraft.current && (Boolean(showcaseCaseId) || !routeConversationId));
+  const freshEntryRef = useRef(Boolean(showcaseCaseId) || !routeConversationId);
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
   // Stash workflow settings changed in the welcome-screen ChatInput before a conversation is created.
   const [pendingConversationSettings, setPendingConversationSettings] =
-    useState<ConversationRuntimeSettings>(() => workflowRepairDraft.current?.runtimeSettings ?? ({
+    useState<ConversationRuntimeSettings>(() => ({
       ...resolveChatEntryDefault(
         runInBackground,
         FALLBACK_CHAT_ENTRY_DEFAULTS,

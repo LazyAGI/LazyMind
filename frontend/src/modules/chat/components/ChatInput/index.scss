@@ -876,6 +876,12 @@
 
     }
 
+    .chat-mention-workflow-disabled {
+      flex-shrink: 0;
+      color: #ff4d4f;
+      font-size: 12px;
+    }
+
     .chat-mention-shortcut {
       display: inline-flex;
       align-items: center;

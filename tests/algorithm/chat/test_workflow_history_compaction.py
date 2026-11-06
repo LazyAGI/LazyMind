@@ -154,3 +154,29 @@ def test_live_transition_receipt_drops_graph_bodies_and_preserves_control():
     assert compact['_agent_control']['stop'] is True
     assert 'projection' not in compact
     assert 'workflow_state' not in compact
+
+
+def test_confirmed_pause_returns_chat_closing_text_and_stops_tool_execution():
+    from lazyllm.tools.agent.functionCall import _tool_result_stop_text
+    from lazymind.workflow_toolkit import HostWorkflowToolkit
+
+    client = MagicMock()
+    client.get_ready_steps.return_value = {
+        'state_version': 1, 'ready_steps': ['generate'], 'rewindable_steps': [],
+    }
+    client.advance.return_value.result = {
+        'attempt_statuses': {'task': 'interrupted'},
+        'workflow_state': {'display': {'status': 'paused', 'reason': 'user_stopped'}},
+    }
+    toolkit = HostWorkflowToolkit(lambda: client)
+    advance = next(tool for tool in _safe_session_tools(toolkit, 'session') if tool.__name__ == 'advance_step')
+    result = advance(['generate'])
+    # This is the same terminal-result reader used by FunctionCall after a tool
+    # returns: it yields the final Chat text rather than another model/tool round.
+    text = _tool_result_stop_text({'ok': True, 'value': result})
+    assert text and '已暂停' in text and '已保留' in text and '继续' in text
+    assert '失败' not in text
+    assert result['_agent_control']['reason'] == 'workflow_paused'
+    assert result['next_action']['tool'] is None
+    client.advance.assert_called_once()
+    assert _tool_result_stop_text({'ok': True, 'value': _compact_transition_result(result)}) == text

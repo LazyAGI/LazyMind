@@ -250,18 +250,6 @@ describe("NewChatPage featured templates", () => {
     });
   });
 
-  it("keeps the recovered Work mode and runtime settings after loading entry defaults", async () => {
-    const settings = { ...entryDefaults.new_task.conversation_settings, enable_subagent: false };
-    useChatInputStore.getState().saveWorkflowRepairDraft(NEW_CHAT_INPUT_DRAFT_KEY, {
-      text: "Recover workflow draft", mentions: [], files: [], runInBackground: true, runtimeSettings: settings,
-    });
-    render(<MemoryRouter initialEntries={["/agent/chat/home"]}><NewChatPage /></MemoryRouter>);
-    await waitFor(() => expect(mocks.getChatSettings).toHaveBeenCalled());
-    expect(mocks.latestChatInputProps.value).toBe("Recover workflow draft");
-    expect(mocks.latestChatInputProps.runInBackground).toBe(true);
-    expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(settings);
-  });
-
   it("keeps the disclaimer inside the scrollable welcome content", async () => {
     const { container } = render(
       <MemoryRouter initialEntries={["/agent/chat/home"]}>

@@ -31,7 +31,7 @@ func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, path := range []string{"/task-center/tasks?status=failed", "/task-center/tasks/background"} {
+	for _, path := range []string{"/task-center/tasks?status=failed", "/task-center/workbench", "/task-center/tasks/background"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("X-User-Id", "owner")
 		rec := httptest.NewRecorder()
@@ -49,6 +49,19 @@ func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
 				t.Fatalf("non-approval waiting must be failed: %s", rec.Body.String())
 			}
 			got = response.Items[0]
+		} else if path == "/task-center/workbench" {
+			Workbench(rec, req)
+			var response struct {
+				Groups map[string]*workbenchGroup `json:"groups"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			group := response.Groups["failed"]
+			if group == nil || group.Total != 1 || len(group.Items) != 1 {
+				t.Fatalf("workbench must use live workflow state: %s", rec.Body.String())
+			}
+			got = group.Items[0]
 		} else {
 			GetTaskByID(rec, req)
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -155,6 +168,35 @@ func TestLinkedTaskUsesWorkflowLifecycleWithoutRevivingCanceledTasks(t *testing.
 				t.Fatal("unfinished workflow must not have a finish time")
 			}
 		})
+	}
+}
+
+func TestLinkedTaskUsesDurableSessionStatusWhenHistoricalRevisionWasRemoved(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{})
+	now := time.Now().UTC()
+	session := orm.WorkflowSession{
+		ID: "historical-session", ConversationID: "conv", CreateUserID: "owner", WorkflowID: "removed-workflow",
+		WorkflowRevisionID: "removed-revision", Status: "waiting", CreatedAt: now.Add(-time.Minute), UpdatedAt: now,
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{
+		ID: "completed-step", SessionID: session.ID, StepID: "review", TaskID: "task", Attempt: 1,
+		Status: "succeeded", Validity: "effective", CreatedAt: now.Add(-time.Second), UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	task := orm.TaskCenterTask{
+		ID: "historical-task", UserID: "owner", ConversationID: "conv", TaskType: "workflow_run",
+		WorkflowSessionID: &session.ID, Status: "running", CreatedAt: session.CreatedAt, UpdatedAt: session.CreatedAt,
+	}
+	got, err := resolveTaskForResponse(t.Context(), db.DB, task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "waiting" {
+		t.Fatalf("status=%q want waiting", got.Status)
 	}
 }
 

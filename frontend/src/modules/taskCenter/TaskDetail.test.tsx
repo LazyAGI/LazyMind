@@ -5,8 +5,11 @@ import type { Task } from './api';
 import TaskDetail from './TaskDetail';
 import { getTask, getTaskGoal, listScheduleTasks } from './api';
 import { axiosInstance } from '@/components/request';
+import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
+import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 
 vi.mock('./api', () => ({ getTask: vi.fn(), getTaskGoal: vi.fn(), listScheduleTasks: vi.fn() }));
+vi.mock('@/utils/developerMode', () => ({ DEVELOPER_ACTIVE_EVENT: 'lazymind:developer-active-change', isDeveloperModeActive: vi.fn(() => false) }));
 vi.mock('@/modules/notifications/NotificationHistory', () => ({ default: ({ taskId }: { taskId: string }) => <div data-testid='notification-history'>{taskId}</div> }));
 vi.mock('@/modules/notifications/ScheduleNotificationPanel', () => ({ default: ({ scheduleId, taskId, showHistory }: { scheduleId: string; taskId: string; showHistory: boolean }) => <button data-schedule={scheduleId} data-task={taskId} data-history={showHistory}>配置通知</button> }));
 
@@ -18,6 +21,7 @@ const translations: Record<string, string> = {
   'settingsPage.recovery.moveToTrash': '移入回收站',
   'taskCenter.conversationUnavailable': '关联对话尚未就绪，暂时无法打开',
   'taskCenter.createdAt': '创建时间',
+  'taskCenter.currentStep': '当前步骤',
   'taskCenter.executionSteps': '执行步骤',
   'taskCenter.moreActions': '更多操作',
   'taskCenter.loadError': '加载失败',
@@ -30,6 +34,7 @@ const translations: Record<string, string> = {
   'taskCenter.statusSkipped': '已跳过',
   'taskCenter.statusFailed': '执行失败',
   'taskCenter.statusInterrupted': '已中断',
+  'taskCenter.statusPaused': '已暂停',
   'taskCenter.statusRunning': '进行中',
   'taskCenter.statusSucceeded': '已完成',
   'taskCenter.statusWaiting': '等待审批',
@@ -58,16 +63,18 @@ const translations: Record<string, string> = {
 };
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) => Object.entries(options ?? {}).reduce(
       (copy, [name, value]) => copy.split(`{{${name}}}`).join(String(value)),
       translations[key] ?? String(options?.defaultValue ?? key),
     ),
+    i18n: { language: 'zh-CN' },
   }),
 }));
 
 vi.mock('@/components/request', () => ({
-  axiosInstance: { get: vi.fn() },
+  axiosInstance: { get: vi.fn(), defaults: {} },
   BASE_URL: '',
 }));
 
@@ -89,6 +96,8 @@ const task: Task = {
 };
 
 beforeEach(() => {
+  useWorkflowStore.setState({ workflowUIByWorkflow: {} });
+  vi.mocked(isDeveloperModeActive).mockReset().mockReturnValue(false);
   vi.mocked(getTask).mockReset().mockResolvedValue(task);
   vi.mocked(getTaskGoal).mockReset().mockResolvedValue(undefined);
   vi.mocked(listScheduleTasks).mockReset().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 5 });
@@ -97,6 +106,215 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  it.each(['paused', 'failed', 'canceled'])('uses the existing empty state instead of spinning forever for a %s task', async status => {
+    const current = { ...task, status, workflow_session_id: 'planning-session' };
+    vi.mocked(getTask).mockResolvedValue(current);
+    vi.mocked(axiosInstance.get).mockImplementation(async (url: string) => {
+      if (url.endsWith('/projection')) return { data: { projection: { nodes: {} } } };
+      if (url.includes('/workflow-sessions/')) return { data: { session: {
+        session_id: 'planning-session', workflow_id: 'ppt', pinned_revision_id: 'planning-revision', steps: [], slots: [],
+      } } };
+      return { data: { ui: { tab_visibility_ready_material: 'execution_plan', tabs: [{ id: 'analysis', label: '分析', slots: [] }] } } };
+    });
+    render(<TaskDetail task={current} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    expect(await screen.findByText('暂无执行步骤')).toBeInTheDocument();
+    expect(document.querySelector('.task-detail-section .ant-spin')).not.toBeInTheDocument();
+    expect(document.querySelector('.task-step-list')).not.toBeInTheDocument();
+    expect(screen.queryByText('加载失败')).not.toBeInTheDocument();
+  });
+
+  function mockPptWorkflow() {
+    const pptTask = { ...task, workflow_session_id: 'ppt-session', steps: [] };
+    const stages = [
+      ['analysis', 'analyze_requirements', '分析', 'requirement_analysis', 'succeeded'],
+      ['materials', 'collect_materials', '素材', 'material_summary', 'succeeded'],
+      ['outline', 'build_outline', '大纲', 'deck_outline', 'succeeded'],
+      ['page_prompts', 'plan_page_prompts', '每页提示词', 'slide_outline', 'pending'],
+      ['slides', 'generate_ppt', '幻灯片', 'preview_html', 'running'],
+    ];
+    const projection = {
+      current_step_id: 'generate_ppt',
+      projection: { nodes: Object.fromEntries(stages.map(([, stepId, , , status]) => [stepId, { execution: status === 'pending' ? 'none' : status, branch: 'active' }])) },
+      attempt_history: Object.fromEntries(stages.filter(([, , , , status]) => status !== 'pending').map(([, stepId, , , status]) => [stepId, [{ attempt: 1, attempt_id: stepId, task_id: stepId, status, validity: 'effective', started_at: task.created_at }]])),
+    };
+    vi.mocked(getTask).mockResolvedValue(pptTask);
+    vi.mocked(axiosInstance.get).mockImplementation(async (url: string) => {
+      if (url.endsWith('/projection')) return { data: projection };
+      if (url.includes('/workflow-sessions/')) return { data: { session: {
+        session_id: 'ppt-session', workflow_id: 'ppt-workflow', pinned_revision_id: 'ppt-revision',
+        current_step_id: '', steps: [], slots: [],
+      } } };
+      return { data: {
+        slots: stages.map(([, , , id]) => ({ id, user_visible: id !== 'slide_outline' })),
+        ui: { tabs: stages.map(([id, step_id, label, slot]) => ({ id, step_id, label, slots: [{ id: slot }] })) },
+      } };
+    });
+    return { pptTask, projection };
+  }
+
+  it.each([false, true])('matches Chat step visibility in developer mode %s without inventing a skipped attempt', async developer => {
+    vi.mocked(isDeveloperModeActive).mockReturnValue(developer);
+    const { pptTask } = mockPptWorkflow();
+    render(<TaskDetail task={pptTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    await screen.findByText('分析');
+    expect(Array.from(document.querySelectorAll('.task-step strong')).map(node => node.textContent)).toEqual(
+      developer ? ['分析', '素材', '大纲', '每页提示词', '幻灯片'] : ['分析', '素材', '大纲', '幻灯片'],
+    );
+    if (developer) expect(screen.getByText('每页提示词').closest('.task-step')).toHaveTextContent('待执行');
+    expect(screen.getByText('幻灯片').closest('.task-step')).toHaveTextContent('当前步骤');
+    expect(screen.getByText('分析').closest('.task-step')).toHaveTextContent('已完成');
+    expect(screen.queryByText('已跳过')).not.toBeInTheDocument();
+  });
+
+  it('updates the open step list when the same developer-mode event used by Chat changes audience', async () => {
+    const { pptTask } = mockPptWorkflow();
+    render(<TaskDetail task={pptTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await screen.findByText('分析');
+    expect(screen.queryByText('每页提示词')).not.toBeInTheDocument();
+
+    vi.mocked(isDeveloperModeActive).mockReturnValue(true);
+    act(() => window.dispatchEvent(new CustomEvent(DEVELOPER_ACTIVE_EVENT)));
+    expect(await screen.findByText('每页提示词')).toBeInTheDocument();
+
+    vi.mocked(isDeveloperModeActive).mockReturnValue(false);
+    act(() => window.dispatchEvent(new CustomEvent(DEVELOPER_ACTIVE_EVENT)));
+    await waitFor(() => expect(screen.queryByText('每页提示词')).not.toBeInTheDocument());
+    expect(screen.getByText('幻灯片')).toBeInTheDocument();
+  });
+
+  it('keeps a visible but bypassed prompt-planning step and labels it as skipped', async () => {
+    vi.mocked(isDeveloperModeActive).mockReturnValue(true);
+    const { pptTask, projection } = mockPptWorkflow();
+    projection.projection.nodes.plan_page_prompts.branch = 'bypassed';
+    render(<TaskDetail task={pptTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    expect((await screen.findByText('每页提示词')).closest('.task-step')).toHaveTextContent('已跳过');
+    expect(document.querySelectorAll('.task-step')).toHaveLength(5);
+  });
+
+  it('refreshes authoritative step states with the open task instead of retaining the initial snapshot', async () => {
+    vi.useFakeTimers();
+    vi.mocked(isDeveloperModeActive).mockReturnValue(true);
+    const { pptTask, projection } = mockPptWorkflow();
+    render(<TaskDetail task={pptTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText('每页提示词').closest('.task-step')).toHaveTextContent('待执行');
+
+    projection.projection.nodes.plan_page_prompts.execution = 'succeeded';
+    vi.mocked(getTask).mockResolvedValue({ ...pptTask, updated_at: '2026-09-02T02:10:00Z' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByText('每页提示词').closest('.task-step')).toHaveTextContent('已完成');
+    expect(document.querySelectorAll('.task-step')).toHaveLength(5);
+  });
+
+  it('uses the same workflow tab labels and effective step statuses as the conversation panel', async () => {
+    const workflowTask = { ...task, workflow_session_id: 'workflow-session', status: 'paused', steps: [] };
+    vi.mocked(getTask).mockResolvedValue(workflowTask);
+    vi.mocked(axiosInstance.get)
+      .mockResolvedValueOnce({ data: { data: { projection: { nodes: {} }, graph: { static_order: [] } } } })
+      .mockResolvedValueOnce({ data: { data: { session: {
+        session_id: 'workflow-session',
+        conversation_id: task.conversation_id,
+        workflow_id: 'find-skill',
+        pinned_revision_id: 'revision-1',
+        workflow_mode: 'dynamic',
+        status: 'stopped',
+        current_step_id: 'search_skillhub',
+        created_at: task.created_at,
+        updated_at: task.updated_at,
+        slots: [{ slot: 'search_plan', selected: true }],
+        steps: [
+          { id: 'one', session_id: 'workflow-session', step_id: 'extract_search_plan', attempt: 1, task_id: 'one', status: 'succeeded', created_at: task.created_at, updated_at: task.updated_at },
+          { id: 'two', session_id: 'workflow-session', step_id: 'search_skillhub', attempt: 1, task_id: 'two', status: 'interrupted', created_at: task.created_at, updated_at: task.updated_at },
+        ],
+      } } } })
+      .mockResolvedValueOnce({ data: { ui: { tabs: [
+        { id: 'plan', step_id: 'extract_search_plan', label: '检索计划', slots: [{ id: 'search_plan' }] },
+        { id: 'search', step_id: 'search_skillhub', label: 'Search SkillHub', slots: [{ id: 'search_plan' }] },
+      ] } } });
+
+    render(<TaskDetail task={workflowTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    expect(await screen.findByText('检索计划')).toBeInTheDocument();
+    expect(screen.getByText('Search SkillHub')).toBeInTheDocument();
+    expect(screen.getByText('检索计划').closest('.task-step')).toHaveTextContent('已完成');
+    expect(screen.getByText('Search SkillHub').closest('.task-step')).toHaveTextContent('已暂停');
+    expect(screen.getByText('Search SkillHub').closest('.task-step')).toHaveClass('is-current', 'is-focus', 'step-tone-paused');
+    expect(screen.getByText('Search SkillHub').closest('.task-step')).toHaveTextContent('当前步骤');
+    expect(screen.queryByText('执行步骤 1')).not.toBeInTheDocument();
+  });
+
+  it('keeps workflow steps mounted when a refreshed task object points to the same workflow session', async () => {
+    const paused = { ...task, workflow_session_id: 'stable-session', status: 'paused', steps: [] };
+    vi.mocked(getTask).mockResolvedValue(paused);
+    vi.mocked(axiosInstance.get).mockImplementation(async (url: string) => url.endsWith('/projection')
+      ? { data: { graph: { static_order: ['active-step'], nodes: { 'active-step': { label: '稳定显示的步骤' } } }, projection: { nodes: { 'active-step': { execution: 'interrupted', branch: 'active' } } } } }
+      : { data: {} });
+    const props = { onClose: vi.fn(), onOpenConversation: vi.fn() };
+    const { rerender } = render(<TaskDetail task={paused} {...props} />);
+
+    expect(await screen.findByText('稳定显示的步骤')).toBeInTheDocument();
+    expect(axiosInstance.get).toHaveBeenCalledTimes(2);
+    rerender(<TaskDetail task={{ ...paused }} {...props} />);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByText('稳定显示的步骤')).toBeInTheDocument();
+    expect(axiosInstance.get).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['waiting', 'waiting', 'attention'],
+    ['running', 'running', 'running'],
+    ['paused', 'interrupted', 'paused'],
+    ['failed', 'failed', 'failed'],
+    ['failed', 'interrupted', 'failed'],
+    ['canceled', 'canceled', 'canceled'],
+  ])('colors the focused step by the %s task category', async (taskStatus, stepStatus, tone) => {
+    const stateTask = { ...task, status: taskStatus, steps: [{ step_id: 'prepare', status: stepStatus }] };
+    vi.mocked(getTask).mockResolvedValue(stateTask);
+    render(<TaskDetail task={stateTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    const step = (await screen.findByText('准备任务')).closest('.task-step');
+    expect(step).toHaveClass('is-focus', `step-tone-${tone}`);
+    expect(step).toHaveTextContent('当前步骤');
+    if (taskStatus === 'failed') expect(step).toHaveTextContent('执行失败');
+    if (taskStatus === 'paused') expect(step).toHaveTextContent('已暂停');
+    expect(step).not.toHaveTextContent('已中断');
+  });
+
+  it('does not turn a failed branch into a pause when the workflow is paused', async () => {
+    const current = { ...task, status: 'paused', steps: [{ step_id: 'prepare', status: 'failed' }] };
+    vi.mocked(getTask).mockResolvedValue(current);
+    render(<TaskDetail task={current} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    const step = (await screen.findByText('准备任务')).closest('.task-step');
+    expect(step).toHaveClass('is-failed');
+    expect(step).not.toHaveClass('step-tone-paused');
+    expect(step).toHaveTextContent('执行失败');
+  });
+
+  it('keeps completed steps green without applying another task-category tone', async () => {
+    const completed = { ...task, status: 'succeeded', steps: [{ step_id: 'prepare', status: 'succeeded' }] };
+    vi.mocked(getTask).mockResolvedValue(completed);
+    render(<TaskDetail task={completed} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    const step = (await screen.findByText('准备任务')).closest('.task-step');
+    expect(step).toHaveClass('is-done');
+    expect(step).not.toHaveClass('is-focus');
+    expect(step).not.toHaveTextContent('当前步骤');
+  });
+
+  it('shows a completed background chat as its truthful single root execution step', async () => {
+    const completed = { ...task, task_type: 'background_chat', status: 'succeeded', steps: [] };
+    vi.mocked(getTask).mockResolvedValue(completed);
+    render(<TaskDetail task={completed} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    const step = (await screen.findAllByText(completed.title!)).find(node => node.closest('.task-step'))?.closest('.task-step');
+    expect(step).toHaveClass('is-done');
+    expect(step).toHaveTextContent('已完成');
+    expect(step).not.toHaveTextContent('当前步骤');
+    expect(screen.queryByText('暂无执行步骤')).not.toBeInTheDocument();
+  });
+
   it.each([
     ['writer', 'write_document', '成稿', 'write_flat_document', '短文成稿', 'pruned'],
     ['ppt', 'generate_ppt', '生成幻灯片', 'choose_style', '选择风格', 'bypassed'],
@@ -117,6 +335,7 @@ describe('TaskDetail', () => {
 
     expect(await screen.findByText('已跳过')).toBeInTheDocument();
     expect(screen.getByText(skippedLabel).closest('.task-step')).toHaveTextContent('已跳过');
+    expect(screen.getByText(skippedLabel).closest('.task-step')).toHaveClass('step-tone-skipped');
     expect(screen.getByText(completedLabel).closest('.task-step')).toHaveTextContent('已完成');
     expect(document.querySelector('.task-detail-status')).toHaveTextContent('已完成');
     expect(document.querySelectorAll('.task-step')).toHaveLength(2);
@@ -130,7 +349,7 @@ describe('TaskDetail', () => {
     ['running', 'pruned', '进行中'],
     ['succeeded', 'bypassed', '已完成'],
     ['failed', 'bypassed', '执行失败'],
-    ['interrupted', 'pruned', '已中断'],
+    ['interrupted', 'pruned', '执行失败'],
     ['waiting', 'active', '等待审批'],
   ])('preserves execution %s on branch %s as %s', async (execution, branch, expected) => {
     const current = { ...task, workflow_session_id: 'workflow', steps: [] };
@@ -258,6 +477,10 @@ describe('TaskDetail', () => {
     vi.useFakeTimers();
     const initial = { ...task, steps: [] };
     const current = { ...task, workflow_session_id: 'writer', status: 'waiting' };
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: {
+      graph: { static_order: ['prepare', 'custom_api_call'], nodes: { prepare: { label: '准备任务' } } },
+      projection: { nodes: { prepare: { execution: 'succeeded', branch: 'active' }, custom_api_call: { execution: 'waiting', branch: 'active' } } },
+    } });
     vi.mocked(getTask).mockResolvedValueOnce(current).mockResolvedValue({ ...current, status: 'succeeded' });
     render(<TaskDetail task={initial} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
     await act(async () => { await Promise.resolve(); });

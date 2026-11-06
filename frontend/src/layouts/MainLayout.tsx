@@ -1,4 +1,3 @@
-import WorkflowRepairReturn from "@/modules/chat/components/ChatInput/WorkflowRepairReturn";
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from '@/modules/taskCenter/events';
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -1371,7 +1370,6 @@ export default function MainLayout() {
       </Sider>
       <Layout className={contentClassName}>
         <Content className="main-layout-body">
-          <WorkflowRepairReturn />
           <div className="sub-app-container">
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>
               {pathname.startsWith("/document-directories") && !directoriesEnabled ? (

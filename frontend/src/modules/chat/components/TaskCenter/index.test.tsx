@@ -111,6 +111,67 @@ const workflowSteps = [
 ];
 
 describe("TaskCenter display modes", () => {
+  it.each([false, true])('uses a gray cancellation marker instead of the pause icon (developer=%s)', developerMode => {
+    useTaskCenterStore.setState({ tasksByConversation: { 'conversation-1': [task('canceled', 1, 'canceled')] } });
+    const view = render(<TaskCenter sessionId='conversation-1' developerMode={developerMode} />);
+    const badge = view.container.querySelector(developerMode ? '.task-status-canceled' : '.ordinary-task-card.is-canceled .ordinary-task-status');
+    const marker = developerMode ? badge : view.container.querySelector('.ordinary-step-node');
+    expect(badge).toHaveTextContent('taskCenter.statusCanceled');
+    expect(marker?.querySelector('.anticon-stop')).toBeInTheDocument();
+    expect(marker?.querySelector('.anticon-pause-circle')).not.toBeInTheDocument();
+    expect(getComputedStyle(badge!).color).toBe('rgb(122, 132, 147)');
+  });
+
+  it("scopes user pauses by workflow and includes abnormal interruptions in failure results", () => {
+    useWorkflowStore.setState({ sessionByConversation: { "conversation-1": {
+      session_id: "session-1", conversation_id: "conversation-1", workflow_id: "writer", status: "waiting",
+      workflow_mode: "dynamic", current_step_id: "write", created_at: iso(0), updated_at: iso(10),
+      projection: { display: { status: "paused", reason: "user_stopped", approval_step_id: "" } },
+    } } });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [
+      { ...task("paused", 1, "interrupted"), ordinary: ordinary("paused", { session_id: "session-1", status: "interrupted" }) },
+      { ...task("older", 2, "interrupted"), ordinary: ordinary("older", { session_id: "older-session", status: "interrupted" }) },
+      task("failed", 3, "failed"),
+    ] } });
+    render(<TaskCenter sessionId="conversation-1" developerMode />);
+    const card = (id: string) => within(screen.getByText(`image-workflow:${id}`).closest<HTMLElement>('.task-card')!);
+    expect(card("paused").getByText("taskCenter.statusPaused")).toBeInTheDocument();
+    expect(card("older").getByText("taskCenter.statusFailed")).toBeInTheDocument();
+    expect(card("failed").getByText("taskCenter.statusFailed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'taskCenter.filterPaused' }));
+    expect(screen.getByText('image-workflow:paused')).toBeInTheDocument();
+    expect(screen.queryByText('image-workflow:older')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'taskCenter.filterFailed' }));
+    expect(screen.getByText('image-workflow:failed')).toBeInTheDocument();
+    expect(screen.getByText('image-workflow:older')).toBeInTheDocument();
+    expect(screen.queryByText('image-workflow:paused')).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("presents an interrupted child as paused in ordinary and developer views (developer=%s)", developerMode => {
+    useWorkflowStore.setState({ sessionByConversation: { "conversation-1": {
+      session_id: "session-1", conversation_id: "conversation-1", workflow_id: "writer", status: "waiting",
+      workflow_mode: "dynamic", current_step_id: "write", created_at: iso(0), updated_at: iso(10),
+      projection: { display: { status: "paused", reason: "user_stopped", approval_step_id: "" } },
+    } } });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("paused", 1, "interrupted"),
+      ordinary: ordinary("paused", { session_id: "session-1", status: "interrupted", process_state: "available", process_steps: [{
+        step_id: "search", revision: 1, order: 1, title: "Paused search", status: "interrupted",
+        started_at: null, finished_at: null, elapsed_ms: null,
+      }] }),
+    }] } });
+
+    const view = render(<TaskCenter sessionId="conversation-1" developerMode={developerMode} />);
+
+    expect(screen.getAllByText("taskCenter.statusPaused").length).toBeGreaterThan(0);
+    expect(screen.queryByText("taskCenter.statusInterrupted", { selector: ".task-status" })).not.toBeInTheDocument();
+    expect(screen.queryByText("taskCenter.ordinaryFailedSummary")).not.toBeInTheDocument();
+    if (!developerMode) {
+      expect(view.container.querySelector('.ordinary-task-card')).toHaveClass('is-paused');
+      expect(view.container.querySelector('.ordinary-thinking-item')).toHaveClass('is-paused');
+      expect(view.container.querySelector('.ordinary-thinking-item')).toHaveTextContent('taskCenter.statusPaused');
+    }
+  });
+
   it("keeps developer text from separate model calls in separate visible log entries", () => {
     useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("model", 1, "running"), execution_log: [
       { type: "text", content: "FIRST CALL", model_output: { run_id: "execution", call_index: 1 } },

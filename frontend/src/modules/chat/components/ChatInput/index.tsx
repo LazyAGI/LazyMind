@@ -38,7 +38,7 @@ import ImageUpload, {
 } from "../ImageUpload";
 import { fileToBase64 } from "@/modules/chat/utils/upload";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import { useChatInputStore, NEW_CHAT_INPUT_DRAFT_KEY } from "@/modules/chat/store/chatInput";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 import { getRuntimeMode, isLocalLikeRuntimeMode } from "@/runtime/mode";
 
@@ -54,7 +54,6 @@ import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
 import { useWorkflowSelection } from "./useWorkflowSelection";
-import { useWorkflowReadiness } from "./useWorkflowReadiness";
 import type { ConversationRuntimeSettings } from "../../utils/request";
 import { WorkflowSessionApi } from "../../utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
@@ -647,10 +646,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onThinkingDepthChange,
     } = props;
     const inputDraftKey = sessionId ?? draftKey;
-    const repairDraftKey = inputDraftKey ?? NEW_CHAT_INPUT_DRAFT_KEY;
-    const restoredRepairDraft = useMemo(() => useChatInputStore.getState().workflowRepairDrafts[repairDraftKey], [repairDraftKey]);
     const showWorkspaceEnvironment = runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
-    const [workspaceId, setWorkspaceId] = useState<string | undefined>(restoredRepairDraft?.workspaceId);
+    const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
     const [projectValid, setProjectValid] = useState(true);
     const [initialProject, setInitialProject] = useState<ConversationGroup>();
@@ -683,7 +680,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setProjectName(name);
       setProjectValid(valid);
     }, []);
-    const [workspacePermissionMode, setWorkspacePermissionMode] = useState<WorkspacePermissionMode>(restoredRepairDraft?.workspacePermissionMode ?? "ask_as_needed");
+    const [workspacePermissionMode, setWorkspacePermissionMode] = useState<WorkspacePermissionMode>("ask_as_needed");
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -711,7 +708,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [featuredMentions, setFeaturedMentions] = useState<ChatMention[]>([]);
     const [featuredBusy, setFeaturedBusy] = useState(false);
     const handleFeaturedBindingChange = useCallback((items: ChatMention[], busy: boolean) => { setFeaturedMentions(items); setFeaturedBusy(busy); }, []);
-    const [mentions, setMentions] = useState<ChatMention[]>(restoredRepairDraft?.mentions ?? []);
+    const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
     const effectiveMentions = useMemo(() => {
       if (!allowMentions) return [];
@@ -777,9 +774,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [onModelSelectionSavingChange]);
     useEffect(() => {
       setInitialModelSelection(undefined);
-      setWorkspaceId(restoredRepairDraft?.workspaceId);
-      setWorkspacePermissionMode(restoredRepairDraft?.workspacePermissionMode ?? "ask_as_needed");
-    }, [configResetKey, sessionId, restoredRepairDraft]);
+      setWorkspaceId(undefined);
+      setWorkspacePermissionMode("ask_as_needed");
+    }, [configResetKey, sessionId]);
     const workflowBlocksModelSwitch = useWorkflowStore((state) => {
       if (!sessionId) return false;
       const session = state.sessionByConversation[sessionId];
@@ -806,48 +803,24 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const [removedTransferredFiles, setRemovedTransferredFiles] = useState<string[]>([]);
     useEffect(() => { setRemovedTransferredFiles([]); }, [props.transferredDraft]);
-    const transferredFiles = restoredRepairDraft?.files ?? props.transferredDraft?.files ?? EMPTY_COMPOSER_FILES;
-    const transferredUploads = useMemo(() => {
-      const localUploadIds = new Set(fileList.map(file => `upload:${file.uid}`));
-      return [...new Map(transferredFiles.map(file => [file.id, file])).values()]
-        .filter(file => file.id.startsWith('upload:') && file.input?.uri && !removedTransferredFiles.includes(file.id) && !localUploadIds.has(file.id));
-    }, [transferredFiles, fileList, removedTransferredFiles]);
+    const localUploadIds = new Set(fileList.map(file => `upload:${file.uid}`));
+    const transferredUploads = [...new Map((props.transferredDraft?.files || EMPTY_COMPOSER_FILES).map(file => [file.id, file])).values()]
+      .filter(file => file.id.startsWith('upload:') && file.input?.uri && !removedTransferredFiles.includes(file.id) && !localUploadIds.has(file.id));
     const displayedFiles = [...fileList, ...transferredUploads.map(file => ({ uid: file.id, name: file.name, base64: file.input?.input_type === 'image' ? file.input.uri : '', suffix: file.name.slice(file.name.lastIndexOf('.')), size: '' }))];
     const conversationFiles = props.conversationFiles ?? EMPTY_COMPOSER_FILES;
     const composerFiles = useMemo(() => {
       const uploaded = fileListRef.current?.getFiles() ?? [];
-      const files = [...transferredFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...fileList.map(file => {
+      const files = [...conversationFiles.filter(file => !removedTransferredFiles.includes(file.id)), ...fileList.map(file => {
         const stored = uploaded.find(item => item.uid === file.uid);
         return { id: `upload:${file.uid}`, name: file.name, disabled: !stored?.uri,
           input: stored?.uri ? { input_type: allowedImageTypes.includes(file.suffix.toLowerCase()) ? 'image' as const : 'file' as const, uri: stored.uri, filename: file.name } : undefined };
       })];
       return [...new Map(files.map(file => [file.id, file])).values()];
-    }, [conversationFiles, transferredFiles, fileList, removedTransferredFiles]);
-    useEffect(() => {
-      const saved = useChatInputStore.getState().workflowRepairDrafts[repairDraftKey];
-      if (saved && draftRef.current.sessionId === inputDraftKey && JSON.stringify(saved.files) !== JSON.stringify(composerFiles)) {
-        useChatInputStore.getState().updateWorkflowRepairFiles(repairDraftKey, composerFiles);
-      }
-    }, [composerFiles, repairDraftKey, inputDraftKey]);
+    }, [conversationFiles, fileList, removedTransferredFiles]);
     const prepareReferences = () => buildComposerReferences(effectiveMentions, composerFiles, [...transferredUploads.map(file => file.input!), ...(fileListRef.current?.getFiles() ?? []).filter(file => file.uri).map(file => ({
       input_type: allowedImageTypes.includes(file.name.substring(file.name.lastIndexOf('.')).toLowerCase()) ? 'image' as const : 'file' as const,
       uri: file.uri, filename: file.name,
     }))], value);
-    const workflowReadiness = useWorkflowReadiness(sessionId, () => {
-      debouncedSaveInput.cancel();
-      const savedMentions = [...effectiveMentions];
-      draftRef.current = { sessionId: inputDraftKey, content: value, mentions: savedMentions };
-      useChatInputStore.getState().saveWorkflowRepairDraft(repairDraftKey, {
-        text: value, mentions: savedMentions, files: composerFiles,
-        featuredSelection: useFeaturedSelectionStore.getState().selections[sessionId || "new"],
-        runtimeSettings: contextRuntimeSettings, runInBackground, workspaceId, workspacePermissionMode,
-      });
-    }, runInBackground);
-    useEffect(() => {
-      if (restoredRepairDraft?.featuredSelection) {
-        useFeaturedSelectionStore.getState().setSelection(sessionId || "new", restoredRepairDraft.featuredSelection);
-      }
-    }, [restoredRepairDraft, sessionId]);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
     // Keep synchronous mode-switch capture aligned with the committed composer.
     // Async uploads can commit before passive effects update the old listener.
@@ -1001,7 +974,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       debouncedSaveInput.cancel();
       const draft = draftRef.current;
       if (draft.sessionId !== undefined) {
-        if (draft.content.trim() || useChatInputStore.getState().workflowRepairDrafts[draft.sessionId]) saveInputContent(draft.sessionId, draft.content, draft.mentions);
+        if (draft.content.trim()) saveInputContent(draft.sessionId, draft.content, draft.mentions);
         else clearInputContent(draft.sessionId);
       }
     }, [saveInputContent, clearInputContent, debouncedSaveInput]);
@@ -1240,7 +1213,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy || selectingWorkflow || workflowReadiness.busy) {
+      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy || selectingWorkflow) {
         return;
       }
       const normalizedText = value.trim();
@@ -1252,7 +1225,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         resolvedMentions = await resolveSkillWorkflowMentions(references.mentions);
         if (resolvedMentions.some((mention) => mention.type === "workflow")
           && !await validateWorkflowSelection()) return;
-        if (!await workflowReadiness.check(resolvedMentions)) return;
       } finally {
         setResolvingSkillWorkflow(false);
       }
@@ -1587,7 +1559,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   )}
                 </div>
               )}
-              {workflowReadiness.dialog}
               <MentionEditor
                 key={inputDraftKey}
                 ref={textAreaRef}
@@ -1887,7 +1858,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
                       hasDraft={Boolean(value.trim())}
-                      sendDisabled={isSendDisabled || featuredBusy || selectingWorkflow || workflowReadiness.busy}
+                      sendDisabled={isSendDisabled || featuredBusy || selectingWorkflow}
                       disabled={disabled}
                       sendLabel={t("chat.send")}
                       stopLabel={t("chat.stopGenerate")}

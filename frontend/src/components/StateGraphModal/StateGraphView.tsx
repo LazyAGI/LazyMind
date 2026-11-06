@@ -1,18 +1,9 @@
-/**
- * StateGraphView — Workflow workflow graph renderer.
- *
- * Layout: dagre LR. Nodes rendered via SVG foreignObject.
- * Edge types (server-computed):
- *   executed         → green solid
- *   current_direct   → blue solid
- *   current_reachable→ blue dashed
- *   skipped          → gray dashed
- * Terminal nodes: __start__ blue filled, __end__ green filled.
- * Self-loops and back-edges are dropped (DAG only).
- */
-import React, { useMemo, useRef, useState } from 'react';
+/** Workflow graph: topology determines layout; live projection determines visuals. */
+import React, { useId, useMemo, useRef, useState } from 'react';
 import { Popover, Tooltip } from 'antd';
+import { useTranslation } from 'react-i18next';
 import dagre from '@dagrejs/dagre';
+import { workflowTaskDisplayStatus } from '@/modules/chat/utils/workflowTaskStatus';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface SGAttempt {
@@ -29,8 +20,7 @@ export interface SGNode {
   step_index: number;
   status: string;
   is_current: boolean;
-  /** The node has stale historical attempts even when it is Ready again. */
-  is_stale?: boolean;
+  status_notes?: string[];
   artifact_summary?: string | null; // legacy, unused
   artifact_items?: { slot: string; content_type: string; preview: string }[];
   step_attempts?: SGAttempt[];
@@ -40,10 +30,7 @@ export interface SGEdge {
   from: string;
   to: string;
   condition: string;
-  // server-computed
-  edge_type: 'executed' | 'current_direct' | 'current_reachable' | 'skipped' | 'pruned' | 'bypassed' | 'stale' | 'inactive';
-  // legacy — ignored
-  is_active_path?: boolean;
+  edge_type: 'executed' | 'current_direct' | 'pruned' | 'bypassed' | 'inactive';
 }
 
 export interface StateGraphData {
@@ -63,19 +50,21 @@ const TERMINAL_IDS = new Set(['__start__', '__end__']);
 
 // ─── Status config ────────────────────────────────────────────────────────────
 const S: Record<string, { color: string; dot: string; label: string }> = {
-  succeeded:   { color: '#389e0d', dot: '#52c41a', label: '已完成' },
-  running:     { color: '#0958d9', dot: '#1677ff', label: '运行中' },
-  waiting:     { color: '#d46b08', dot: '#fa8c16', label: '等待审批' },
-  failed:      { color: '#cf1322', dot: '#ff4d4f', label: '失败' },
-  interrupted: { color: '#cf1322', dot: '#ff4d4f', label: '中断' },
-  pending:     { color: '#8c8c8c', dot: '#bfbfbf', label: '未执行' },
-  ready:       { color: '#0958d9', dot: '#1677ff', label: '可执行' },
-  blocked:     { color: '#d46b08', dot: '#fa8c16', label: '素材未满足' },
-  stale:       { color: '#722ed1', dot: '#9254de', label: '已失效' },
-  pruned:      { color: '#8c8c8c', dot: '#d9d9d9', label: '未选分支' },
-  bypassed:    { color: '#8c8c8c', dot: '#d9d9d9', label: '已绕过' },
+  succeeded:   { color: '#389e0d', dot: '#52c41a', label: 'taskCenter.statusCompleted' },
+  running:     { color: '#0958d9', dot: '#1677ff', label: 'taskCenter.statusRunning' },
+  waiting:     { color: '#d46b08', dot: '#fa8c16', label: 'taskCenter.statusWaiting' },
+  failed:      { color: '#cf1322', dot: '#ff4d4f', label: 'taskCenter.statusFailed' },
+  paused:      { color: '#a87913', dot: '#e5b544', label: 'taskCenter.statusPaused' },
+  pending:     { color: '#177d7a', dot: '#279c9a', label: 'taskCenter.statusPending' },
+  canceled:    { color: '#6f7988', dot: '#7a8493', label: 'taskCenter.statusCanceled' },
+  skipped:     { color: '#8c7053', dot: '#b89b7a', label: 'taskCenter.statusSkipped' },
 };
-function sc(status: string) { return S[status] ?? S.pending; }
+// These runtime values share a display meaning; keep persisted execution facts intact.
+const STATUS_ALIASES: Record<string, string> = {
+  completed: 'succeeded', cancelled: 'canceled',
+  pruned: 'skipped', bypassed: 'skipped', ready: 'pending', queued: 'pending', claimed: 'pending',
+};
+function sc(status: string) { return S[STATUS_ALIASES[status] ?? workflowTaskDisplayStatus(status)] ?? S.pending; }
 
 function fmtDur(sec: number): string {
   if (sec < 0) return '';
@@ -97,25 +86,12 @@ function truncLabel(str: string): string {
 }
 
 // ─── Edge visual config ───────────────────────────────────────────────────────
-const EDGE_STYLE: Record<string, { stroke: string; dash?: string; width: number }> = {
-  executed:          { stroke: '#52c41a', width: 1.5 },
-  current_direct:    { stroke: '#1677ff', width: 1.5 },
-  current_reachable: { stroke: '#1677ff', dash: '6 3', width: 1.2 },
-  skipped:           { stroke: '#bfbfbf', dash: '5 3', width: 1.2 },
-  pruned:            { stroke: '#bfbfbf', dash: '2 3', width: 1.2 },
-  bypassed:          { stroke: '#8c8c8c', dash: '5 3', width: 1.2 },
-  stale:             { stroke: '#9254de', dash: '5 3', width: 1.2 },
-  inactive:          { stroke: '#d9d9d9', dash: '5 3', width: 1.0 },
-};
-const ARROW_IDS: Record<string, string> = {
-  executed: 'arr-green',
-  current_direct: 'arr-blue',
-  current_reachable: 'arr-blue',
-  skipped: 'arr-gray',
-  pruned: 'arr-gray',
-  bypassed: 'arr-gray',
-  stale: 'arr-gray',
-  inactive: 'arr-gray',
+const EDGE_STYLE: Record<SGEdge['edge_type'], { stroke: string; dash?: string; width: number; label: string }> = {
+  executed:       { stroke: '#52c41a', width: 1.5, label: 'chat.workflowGraph.executedRoute' },
+  current_direct: { stroke: '#1677ff', width: 1.5, label: 'chat.workflowGraph.activeRoute' },
+  pruned:         { stroke: '#b89b7a', dash: '5 3', width: 1.2, label: 'chat.workflowGraph.skippedRoute' },
+  bypassed:       { stroke: '#b89b7a', dash: '5 3', width: 1.2, label: 'chat.workflowGraph.skippedRoute' },
+  inactive:       { stroke: '#d9d9d9', dash: '5 3', width: 1.0, label: 'chat.workflowGraph.inactiveRoute' },
 };
 
 // Go rejects cyclic graphs before runtime. The renderer only drops malformed
@@ -172,16 +148,18 @@ function ptsToD(pts: { x: number; y: number }[]): string {
 
 // ─── Node Popover ─────────────────────────────────────────────────────────────
 function AttemptTag({ status }: { status: string }) {
+  const { t } = useTranslation();
   const c = sc(status);
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: `${c.dot}18`, border: `1px solid ${c.dot}50`, borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 500, color: c.color }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.dot, display: 'inline-block' }} />
-      {c.label}
+      {t(c.label)}
     </span>
   );
 }
 
 function NodePopover({ node }: { node: SGNode }) {
+  const { t } = useTranslation();
   const c = sc(node.status);
   const attempts = node.step_attempts ?? [];
   const totalArtifacts = attempts.reduce((s, a) => s + a.artifact_count, 0);
@@ -197,17 +175,19 @@ function NodePopover({ node }: { node: SGNode }) {
           )}
           <span style={{ fontWeight: 600, fontSize: 14, color: '#141414', flex: 1 }}>{node.label}</span>
           <AttemptTag status={node.status} />
-          {node.is_stale && node.status !== 'stale' && <AttemptTag status='stale' />}
         </div>
+        {node.status_notes?.map(note => (
+          <div key={note} style={{ fontSize: 12, color: '#595959', marginBottom: 6, overflowWrap: 'anywhere' }}>{note}</div>
+        ))}
         <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#8c8c8c' }}>
-          <span>执行 {attempts.length} 次</span>
+          <span>{t('chat.workflowGraph.attempts', { count: attempts.length })}</span>
           {totalArtifacts > 0 && <span>📎 {totalArtifacts}</span>}
           {latest && latest.duration_sec >= 0 && <span>⏱ {fmtDur(latest.duration_sec)}</span>}
         </div>
       </div>
       {attempts.length > 0 && (
         <div style={{ padding: '10px 16px', borderBottom: '1px solid #f0f0f0' }}>
-          <div style={{ fontSize: 11, color: '#bfbfbf', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 8 }}>执行历史</div>
+          <div style={{ fontSize: 11, color: '#bfbfbf', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 8 }}>{t('chat.workflowGraph.history')}</div>
           {[...attempts].reverse().map((a) => (
             <div key={a.attempt} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #f5f5f5' }}>
               <span style={{ color: '#8c8c8c', fontSize: 12, minWidth: 24, fontWeight: 600 }}>#{a.attempt}</span>
@@ -219,7 +199,7 @@ function NodePopover({ node }: { node: SGNode }) {
         </div>
       )}
       <div style={{ padding: '10px 16px' }}>
-        <div style={{ fontSize: 11, color: '#bfbfbf', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 8 }}>产出摘要</div>
+        <div style={{ fontSize: 11, color: '#bfbfbf', fontWeight: 600, letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 8 }}>{t('chat.workflowGraph.artifacts')}</div>
         {node.artifact_items && node.artifact_items.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {node.artifact_items.map((item, idx) => (
@@ -233,7 +213,7 @@ function NodePopover({ node }: { node: SGNode }) {
             ))}
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: '#d9d9d9', textAlign: 'center', padding: '8px 0' }}>暂无产出摘要</div>
+          <div style={{ fontSize: 12, color: '#d9d9d9', textAlign: 'center', padding: '8px 0' }}>{t('chat.workflowGraph.noArtifacts')}</div>
         )}
       </div>
     </div>
@@ -254,6 +234,7 @@ function TerminalNode({ pn }: { pn: PosNode }) {
 }
 
 function StepNode({ pn, svgRef }: { pn: PosNode; svgRef: React.RefObject<SVGSVGElement | null> }) {
+  const { t } = useTranslation();
   const { data } = pn;
   const c = sc(data.status);
   const attempts = data.step_attempts ?? [];
@@ -287,9 +268,6 @@ function StepNode({ pn, svgRef }: { pn: PosNode; svgRef: React.RefObject<SVGSVGE
               {String(data.step_index).padStart(2, '0')}
             </span>
           )}
-          {data.is_stale && data.status !== 'stale' && (
-            <span style={{ float: 'right', color: S.stale.color, fontSize: 10, lineHeight: '18px' }}>历史失效</span>
-          )}
         </div>
         {/* Row 2: label */}
         <div style={{ fontSize: 13, fontWeight: 600, color: '#141414', lineHeight: 1.3 }}>
@@ -299,7 +277,7 @@ function StepNode({ pn, svgRef }: { pn: PosNode; svgRef: React.RefObject<SVGSVGE
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flexWrap: 'nowrap', overflow: 'hidden' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: c.color, flexShrink: 0 }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: c.dot, display: 'inline-block' }} />
-            {c.label}
+            {t(c.label)}
           </span>
           {totalArtifacts > 0 && <span style={{ color: '#8c8c8c', flexShrink: 0 }}>📎{totalArtifacts}</span>}
           {latest && latest.duration_sec >= 0 && <span style={{ color: '#8c8c8c', flexShrink: 0 }}>⏱{fmtDur(latest.duration_sec)}</span>}
@@ -319,15 +297,13 @@ function StepNode({ pn, svgRef }: { pn: PosNode; svgRef: React.RefObject<SVGSVGE
   );
 }
 
-function EdgeLine({ pe, svgRef }: { pe: PosEdge; svgRef: React.RefObject<SVGSVGElement | null> }) {
+function EdgeLine({ pe, svgRef, markerPrefix }: { markerPrefix: string; pe: PosEdge; svgRef: React.RefObject<SVGSVGElement | null> }) {
   const [hov, setHov] = useState(false);
   const { data, pts } = pe;
   if (pts.length < 2) return null;
 
-  const etype = data.edge_type ?? (data.is_active_path ? 'current_direct' : 'skipped');
-  const style = EDGE_STYLE[etype] ?? EDGE_STYLE.skipped;
-  const markerId = ARROW_IDS[etype] ?? 'arr-gray';
-  const stroke = hov ? (etype === 'executed' ? '#237804' : etype.startsWith('current') ? '#003eb3' : '#8c8c8c') : style.stroke;
+  const style = EDGE_STYLE[data.edge_type];
+  const markerId = `${markerPrefix}-${data.edge_type}`;
   const d = ptsToD(pts);
 
   return (
@@ -339,34 +315,38 @@ function EdgeLine({ pe, svgRef }: { pe: PosEdge; svgRef: React.RefObject<SVGSVGE
         {/* Wide invisible hit area */}
         <path d={d} fill='none' stroke='transparent' strokeWidth={14} style={{ cursor: data.condition ? 'help' : 'default' }} />
         {/* Visible edge */}
-        <path d={d} fill='none' stroke={stroke} strokeWidth={hov ? style.width + 0.5 : style.width} strokeDasharray={style.dash} markerEnd={`url(#${markerId})`} />
+        <path d={d} fill='none' stroke={style.stroke} strokeWidth={hov ? style.width + 0.5 : style.width} strokeDasharray={style.dash} markerEnd={`url(#${markerId})`} />
       </g>
     </Tooltip>
   );
 }
 
 // ─── Legend ───────────────────────────────────────────────────────────────────
-function Legend() {
+function Legend({ nodes, edges }: { nodes: SGNode[]; edges: SGEdge[] }) {
+  const { t } = useTranslation();
+  const stepNodes = nodes.filter(node => !TERMINAL_IDS.has(node.id));
+  const statuses = [...new Map(stepNodes.map(node => {
+    const config = sc(node.status);
+    return [config.label, config] as const;
+  })).values()];
+  const edgeStyles = [...new Map(edges.map(edge => {
+    const config = EDGE_STYLE[edge.edge_type];
+    return [config.label, config] as const;
+  })).values()];
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '8px 20px', borderBottom: '1px solid #f0f0f0', fontSize: 12, color: '#595959', flexWrap: 'wrap', background: '#fff' }}>
-      {Object.entries(S).map(([, c]) => (
+    <div aria-label={t('chat.workflowGraph.legend')} style={{ display: 'flex', alignItems: 'center', gap: '10px 20px', padding: '12px 20px', borderBottom: '1px solid #f0f0f0', fontSize: 12, color: '#595959', flexWrap: 'wrap', background: '#fff' }}>
+      {statuses.map(c => (
         <span key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.dot, display: 'inline-block' }} />
-          {c.label}
+          {t(c.label)}
         </span>
       ))}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <svg width={28} height={8}><line x1={0} y1={4} x2={28} y2={4} stroke='#52c41a' strokeWidth={2} /></svg>
-        已执行
-      </span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <svg width={28} height={8}><line x1={0} y1={4} x2={28} y2={4} stroke='#1677ff' strokeWidth={2} /></svg>
-        当前直达
-      </span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <svg width={28} height={8}><line x1={0} y1={4} x2={28} y2={4} stroke='#1677ff' strokeWidth={2} strokeDasharray='5 2' /></svg>
-        后续可达
-      </span>
+      {edgeStyles.map(c => (
+        <span key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <svg width={28} height={8}><line x1={0} y1={4} x2={28} y2={4} stroke={c.stroke} strokeWidth={c.width} strokeDasharray={c.dash} /></svg>
+          {t(c.label)}
+        </span>
+      ))}
     </div>
   );
 }
@@ -374,6 +354,7 @@ function Legend() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function StateGraphView({ data }: { data: StateGraphData }) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const markerPrefix = useId().replace(/:/g, '');
   const nodes = data?.nodes ?? [];
   const allEdges = data?.edges ?? [];
   const dagEdges = useMemo(() => toDAGEdges(nodes, allEdges), [nodes, allEdges]);
@@ -385,16 +366,20 @@ export default function StateGraphView({ data }: { data: StateGraphData }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Legend />
+      <Legend nodes={nodes} edges={dagEdges} />
       <div className='sgv-scroll' style={{ flex: 1, overflow: 'auto', background: '#f5f5f5' }}>
         <svg ref={svgRef} width={svgW} height={svgH} style={{ display: 'block', background: '#f5f5f5', minWidth: '100%' }} aria-label='Workflow graph'>
           <defs>
-            <marker id='arr-green' markerWidth={8} markerHeight={8} refX={7} refY={3} orient='auto'><path d='M0,0 L0,6 L8,3 z' fill='#52c41a' /></marker>
-            <marker id='arr-blue'  markerWidth={8} markerHeight={8} refX={7} refY={3} orient='auto'><path d='M0,0 L0,6 L8,3 z' fill='#1677ff' /></marker>
-            <marker id='arr-gray'  markerWidth={8} markerHeight={8} refX={7} refY={3} orient='auto'><path d='M0,0 L0,6 L8,3 z' fill='#bfbfbf' /></marker>
+            {Object.entries(EDGE_STYLE).map(([type, style]) => (
+              <marker key={type} id={`${markerPrefix}-${type}`} markerWidth={8} markerHeight={8} refX={7} refY={3} orient='auto'><path d='M0,0 L0,6 L8,3 z' fill={style.stroke} /></marker>
+            ))}
           </defs>
-          {pes.map((pe, i) => <EdgeLine key={i} pe={pe} svgRef={svgRef} />)}
-          {pns.map((pn) => pn.isTerminal ? <TerminalNode key={pn.id} pn={pn} /> : <StepNode key={pn.id} pn={pn} svgRef={svgRef} />)}
+          {/* Cache coordinates only: statuses, labels and conditions must stay live. */}
+          {pes.map((pe, i) => <EdgeLine key={i} pe={{ ...pe, data: dagEdges[i] }} svgRef={svgRef} markerPrefix={markerPrefix} />)}
+          {pns.map((pn, i) => {
+            const liveNode = { ...pn, data: nodes[i] };
+            return pn.isTerminal ? <TerminalNode key={pn.id} pn={liveNode} /> : <StepNode key={pn.id} pn={liveNode} svgRef={svgRef} />;
+          })}
         </svg>
       </div>
     </div>

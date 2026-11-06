@@ -24,6 +24,21 @@ beforeEach(() => {
 });
 
 describe('versioned workflow synchronization', () => {
+  it('starts the pinned UI read before the runtime projection has arrived', async () => {
+    let resolve!: (value: unknown) => void;
+    api.getLatestSession.mockResolvedValue({ data: { data: { session: { ...session(), pinned_revision_id: 'revision' } } } });
+    api.getProjection.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const ui = vi.spyOn(useWorkflowStore.getState(), 'fetchWorkflowUI').mockResolvedValue({ tabs: [] });
+    try {
+      const loading = useWorkflowStore.getState().loadActiveSession('c');
+      await vi.waitFor(() => expect(ui).toHaveBeenCalledWith('image-workflow', 'revision'));
+      expect(useWorkflowStore.getState().sessionByConversation.c).toBeUndefined();
+      resolve({ data: { data: { state_version: 1, status: 'waiting', projection: {}, attempt_history: {} } } });
+      await loading;
+      expect(useWorkflowStore.getState().sessionByConversation.c?.session_id).toBe('s');
+    } finally { ui.mockRestore(); }
+  });
+
   it('keeps resumed Chat stop ownership across snapshots and rejects stale bindings', () => {
     const store = useWorkflowStore.getState();
     store.setSession('c', session());

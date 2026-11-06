@@ -23,17 +23,7 @@ export interface ArtifactRef {
   preview?: string;
 }
 
-export interface WorkflowRepairDraft extends ChatModeDraft {
-  runtimeSettings?: import('../utils/request').ConversationRuntimeSettings;
-  runInBackground: boolean;
-  workspaceId?: string;
-  workspacePermissionMode?: import('../utils/localWorkspace').WorkspacePermissionMode;
-}
-
 interface ChatInputStore {
-  workflowRepairDrafts: Record<string, WorkflowRepairDraft>;
-  saveWorkflowRepairDraft: (key: string, draft: WorkflowRepairDraft) => void;
-  updateWorkflowRepairFiles: (key: string, files: ComposerFileCandidate[]) => void;
   modeDraft?: ChatModeDraft;
   setModeDraft: (draft?: ChatModeDraft) => void;
   inputContents: Record<string, string>;
@@ -54,27 +44,12 @@ interface ChatInputStore {
 export const useChatInputStore = create<ChatInputStore>()(
   persist(
     (set, get) => ({
-      workflowRepairDrafts: {},
-      saveWorkflowRepairDraft: (key, draft) => set(state => ({
-        workflowRepairDrafts: { ...state.workflowRepairDrafts, [key]: draft },
-        inputContents: { ...state.inputContents, [key]: draft.text },
-        inputMentions: { ...state.inputMentions, [key]: draft.mentions },
-      })),
-      updateWorkflowRepairFiles: (key, files) => set(state => {
-        const draft = state.workflowRepairDrafts[key];
-        return draft ? { workflowRepairDrafts: { ...state.workflowRepairDrafts, [key]: { ...draft, files } } } : {};
-      }),
       setModeDraft: modeDraft => set({ modeDraft }),
       inputContents: {},
       inputMentions: {},
       artifactRefs: {},
       saveInputContent: (conversationId: string, content: string, mentions?: ChatMention[]) => {
         set((state) => ({
-          workflowRepairDrafts: state.workflowRepairDrafts[conversationId] ? {
-            ...state.workflowRepairDrafts,
-            [conversationId]: { ...state.workflowRepairDrafts[conversationId], text: content,
-              mentions: mentions ?? state.workflowRepairDrafts[conversationId].mentions },
-          } : state.workflowRepairDrafts,
           inputContents: {
             ...state.inputContents,
             [conversationId]: content,
@@ -96,13 +71,11 @@ export const useChatInputStore = create<ChatInputStore>()(
           const inputMentions = { ...state.inputMentions };
           delete newContents[conversationId];
           delete inputMentions[conversationId];
-          const workflowRepairDrafts = { ...state.workflowRepairDrafts };
-          delete workflowRepairDrafts[conversationId];
-          return { inputContents: newContents, inputMentions, workflowRepairDrafts };
+          return { inputContents: newContents, inputMentions };
         });
       },
       clearAllInputContents: () => {
-        set({ inputContents: {}, inputMentions: {}, workflowRepairDrafts: {}, modeDraft: undefined });
+        set({ inputContents: {}, inputMentions: {}, modeDraft: undefined });
       },
       addArtifactRef: (conversationId: string, ref: ArtifactRef) => {
         set((state) => {
@@ -144,7 +117,7 @@ export const useChatInputStore = create<ChatInputStore>()(
     }),
     {
       name: "chat-input-contents",
-      partialize: (state) => ({ inputContents: state.inputContents, inputMentions: state.inputMentions, workflowRepairDrafts: state.workflowRepairDrafts }),
+      partialize: (state) => ({ inputContents: state.inputContents, inputMentions: state.inputMentions }),
     },
   ),
 );

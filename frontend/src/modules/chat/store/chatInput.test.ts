@@ -20,16 +20,3 @@ describe('chat input drafts', () => {
     expect(store.getInputContent('b')).toBe('另一条消息');
   });
 });
-
-
-it('persists repair attachments with their exact draft and removes the recovery after submission', async () => {
- const files = [{ id: 'upload:one', name: 'one.pdf', input: { input_type: 'file' as const, uri: '/files/one', filename: 'one.pdf' } }];
- const store = useChatInputStore.getState();
- store.saveWorkflowRepairDraft('repair', { text: '测试技能 draft', mentions: [mention], files, runInBackground: true });
- await useChatInputStore.persist.rehydrate();
- expect(useChatInputStore.getState().workflowRepairDrafts.repair).toMatchObject({ files, runInBackground: true, mentions: [mention] });
- store.saveInputContent('repair', '测试技能 updated', [mention]);
- expect(useChatInputStore.getState().workflowRepairDrafts.repair.text).toBe('测试技能 updated');
- store.clearInputContent('repair');
- expect(useChatInputStore.getState().workflowRepairDrafts.repair).toBeUndefined();
-});

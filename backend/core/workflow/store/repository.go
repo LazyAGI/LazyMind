@@ -994,6 +994,18 @@ func (r *Repository) WaitTaskStatuses(ctx context.Context, sessionID string, tas
 			}
 		}
 		if terminal {
+			// A stop request fences attempts before their executors have exited.
+			// Do not release Chat to summarize until every stop receipt for this
+			// session has arrived, including parallel attempts outside this call.
+			var pendingStops int64
+			if err := r.db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
+				Where("session_id = ? AND terminal_code = ?", sessionID, "WORKFLOW_STOP_REQUESTED").
+				Count(&pendingStops).Error; err != nil {
+				return nil, err
+			}
+			terminal = pendingStops == 0
+		}
+		if terminal {
 			var tasks []orm.SubAgentTask
 			_ = r.db.WithContext(ctx).Select("id", "summary").Where("id IN ?", taskIDs).Find(&tasks).Error
 			summaries := make(map[string]string, len(tasks))

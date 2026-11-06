@@ -1,3 +1,5 @@
+@use '../../../../styles/taskStatus' as status;
+
 .workflow-panel {
   container: workflow-panel / inline-size;
   display: flex;
@@ -297,6 +299,7 @@
     &--completed { background: #e6f7ee; color: #16a34a; }
     &--waiting   { background: #fff4e0; color: #d97706; }
     &--failed    { background: #fef2f2; color: #dc2626; }
+    &--stopped   { background: status.$paused-soft; color: status.$paused-text; }
   }
 
   &__revision {
@@ -622,9 +625,25 @@
     flex-shrink: 0;
 
     &--running     { background: #2563eb; }
-    &--interrupted { background: #f59e0b; }
+    &--paused { background: status.$paused-accent; }
     &--failed      { background: #ef4444; }
+    &--skipped     { background: status.$skipped-accent; }
+    &--canceled    { background: #7a8493; }
     &--succeeded   { background: #10b981; }
+  }
+
+  &__empty.workflow-panel__empty--skipped {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    color: status.$skipped-text;
+    padding: 28px 24px;
+    text-align: center;
+    line-height: 1.6;
+
+    strong { font-weight: 500; }
+    span { max-width: 520px; }
   }
 
   // Horizontal scrollable image card list

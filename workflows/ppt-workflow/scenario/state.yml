@@ -650,6 +650,7 @@ steps:
   build_outline:
     label: Build Outline
     mode: auto
+    route: choice
     rerun_when: >
       用户要求在未启用 AI 底图的现有 PPT 中插入整页；或 AI 底图插页流程
       已经先插入底图提示词和底图，需要发布对应的新大纲。

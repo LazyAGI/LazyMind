@@ -691,6 +691,14 @@ func manualSchemas() map[string]any {
 		"TaskRemovalPreview": objReq([]string{"task_id", "task_count", "conversation_count", "active_task_count", "impact_version"}, prop("task_id", strSchema()), prop("task_count", intSchema()), prop("conversation_count", intSchema()), prop("active_task_count", intSchema()), prop("impact_version", strSchema())),
 		"TaskRemovalRequest": obj(prop("impact_version", strSchema())),
 		"TaskRemovalResult":  objReq([]string{"removed_task_ids", "trashed_conversation_ids", "cancellation_pending"}, prop("removed_task_ids", array(strSchema())), prop("trashed_conversation_ids", array(strSchema())), prop("cancellation_pending", boolSchema())),
+		"TaskCenterWorkbenchGroup": objReq([]string{"items", "total", "page"},
+			prop("items", array(refSchema("TaskCenterTaskResponse"))), prop("total", intSchema()), prop("page", intSchema())),
+		"TaskCenterWorkbenchResponse": objReq([]string{"groups", "page_size"},
+			prop("groups", objReq([]string{"attention", "running", "paused", "failed", "recent", "canceled"},
+				prop("attention", refSchema("TaskCenterWorkbenchGroup")), prop("running", refSchema("TaskCenterWorkbenchGroup")),
+				prop("paused", refSchema("TaskCenterWorkbenchGroup")), prop("failed", refSchema("TaskCenterWorkbenchGroup")),
+				prop("recent", refSchema("TaskCenterWorkbenchGroup")), prop("canceled", refSchema("TaskCenterWorkbenchGroup")))),
+			prop("page_size", intSchema())),
 		"TaskCenterTaskListResponse": objReq(
 			[]string{"items", "total", "page", "page_size"}, prop("items", array(refSchema("TaskCenterTaskResponse"))),
 			prop("total", int64Schema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("status_counts", refSchema("TaskCenterStatusCounts")),
@@ -1184,6 +1192,13 @@ func manualPaths() map[string]any {
 		"/schedules/{schedule_id}:move": map[string]any{"post": op(
 			"Move a schedule to an automation group", queryParams(param("path", "schedule_id", true, strSchema())),
 			jsonBody(refSchema("ScheduleMoveRequest"), true), map[string]any{"description": "Schedule moved"},
+		)},
+		"/task-center/workbench": map[string]any{"get": op(
+			"Summarize task categories with four previews per page", queryParams(
+				param("query", "task_type", false, strSchema()), param("query", "keyword", false, strSchema()),
+				param("query", "category", false, enumStringSchema("attention", "running", "paused", "failed", "recent", "canceled")),
+				param("query", "page", false, intSchema()),
+			), nil, response(200, "Task-center workbench", refSchema("TaskCenterWorkbenchResponse")),
 		)},
 		"/task-center/tasks": map[string]any{"get": op(
 			"List task-center tasks", queryParams(

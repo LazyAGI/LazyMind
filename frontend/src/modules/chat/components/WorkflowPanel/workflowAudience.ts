@@ -1,4 +1,10 @@
-import type { CompositePanelNode, CompositeLayoutNode, WorkflowUI } from '../../store/workflowPanel';
+import { filterWorkflowTabs, type CompositePanelNode, type CompositeLayoutNode, type WorkflowUI, type WorkflowSession } from '../../store/workflowPanel';
+
+/** Chat and Task Center must apply the same audience and runtime visibility rules. */
+export function workflowTabsForAudience(ui: WorkflowUI, session: Pick<WorkflowSession, 'slots' | 'steps' | 'projection'>, developer: boolean) {
+  const visibleUI = workflowUIForAudience(ui, developer);
+  return filterWorkflowTabs(visibleUI.tabs, session.slots, visibleUI.tab_visibility_ready_material, session);
+}
 
 export function hiddenUserSlots(ui: WorkflowUI): Set<string> {
   return new Set([

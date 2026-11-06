@@ -446,7 +446,6 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	seedFacadeSources(t, db, "revision-1", facadeSourceWorkflow, facadeSourceState)
 	inputContent := []byte("source material")
 	if err := db.Create(&orm.ChatHistory{ID: "trigger-history", ConversationID: "foreign-chat"}).Error; err != nil {
 		t.Fatal(err)

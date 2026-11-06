@@ -8,7 +8,7 @@ import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
-import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
+import { reconcileWorkflowTasks, workflowTaskDisplayStatus, taskBelongsToWorkflow } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +24,8 @@ import {
   ApiOutlined,
   CheckOutlined,
   DownloadOutlined,
+  PauseCircleFilled,
+  StopOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -488,8 +490,9 @@ function ReferenceSources({ sources, operations }: { sources: ChatSource[]; oper
   return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults operations={operations} /></div>;
 }
 
-function StatusBadge({ status }: { status: TaskStatus }) {
+function StatusBadge({ status: rawStatus, workflowPaused }: { status: TaskStatus; workflowPaused: boolean }) {
   const { t } = useTranslation();
+  const status = workflowTaskDisplayStatus(rawStatus, workflowPaused ? 'paused' : undefined);
   if (status === "succeeded") {
     return (
       <span className="task-status task-status-success">
@@ -497,17 +500,20 @@ function StatusBadge({ status }: { status: TaskStatus }) {
       </span>
     );
   }
-  if (status === "failed" || status === "canceled") {
+  if (status === "failed") {
     return (
       <span className="task-status task-status-failed">
         <CloseCircleFilled /> {t("taskCenter.statusFailed")}
       </span>
     );
   }
-  if (status === "interrupted") {
+  if (status === "canceled") {
+    return <span className="task-status task-status-canceled"><StopOutlined /> {t("taskCenter.statusCanceled")}</span>;
+  }
+  if (status === "paused") {
     return (
-      <span className="task-status task-status-failed">
-        <CloseCircleFilled /> {t("taskCenter.statusInterrupted")}
+      <span className="task-status task-status-paused">
+        <PauseCircleFilled /> {t("taskCenter.statusPaused")}
       </span>
     );
   }
@@ -518,7 +524,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
-function TaskCard({ task }: { task: SubAgentTask }) {
+function TaskCard({ task, workflowPaused }: { task: SubAgentTask; workflowPaused: boolean }) {
   const [collapsed, setCollapsed] = useState(false);
   const [cardHeight, setCardHeight] = useState<number>(0);
   const cardDragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -567,7 +573,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           </span>
         </Tooltip>
         <span className="task-card-tag">{t("taskCenter.panelTitle")}</span>
-        <StatusBadge status={task.status} />
+        <StatusBadge status={task.status} workflowPaused={workflowPaused} />
       </div>
       {!collapsed && (
         <>
@@ -628,7 +634,7 @@ function stateLabel(state: OrdinaryTaskState, t: TFunction): string {
   if (state === "running") return t("taskCenter.ordinaryStatusRunning");
   if (state === "failed") return t("taskCenter.statusFailed");
   if (state === "canceled") return t("taskCenter.statusCanceled");
-  if (state === "interrupted") return t("taskCenter.statusInterrupted");
+  if (state === "paused") return t("taskCenter.statusPaused");
   if (state === "outdated") return t("taskCenter.ordinaryStatusOutdated");
   return t("taskCenter.statusPending");
 }
@@ -641,10 +647,12 @@ function StateMarker({
   ordinal?: number;
 }) {
   if (state === "complete") return <CheckOutlined />;
+  if (state === "paused") return <PauseCircleFilled />;
   if (state === "running") {
     return <span className="ordinary-task-spinner" aria-hidden="true" />;
   }
-  if (["failed", "canceled", "interrupted"].includes(state)) return <CloseCircleFilled />;
+  if (state === "canceled") return <StopOutlined />;
+  if (state === "failed") return <CloseCircleFilled />;
   return <>{ordinal}</>;
 }
 
@@ -798,7 +806,7 @@ function OrdinaryTaskCard({
 function groupState(group: OrdinaryTaskGroup): OrdinaryTaskState {
   const states = group.items.map((item) => item.state);
   if (states.includes("failed")) return "failed";
-  if (states.includes("interrupted")) return "interrupted";
+  if (states.includes("paused")) return "paused";
   if (states.includes("canceled")) return "canceled";
   if (states.includes("running")) return "running";
   if (states.every((state) => state === "complete")) return "complete";
@@ -858,7 +866,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
                 ? t("taskCenter.ordinaryParallelPending")
                 : state === "outdated"
                   ? t("taskCenter.ordinaryParallelOutdated")
-                  : state === "canceled" || state === "interrupted" ? stateLabel(state, t)
+                  : state === "canceled" || state === "paused" ? stateLabel(state, t)
                     : t("taskCenter.ordinaryParallelRunning")}
         </strong>
         <span className="ordinary-parallel-status">{stateLabel(state, t)}</span>
@@ -929,11 +937,13 @@ function OrdinaryTaskCenter({
   groupedStatus,
   hiddenSteps,
   hideGroupedArtifacts,
+  workflowPaused = false,
 }: {
   hideFinalArtifacts?: boolean;
   groupedStatus?: string;
   hiddenSteps?: string[];
   hideGroupedArtifacts?: boolean;
+  workflowPaused?: boolean;
   runs: OrdinaryRunView[];
   timeline: OrdinaryTaskTimeline;
   onClose?: () => void;
@@ -1033,7 +1043,7 @@ function OrdinaryTaskCenter({
                 })}
               </strong>
               <span>
-                {timeline.items.length === 0 ? t("taskCenter.ordinaryInitializing") : activeItem
+                {workflowPaused ? t("taskCenter.statusPaused") : timeline.items.length === 0 ? t("taskCenter.ordinaryInitializing") : activeItem
                   ? timeline.failedCount > 0
                     ? t("taskCenter.ordinaryRunningWithFailures", {
                         count: timeline.failedCount,
@@ -1063,10 +1073,10 @@ function OrdinaryTaskCenter({
             </span>
           </div>
           {timeline.items.some(item => item.ordinary?.session_id) && !groupedStatus && (
-            <progress className="ordinary-workflow-progress" aria-label={t("taskCenter.ordinaryCompletedSummary", { completed: timeline.completedCount, total: timeline.totalCount })}
+            <progress className={`ordinary-workflow-progress${workflowPaused ? ' is-paused' : ''}`} aria-label={t("taskCenter.ordinaryCompletedSummary", { completed: timeline.completedCount, total: timeline.totalCount })}
               max={Math.max(1, timeline.totalCount)} value={timeline.totalCount > 0 ? timeline.completedCount : undefined} />
           )}
-          {groupedStatus ? <WorkflowTaskProgress hiddenSteps={hiddenSteps} timeline={timeline} status={groupedStatus}
+          {groupedStatus ? <WorkflowTaskProgress hiddenSteps={hiddenSteps} timeline={timeline} status={groupedStatus} paused={workflowPaused}
             title={item => publicTaskTitle(item, t)} label={item => stateLabel(item.state, t)}
             details={item => <OrdinaryTaskDetails key={item.id} item={item} />} /> : <ol className="ordinary-task-list" aria-label={t("taskCenter.ordinaryTimelineLabel")}>
             {timeline.groups.map((group) => {
@@ -1117,7 +1127,7 @@ function OrdinaryTaskCenter({
   );
 }
 
-type FilterKey = "all" | "running" | "succeeded" | "failed";
+type FilterKey = "all" | "running" | "succeeded" | "failed" | "paused";
 
 const TaskCenter = (props: Props) => {
   const {
@@ -1136,6 +1146,7 @@ const TaskCenter = (props: Props) => {
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
   const workflowSession = useWorkflowStore((s) => sessionId ? s.sessionByConversation[sessionId] : undefined);
+  const workflowPaused = workflowSession?.projection?.display?.status === 'paused';
   const { i18n } = useTranslation();
   const taskPresentation = useWorkflowStore(s => workflowSession ? s.workflowUIByWorkflow[workflowUICacheKey(workflowSession.workflow_id, workflowSession.pinned_revision_id, i18n.language || "")]?.task_presentation : undefined);
   const tasks = useMemo(() => reconcileWorkflowTasks(storedTasks, workflowSession?.steps), [storedTasks, workflowSession?.steps]);
@@ -1182,23 +1193,26 @@ const TaskCenter = (props: Props) => {
         || workflowSteps.some(step => step.session_id === currentRun.run_id && step.task_id === task.task_id)) : tasks,
       currentRun && workflowSession?.session_id !== currentRun.run_id ? [] : workflowSteps,
       now, plannedCount,
+      workflowPaused ? workflowSession?.session_id : undefined,
     ),
     ...runTiming,
-  }), [currentRun, now, plannedCount, tasks, workflowSession?.session_id, workflowSteps, runTiming.elapsedSeconds, runTiming.cumulativeExecutionSeconds]);
+  }), [currentRun, now, plannedCount, tasks, workflowPaused, workflowSession?.session_id, workflowSteps, runTiming.elapsedSeconds, runTiming.cumulativeExecutionSeconds]);
 
   const filteredTasks = useMemo(() => {
     if (filter === "all") return tasks;
     if (filter === "running") return tasks.filter((t) => RUNNING_STATUSES.includes(t.status));
     if (filter === "succeeded") return tasks.filter((t) => t.status === "succeeded");
-    if (filter === "failed") return tasks.filter((t) => t.status === "failed" || t.status === "interrupted" || t.status === "canceled");
+    if (filter === "failed" || filter === "paused") return tasks.filter((task) =>
+      workflowTaskDisplayStatus(task.status, workflowPaused && taskBelongsToWorkflow(task, workflowSession) ? 'paused' : undefined) === filter);
     return tasks;
-  }, [tasks, filter]);
+  }, [tasks, filter, workflowPaused, workflowSession]);
 
   const filterDefs: { key: FilterKey; label: string }[] = [
     { key: "all", label: t("taskCenter.filterAll") },
     { key: "running", label: t("taskCenter.running") },
     { key: "succeeded", label: t("taskCenter.filterSucceeded") },
     { key: "failed", label: t("taskCenter.filterFailed") },
+    { key: "paused", label: t("taskCenter.filterPaused") },
   ];
 
   const reloadOrdinary = async () => {
@@ -1215,6 +1229,7 @@ const TaskCenter = (props: Props) => {
     return (
       <OrdinaryTaskCenter
         hideFinalArtifacts={props.hideFinalArtifacts}
+        workflowPaused={workflowPaused && (!currentRun || currentRun.run_id === workflowSession?.session_id)}
         key={sessionId}
         runs={[...(runs ?? []), ...(workflowSession?.ordinary_runs ?? [])]}
         timeline={ordinaryTimeline}
@@ -1276,7 +1291,7 @@ const TaskCenter = (props: Props) => {
           <div className="task-empty">{t("taskCenter.empty")}</div>
         ) : (
           filteredTasks.map((task) => (
-            <TaskCard key={task.task_id} task={task} />
+            <TaskCard key={task.task_id} task={task} workflowPaused={workflowPaused && taskBelongsToWorkflow(task, workflowSession)} />
           ))
         )}
       </div>

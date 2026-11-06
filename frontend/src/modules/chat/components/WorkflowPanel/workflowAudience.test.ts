@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hydrateWorkflowUI } from '../../store/workflowPanel';
-import { hiddenUserSlots, workflowUIForAudience } from './workflowAudience';
+import { hiddenUserSlots, workflowTabsForAudience, workflowUIForAudience } from './workflowAudience';
 
 describe('workflow audience visibility', () => {
   const spec = {
@@ -40,5 +40,18 @@ describe('workflow audience visibility', () => {
   it('preserves legacy layouts without declarations', () => {
     const ui = hydrateWorkflowUI({ ui: { tabs: [{ id: 'legacy', slots: [{ id: 'document' }] }] } });
     expect(workflowUIForAudience(ui, false)).toBe(ui);
+  });
+
+  it('combines audience and runtime tab visibility without using attempt count as the step list', () => {
+    const ui = hydrateWorkflowUI({ ...spec, ui: { tabs: [
+      { id: 'analysis', slots: [{ id: 'notes' }] },
+      { id: 'prompts', slots: [{ id: 'prompt' }] },
+      { id: 'materials', step_id: 'collect', hide_when_material: 'skip_collection', slots: [{ id: 'notes' }] },
+      { id: 'preview', slots: [{ id: 'slide' }] },
+    ] } });
+    const session = { slots: [{ slot: 'skip_collection', selected: true }], projection: { past: ['collect'] } } as Parameters<typeof workflowTabsForAudience>[1];
+    expect(workflowTabsForAudience(ui, session, true).map(tab => tab.id)).toEqual(['analysis', 'prompts', 'materials', 'preview']);
+    expect(workflowTabsForAudience(ui, session, false).map(tab => tab.id)).toEqual(['analysis', 'materials', 'preview']);
+    expect(workflowTabsForAudience(ui, { ...session, projection: { past: [] } }, true).map(tab => tab.id)).toEqual(['analysis', 'prompts', 'preview']);
   });
 });

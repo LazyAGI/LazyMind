@@ -14,8 +14,8 @@ import { useChatMessageStore } from "../../store/chatMessage";
 import { useWorkflowStore } from "../../store/workflowPanel";
 import type { ChatFileList, ChatInputImperativeProps } from "./types";
 import type { ChatMention } from "./MentionEditor";
-import { listSkillLinkedWorkflows, getWorkflowReadiness } from "@/modules/workflow/workflowDraftApi";
-import { message, ConfigProvider } from "antd";
+import { listSkillLinkedWorkflows } from "@/modules/workflow/workflowDraftApi";
+import { message } from "antd";
 import { MemoryRouter } from "react-router-dom";
 
 const render = (ui: ReactNode) => renderComponent(ui, { wrapper: MemoryRouter });
@@ -44,7 +44,6 @@ vi.mock("@/modules/chat/utils/request", async (importOriginal) => ({
 
 vi.mock("@/modules/workflow/workflowDraftApi", () => ({
   listSkillLinkedWorkflows: vi.fn().mockResolvedValue({ workflows: [] }),
-  getWorkflowReadiness: vi.fn(),
 }));
 
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -894,72 +893,20 @@ describe("ChatInput optional reranking", () => {
   });
 });
 
-
-describe("workflow readiness before submitting", () => {
-  const key = "workflow-readiness-draft";
-  const workflow: ChatMention = { mention_id: "selected-workflow", type: "workflow", resource_id: "user:owner:workflow",
-    display_name: "Workflow", start: 0, end: 8 };
-  const unavailable = { ready: false, workflow_ref: workflow.resource_id, name: "Workflow", revision_id: "rev", revision_no: 1,
-    editable: true, repair_url: "/memory-management/workflows/draft", issues: [{ code: "CONFIG", message: "Missing configuration" }] };
-  beforeEach(() => {
-    const createObjectURL = URL.createObjectURL;
-    const revokeObjectURL = URL.revokeObjectURL;
-    URL.createObjectURL = vi.fn(() => "blob:test-pdf");
-    URL.revokeObjectURL = vi.fn();
-    onTestFinished(() => {
-      URL.createObjectURL = createObjectURL;
-      URL.revokeObjectURL = revokeObjectURL;
-    });
-    useChatInputStore.getState().clearAllInputContents();
-    useChatInputStore.getState().saveInputContent(key, "Workflow draft", [workflow]);
-    vi.mocked(getWorkflowReadiness).mockReset().mockResolvedValue(unavailable);
-  });
-  function Composer({ work = false, onSend }: { work?: boolean; onSend: ReturnType<typeof vi.fn> }) {
-    const [value, setValue] = useState("Workflow draft");
-    return <ConfigProvider theme={{ token: { motion: false } }}><ChatInput value={value} onChange={setValue}
-      onSend={onSend} draftKey={key} isChatContent runInBackground={work}
-      initialConversationSettings={{ enable_workflow: true, workflow_mode: "dynamic" }}
-      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} /></ConfigProvider>;
-  }
-  it.each([false, true])("blocks Chat/Work without losing the selected workflow or attachment (work=%s)", async work => {
-    const onSend = vi.fn();
-    render(<Composer work={work} onSend={onSend} />);
-    fireEvent.click(screen.getByTestId("attach-test-pdf"));
-    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(onSend).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByRole("button", { name: "paper.pdf" })).toBeInTheDocument();
-    expect(useChatInputStore.getState().getInputContent(key)).toBe("Workflow draft");
-    expect(useChatInputStore.getState().getInputMentions(key)).toEqual([workflow]);
-    vi.mocked(getWorkflowReadiness).mockResolvedValue({ ...unavailable, ready: true, issues: [] });
-    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
-      text: "Workflow draft", mentions: [workflow], referencedFiles: [expect.objectContaining({ filename: "paper.pdf" })],
-    })));
-  });
-  it("restores the attachment and references after navigating to repair and remounting the composer", async () => {
-    const onSend = vi.fn();
-    const view = render(<Composer onSend={onSend} work />);
-    fireEvent.click(screen.getByTestId("attach-test-pdf"));
-    fireEvent.click(screen.getByText("select workspace"));
-    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "chat.workflowReadinessRepair" }));
-    await waitFor(() => expect(useChatInputStore.getState().workflowRepairDrafts[key]).toMatchObject({
-      text: "Workflow draft", mentions: [workflow], workspaceId: "grant-alpha", runInBackground: true,
-      files: [expect.objectContaining({ name: "paper.pdf", input: expect.objectContaining({ uri: "/uploads/paper.pdf" }) })],
-    }));
-    view.unmount();
-    render(<Composer onSend={onSend} work />);
-    expect(screen.getByRole("button", { name: "paper.pdf" })).toBeInTheDocument();
-    vi.mocked(getWorkflowReadiness).mockResolvedValue({ ...unavailable, ready: true, issues: [] });
-    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
-      text: "Workflow draft", workspace_id: "grant-alpha", mentions: [workflow],
-      referencedFiles: [expect.objectContaining({ filename: "paper.pdf", uri: "/uploads/paper.pdf" })],
-    })));
-    expect(useChatInputStore.getState().workflowRepairDrafts[key]).toBeUndefined();
-  });
+it.each([
+  { work: false, type: 'workflow' as const },
+  { work: true, type: 'workflow' as const },
+  { work: false, type: 'skill' as const },
+  { work: true, type: 'skill' as const },
+])('submits a selected $type directly in Work=$work without a repair dialog', async ({ work, type }) => {
+  useChatInputStore.getState().clearAllInputContents();
+  vi.mocked(listSkillLinkedWorkflows).mockResolvedValue({ skill_id: 'skill-1', skill_name: 'Advisor', workflows: [] });
+  const mention: ChatMention = { mention_id: `selected-${type}`, type, resource_id: type === 'workflow' ? 'user:owner:workflow' : 'skill-1', display_name: 'Selected capability' };
+  const onSend = vi.fn();
+  render(<ChatInput value="Run this" onChange={vi.fn()} onSend={onSend} isChatContent runInBackground={work}
+    boundMentions={[mention]} initialConversationSettings={{ enable_workflow: true, workflow_mode: 'dynamic' }}
+    showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+  fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+  await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: 'Run this', mentions: [mention] })));
+  expect(screen.queryByRole('dialog')).toBeNull();
 });

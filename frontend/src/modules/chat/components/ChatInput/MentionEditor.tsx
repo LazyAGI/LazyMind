@@ -10,13 +10,14 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { message } from "antd";
+import { message, Tooltip } from "antd";
 import {
   AppstoreOutlined,
   BulbOutlined,
   CommentOutlined,
   DatabaseOutlined,
   FileTextOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { listSkillAssetsPage } from "@/modules/memory/skillApi";
@@ -502,7 +503,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     if (!editor || !currentQuery || selectingWorkflow.current) return;
     const candidateDisabledReason = getDisabledReason(candidate);
     if (candidate.disabled || candidateDisabledReason) {
-      message.info(candidateDisabledReason || "该能力已停用");
+      message.info(candidateDisabledReason || t("chat.mentionCapabilityDisabled"));
       return;
     }
     if (
@@ -666,7 +667,13 @@ const MentionEditor = forwardRef<MentionEditorRef, {
             if (!items.length) return null;
             return <div className={`chat-mention-group${group.type === "conversation" ? " is-conversation" : ""}`} key={group.type}>
               <div className="chat-mention-group-title">
-                <span>{group.icon}{t(group.labelKey)}</span>
+                <span>{group.icon}{t(group.labelKey)}
+                  {group.type === "workflow" && workflowDisabled && (
+                    <Tooltip title={t("chat.workflowSelectionDisabledLabel")}>
+                      <StopOutlined className="chat-mention-workflow-disabled" aria-label={t("chat.conversationConfigWorkflowDisabled")} />
+                    </Tooltip>
+                  )}
+                </span>
                 <span className="chat-mention-shortcut"><code>{group.trigger}{group.shortcut}:</code>{t("chat.mentionShortcutHint")}</span>
               </div>
               <div className="chat-mention-options">
@@ -675,12 +682,11 @@ const MentionEditor = forwardRef<MentionEditorRef, {
                 const itemDisabled = isCandidateDisabled(item);
                 const itemDisabledReason = getDisabledReason(item);
                 const title = itemDisabled
-                  ? `${item.name}\n${itemDisabledReason || "该能力已停用"}`
+                  ? `${item.name}\n${itemDisabledReason || t("chat.mentionCapabilityDisabled")}`
                   : item.description ? `${item.name}\n${item.description}` : item.name;
                 return <button type="button" role="option" id={`${menuId}-${index}`} title={title} aria-selected={activeIndex === index} className={`chat-mention-option${activeIndex === index ? " is-active" : ""}`} disabled={itemDisabled} key={`${item.type}-${item.id}`} onClick={() => { if (!itemDisabled) insertCandidate(item); }} onMouseEnter={() => { if (!itemDisabled) setActiveKey(`${item.type}:${item.id}`); }} onMouseDown={(event) => { event.preventDefault(); if (!itemDisabled) insertCandidate(item); }}>
                   <span className="chat-mention-option-name">{item.name}</span>
-                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || "已停用"}</span>
-                    : item.type === "workflow" && workflowDisabled ? <span className="chat-mention-option-status">{t("chat.workflowSelectionDisabledLabel")}</span> : null}
+                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || t("chat.mentionDisabled")}</span> : null}
                   {group.type === "conversation" && item.description ? <span className="chat-mention-option-description">{item.description}</span> : null}
                 </button>;
               })}

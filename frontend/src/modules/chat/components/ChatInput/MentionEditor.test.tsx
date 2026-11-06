@@ -71,7 +71,11 @@ describe("MentionEditor", () => {
       onPaste={vi.fn()} onSend={onSend} onCompositionChange={vi.fn()} />);
     enterQuery(query);
     const option = await screen.findByRole("option", { name: /Writer/ });
-    expect(option).toHaveTextContent("chat.workflowSelectionDisabledLabel");
+    expect(option).toHaveTextContent("Writer");
+    expect(option).not.toHaveTextContent("chat.workflowSelectionDisabledLabel");
+    const disabledIcon = screen.getByRole("img", { name: "chat.conversationConfigWorkflowDisabled" });
+    expect(disabledIcon.closest(".chat-mention-group-title")).toHaveTextContent("chat.mentionWorkflow");
+    expect(container.querySelectorAll(".chat-mention-workflow-disabled")).toHaveLength(1);
     fireEvent.mouseDown(option);
     expect(beforeWorkflowSelect).toHaveBeenCalledTimes(1);
     expect(container.querySelector(".chat-mention-chip")).toBeNull();
@@ -88,6 +92,7 @@ describe("MentionEditor", () => {
       onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
     enterQuery("/workflow:");
     await screen.findByRole("option", { name: "Writer" });
+    expect(screen.queryByRole("img", { name: "chat.conversationConfigWorkflowDisabled" })).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowDown" });
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     await waitFor(() => expect(beforeWorkflowSelect).toHaveBeenCalledTimes(1));

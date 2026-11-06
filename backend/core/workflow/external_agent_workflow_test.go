@@ -508,12 +508,20 @@ func TestExternalTaskResponseActionContract(t *testing.T) {
 }
 
 func TestExternalTaskHostedSessionAndResults(t *testing.T) {
-	db := seedReadinessWorkflow(t)
+	db := newHandlerTestDB(t)
 	if err := db.AutoMigrate(&orm.Conversation{}, &orm.UserModelProvider{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
 	seedWorkflowModelSelection(t, db, "owner")
-	task := orm.ExternalAgentWorkflowTask{ID: uuid.NewString(), OwnerUserID: "owner", AgentType: "codex", IdempotencyKey: "run", TaskDescription: "Make report", WorkflowRef: "user:owner:readiness", WorkflowRevisionID: "good",
+	resource := orm.WorkflowResource{ID: "resource", WorkflowRef: "user:owner:report", WorkflowID: "report", OwnerUserID: "owner", Status: "active", HeadRevisionID: "revision"}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	revision := orm.WorkflowRevision{ID: "revision", WorkflowResourceID: resource.ID, RevisionNo: 1, TreeHash: "tree", CompiledGraph: mustJSON(map[string]any{})}
+	if err := db.Create(&revision).Error; err != nil {
+		t.Fatal(err)
+	}
+	task := orm.ExternalAgentWorkflowTask{ID: uuid.NewString(), OwnerUserID: "owner", AgentType: "codex", IdempotencyKey: "run", TaskDescription: "Make report", WorkflowRef: resource.WorkflowRef, WorkflowRevisionID: revision.ID,
 		RequestJSON: mustJSON(map[string]any{}), ResultSummaryJSON: mustJSON(map[string]any{}), ResultArtifactsJSON: mustJSON([]any{})}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)

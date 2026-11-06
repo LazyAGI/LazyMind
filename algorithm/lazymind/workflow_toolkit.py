@@ -337,6 +337,27 @@ class HostWorkflowToolkit:
             retry_origin=retry_origin,
             workflow_mode=workflow_mode,
         )).result
+        workflow_state = result.get('workflow_state') or {}
+        display = workflow_state.get('display') or {}
+        if display.get('status') == 'paused':
+            # Only the authoritative, acknowledged pause is a user boundary.
+            # An interrupted attempt by itself may instead be an execution failure.
+            return {
+                **result,
+                'status': 'paused',
+                'outcome': 'workflow_paused',
+                'ready_steps': [],
+                'retryable_steps': [],
+                'next_action': {
+                    'tool': None,
+                    'instruction': (
+                        'The user paused this workflow and all executors have stopped. '
+                        'Conclude this Chat turn with the confirmed pause and preserved progress. '
+                        'Do not retry, resume, or advance any step until the user explicitly continues.'
+                    ),
+                },
+                'command_id': resolved_command_id,
+            }
         statuses = result.get('attempt_statuses') if isinstance(result, dict) else None
         if isinstance(statuses, dict):
             failed = {

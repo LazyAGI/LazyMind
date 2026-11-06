@@ -11,8 +11,8 @@ import (
 
 func TestDurableDisplayStates(t *testing.T) {
 	for _, sample := range []struct {
-		name, session, step, mode, want      string
-		stopped, skip, stale, runningSibling bool
+		name, session, step, mode, want                     string
+		stopped, legacyStopped, skip, stale, runningSibling bool
 	}{
 		{name: "preparing", session: "waiting", want: "running"},
 		{name: "running", session: "active", step: "running", want: "running"},
@@ -23,13 +23,15 @@ func TestDurableDisplayStates(t *testing.T) {
 		{name: "failed", session: "failed", step: "failed", mode: "human", want: "failed"},
 		{name: "driver failure cannot discard pending review", session: "failed", step: "succeeded", mode: "human", want: "waiting"},
 		{name: "user pause", session: "waiting", step: "interrupted", stopped: true, want: "paused"},
+		{name: "legacy user pause", session: "waiting", step: "interrupted", legacyStopped: true, want: "paused"},
+		{name: "pause takes precedence without approving review", session: "waiting", step: "succeeded", mode: "human", stopped: true, want: "paused"},
 		{name: "pause before dispatch", session: "waiting", stopped: true, want: "paused"},
 		{name: "completed", session: "completed", step: "succeeded", want: "completed"},
 		{name: "parallel execution wins", session: "waiting", step: "succeeded", mode: "human", runningSibling: true, want: "running"},
 		{name: "stale approval ignored", session: "waiting", step: "succeeded", mode: "human", stale: true, want: "running"},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{})
+			db := orm.MigrateTestDB(t, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}, &orm.SubAgentTask{})
 			now := time.Now().UTC()
 			session := orm.WorkflowSession{ID: "session", Status: sample.session, WorkflowID: "workflow", CreateUserID: "owner", WorkflowRevisionID: "revision"}
 			if sample.stopped {
@@ -40,12 +42,20 @@ func TestDurableDisplayStates(t *testing.T) {
 				t.Fatal(err)
 			}
 			if sample.step != "" {
-				step := orm.WorkflowSessionStep{ID: "attempt", SessionID: session.ID, StepID: "step", TaskID: "task", Status: sample.step, Attempt: 1, Validity: "effective", CreatedAt: now.Add(-time.Second)}
+				step := orm.WorkflowSessionStep{ID: "attempt", SessionID: session.ID, StepID: "step", TaskID: "task", Status: sample.step, Attempt: 1, Validity: "effective", CreatedAt: now.Add(-time.Second), UpdatedAt: now}
 				if sample.stale {
 					step.Validity = "stale"
 				}
 				if err := db.Create(&step).Error; err != nil {
 					t.Fatal(err)
+				}
+				if sample.legacyStopped {
+					if err := db.Exec(`INSERT INTO sub_agent_tasks
+						(id, conversation_id, seq_in_conversation, agent_type, title, mode, status, summary, last_heartbeat, created_at, updated_at)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+						"task", "conversation", 1, "workflow_step", "step", "auto", "interrupted", legacyUserStopSummary, now, now.Add(-time.Second), now).Error; err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			if sample.skip {
@@ -62,7 +72,7 @@ func TestDurableDisplayStates(t *testing.T) {
 			if err != nil || view.Status != sample.want {
 				t.Fatalf("view=%+v err=%v want=%s", view, err, sample.want)
 			}
-			if (view.ApprovalStepID != "") != (sample.want == "waiting") {
+			if (view.ApprovalStepID != "") != (sample.mode == "human" && sample.step == "succeeded" && !sample.skip && !sample.stale && !sample.runningSibling) {
 				t.Fatalf("unexpected approval: %+v", view)
 			}
 			payload, err := Enrich(db.DB, session, json.RawMessage(`{"display":{"status":"waiting","approval_step_id":"old"}}`))
