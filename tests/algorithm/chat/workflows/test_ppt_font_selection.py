@@ -62,3 +62,48 @@ def test_plain_text_rename_uses_semantic_planner(tools, monkeypatch):
     )
     assert ops[0]['op'] == 'replace_text'
     assert new == '新标题'
+
+
+def test_whole_deck_generic_font_uses_available_variant(tools, monkeypatch):
+    from lazymind.chat.engine.tools.file_resources import font_library
+
+    def model(_system, prompt, **_kwargs):
+        assert json.loads(prompt)['requested_font'] == '宋体'
+        return '{"op":"set_font","family":"宋体-简"}'
+    monkeypatch.setattr(tools, '_agent_llm_call', model)
+    monkeypatch.setattr(font_library, 'ensure_font', lambda family, allow: family)
+    assert tools._resolve_requested_font('宋体', False) == '宋体-简'
+
+
+def test_whole_deck_missing_exact_font_is_rejected(tools, monkeypatch):
+    from lazymind.chat.engine.tools.file_resources.font_library import FontUnavailableError
+    monkeypatch.setattr(tools, '_agent_llm_call', lambda *a, **kw: '{"op":"font_unavailable"}')
+    with pytest.raises(FontUnavailableError):
+        tools._resolve_requested_font('SimSun', False)
+
+
+def test_whole_deck_request_persists_and_publishes_resolved_font(tools, monkeypatch, tmp_path):
+    from lazymind.chat.engine.tools.file_resources import font_library
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    for page in (1, 2):
+        (pages / f'page_{page:03}.html').write_text('<html><body><h1>Title</h1><p>Body</p></body></html>')
+    monkeypatch.setattr(tools, '_resolve_deck_dir', lambda _: tmp_path)
+    monkeypatch.setattr(tools, '_agent_llm_call', lambda *a, **kw: '{"op":"set_font","family":"宋体-简"}')
+    monkeypatch.setattr(font_library, 'ensure_font', lambda family, allow: family)
+    # Font binaries and artifact publication are external boundaries in this routing test.
+    monkeypatch.setattr(tools, '_prepare_portable_font', lambda family: (family, []))
+    monkeypatch.setattr(tools, '_package_edited_html_fonts', lambda html, *a: html)
+    published = []
+
+    def publish(deck, numbers, **kwargs):
+        published.extend(numbers)
+        return {'published_count': len(numbers), 'failed_count': 0}
+    monkeypatch.setattr(tools, '_publish_pages_from_disk', publish)
+    result = tools.ppt_replace_deck_fonts(str(tmp_path), target_font='宋体', allow_font_download=False)
+    assert result['target_font'] == '宋体-简'
+    assert published == [1, 2]
+    for page in pages.glob('*.html'):
+        html = page.read_text()
+        assert '宋体-简' in html and '>Title<' in html and '>Body<' in html
+    assert '宋体-简' in json.loads((tmp_path / 'style_spec.json').read_text())['typography']['body_font']

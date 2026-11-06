@@ -110,6 +110,30 @@ describe('SlotHtmlSlide mutation baseline', () => {
       expect(latest.baseDraftVersion).toBe(1);
     });
   });
+  it('keeps a saved edit when chat refresh returns an older slide, but accepts newer content', async () => {
+    const slot = { slot_id: 'slides', slot: 'slides', revision: 1, draft_version: 4, list_index: 0,
+      selected: true, created_at: '', content_type: 'text', change_source: 'human',
+      artifact_value: { text: '<html><body>Old</body></html>' },
+    } as SlotRevision;
+    const view = render(<SlotHtmlSlide slot={slot} sessionId='ppt-session' slotId='slides' />);
+    fireEvent.click(await screen.findByRole('button', { name: 'apply slide rewrite' }));
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('New'));
+    view.rerender(<SlotHtmlSlide slot={{ ...slot, artifact_value: { ...slot.artifact_value as object } }}
+      sessionId='ppt-session' slotId='slides' />);
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('New'));
+    expect(dialogRender.mock.lastCall?.[0].baseRevision).toBe(2);
+    view.rerender(<SlotHtmlSlide slot={{ ...slot,
+      artifact_value: { text: '<html><body>Old refreshed response</body></html>' },
+    }} sessionId='ppt-session' slotId='slides' />);
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('New'));
+    expect(dialogRender.mock.lastCall?.[0].baseRevision).toBe(2);
+    view.rerender(<SlotHtmlSlide slot={{ ...slot, revision: 3, draft_version: 1,
+      artifact_value: { text: '<html><body>Newest</body></html>' },
+    }} sessionId='ppt-session' slotId='slides' />);
+    await waitFor(() => expect(screen.getByTitle('slide-1').getAttribute('srcdoc')).toContain('Newest'));
+    expect(dialogRender.mock.lastCall?.[0].baseRevision).toBe(3);
+  });
+
   it('keeps enlarged navigation open across pages and disables the end buttons', async () => {
     const slot = {
       slot_id: 'slides', slot: 'slides', revision: 1, list_index: 0,

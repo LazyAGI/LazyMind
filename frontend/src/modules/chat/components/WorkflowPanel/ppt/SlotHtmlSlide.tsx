@@ -514,6 +514,10 @@ export function SlotHtmlSlide({
   const page = slot.sort_order ?? ((slot.list_index ?? 0) + 1);
   const listIndex = slot.list_index ?? -1;
   const actionSlotId = slotId || slot.slot_id || slot.slot;
+  const slideIdentity = `${sessionId}:${actionSlotId}:${listIndex}`;
+  const artifactSnapshot = JSON.stringify(slot.artifact_value ?? null);
+  const appliedBaseline = useRef<{ identity: string; revision: number; draftVersion: number } | null>(null);
+  const loadGeneration = useRef(0);
   const editable = Boolean(sessionId && actionSlotId && !readOnly && !compact && page > 0);
   const displayHtml = editPreview?.candidate_html || html;
   const pagedNavigation = navigation && 'index' in navigation ? navigation : undefined;
@@ -557,10 +561,6 @@ export function SlotHtmlSlide({
     editPreviewRef.current = editPreview;
   }, [editPreview]);
 
-  useEffect(() => {
-    setLocalRevision(slot.revision);
-    setLocalDraftVersion(slot.draft_version);
-  }, [slot.draft_version, slot.revision]);
 
   useEffect(() => {
     if (!expanded) return undefined;
@@ -584,6 +584,16 @@ export function SlotHtmlSlide({
   }, [clearSelectedNode]);
 
   useEffect(() => {
+    const saved = appliedBaseline.current;
+    if (saved?.identity === slideIdentity && (
+      slot.revision < saved.revision
+      || (slot.revision === saved.revision && (slot.draft_version ?? 0) < saved.draftVersion)
+    )) return;
+    if (saved?.identity !== slideIdentity) appliedBaseline.current = null;
+    setLocalRevision(slot.revision);
+    setLocalDraftVersion(slot.draft_version);
+    const generation = ++loadGeneration.current;
+    const artifactValue = JSON.parse(artifactSnapshot);
     let cancelled = false;
     setError(null);
     setEditPreview(null);
@@ -591,27 +601,27 @@ export function SlotHtmlSlide({
     setApplyError(undefined);
     clearSelection();
     (async () => {
-      const text = await loadArtifactText(slot.artifact_value);
-      if (cancelled) return;
-      const extracted = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(slot.artifact_value);
+      const text = await loadArtifactText(artifactValue);
+      if (cancelled || generation !== loadGeneration.current) return;
+      const extracted = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(artifactValue);
       if (!extracted) {
         setError('Not a valid HTML slide');
         setHtml(null);
         return;
       }
       const withCharts = await htmlWithInlinedEcharts(extracted);
-      if (!cancelled) {
+      if (!cancelled && generation === loadGeneration.current) {
         setHtml(withCharts);
         setSourceHtml(extracted);
       }
     })().catch(() => {
-      if (!cancelled) {
+      if (!cancelled && generation === loadGeneration.current) {
         setError('Failed to load HTML slide');
         setHtml(null);
       }
     });
     return () => { cancelled = true; };
-  }, [clearSelection, slot.artifact_value, slot.revision, slot.slot_id]);
+  }, [artifactSnapshot, clearSelection, slideIdentity, slot.draft_version, slot.revision]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -854,6 +864,10 @@ export function SlotHtmlSlide({
       if (typeof result.revision !== 'number' || typeof result.draft_version !== 'number') {
         throw new Error('invalid apply baseline');
       }
+      appliedBaseline.current = {
+        identity: slideIdentity, revision: result.revision, draftVersion: result.draft_version,
+      };
+      ++loadGeneration.current;
       setLocalRevision(result.revision);
       setLocalDraftVersion(result.draft_version);
       if (preview.candidate_html) {
@@ -871,7 +885,7 @@ export function SlotHtmlSlide({
     } finally {
       setApplying(false);
     }
-  }, [actionSlotId, clearSelection, listIndex, onRefresh, sessionId]);
+  }, [actionSlotId, clearSelection, listIndex, onRefresh, sessionId, slideIdentity]);
 
   const retryPersistPreview = useCallback(() => {
     if (editPreview && !applying) void persistPreview(editPreview);
