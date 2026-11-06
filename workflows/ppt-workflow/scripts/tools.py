@@ -9937,32 +9937,6 @@ def _deterministic_selection_styles(
 ) -> dict[str, str]:
     """Translate common local-polish phrases without an LLM round trip."""
     styles: dict[str, str] = {}
-    font_match = re.search(
-        r'(?:字体\s*(?:替换成|替换为|换成|改成|改为|设为|设置为|用)|font(?:[ -]family)?\s*(?:to|:|=))\s*[\"\“\']?([^，。；;\n\"\”\']+)',
-        command, re.I,
-    )
-    family = font_match.group(1).strip() if font_match else ''
-    if not family:
-        short = re.fullmatch(r'\s*(?:换成|换为|改成|改为|改用|使用)\s*[“\"\']?(.+?)[”\"\']?[。！!]?\s*', command)
-        if short:
-            from lazymind.presentation_resources import font_families
-            candidate = short.group(1).strip()
-            explicit_font = candidate.endswith('字体')
-            if explicit_font:
-                candidate = candidate[:-2].strip()
-            known = available_font_families() | set(font_families()) | {
-                '宋体', 'SimSun', '黑体', 'SimHei', '楷体', 'KaiTi', '仿宋', 'FangSong', '微软雅黑',
-            }
-            if explicit_font or candidate.casefold() in {name.casefold() for name in known}:
-                family = candidate
-    if family and not re.fullmatch(r'\d+(?:\.\d+)?\s*(?:px|pt)', family, re.I):
-        available = {f.casefold(): f for f in available_font_families()}
-        if family.casefold() not in available:
-            from lazymind.chat.engine.tools.file_resources.font_library import ensure_font
-            allow_download = not re.search(r'不(?:要)?下载|禁止下载|(?:no|without|do not|don.t)\s+download', command, re.I)
-            family = ensure_font(family, bool(allow_download))
-            available[family.casefold()] = family
-        styles['font-family'] = json.dumps(available[family.casefold()], ensure_ascii=False)
     for property_name, context in _CSS_SIZE_CONTEXTS.items():
         relative = _relative_style_value(command, selection, property_name, context)
         explicit = None if relative else _explicit_style_value(command, property_name, context)
@@ -10237,8 +10211,6 @@ def _single_selection_edit_ops(
         raise ValueError('instruction must not be empty')
 
     styles = _deterministic_selection_styles(command, selection)
-    if styles:
-        return [{'op': 'set_style', **target_ref, 'styles': styles}], old_text, old_text
 
     academic_op = _academic_selection_op(
         command, tree, target, target_ref, _coerce_str(selection.get('_deck_dir')),
@@ -10317,7 +10289,7 @@ def _single_selection_edit_ops(
             'values': clean_values,
         }], old_text, ' / '.join(clean_values)
 
-    if re.search(r'(?:删除|删掉|移除|去掉|delete|remove)', command, re.I):
+    if not styles and re.search(r'(?:删除|删掉|移除|去掉|delete|remove)', command, re.I):
         use_group = bool(group and re.search(r'(?:整组|整个组|整个模块|整块|all|group)', command, re.I))
         if use_group:
             op = {'op': 'delete_node', 'group': group}
@@ -10326,49 +10298,15 @@ def _single_selection_edit_ops(
             old_text = tree.node_text(tree.find_repeated_item(target)).strip()
         return [op], old_text, ''
 
-    replacement = re.search(
-        r'(?:修改(?:标题|文字|内容)?(?:成|为)|改成|改为|替换为|变成|rename(?:\s+it)?\s+to)\s*[：:]?\s*(.+)$',
-        command, re.I | re.S,
-    )
-    if replacement:
-        value = replacement.group(1).strip().strip('“”\"\'')
-        if not value:
-            raise ValueError('replacement text must not be empty')
-        if compound_text_target:
-            values = _plan_compound_text_replacement(
-                command,
-                tree,
-                target,
-                segment_details,
-                draft_replacement=value,
-            )
-            return [{
-                'op': 'replace_text_segments',
-                **target_ref,
-                'values': values,
-            }], old_text, ' / '.join(values)
-        op: dict[str, Any] = {'op': 'replace_text', **target_ref, 'value': value}
-        inner = tree.html[node['open_end']:node['end']]
-        has_nested_markup = '<' in inner[
-            :inner.rfind('</') if '</' in inner else len(inner)
-        ].strip()
-        if has_nested_markup and selected_text:
-            # Only use a leaf-text match when that exact text was verified in
-            # the source. Rendered text may span styling tags (for example
-            # <span>赛博朋克</span>2077) and cannot be matched as one HTML slice.
-            op['match'] = selected_text
-        elif has_nested_markup and node['tag'] in _SEMANTIC_TEXT_TAGS:
-            # Child tags only style portions of this semantic text element.
-            # The exact data-el occurrence keeps whole-content replacement local.
-            op['scope'] = 'element'
-        return [op], old_text, value
-
     repeated_target = tree.find_repeated_item(target)
     insertion_segments = [
         item['text'].strip() for item in _visible_text_segments(tree, repeated_target)
     ]
+    font_choices = {family.casefold(): family for family in available_font_families()}
     prompt = json.dumps({
         'instruction': command,
+        'available_font_families': sorted(font_choices.values()),
+        'suggested_styles': styles,
         'current_page_html': _semantic_page_html_context(tree.html),
         'selected_item': {
             'text_segments_in_order': insertion_segments,
@@ -10400,6 +10338,7 @@ def _single_selection_edit_ops(
                 else {'op': 'replace_text', 'value': 'new plain text'}
             ),
             {'op': 'delete_node'},
+            {'op': 'font_unavailable', 'family': 'explicitly requested unavailable font'},
             {'op': 'set_style', 'styles': {'css-property': 'safe value'}},
             *([{
                 'op': 'insert_sibling',
@@ -10422,7 +10361,18 @@ def _single_selection_edit_ops(
         'When compound_text_target is true, any wording change '
         'must use replace_text_segments with exactly one non-empty value per existing '
         'text segment, in order; preserve unchanged segments. For layout requests '
-        'prefer ordinary flex/grid properties in styles.',
+        'prefer ordinary flex/grid properties in styles. '
+        'Interpret font requests semantically, including short requests such as 换成宋体 '
+        'and stylistic requests such as 换个正式点的字体. Use set_style, preserve all text, '
+        'and select a single exact font-family from available_font_families. '
+        'For a generic Chinese font category such as 宋体, choose an installed corresponding '
+        'family such as 宋体-简 or Songti SC. For an explicitly specified exact family such '
+        'as SimSun, do not substitute: return font_unavailable when absent. '
+        'Include other requested style changes in the same styles object. '
+        'suggested_styles contains parsed numeric, relative and formatting values; '
+        'use them when consistent with intent, but do not omit other requested changes. '
+        'Never interpret a font request as replacement text. If no suitable font is available, '
+        'return font_unavailable. Bare 改成/改为 is ambiguous: infer text versus style from intent.',
         prompt,
         request_name='ppt-selection-edit',
     ))
@@ -10494,9 +10444,21 @@ def _single_selection_edit_ops(
         return [
             {'op': name, **target_ref, 'scope': 'item'},
         ], tree.node_text(delete_target).strip(), ''
+    if name == 'font_unavailable':
+        from lazymind.chat.engine.tools.file_resources.font_library import FontUnavailableError
+        raise FontUnavailableError(f'请求的字体不可用：{_coerce_str(planned.get("family"))}')
     if name == 'set_style':
+        planned_styles = planned.get('styles')
+        if not isinstance(planned_styles, dict) or not planned_styles:
+            raise ValueError('AI edit planner returned invalid styles')
+        if 'font-family' in planned_styles:
+            family = _coerce_str(planned_styles['font-family']).strip().strip('\"\'')
+            if family.casefold() not in font_choices:
+                from lazymind.chat.engine.tools.file_resources.font_library import FontUnavailableError
+                raise FontUnavailableError(f'请求的字体不可用：{family}')
+            planned_styles['font-family'] = json.dumps(font_choices[family.casefold()], ensure_ascii=False)
         return [{
-            'op': name, **target_ref, 'styles': planned.get('styles'),
+            'op': name, **target_ref, 'styles': planned_styles,
         }], old_text, old_text
     raise ValueError('AI edit planner returned an unsupported operation')
 
