@@ -146,7 +146,7 @@ slots:
     type: file
     cardinality: single
   - id: writing_task
-    user_visible: false
+    user_visible: true
     label: Writing Task
     type: file
     cardinality: single
@@ -300,6 +300,7 @@ ui:
       label: Preparation
       layout: list
       slots:
+        - id: writing_task
         - id: source_document
 
     - id: outline

@@ -171,12 +171,10 @@ slots:
   - {id: reading_reflection_pool, label: "阅读心得材料池", type: file, cardinality: single, exposed: false}
   - {id: reading_reflection_document, label: "阅读心得", type: file, cardinality: single}
   - {id: analysis_chart, label: 分析图表, type: file, cardinality: list, ordered: true}
-  - {id: finish_document, label: 结束说明, type: file, cardinality: single, exposed: false}
+  - {id: finish_document, label: 结束说明, type: file, cardinality: single, exposed: true}
 ui:
   hide_skipped_steps: true
   hide_unstarted_steps: true
-  task_presentation:
-    hidden_steps: [finish]
   slots:
     seed_pool: {widgetType: json-block, readOnly: false, collapsed: false}
     research_topic_document: {widgetType: text-markdown, readOnly: false}
@@ -269,3 +267,9 @@ ui:
       allow_download: true
       slots:
         - {id: reading_reflection_document}
+    - id: finish
+      step_id: finish
+      label: 结束说明
+      layout: list
+      slots:
+        - {id: finish_document}

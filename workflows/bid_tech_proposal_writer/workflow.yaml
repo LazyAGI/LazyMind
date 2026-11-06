@@ -170,7 +170,7 @@ slots:
     exposed: false
 
   - id: raw_bid_text
-    user_visible: false
+    user_visible: true
     label: 招标文件全文
     type: text
     cardinality: single

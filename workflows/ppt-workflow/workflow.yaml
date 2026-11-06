@@ -669,14 +669,14 @@ slots:
     ordered: true
 
   - id: background_images
-    user_visible: false
+    user_visible: true
     label: AI Background Images
     type: image
     cardinality: list
     ordered: true
 
   - id: background_prompts
-    user_visible: false
+    user_visible: true
     label: AI Background Prompts
     type: text
     cardinality: list
