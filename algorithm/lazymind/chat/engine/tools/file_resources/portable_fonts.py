@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+from html.parser import HTMLParser
 from pathlib import Path
 import re
 import shutil
@@ -105,23 +106,61 @@ def check_glyphs(records, text):
         raise ValueError('目标字体缺少所选文字的字形：' + ''.join(missing[:24]) + '；未修改文档')
 
 
+class _PageText(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.hidden = 0
+        self.text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {'script', 'style'}:
+            self.hidden += 1
+
+    def handle_endtag(self, tag):
+        if tag in {'script', 'style'}:
+            self.hidden = max(0, self.hidden - 1)
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.text.append(data)
+
+
+def _html_font_bytes(record, text):
+    from fontTools import subset
+    with TTFont(io.BytesIO(font_bytes(record))) as font:
+        # OS/2 bit 8 prohibits subsetting. Preserve that restriction.
+        if not int(getattr(font.get('OS/2'), 'fsType', 0)) & 256:
+            options = subset.Options()
+            options.layout_features = ['*']
+            subsetter = subset.Subsetter(options=options)
+            subsetter.populate(text=text)
+            subsetter.subset(font)
+        font.flavor = 'woff'
+        output = io.BytesIO()
+        font.save(output)
+        return output.getvalue()
+
+
 def package_html_fonts(html, family, records, text=''):
-    """Inline full fonts in durable HTML; metadata also drives strict PPTX export."""
+    """Embed page glyphs for HTML; retain full font identity for editable PPTX export."""
     check_glyphs(records, text)
     # One package per family: repeated edits refresh bytes without duplicating
     # resources or dropping earlier edits to another scope/family.
     key = hashlib.sha256(family.casefold().encode()).hexdigest()[:24]
     pattern = rf'<style\b[^>]*\bid=["\']lazymind-portable-font-{key}["\'][^>]*>[\s\S]*?</style>'
     html = re.sub(pattern, '', html, flags=re.I)
+    page = _PageText()
+    page.feed(html)
+    glyph_text = ''.join(page.text) + text
     blocks = []
     for record in records:
         metadata = {'family': family, 'weight': record['weight'], 'style': record['style'], 'sha256': record['id']}
         token = base64.b64encode(json.dumps(metadata, ensure_ascii=False).encode()).decode()
-        data = base64.b64encode(font_bytes(record)).decode()
+        data = base64.b64encode(_html_font_bytes(record, glyph_text)).decode()
         quoted = json.dumps(family, ensure_ascii=False).replace('<', '\\3c ')
         blocks.append(f'/*lazymind-font:{token}*/@font-face{{font-family:{quoted};'
                       f'font-weight:{record["weight"]};font-style:{record["style"]};'
-                      f'src:url(data:font/ttf;base64,{data})}}')
+                      f'src:url(data:font/woff;base64,{data})}}')
     block = (f'<style id="lazymind-portable-font-{key}" data-lazymind-font-required="true">'
              + ''.join(blocks) + '</style>')
     closing = re.search(r'</head\s*>', html, re.I)

@@ -309,7 +309,7 @@ def test_html_font_edit_packages_bytes_and_never_generates(html_tools, tmp_path,
     assert publisher.call_args.args[1] == (pages or [1, 2])
     changed = paths[0].read_text()
     assert 'data-lazymind-font-required="true"' in changed
-    assert 'data:font/ttf;base64,' in changed
+    assert 'data:font/woff;base64,' in changed
     assert '<script>const unchanged = 123;</script>' in changed
     assert 'font-family:Old' not in changed
     if scope == 'titles':
@@ -421,3 +421,26 @@ def test_missing_font_has_actionable_error_code_without_substitution(monkeypatch
         font_library.ensure_font('宋体', True)
     assert error.value.error_code == 'FONT_UNAVAILABLE'
     assert '宋体' in str(error.value)
+
+
+@pytest.mark.parametrize('fs_type,keeps_unused', [(0, False), (256, True)])
+def test_html_font_subsets_page_glyphs_and_honors_no_subsetting(tmp_path, monkeypatch, fs_type, keeps_unused):
+    import base64
+    import io
+    import re
+    from fontTools.ttLib import TTFont
+    from lazymind.chat.engine.tools.file_resources.font_library import register_font, local_font_css
+    from lazymind.chat.engine.tools.file_resources.portable_fonts import package_html_fonts
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'library'))
+    record = register_font(make_font(tmp_path, fs_type=fs_type, text='正文TitleUnused'))
+    html = package_html_fonts('<html><head></head><body>正文Title</body></html>', 'Test Font', [record])
+    encoded = re.search(r'data:font/woff;base64,([A-Za-z0-9+/=]+)', html).group(1)
+    with TTFont(io.BytesIO(base64.b64decode(encoded))) as font:
+        cmap = font.getBestCmap()
+        assert all(ord(char) in cmap for char in '正文Title')
+        assert (ord('U') in cmap) is keeps_unused
+    assert local_font_css(html) == ''
+    # An unselected intermediate weight must not reintroduce a full-family font.
+    from lazymind.chat.engine.tools.file_resources import font_library
+    monkeypatch.setattr(font_library, 'local_fonts', lambda: [{**record, 'id': 'other-weight'}])
+    assert local_font_css(html) == ''

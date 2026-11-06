@@ -164,13 +164,17 @@ def local_font_css(html: str) -> str:
     """Self-contained fonts for browser previews; no expiring cloud URLs."""
     blocks = []
     packaged = set()
+    packaged_families = set()
     for token in re.findall(r'/\*lazymind-font:([A-Za-z0-9+/=]+)\*/', html):
         try:
-            packaged.add(json.loads(base64.b64decode(token))['sha256'])
+            metadata = json.loads(base64.b64decode(token))
+            packaged.add(metadata['sha256'])
+            packaged_families.add(metadata['family'].casefold())
         except (ValueError, KeyError, TypeError):
             continue
     for record in local_fonts():
-        if not record['embeddable'] or record['id'] in packaged:
+        if (not record['embeddable'] or record['id'] in packaged
+                or packaged_families.intersection(name.casefold() for name in record['aliases'])):
             continue
         aliases = [name for name in record['aliases'] if name.casefold() in html.casefold()]
         if not aliases:
