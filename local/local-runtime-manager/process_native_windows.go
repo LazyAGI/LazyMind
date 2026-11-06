@@ -59,6 +59,20 @@ func forceKillProcessTree(pid int) error {
 	return nil
 }
 
+func interruptProcessPID(pid int) error { return forceKillProcessPID(pid) }
+
+func forceKillProcessPID(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(handle)
+	return windows.TerminateProcess(handle, 1)
+}
+
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false

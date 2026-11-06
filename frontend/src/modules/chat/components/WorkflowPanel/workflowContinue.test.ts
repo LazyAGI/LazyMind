@@ -106,3 +106,23 @@ it('does not offer a continue shortcut while a question card is unanswered', () 
     status: 'completed', current_step_id: 'outline', steps: [],
   }, 'waiting_input', outlineTab)).toBeUndefined();
 });
+
+describe('continuing edited inputs', () => {
+  it('regenerates the ready downstream step without approving its obsolete results', () => {
+    const session = checkpoint(false);
+    session.projection!.display = { status: 'waiting', reason: 'inputs_changed', approval_step_id: '' };
+    session.projection!.nodes!.collect.validity = 'stale';
+    expect(resolveWorkflowContinueAction(session, 'waiting')).toEqual({ kind: 'regenerate', stepId: 'collect' });
+    session.projection!.ready = [];
+    expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
+  });
+
+  it('does not offer regeneration over a running or failed effective branch', () => {
+    const session = checkpoint(false);
+    session.projection!.display = { status: 'waiting', reason: 'inputs_changed', approval_step_id: '' };
+    for (const execution of ['running', 'failed']) {
+      session.projection!.nodes!.analyze.execution = execution;
+      expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
+    }
+  });
+});

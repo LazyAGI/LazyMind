@@ -977,6 +977,7 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 		t.Fatalf("ensure dirs: %v", err)
 	}
 	cmd := exec.Command("sleep", "60")
+	configureChildProcess(cmd, false)
 	if err := cmd.Start(); err != nil {
 		t.Skipf("sleep command unavailable: %v", err)
 	}
@@ -995,6 +996,9 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	manager.processScanner = func(paths RuntimePaths) ([]LocalProcessRecord, error) {
 		return []LocalProcessRecord{{
 			Service:     "test-orphan",
+			Executable:  "sleep",
+			OwnerRoot:   paths.RuntimeRoot,
+			StartID:     processStartIdentity(cmd.Process.Pid),
 			PID:         cmd.Process.Pid,
 			RepoRoot:    paths.RepoRoot,
 			RuntimeRoot: paths.RuntimeRoot,

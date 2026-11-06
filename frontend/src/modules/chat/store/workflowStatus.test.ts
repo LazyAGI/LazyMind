@@ -3,6 +3,7 @@ import { reconcileWorkflowSessionStatus, workflowDisplayLabel } from './workflow
 
 it('distinguishes waiting for the next step from a real approval checkpoint', () => {
   expect(workflowDisplayLabel('waiting', 'next_step_required')).toBe('chat.workflowStatusNextStep');
+  expect(workflowDisplayLabel('waiting', 'inputs_changed')).toBe('chat.workflowStatusInputsChanged');
   expect(workflowDisplayLabel('waiting', 'approval_required')).toBe('chat.workflowStatusWaiting');
   expect(workflowDisplayLabel('failed', 'no_advance')).toBe('chat.workflowStatusFailed');
 });

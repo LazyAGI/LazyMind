@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/runstate"
 )
 
 // ApplyLifecycle shares stop/resume effects across command formats. The caller
@@ -93,15 +94,18 @@ func ApplyLifecycle(tx *gorm.DB, session *orm.WorkflowSession, commandID string,
 			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'cancel' AND consumed_at IS NULL", session.ID).Update("consumed_at", now).Error; err != nil {
 				return "", false, err
 			}
-			session.Status = "waiting"
-		} else {
-			session.Status = "active"
 		}
+		var pending int64
+		if controlled {
+			if err := tx.Model(&orm.WorkflowReviewCheckpoint{}).Where("session_id = ? AND status = ?", session.ID, "pending").Count(&pending).Error; err != nil {
+				return "", false, err
+			}
+		}
+		session.Status = runstate.AfterControl(session.Status, "resume", pending > 0, false)
 		changed = true
 	}
 	if changed {
-		updates := map[string]any{"status": session.Status, "updated_at": now}
-		if err := tx.Model(session).Updates(updates).Error; err != nil {
+		if err := runstate.Write(tx, session, session.Status, nil); err != nil {
 			return "", false, err
 		}
 	}

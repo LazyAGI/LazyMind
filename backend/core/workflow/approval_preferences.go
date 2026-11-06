@@ -15,6 +15,7 @@ import (
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
+	"lazymind/core/workflow/runstate"
 )
 
 type approvalPreferenceRequest struct {
@@ -46,8 +47,8 @@ type nativeTurnBinding struct {
 // An unsent/refused request cannot change the workflow's state.
 func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversationID string, req NativeControlCommand) (int64, error) {
 	var version int64
-	if req.Kind != "approve" && req.Kind != "resume" && req.Kind != "retry" && req.Kind != "rewind" {
-		return 0, controlstore.Reject("INVALID_COMMAND", "expected approve, resume, retry or rewind")
+	if req.Kind != "approve" && req.Kind != "resume" && req.Kind != "retry" && req.Kind != "rewind" && req.Kind != "continue" {
+		return 0, controlstore.Reject("INVALID_COMMAND", "expected approve, resume, retry, rewind or continue")
 	}
 	approval := req.Kind == "approve"
 	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
@@ -65,8 +66,11 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 		if err != nil {
 			return err
 		}
-		if approval && (display.Status != "waiting" || req.StepID == "" || display.ApprovalStepID != req.StepID) {
+		if approval && (!display.ApprovalRequired() || req.StepID == "" || display.ApprovalStepID != req.StepID) {
 			return controlstore.Reject("INVALID_COMMAND", "no matching approval checkpoint")
+		}
+		if req.Kind == "continue" && (display.Status != "waiting" || display.Reason != "inputs_changed" || req.PreferenceScope != "" || req.StepID != "") {
+			return controlstore.Reject("INVALID_COMMAND", "no edited workflow awaiting regeneration")
 		}
 		if req.Kind == "resume" && (display.Status != "paused" || req.PreferenceScope != "") {
 			return controlstore.Reject("INVALID_COMMAND", "no paused workflow to resume")
@@ -102,40 +106,21 @@ func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversatio
 				return err
 			}
 		}
-		status := SessionStatusActive
-		if req.Kind == "rewind" {
-			// Only transfer Chat ownership here. The existing transition command
-			// must still see completed/failed to apply its original recovery rules.
-			status = session.Status
-		}
-		if approval {
-			projected, err := projectSession(ctx, tx, &session)
-			if err != nil {
-				return err
-			}
-			if projected.Display.ApprovalStepID != "" {
-				status = SessionStatusWaiting
-			} else if projected.Projection.Completed {
-				status = SessionStatusCompleted
-			}
-		}
 		binding, err := json.Marshal(nativeTurnBinding{HistoryID: req.HistoryID})
 		if err != nil {
 			return err
 		}
-		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND state_version = ?", session.ID, req.ExpectedStateVersion).
-			Updates(map[string]any{"status": status, "control_binding_json": string(binding), "state_version": gorm.Expr("state_version + 1"), "updated_at": time.Now().UTC()})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before approving")
+		if err := acceptRunControl(ctx, tx, &session, req.Kind,
+			map[string]any{"control_binding_json": string(binding), "state_version": gorm.Expr("state_version + 1")}, &req.ExpectedStateVersion); err != nil {
+			if err == runstate.ErrStateChanged {
+				return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before approving")
+			}
+			return err
 		}
 		session.StateVersion++
 		version = session.StateVersion
-		session.Status = status
 		session.ControlBindingJSON = string(binding)
-		payload, _ := json.Marshal(map[string]any{"status": status})
+		payload, _ := json.Marshal(map[string]any{"status": session.Status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
 	if err == nil {

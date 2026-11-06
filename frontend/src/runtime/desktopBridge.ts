@@ -4,6 +4,7 @@ import {
   isAssistantBridgePlatformMismatch,
   syncLocalAssistantSession,
   type LocalAssistantSession,
+  type LocalAssistantSessionClear,
 } from "./assistantSession";
 
 export type DesktopBridgeUnavailableReason =
@@ -223,7 +224,7 @@ interface LazyMindDesktopBridge {
   agentExecutableBind?: (target: DesktopAgentBindingTarget, path: string) => Promise<unknown> | unknown;
   agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
   assistantSessionSet?: (session: LocalAssistantSession) => Promise<unknown> | unknown;
-  assistantSessionClear?: () => Promise<unknown> | unknown;
+  assistantSessionClear?: (request: LocalAssistantSessionClear) => Promise<unknown> | unknown;
   restartRuntime?: (options?: { reload?: boolean }) => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   localFolderAccessStatus?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;

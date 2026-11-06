@@ -58,6 +58,7 @@ if str(LIB_DIR) not in sys.path:
 from model_client import ModelClientError, llm, vlm  # noqa: E402
 from presentation_assets import prompt_catalog, resolve_html as resolve_asset_html  # noqa: E402
 import template_html  # noqa: E402
+from material_images import bind_prompt_materials, normalize_material_sources, missing_material_images  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -2109,10 +2110,15 @@ def cmd_page_html_from_brief(
         return _fail(f'page-html brief p{page_no}: empty brief', page_no=page_no)
 
     if (deck / 'complete_page_prompts.json').is_file():
+        try:
+            brief_text, material_images = bind_prompt_materials(deck, brief_text)
+        except (ValueError, OSError) as exc:
+            return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
         return _write_page_html_from_query(
             deck, page_no, brief_text,
             page_plan={'page_no': page_no, 'slots': []},
             inherited_image=None,
+            material_images=material_images,
             background_image=_resolve_background_image(deck, page_no),
             prompt_mode='complete-page-prompt', language='',
             llm_call=llm_call, edit_instruction=edit_instruction,
@@ -2170,6 +2176,7 @@ def _write_page_html_from_query(
     language: str,
     llm_call=None,
     edit_instruction: str = '',
+    material_images: list[str] | None = None,
 ) -> int:
     """Shared HTML generation path used by deterministic / rewrite / brief modes."""
     rewritten_query = (rewritten_query or '').strip()
@@ -2262,15 +2269,20 @@ def _write_page_html_from_query(
     extra_paths: list[str] = []
     if inherited_image and inherited_image.get('local_path'):
         extra_paths.append(inherited_image['local_path'])
+    html = normalize_material_sources(html, deck)
     html, fixed = _normalize_img_srcs(html, page_plan, extra_paths=extra_paths)
+    image_error = ''
+    imgs_localized = 0
     try:
         html, imgs_localized = _prepare_local_imgs(html, deck, rewritten_query)
     except (ValueError, OSError) as exc:
-        return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
+        image_error = str(exc)
 
     required_image_path = (inherited_image or {}).get('local_path')
     required_background_path = (background_image or {}).get('local_path')
     html, background_restored = _restore_background_image(html, required_background_path)
+    required_materials = list(dict.fromkeys([*(material_images or []), *extra_paths]))
+    missing_materials = missing_material_images(html, deck, required_materials)
     missing_foreground = bool(
         required_image_path
         and not _html_has_foreground_image(html, required_image_path)
@@ -2280,8 +2292,10 @@ def _write_page_html_from_query(
         and not _html_has_background_image(html, required_background_path)
     )
     invalid_document = not bool(_HTML_DOC_RE.fullmatch(html.strip()))
-    if missing_foreground or missing_background or invalid_document:
+    if missing_foreground or missing_background or missing_materials or image_error or invalid_document:
         corrections: list[str] = []
+        if image_error:
+            corrections.append('Use only valid, approved image paths: ' + image_error)
         if invalid_document:
             corrections.append('Return a complete HTML document from <!doctype html> through </html>, not prose, JSON, a fragment, or truncated markup.')
         if missing_foreground:
@@ -2291,6 +2305,8 @@ def _write_page_html_from_query(
                 f'<img src="{required_src}">. It must be clearly visible, must not be a '
                 'CSS background, and must not be covered by a dark/gradient overlay.'
             )
+        for path in missing_materials:
+            corrections.append(f'Include a visible foreground <img src="{_page_relative_asset_path(path)}"> for this required uploaded material.')
         if missing_background:
             background_src = _page_relative_asset_path(required_background_path)
             corrections.append(
@@ -2319,6 +2335,7 @@ def _write_page_html_from_query(
             return _fail(f'page-html p{page_no}: {exc}', page_no=page_no)
         if not _HTML_DOC_RE.fullmatch(html.strip()):
             return _fail(f'page-html p{page_no}: incomplete HTML document after one repair attempt', page_no=page_no)
+        html = normalize_material_sources(html, deck)
         html, retry_fixed = _normalize_img_srcs(html, page_plan, extra_paths=extra_paths)
         try:
             html, retry_localized = _prepare_local_imgs(html, deck, rewritten_query)
@@ -2328,6 +2345,10 @@ def _write_page_html_from_query(
         imgs_localized += retry_localized
         html, retry_background_restored = _restore_background_image(html, required_background_path)
         background_restored = background_restored or retry_background_restored
+        missing_materials = missing_material_images(html, deck, required_materials)
+        if missing_materials:
+            return _fail(f'page-html p{page_no}: missing or invalid material images after one repair attempt: '
+                         + ', '.join(missing_materials), page_no=page_no)
         if required_image_path and not _html_has_foreground_image(html, required_image_path):
             required_src = _page_relative_asset_path(required_image_path)
             return _fail(

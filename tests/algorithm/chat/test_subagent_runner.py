@@ -1143,6 +1143,48 @@ def test_workflow_saved_record_passes_without_content_review(completion_case, fi
     model.share.assert_not_called()
 
 
+@pytest.mark.parametrize('completed', [True, False])
+def test_explicit_workflow_completion_review_uses_current_step_contract(monkeypatch, completed):
+    observed = []
+
+    def review(_model, prompt):
+        contract_line = next(line for line in prompt.splitlines()
+                             if line.startswith('Workflow step contract: '))
+        contract = json.loads(contract_line.split(': ', 1)[1])
+        assert contract['workflow_id'] == 'ppt-workflow'
+        assert contract['step_id'] == 'analyze_requirements'
+        assert contract['required_output_artifact_keys'] == ['requirement_analysis']
+        assert 'Do not require deliverables or actions assigned to later Workflow steps' in prompt
+        observed.append(contract)
+        return json.dumps({
+            'completed': completed, 'requires_artifact': True,
+            'artifact_keys': ['requirement_analysis'],
+            'reason': 'Requirements were analyzed; later steps will build the PPT.' if completed
+            else 'The required audience analysis is missing from this step.',
+        })
+
+    monkeypatch.setattr(runner_mod, '_silent_background_model_call', review)
+    # Automatic workflow acceptance remains record-based on this branch. An
+    # explicitly invoked reviewer still honors upstream's current-step scope.
+    is_ok, summary, phase = runner_mod._evaluate_completion(
+        llm=MagicMock(),
+        objective='User wants a 9-slide PPT with source images. '
+                  'This step only analyzes requirements; material collection and PPT generation follow later.',
+        steps=[],
+        artifacts=[{'slot': 'requirement_analysis', 'content_type': 'text',
+                    'value': {'text': 'Requirements saved.'}}],
+        force_result='Requirements saved. Source images must be collected in the next step.',
+        workflow_step={'workflow_id': 'ppt-workflow', 'step_id': 'analyze_requirements',
+                       'required_output_artifact_keys': ['requirement_analysis'],
+                       'output_slots': ['requirement_analysis']},
+    )
+    assert observed
+    assert is_ok is completed
+    if not completed:
+        assert phase == 'objective_incomplete'
+        assert 'audience analysis' in summary
+
+
 @pytest.mark.parametrize('objective,final,completed', [
     ('使用记忆写入工具更新项目记忆文件。', '步骤结论：任务失败，缺少更新记忆文件工具，未写入任何文件。', False),
     ('读取章节并提出复核意见，不写入文件。', '已完成复核，情节与摘要一致。', True),

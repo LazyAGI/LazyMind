@@ -8,6 +8,9 @@ import (
 const desktopOwnerPIDEnvVar = "LAZYMIND_DESKTOP_OWNER_PID"
 
 func processTextMatchesRuntime(paths RuntimePaths, parts ...string) bool {
+	if len(parts) > 0 && isConnectorExecutable(parts[0]) {
+		return false
+	}
 	text := strings.Join(parts, " ")
 	repo := filepath.Clean(paths.RepoRoot)
 	buildRoot := filepath.Clean(paths.BuildRoot)
@@ -58,43 +61,4 @@ func isRuntimeGuardCommand(executable string, args []string) bool {
 		}
 	}
 	return false
-}
-
-func inferServiceFromProcessText(paths RuntimePaths, text string) string {
-	candidates := []string{
-		processComposeServiceName,
-		sqliteServerProcessName,
-		localProxyProcessName,
-		authServiceProcessName,
-		channelGatewayProcessName,
-		coreProcessName,
-		scanControlPlaneProcessName,
-		fileWatcherProcessName,
-		frontendProcessName,
-		milvusLiteProcessName,
-		docServerProcessName,
-		processorServerProcessName,
-		processorWorkerProcessName,
-		algoProcessName,
-		chatProcessName,
-		evoProcessName,
-	}
-	for _, candidate := range candidates {
-		if strings.Contains(text, candidate) {
-			return candidate
-		}
-	}
-	if strings.Contains(text, paths.CaddyBin) || strings.Contains(text, "caddy") {
-		return frontendProcessName
-	}
-	if strings.Contains(text, paths.CoreBin) {
-		return coreProcessName
-	}
-	if strings.Contains(text, paths.ScanControlPlaneBin) {
-		return scanControlPlaneProcessName
-	}
-	if strings.Contains(text, paths.FileWatcherBin) {
-		return fileWatcherProcessName
-	}
-	return "local-runtime-orphan"
 }

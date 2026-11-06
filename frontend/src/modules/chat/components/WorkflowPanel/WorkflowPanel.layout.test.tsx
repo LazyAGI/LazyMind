@@ -1607,3 +1607,64 @@ it.each(['awaiting_user', 'stopped'] as const)('uses the shared approval step de
   expect(execute).toHaveBeenCalledWith({ kind: 'confirm_and_continue', stepId: 'write_document', review });
   expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
 });
+
+
+it('offers regeneration after edits on both native and hosted panels', async () => {
+  fixture.session.status = 'waiting';
+  fixture.session.projection = {
+    display: { status: 'waiting', reason: 'inputs_changed', approval_step_id: '' },
+    current: [], ready: ['write_document'], nodes: { write_document: {
+      execution: 'none', requires_approval: true, validity: 'stale',
+      reachability: 'reachable', readiness: 'ready', branch: 'active',
+    } },
+  };
+  fixture.session.steps = fixture.session.steps!.map(step => ({ ...step, validity: 'stale' }));
+  const send = vi.fn();
+  const native = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+  expect(await screen.findByText('等待重新生成')).toBeVisible();
+  expect(screen.queryByRole('group', { name: '工作流审批操作' })).not.toBeInTheDocument();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新生成' })));
+  expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'continue', expected_state_version: 0 });
+  native.unmount();
+  const execute = vi.fn(async () => {});
+  render(<WorkflowPanel conversationId='layout-test' controlAdapter={{ execute }} />);
+  expect(await screen.findByText('等待重新生成')).toBeVisible();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新生成' })));
+  expect(execute).toHaveBeenCalledWith({ kind: 'continue' });
+});
+
+
+it('does not approve obsolete results when saving edits invalidates the checkpoint', async () => {
+  fixture.session.status = 'waiting';
+  fixture.session.projection = {
+    display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' },
+    current: [], ready: [], nodes: { write_document: {
+      execution: 'succeeded', requires_approval: true, validity: 'effective',
+      reachability: '', readiness: '', branch: 'active',
+    } },
+  };
+  fixture.flush.mockImplementationOnce(async () => {
+    fixture.session = { ...fixture.session, state_version: 1,
+      steps: fixture.session.steps!.map(step => ({ ...step, validity: 'stale' })),
+      projection: { ...fixture.session.projection,
+        display: { status: 'waiting', reason: 'inputs_changed', approval_step_id: '' },
+        ready: ['write_document'], nodes: { write_document: {
+          execution: 'none', requires_approval: true, validity: 'stale',
+          reachability: 'reachable', readiness: 'ready', branch: 'active',
+        } },
+      },
+    };
+    return true;
+  });
+  const send = vi.fn();
+  render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+  fireEvent.click(await screen.findByRole('tab', { name: '成稿' }));
+  await screen.findByRole('button', { name: '发布' });
+  const approve = await screen.findByRole('button', { name: '继续执行' });
+  await act(async () => fireEvent.click(approve));
+  expect(fixture.flush).toHaveBeenCalledOnce();
+  expect(send).not.toHaveBeenCalled();
+  expect(await screen.findByText('等待重新生成')).toBeVisible();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '重新生成' })));
+  expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'continue', expected_state_version: 1 });
+});

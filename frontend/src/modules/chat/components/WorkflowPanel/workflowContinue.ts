@@ -1,7 +1,7 @@
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import { resolvePendingApprovalStep } from './workflowApproval';
 
-export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed'; stepId: string };
+export type WorkflowContinueAction = { kind: 'approval' | 'resume' | 'completed' | 'regenerate'; stepId: string };
 
 /** Waiting alone is not a checkpoint: automatic dispatch also passes through it. */
 export function resolveWorkflowContinueAction(
@@ -18,6 +18,10 @@ export function resolveWorkflowContinueAction(
   const nodes = session.projection?.nodes ?? {};
   if (Object.values(nodes).some((node) => node.validity !== 'stale'
     && ['pending', 'queued', 'claimed', 'running', 'failed'].includes(node.execution))) return undefined;
+  if (session.projection?.display?.reason === 'inputs_changed') {
+    const stepId = session.projection.ready?.[0];
+    return stepId ? { kind: 'regenerate', stepId } : undefined;
+  }
   const interruptedStep = (session.projection?.current ?? []).find((id) =>
     nodes[id]?.validity !== 'stale' && ['interrupted', 'cancelled', 'canceled'].includes(nodes[id]?.execution),
   );
