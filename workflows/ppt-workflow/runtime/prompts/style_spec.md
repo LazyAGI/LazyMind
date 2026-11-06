@@ -107,3 +107,5 @@ Do not invent facts or decorative KPI values to implement the concept.
 - Do NOT change an explicit user color to the catalog's primary_color.hex.
 - Do NOT generate separate palettes for individual slides.
 - JSON must be valid.
+
+Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. Font resources must be embedded in the delivered HTML and editable PPTX; do not claim portability from a font name alone.

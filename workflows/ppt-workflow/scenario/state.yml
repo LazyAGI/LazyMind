@@ -1227,7 +1227,8 @@ steps:
 
       For an approved work-review reference, derive typography, semantic colors,
       title placement and alignment from the actual reference and explicit user
-      choices. Do not impose a fixed font, body color, light/dark surface or header
+      choices. Default to Songti SC (宋体-简) unless another font or preserving template
+      fonts is explicitly requested. Embed the font in exports. Do not impose a fixed body color, light/dark surface or header
       layout based on this scenario. Choose compositions from information needs;
       tables, text/flow pairings and result comparisons are options, not templates.
       Preserve hierarchy, contrast and readable density while correcting overlaps

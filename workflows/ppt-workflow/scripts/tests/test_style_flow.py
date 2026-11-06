@@ -477,7 +477,7 @@ class StyleFlowCombinationTest(unittest.TestCase):
                                    return_value={'published_count': 1}) as publish:
                 result = TOOLS.ppt_publish_outline(page_prompts=['红金配色，标题置顶，左右习俗插画，正文大字'])
             self.assertEqual(result['published_count'], 1)
-            publish.assert_called_once_with(deck, None, ['红金配色，标题置顶，左右习俗插画，正文大字'], None)
+            publish.assert_called_once_with(deck, None, ['红金配色，标题置顶，左右习俗插画，正文大字'], None, None, None)
             find.assert_not_called()
 
     def test_publish_outline_reports_missing_binding_without_search(self):
@@ -491,7 +491,8 @@ class StyleFlowCombinationTest(unittest.TestCase):
         outline = '## 春节习俗\n贴春联、吃年夜饭'
         prompt = '标题“春节快乐”置顶，红金配色；左侧春联插画，右侧年夜饭插画；短句大字，无 AI 底图。'
         with tempfile.TemporaryDirectory() as temp, \
-             mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=(outline, 'text')), \
+             mock.patch.object(TOOLS, '_resolve_artifact_text',
+                               side_effect=lambda ctx, slot: (outline if slot == 'deck_outline' else '', 'text')), \
              mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]), \
              mock.patch.object(TOOLS, '_publish_ordered_ppt_artifact', return_value={'status': 'ok'}) as publish:
             for invalid in (None, [], [outline], ['']):
@@ -627,6 +628,9 @@ class StyleFlowCombinationTest(unittest.TestCase):
                 TOOLS, '_publish_pages_from_disk', return_value={
                     'published_count': 1, 'failed_count': 0,
                 },
+            ), mock.patch.object(TOOLS, 'available_font_families', return_value={'宋体'}), mock.patch(
+                'lazymind.chat.engine.tools.file_resources.presentation_edit.available_font_families',
+                return_value={'宋体'},
             ), mock.patch.object(TOOLS, '_prepare_portable_font', return_value=('宋体', [])), mock.patch.object(
                 TOOLS, '_package_edited_html_fonts', side_effect=lambda html, *args: html,
             ):
@@ -659,6 +663,9 @@ class StyleFlowCombinationTest(unittest.TestCase):
                 TOOLS, '_publish_pages_from_disk', return_value={
                     'published_count': 1, 'failed_count': 0,
                 },
+            ), mock.patch.object(TOOLS, 'available_font_families', return_value={'SimSun'}), mock.patch(
+                'lazymind.chat.engine.tools.file_resources.presentation_edit.available_font_families',
+                return_value={'SimSun'},
             ), mock.patch.object(TOOLS, '_prepare_portable_font', return_value=('SimSun', [])), mock.patch.object(
                 TOOLS, '_package_edited_html_fonts', side_effect=lambda html, *args: html,
             ):

@@ -444,3 +444,27 @@ def test_html_font_subsets_page_glyphs_and_honors_no_subsetting(tmp_path, monkey
     from lazymind.chat.engine.tools.file_resources import font_library
     monkeypatch.setattr(font_library, 'local_fonts', lambda: [{**record, 'id': 'other-weight'}])
     assert local_font_css(html) == ''
+
+
+def test_generated_songti_page_contains_subset_font_before_publication(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from lazymind.chat.engine.tools.file_resources import font_library, presentation_edit
+    script = Path(__file__).parents[2] / 'workflows/ppt-workflow/runtime/scripts/run_stage.py'
+    spec = importlib.util.spec_from_file_location('songti_run_stage', script)
+    stage = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stage)
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'fonts'))
+    font_library.register_font(make_font(tmp_path, family='Songti SC'))
+    monkeypatch.setattr(presentation_edit, 'available_font_families', lambda: {'Songti SC'})
+    html = ('<html><head><style>body{font-family:"Songti SC",serif}</style></head>'
+            '<body><h1>正文Title</h1></body></html>')
+    monkeypatch.setattr(stage, 'llm', lambda *a, **kw: html)
+    code, result = stage._capture_cmd(stage._write_page_html_from_query, tmp_path, 1, '正文',
+                                      page_plan={}, inherited_image=None, background_image=None,
+                                      prompt_mode='deterministic', language='zh')
+    assert code == 0, result
+    saved = (tmp_path / 'pages/page_001.html').read_text()
+    assert 'data:font/woff;base64,' in saved
+    assert 'data-lazymind-font-required="true"' in saved
+    assert '<h1>正文Title</h1>' in saved

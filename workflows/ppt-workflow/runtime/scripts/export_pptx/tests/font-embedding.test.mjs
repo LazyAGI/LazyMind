@@ -36,6 +36,43 @@ test('portable font package rejects corruption and preview-only embedding', () =
     '/*lazymind-font:broken*/@font-face{src:url(missing.ttf)}</style>')), /empty or invalid/);
 });
 
+test('subset HTML embeds verified original bytes and fails when the original is missing', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'subset-export-'));
+  const previous = process.env.LAZYMIND_FONT_DIR;
+  process.env.LAZYMIND_FONT_DIR = folder;
+  try {
+    const data = makeTestTtf();
+    const id = createHash('sha256').update(data).digest('hex');
+    const record = { id, file: `${id}.ttf`, aliases: ['Test Web Font'], family: 'Test Web Font',
+      weight: 400, style: 'normal', embeddable: true };
+    await writeFile(path.join(folder, record.file), data);
+    await writeFile(path.join(folder, `${id}.json`), JSON.stringify(record));
+    // Browser subset is deliberately different from the complete editable font.
+    const html = portableHtml().replace('data:font/ttf', 'data:font/woff')
+      .replace(data.toString('base64'), Buffer.from('browser subset').toString('base64'));
+    assert.throws(() => portableFontFaces(html), /Original font resource unavailable/);
+    const faces = portableFontFaces(html, await localFontFaces());
+    assert.ok(faces[0].data.equals(data));
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    await writeFile(source, html);
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types></Types>');
+    zip.file('ppt/_rels/presentation.xml.rels', '<Relationships></Relationships>');
+    zip.file('ppt/presentation.xml', '<p:presentation><p:defaultTextStyle/></p:presentation>');
+    await writeFile(output, await zip.generateAsync({ type: 'nodebuffer' }));
+    await embedGoogleFontsFromPages(output, [{ path: source }]);
+    await verifyEmbeddedFaces(output, faces);
+    await rm(path.join(folder, record.file));
+    await assert.rejects(embedGoogleFontsFromPages(output, [{ path: source }]),
+      error => error.fontPortability && /Original font resource unavailable/.test(error.message));
+  } finally {
+    if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
+    else process.env.LAZYMIND_FONT_DIR = previous;
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 test('HTML exports its own fonts offline and verifies actual PPTX parts', async () => {
   const folder = await mkdtemp(path.join(os.tmpdir(), 'portable-export-'));
   try {

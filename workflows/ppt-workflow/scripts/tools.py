@@ -1308,13 +1308,16 @@ def ppt_fill_template(template_file: str, source_sha256: str, edits: list[dict] 
             '停止调用工具，不需要主 chat 追加检测或 HTML 生成。'}
 
 
-def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_ref: str = '') -> dict[str, Any]:
+def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_ref: str = '',
+                             font_family: str = 'Songti SC') -> dict[str, Any]:
     """Publish editable PPTX directly, without HTML generation.
 
     slides: ordered [{title, bullets: [plain text], notes?}] authored from the
     approved per-page briefs. template_file must be empty; uploaded templates
     require ppt_inspect_template_page followed by ppt_fill_template instead.
     This path supports editable text and notes, not generated charts or formulas.
+    font_family defaults to Songti SC (宋体-简); explicit user fonts override it.
+    The selected font is embedded in the delivered PPTX.
     """
     from lazymind.chat.engine.tools.file_resources.native_presentation import build_native_pptx
     if _workflow_session_id() and _required_output_format() != 'native_pptx':
@@ -1326,7 +1329,8 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     template = None
     slides = _pages_with_saved_notes(slides, notes_ref)
     digest = hashlib.sha256(json.dumps(slides, ensure_ascii=False, sort_keys=True).encode())
-    digest.update(b'native-pptx-v1')
+    digest.update(b'native-pptx-v2-embedded-font')
+    digest.update(font_family.encode())
     if template:
         digest.update(template.read_bytes())
     root = _conversation_root() / 'native_pptx' / digest.hexdigest()
@@ -1335,7 +1339,7 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     if not reused:
         temporary = root / f'{uuid.uuid4().hex}.pptx'
         try:
-            stats = build_native_pptx(slides, temporary, template)
+            stats = build_native_pptx(slides, temporary, template, font_family=font_family)
             os.replace(temporary, output)
         finally:
             temporary.unlink(missing_ok=True)
