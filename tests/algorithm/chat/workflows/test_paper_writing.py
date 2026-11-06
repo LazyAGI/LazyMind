@@ -1091,17 +1091,21 @@ def test_public_workflow_presentation_and_named_outputs():
     }
     assert not any(re.match(r'f\d(?:_|$)', slot['id']) for slot in workflow['slots'])
     ui = workflow['ui']
-    assert not ui['task_presentation'].get('grouped')
-    assert set(ui['task_presentation']['hidden_steps']) == {'finish'}
-    assert len(ui['tabs']) == 10
+    assert not ui.get('task_presentation', {}).get('grouped')
+    assert not ui.get('task_presentation', {}).get('hidden_steps')
+    assert len(ui['tabs']) == 11
+    assert ui['tabs'][-1]['id'] == 'finish'
     assert ui['tabs'][0]['step_id'] == 'research_topic'
     assert 'prepare_document' not in ui['slots']
     assert 'prepare' not in yaml.safe_load((PACKAGE / 'scenario/state.yml').read_text())['steps']
     for tab in ui['tabs']:
-        assert tab['id'] not in ui['task_presentation']['hidden_steps']
+        assert tab['id'] in {step['id'] for step in workflow['steps']}
         assert len(tab['label']) <= 6
         assert not re.search(r'F\d|mock', tab['label'], re.I)
-        assert tab['allow_download'] is True
+        if tab['id'] != 'finish':
+            assert tab['allow_download'] is True
+        else:
+            assert tab['slots'] == [{'id': 'finish_document'}]
     for slot in workflow['slots']:
         if slot['id'].endswith('_pool'):
             assert slot['exposed'] is False

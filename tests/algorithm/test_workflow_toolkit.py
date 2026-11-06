@@ -302,3 +302,17 @@ def test_reorder_pages_rejects_bad_permutations_or_misaligned_lists(order):
     with pytest.raises(ValueError):
         HostWorkflowToolkit(lambda: client).reorder_artifact_pages('session', ['slides'], order)
     client.reorder_slot_orders.assert_not_called()
+
+
+def test_ppt_preparation_starts_background_libraries_only_for_ppt(monkeypatch):
+    from unittest.mock import Mock
+    from lazymind import presentation_resources
+    prefetch = Mock()
+    monkeypatch.setattr(presentation_resources, 'prefetch', prefetch)
+    client = MagicMock()
+    client.prepare_workflow.return_value.result = {'status': 'missing_inputs'}
+    toolkit = HostWorkflowToolkit(lambda: client)
+    toolkit.prepare_workflow('writer')
+    prefetch.assert_not_called()
+    assert toolkit.prepare_workflow('ppt-workflow') == {'status': 'missing_inputs'}
+    prefetch.assert_called_once_with()

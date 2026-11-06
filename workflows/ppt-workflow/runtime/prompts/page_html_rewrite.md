@@ -44,13 +44,14 @@
    - `closing` 结尾 —— 收束感，简短总结或 call-to-action。
 5. **继承 style_spec**：把 deck 的整体风格用一两句自然语言带出来（例："风格专业清新，主色是宝石蓝，辅以浅灰和小范围的琥珀色点缀；字体以黑体为主"），不要只说 "现代、简洁、专业" 这种套话。具体 hex 值、字体名可以写进去。
 6. **不要在 query 里重复 HTML 机械规范**：`.wrapper` 结构、`#bg` / `#ct` 分层、1600×900 画布、ECharts 容器 id 命名、`{renderer:'svg'}`、`__pptxChartsReady` 计数器、`../assets/echarts.min.js` script 路径、伪元素 `<span>` 包裹、单层背景、图片 `../images/` 前缀 —— 这些统一由下游生成器的 system prompt 管理，rewriter 只负责**内容、版面、风格指引**。忽略这条规则的唯一例外是 inherited_image 的具体相对路径（见下条），那个必须在 query 里显式写出来让生成器知道用哪张图。
-7. **处理 inherited_table**：如果输入里有 `inherited_table`，query 里必须明确说出 "这一页的核心是一张表格，包含以下几列……第一行是表头，内容如下……"，并把所有单元格原样列出（可以写成"第 1 行 X 列 Y，值为 …"这样的自然语言描述，或者直接用句子把每行写清楚）。
+7. **处理 inherited_table**：如果输入里有 `inherited_table`，query 里必须明确说出 "这一页的核心是一张表格，包含以下几列……第一行是表头，内容如下……"，并把所有单元格原样列出（可以写成"第 1 行 X 列 Y，值为 …"这样的自然语言描述，或者直接用句子把每行写清楚）。同时主动规划语义分组：同列连续多行确实共享同一状态、类别或阶段时，在版面指引里写明列名、正文起止行（不含表头）、共享文字和垂直居中要求，由生成器合并展示；分组表头可横向合并。保留每行的原始信息和对应关系，不因数字或文字偶然相同就合并，不跨分组或表头/正文合并，遵从用户和原表明确的合并约束。
 8. **处理 inherited_image（硬性要求，不得忽略）**：如果输入里有 `inherited_image_local_path`，query 里必须**明确、显著、不可省略地**写出：
    - 路径：`../<那个路径>`（精确引用，前缀 `../` 不能丢）。
    - **图的内容描述**：取 `inherited_image_caption_hint`（首选）或 `inherited_image_alt`（备选）作为这张图"画的是什么"的语义说明，明文写进 query。例："这张图是 DRAM 市场份额饼图，三大原厂占比对比"。**没有这一条，生成器只能瞎猜，写出的配文会跑题**。
    - **图的尺寸**：若 `inherited_image_size` 非空，把宽高 + aspect 也明文写出（例："原生 1280×720，aspect 约 1.78"），并给生成器一个具体的 width / height 建议（例："建议在版面里占 800px 宽，按原生比例算高约 450px"），保持图片不失真、不留黑边。
+   - PDF/知识库证据图：明确要求 `object-fit: contain`，完整保留坐标轴、图例和标注；将素材描述中的文件名与页码作为来源 caption 传下去。不能裁剪成装饰，不能从未核对的图形猜测数值。
    - 摆放：作为前景 `<img>` 放在版面中显著位置（建议占页面 30-50% 视觉面积）。**不能当成背景（background-image）、不能放在蒙版下、不能用遮罩/渐变压暗覆盖文字**。
-   - 如果页面还有要点和数据，应该与这张图形成"图 + 文"的并列布局；宁可删减部分文字也要保住这张图的可见性。
+   - 如果页面还有要点和数据，应该与这张图形成“图 + 文”的并列布局。技术/科研页必须保留关键机制、条件和结果；先去重、去装饰并调整图文分区，不能为放大图片删掉技术解释。
 9. **无配图时**：如果没有 `inherited_image_local_path`，query 要明说"这页没有可用的配图，请用纯文字 + CSS / SVG / ECharts 装饰把版面填满，不要留大片空白"。不要编造图片路径。
    `background_image_local_path` 不算前景配图；即使有底图，没有 inherited image 时仍不得编造前景 `<img>`。
 10. **处理 AI 底图（硬性）**：若 `background_image_local_path` 非空，query 必须写出精确相对路径，并要求生成器设置 `#bg { background-image: url(<精确路径>); background-size: cover; background-position: center; }`。不得将它输出为前景 `<img>`，也不得替换成自选颜色或虚构路径。
@@ -59,3 +60,27 @@
 ## 输出
 
 直接输出重写后的 query 段落 prose。不要 JSON、不要 markdown fence、不要任何说明性前后缀。250-500 字为宜，但如果页面信息（inherited_table / 多要点）较多，可以更长，以完整承载信息为准。
+
+## 技术答辩与科研文案的深度保持
+
+当需求或大纲要求技术/科研深度时，把已确认的正文逐条传下去，不要重写成几个关键词。
+明确写出观众将看到的“具体问题—原因—模块/算法步骤—为什么有效—结果与边界”，保留
+必要的接口、参数、状态、变量和对照条件。3-5 条有解释的要点或 2-3 个充分展开的技术块
+比同等数量的空泛标签有效；大纲已有的技术细节不得移入不可见的讲稿后从页面删掉。
+页面的核心量化结论有完整数据时，明确指定柱状图/折线图/饼图或环形图，以及原始类别、
+各系列值、单位、坐标轴、图例、标签和统计范围。前后对比用柱状图，有序变化用折线图，
+同一整体的互斥构成才用饼图。不能仅保留 KPI 大字，不能从百分比编造绝对值或时间曲线。
+图文页可从正文占可用区 40-55%、图片占 35-55% 起调；图表主导页可扩大图表，但以
+实际长宽比、字号与标注可读为准。保留技术解释和完整证据，避免巨幅装饰图或整页截图缩略图。
+没有足够数据或代码证据时，忠实表达缺口，不补造技术机制、指标或个人贡献。
+
+## Multi-paper method narrative
+
+Preserve the approved prerequisite-first paper order from the supplied academic analysis/outline:
+if A builds on B, explain B's method before A. A citation, shared topic or benchmark alone does not
+prove dependency; do not invent relationships or reorder by upload order/results alone.
+For each paper retain the problem, inputs, key ordered steps/modules, outputs, mechanism and
+experimental limitations. Explain how dependent methods modify their predecessors. Use supported
+process diagrams or concise pseudocode for methods; results comparisons supplement rather than
+replace method explanations. With a smaller confirmed page budget, compress copy/comparisons
+while preserving every paper's core process and source attribution; do not add pages silently.

@@ -678,6 +678,15 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				req.CommandID, session.ID, req.TargetStepID, req.Operation, req.GraphHash, graph.GraphHash, session.StateVersion)
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
 		}
+		if req.Operation == "retry" && req.RetryOrigin == "automatic" {
+			before := targets[0].UserInput
+			if err := inheritAutomaticRetryIntent(ctx, tx, session.ID, &targets[0]); err != nil {
+				return err
+			}
+			if targets[0].UserInput != before {
+				currentInputs[targets[0].TaskID] = targets[0].UserInput
+			}
+		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			var latest orm.WorkflowSessionStep
@@ -927,6 +936,52 @@ func sessionIntentText(value string) string {
 	return ""
 }
 
+// inheritAutomaticRetryIntent retains the failed native attempt's user amendment.
+// A model/provider failure notification is diagnostic context, not a replacement
+// for the request the failed attempt was executing. User-initiated retries and
+// rewinds keep their new input; hosted attempts without native params are unchanged.
+func inheritAutomaticRetryIntent(ctx context.Context, tx *gorm.DB, sessionID string, target *transitionTarget) error {
+	var previous orm.WorkflowSessionStep
+	if err := tx.WithContext(ctx).Where("session_id = ? AND step_id = ? AND validity = ?", sessionID,
+		target.TargetStepID, "effective").Order("attempt DESC").First(&previous).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if previous.ExecutorHost == "external-agent" {
+		return nil
+	}
+	var task orm.SubAgentTask
+	if err := tx.WithContext(ctx).Select("params").Where("id = ? AND conversation_id = (SELECT conversation_id FROM plugin_sessions WHERE id = ?)",
+		previous.TaskID, sessionID).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if len(task.Params) == 0 {
+		return nil
+	}
+	var params struct {
+		CurrentUserInput string `json:"current_user_input"`
+		RetryHint        string `json:"retry_hint"`
+	}
+	if err := json.Unmarshal(task.Params, &params); err != nil {
+		return fmt.Errorf("read automatic retry intent: %w", err)
+	}
+	if strings.TrimSpace(params.CurrentUserInput) == "" {
+		return nil
+	}
+	parts := []string{params.RetryHint, target.RuntimeInstruction}
+	if diagnostic := strings.TrimSpace(target.UserInput); diagnostic != "" && diagnostic != params.CurrentUserInput {
+		parts = append(parts, "Automatic retry diagnostic (not a new user request): "+diagnostic)
+	}
+	target.RuntimeInstruction = strings.TrimSpace(strings.Join(parts, "\n\n"))
+	target.UserInput = params.CurrentUserInput
+	return nil
+}
+
 // applyRecoveryIntent keeps the workflow launch request authoritative when a
 // user retries, rewinds, or re-executes a stale step. The recovery command is useful execution
 // context, but it must not replace {{user_input}} and silently change the task.
@@ -1141,74 +1196,10 @@ func invalidateNativeForOperation(ctx context.Context, tx *gorm.DB, session *orm
 	if operation == "rewind" && attempt.Status != "succeeded" {
 		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_REWIND", "only succeeded attempts can be rewound", false, nil)
 	}
-	queue := []orm.WorkflowSessionStep{attempt}
-	seen := map[string]bool{}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if seen[current.ID] {
-			continue
-		}
-		seen[current.ID] = true
-		if err := tx.Model(&orm.WorkflowSessionStep{}).Where("id = ?", current.ID).Update("validity", "stale").Error; err != nil {
-			return err
-		}
-		var outputs []orm.WorkflowSlotRevision
-		if err := tx.Where("session_id = ? AND ((producer_attempt_id = ? AND producer_attempt_id != '') OR (step_id = ? AND attempt = ?))", session.ID, current.ID, current.StepID, current.Attempt).Find(&outputs).Error; err != nil {
-			return err
-		}
-		for _, output := range outputs {
-			if err := tx.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", output.ID).Updates(map[string]any{"validity": "stale", "selected": false}).Error; err != nil {
-				return err
-			}
-			var bindings []orm.WorkflowAttemptInputBinding
-			if err := tx.Where("material_revision_id = ?", output.ID).Find(&bindings).Error; err != nil {
-				return err
-			}
-			for _, binding := range bindings {
-				var consumer orm.WorkflowSessionStep
-				if tx.Where("id = ? AND validity = ?", binding.AttemptID, "effective").First(&consumer).Error == nil {
-					queue = append(queue, consumer)
-				}
-			}
-			var decisions []orm.WorkflowRouteDecision
-			if err := tx.Where("session_id = ? AND validity = ?", session.ID, "effective").Find(&decisions).Error; err != nil {
-				return err
-			}
-			for _, decision := range decisions {
-				var witnesses []graphengine.Witness
-				_ = json.Unmarshal(decision.WitnessJSON, &witnesses)
-				usesRevision := false
-				for _, witness := range witnesses {
-					if witness.RevisionID == output.ID {
-						usesRevision = true
-						break
-					}
-				}
-				if usesRevision {
-					if err := enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue); err != nil {
-						return err
-					}
-					if err := tx.Model(&orm.WorkflowRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error; err != nil {
-						return err
-					}
-				}
-			}
-		}
-		var sourceDecisions []orm.WorkflowRouteDecision
-		if err := tx.Where("session_id = ? AND source_attempt_id IN ? AND validity = ?", session.ID, []string{current.ID, current.TaskID}, "effective").Find(&sourceDecisions).Error; err != nil {
-			return err
-		}
-		for _, decision := range sourceDecisions {
-			if err := enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue); err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.WorkflowRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error; err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	// Native executions use the same lease fencing as hosted executions. Merely
+	// marking their dependency closure stale leaves workers running: heartbeat
+	// and publication must also lose their authority when an upstream step rewinds.
+	return controlstore.InvalidateAttempts(tx, session, []orm.WorkflowSessionStep{attempt})
 }
 
 func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {

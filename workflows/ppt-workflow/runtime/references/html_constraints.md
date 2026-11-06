@@ -23,7 +23,10 @@ system prompts. They describe what the downstream converter
 - `mix-blend-mode` — not supported
 - Repeating texture backgrounds (`background-size` smaller than element) — may flatten
 - CSS animations / transitions / :hover — dropped
-- Custom fonts require target device to have them installed
+- Font replacement uses scoped edits and packages licensed full font files in HTML.
+  The editable PPTX exporter must embed and verify these required fonts before publishing;
+  a missing/corrupt/restricted font fails export instead of silently substituting it.
+  Legacy HTML without packaged fonts can still depend on fonts installed on the target device.
 - Image `opacity<1` simulated via background-color overlay (matching required)
 
 ## 3. Background resolution priority (slide background)

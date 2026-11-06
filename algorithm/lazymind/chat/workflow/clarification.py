@@ -169,7 +169,7 @@ def startup_metadata(workflow_ref: str, revision_id: str, request: str, values: 
 
 def startup_card(missing: list[dict], metadata: dict[str, str]) -> dict:
     questions = []
-    for field in missing[:3]:
+    for field in missing:
         question = {key: field[key] for key in (
             'id', 'type', 'reason', 'choices', 'choice_policy', 'allow_other', 'boolean_labels',
             'validation', 'attachment',

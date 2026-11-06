@@ -137,6 +137,24 @@ describe('ArtifactRewriteDialog', () => {
     expect(screen.getByRole('button', { name: 'chat.artifactRewrite.preview' })).toBeEnabled();
   });
 
+  it('shows the server selection error instead of the Axios transport code', async () => {
+    const request = vi.fn().mockRejectedValue({ code: 'ERR_BAD_REQUEST',
+      response: { data: { data: { code: 'SELECTION_STALE' } } } });
+    renderDialog(request);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '删除' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.preview' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('chat.artifactRewrite.errors.stale');
+  });
+
+  it('explains unavailable fonts instead of suggesting a blind retry', async () => {
+    const request = vi.fn().mockRejectedValue({ code: 'ERR_BAD_REQUEST',
+      response: { data: { data: { code: 'FONT_UNAVAILABLE' } } } });
+    renderDialog(request);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '换成宋体' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.preview' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('chat.artifactRewrite.errors.fontUnavailable');
+  });
+
   it('removes progress on unmount and ignores a late preview response', async () => {
     let finish!: (value: typeof readyPreview) => void;
     const request = vi.fn(() => new Promise<typeof readyPreview>(resolve => { finish = resolve; }));

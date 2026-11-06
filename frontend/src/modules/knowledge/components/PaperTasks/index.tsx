@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
-import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import type { CheckboxChangeEvent } from 'antd/es/checkbox';
-import { BranchesOutlined, DownOutlined, EditOutlined, FundProjectionScreenOutlined, HistoryOutlined, ReadOutlined, ReloadOutlined, CheckOutlined, MinusOutlined } from '@ant-design/icons';
+import { Alert, Button, Drawer, Dropdown, Input, List, Modal, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { BranchesOutlined, DownOutlined, EditOutlined, FundProjectionScreenOutlined, HistoryOutlined, LoadingOutlined, ReadOutlined, ReloadOutlined, CheckOutlined, MinusOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -85,7 +84,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [params, setParams] = useSearchParams();
     const [launch, setLaunch] = useState<{ kind: PaperTask; direction: boolean }>();
     const [instruction, setInstruction] = useState('');
-    const [reflectionFirst, setReflectionFirst] = useState(false);
     const [expansionEnabled, setExpansionEnabled] = useState(false);
     const [topicBusy, setTopicBusy] = useState(false);
     const [selectionRetry, setSelectionRetry] = useState(0);
@@ -162,7 +160,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         }
         setActionError('');
         setInstruction('');
-        setReflectionFirst(false);
         setExpansionEnabled(false);
         setReviewTopic('');
         setReviewPapersExpanded(false);
@@ -348,7 +345,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const body = {
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
-                user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: reflectionFirst,
+                user_instruction: launch.direction ? undefined : (launch.kind === 'review' ? reviewInstruction(reviewTopic, instruction) : instruction.trim()), reflection_first: false,
                 ...(launchesExpansion ? { budget_mode: launchBudgetMode } : {}),
                 ...(launchesExpansion && launchBudgetMode !== 'fast' ? { direction_selection: directionSelection } : {}),
                 ...(directReview ? { skip_expansion: true, review_scope: 'selected' as const, paper_ids: eligibleReviewPapers.map(item => item.paper.paper_id) } : {}),
@@ -677,7 +674,6 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             <Input.TextArea aria-label={t(launch?.direction ? 'paperTasks.topic' : 'paperTasks.additional')}
                 placeholder={t(launch?.direction ? 'paperTasks.topicPlaceholder' : `paperTasks.placeholder.${launch?.kind || 'expansion'}`)}
                 value={instruction} disabled={busy || topicBusy} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInstruction(event.target.value)} />
-            {launch?.kind === 'ppt' && <Checkbox style={{ marginTop: 12 }} checked={reflectionFirst} onChange={(event: CheckboxChangeEvent) => setReflectionFirst(event.target.checked)}>{t('paperTasks.reflectionFirst')}</Checkbox>}
         </Modal>
         {/* Keep nested portals mounted for result links that open without history. */}
         <Drawer forceRender className="paper-expansion-history-drawer" open={history} width={780} onClose={() => setHistory(false)}

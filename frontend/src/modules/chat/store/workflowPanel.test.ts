@@ -43,12 +43,12 @@ describe('runtime skipped tab visibility', () => {
     const visible = (projection: WorkflowRuntimeProjection) =>
       filterWorkflowTabs(paper.tabs, [], undefined, projection, true).map(tab => tab.id);
 
-    expect(visible({ completed: true, past: ['research_topic', 'finish'] })).toEqual(['research_topic']);
-    expect(visible({ completed: true, past: ['peer_review', 'finish'] })).toEqual(['peer_review']);
+    expect(visible({ completed: true, past: ['research_topic', 'finish'] })).toEqual(['research_topic', 'finish']);
+    expect(visible({ completed: true, past: ['peer_review', 'finish'] })).toEqual(['peer_review', 'finish']);
     expect(visible({ completed: false, past: ['research_topic'] })).toContain('revise_document');
     expect(visible({ completed: false, past: ['research_topic', 'finish'] })).toContain('revise_document');
     expect(visible({ completed: true, past: ['research_topic', 'revise_document', 'finish'] }))
-      .toEqual(['research_topic', 'revise_document']);
+      .toEqual(['research_topic', 'revise_document', 'finish']);
   });
 
   it('keeps a completed unexecuted tab when it has a selected artifact', () => {
@@ -79,7 +79,7 @@ describe('runtime skipped tab visibility', () => {
     const hidden = ['research_topic', 'literature_review', 'experiment', 'data_analysis', 'write_outline', 'write_document', 'reading_reflection'];
     const selected: WorkflowRuntimeProjection = { pruned: hidden, past: ['peer_review'] };
     const visible = () => filterWorkflowTabs(paper.tabs, [], undefined, selected, true).map(t => t.id);
-    expect(visible()).toEqual(['peer_review', 'revise_document']);
+    expect(visible()).toEqual(['peer_review', 'revise_document', 'finish']);
     selected.past = ['peer_review', 'refine_topic'];
     expect(visible()).toContain('refine_topic');
     selected.past = [];
@@ -165,6 +165,27 @@ describe('hydrateWorkflowUI', () => {
 });
 
 describe('filterWorkflowTabs', () => {
+  it.each([false, true])('keeps PPT intermediate results visible with legacy compact settings: %s', (legacy) => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/ppt-workflow/workflow.yaml'), 'utf8'));
+    const ui = hydrateWorkflowUI(spec);
+    const tabs = ui.tabs?.map(tab => ({
+      ...tab,
+      ...(legacy && tab.id !== 'composite_preview'
+        ? { presentation_hide_when_material: 'compact_presentation' } : {}),
+    }));
+    const slots = [
+      { slot: 'compact_presentation', selected: true },
+      { slot: 'ppt_capability_requirements', selected: true },
+      { slot: 'skip_background_images', selected: true },
+      { slot: 'deck_outline', selected: true },
+    ] as SlotRevision[];
+    const runtime = { projection: { past: ['analyze_requirements', 'collect_materials', 'build_outline', 'plan_page_prompts'] } };
+    expect(filterWorkflowTabs(tabs, slots, ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
+      .toEqual(['analysis', 'materials', 'outline', 'page_prompts', 'composite_preview']);
+    expect(filterWorkflowTabs(tabs, slots.slice(0, 2), ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
+      .toEqual(['analysis', 'materials', 'background_prompts', 'background_images', 'outline', 'page_prompts', 'composite_preview']);
+  });
+
   it.each([
     ['fast', ['screening_not_required', 'analysis_not_required'], ['expand_and_screen']],
     ['balanced', ['analysis_not_required'], ['expand_and_screen', 'screen_and_supplement']],

@@ -744,7 +744,7 @@ async def _run_completion_review_scenario(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('agent_type', ['research', 'workflow_step'])
+@pytest.mark.parametrize('agent_type', ['research'])
 async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path, agent_type):
     verdict = json.dumps({
         'completed': True,
@@ -852,7 +852,7 @@ async def test_missing_resumed_file_is_not_completion_evidence(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('agent_type', ['research', 'workflow_step'])
+@pytest.mark.parametrize('agent_type', ['research'])
 async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path, agent_type):
     evaluation_started = threading.Event()
 
@@ -1139,10 +1139,7 @@ def test_workflow_output_contracts_keep_their_existing_rules(completion_case, pa
                  'reason': 'The explanation is complete.'},
     )
     assert _terminal(events)['status'] == expected
-    if params:
-        model.share.assert_not_called()
-    else:
-        model.share.assert_called_once()
+    model.share.assert_not_called()
 
 
 def test_text_cannot_replace_a_declared_file_artifact(completion_case):
@@ -1193,7 +1190,7 @@ def test_workflow_zero_failure_counts_do_not_introduce_model_review(completion_c
     ('I cannot complete the required action.', False),
     ('缺少页脚，需要用户审核。', False),
 ])
-def test_workflow_uncertain_completion_is_reviewed_without_losing_artifacts(completion_case, final, completed):
+def test_workflow_saved_record_passes_without_content_review(completion_case, final, completed):
     events, model, _ = completion_case(
         agent_type='workflow_step', final=final,
         params={'required_output_artifact_keys': ['document'],
@@ -1202,13 +1199,13 @@ def test_workflow_uncertain_completion_is_reviewed_without_losing_artifacts(comp
         verdict={'completed': completed, 'requires_artifact': True, 'artifact_keys': ['document'],
                  'reason': 'Required action completed.' if completed else 'Required action incomplete.'},
     )
-    assert _terminal(events)['status'] == ('succeeded' if completed else 'failed')
+    assert _terminal(events)['status'] == 'succeeded'
     assert any(event['type'] == 'artifact' for event in events)
-    model.share.assert_called_once()
+    model.share.assert_not_called()
 
 
 @pytest.mark.parametrize('completed', [True, False])
-def test_workflow_completion_review_uses_current_step_contract(monkeypatch, completion_case, completed):
+def test_explicit_workflow_completion_review_uses_current_step_contract(monkeypatch, completed):
     observed = []
 
     def review(_model, prompt):
@@ -1228,43 +1225,42 @@ def test_workflow_completion_review_uses_current_step_contract(monkeypatch, comp
         })
 
     monkeypatch.setattr(runner_mod, '_silent_background_model_call', review)
-    events, _, _ = completion_case(
-        agent_type='workflow_step',
+    # Automatic workflow acceptance remains record-based on this branch. An
+    # explicitly invoked reviewer still honors upstream's current-step scope.
+    is_ok, summary, phase = runner_mod._evaluate_completion(
+        llm=MagicMock(),
         objective='User wants a 9-slide PPT with source images. '
                   'This step only analyzes requirements; material collection and PPT generation follow later.',
-        params={'workflow_id': 'ppt-workflow', 'step_id': 'analyze_requirements',
-                'required_output_artifact_keys': ['requirement_analysis'],
-                'output_slot_types': {'requirement_analysis': 'text'}},
-        output_slots=['requirement_analysis'], save=('requirement_analysis', 'text'),
-        final='Requirements saved. Source images are missing and must be collected in the next step.',
+        steps=[],
+        artifacts=[{'slot': 'requirement_analysis', 'content_type': 'text',
+                    'value': {'text': 'Requirements saved.'}}],
+        force_result='Requirements saved. Source images must be collected in the next step.',
+        workflow_step={'workflow_id': 'ppt-workflow', 'step_id': 'analyze_requirements',
+                       'required_output_artifact_keys': ['requirement_analysis'],
+                       'output_slots': ['requirement_analysis']},
     )
-    terminal = _terminal(events)
     assert observed
-    assert terminal['status'] == ('succeeded' if completed else 'failed')
-    assert any(event['type'] == 'artifact' for event in events)
+    assert is_ok is completed
     if not completed:
-        assert terminal['current_phase'] == 'objective_incomplete'
-        assert 'audience analysis' in terminal['summary']
+        assert phase == 'objective_incomplete'
+        assert 'audience analysis' in summary
 
 
 @pytest.mark.parametrize('objective,final,completed', [
     ('使用记忆写入工具更新项目记忆文件。', '步骤结论：任务失败，缺少更新记忆文件工具，未写入任何文件。', False),
     ('读取章节并提出复核意见，不写入文件。', '已完成复核，情节与摘要一致。', True),
 ])
-def test_workflow_without_outputs_checks_actual_completion(completion_case, objective, final, completed):
+def test_workflow_without_required_outputs_does_not_review_content(completion_case, objective, final, completed):
     events, model, _ = completion_case(
         agent_type='workflow_step', objective=objective, final=final,
         params={'required_output_artifact_keys': []}, output_slots=[],
         verdict={'completed': completed, 'requires_artifact': False, 'artifact_keys': [], 'reason': final},
     )
     terminal = _terminal(events)
-    assert terminal['status'] == ('succeeded' if completed else 'failed')
+    assert terminal['status'] == 'succeeded'
     assert terminal['summary'] == final
-    if not completed:
-        assert terminal['type'] == 'error'
-        assert terminal['current_phase'] == 'objective_incomplete'
     assert not any(event['type'] == 'artifact' for event in events)
-    model.share.assert_called_once()
+    model.share.assert_not_called()
 
 
 def test_completed_negative_review_is_not_an_execution_failure(completion_case):
@@ -1276,8 +1272,7 @@ def test_completed_negative_review_is_not_an_execution_failure(completion_case):
         verdict={'completed': True, 'requires_artifact': True, 'artifact_keys': ['document'], 'reason': final},
     )
     assert _terminal(events)['status'] == 'succeeded'
-    model.share.assert_called_once()
-    assert 'negative findings' in model.share.return_value.call_args.args[0]
+    model.share.assert_not_called()
 
 
 def test_workflow_without_model_review_still_requires_actual_delivery(completion_case):
@@ -1289,6 +1284,64 @@ def test_workflow_without_model_review_still_requires_actual_delivery(completion
     )
     assert _terminal(events)['status'] == 'failed'
     assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    assert 'document' in _terminal(events)['summary']
+    assert 'Upstream action:' in _terminal(events)['summary']
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_workflow_accepts_saved_locator_without_opening_body(monkeypatch, tmp_path):
+    model = MagicMock()
+    read_body = MagicMock(side_effect=AssertionError('Acceptance must not inspect content'))
+    monkeypatch.setattr(runner_mod.subagent_tools, 'artifact_is_deliverable', read_body)
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={'required_output_artifact_keys': ['deck_outline']}, output_slots=['deck_outline'],
+        artifacts=[{'slot': 'deck_outline', 'content_type': 'file', 'seq': 1,
+                    'value': {'path': 'unresolved-placeholder.md'}}],
+        final='大纲已保存，部分日期尚未确认。',
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    read_body.assert_not_called()
+    model.share.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('inventory', [
+    [{'slot': 'deck_outline', 'artifact_id': 'outline-from-prior-attempt'}],
+    [],
+    ConnectionError('inventory offline'),
+])
+async def test_workflow_acceptance_checks_prior_records_and_reports_lookup_failure(monkeypatch, tmp_path, inventory):
+    lookup = MagicMock()
+    if isinstance(inventory, Exception):
+        lookup.side_effect = inventory
+    else:
+        lookup.return_value = inventory
+    monkeypatch.setattr(runner_mod.subagent_tools, '_public_workflow_artifacts', lookup)
+    client = MagicMock()
+    client.list_artifacts.return_value.result = {'artifacts': []}
+    monkeypatch.setattr('lazymind.workflow_sdk.WorkflowClient', lambda *args, **kwargs: client)
+    model = MagicMock()
+    _raw, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        params={'session_id': 'workflow-session', 'required_output_artifact_keys': ['deck_outline'],
+                'workflow_runtime': {'publisher_owned_slots': ['deck_outline']}},
+        output_slots=['deck_outline'], final='日期尚未确认。',
+    )
+    terminal = _terminal(events)
+    if isinstance(inventory, Exception):
+        assert terminal['status'] == 'failed'
+        assert terminal['current_phase'] == 'completion_evaluation_failed'
+        assert 'ConnectionError' in terminal['summary']
+        assert 'retry the artifact inventory lookup' in terminal['summary']
+    elif inventory:
+        assert terminal['status'] == 'succeeded'
+    else:
+        assert terminal['current_phase'] == 'missing_required_artifacts'
+        assert 'deck_outline' in terminal['summary']
+        assert 'publish these outputs' in terminal['summary']
+    lookup.assert_called_once_with('workflow-session')
     model.share.assert_not_called()
 
 
@@ -1547,7 +1600,7 @@ def test_workflow_plan_keeps_runtime_length_above_step_defaults_without_db(tmp_p
 
 def test_completion_review_uses_the_same_runtime_length_requirement(completion_case):
     events, model, _ = completion_case(
-        agent_type='workflow_step', objective='生成2000–3000字章节。',
+        agent_type='research', objective='生成2000–3000字章节。',
         params={'launch_user_input': '请写约200字的章节。', 'runtime_instruction': '本次改为约300字。'},
         output_slots=[], final='已完成约300字的章节。',
         verdict={'completed': True, 'requires_artifact': False, 'artifact_keys': [], 'reason': '满足本次字数要求。'},
@@ -2437,7 +2490,7 @@ def test_completion_invalid_format_retry_preserves_negative_verdict():
     assert model.share.call_count == 2
 
 
-@pytest.mark.parametrize('agent_type', ['document_generation', 'workflow_step'])
+@pytest.mark.parametrize('agent_type', ['document_generation'])
 def test_invalid_reviewer_retains_saved_delivery(completion_case, agent_type):
     events, model, _ = completion_case(
         agent_type=agent_type, params={'required_output_artifact_keys': ['document']},

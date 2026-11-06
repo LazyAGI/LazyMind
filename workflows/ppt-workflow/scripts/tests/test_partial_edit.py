@@ -15,9 +15,15 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(TOOLS)
 
 
+def accept_suggested_styles(_system, prompt, **_kwargs):
+    return json.dumps({'op': 'set_style', 'styles': json.loads(prompt)['suggested_styles']})
+
+
 def test_clicked_font_edit_is_local_and_preserves_nested_text():
     html = '<main><div data-el="title"><span style="font-family:Old">标题</span><b>重点</b></div><p data-el="body">不修改</p></main>'
-    with mock.patch.object(TOOLS, 'available_font_families', return_value={'宋体'}):
+    with mock.patch.object(TOOLS, 'available_font_families', return_value={'宋体', 'Arial'}), \
+            mock.patch.object(TOOLS, '_agent_llm_call', return_value=
+                              '{"op":"set_style","styles":{"font-family":"宋体"}}'):
         tree = TOOLS._HtmlTree(html)
         ops, old, new = TOOLS._single_selection_edit_ops('字体换成宋体', {'el': 'title'}, tree)
         assert old == new
@@ -30,20 +36,22 @@ def test_clicked_font_edit_is_local_and_preserves_nested_text():
         assert '标题' in updated and '重点' in updated
         replaced = TOOLS._upsert_font_override(updated, 'Arial', 'all')
         assert '宋体' not in replaced
-        assert 'font-family: "Arial" !important' in replaced
+        assert 'font-family: &quot;Arial&quot; !important' in replaced
 
 
-def test_clicked_unknown_font_does_not_fall_through_to_llm():
+def test_clicked_unknown_font_returns_model_unavailable_result():
     import pytest
     with mock.patch.object(TOOLS, 'available_font_families', return_value={'Arial'}), \
-            mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+            mock.patch.object(TOOLS, '_agent_llm_call', return_value=
+                              '{"op":"font_unavailable","family":"不存在字体"}') as llm:
         with pytest.raises(ValueError, match='不可用'):
             TOOLS._single_selection_edit_ops('字体改为不存在字体', {'el': 'title'},
                                             TOOLS._HtmlTree('<h1 data-el="title">标题</h1>'))
-        llm.assert_not_called()
+        llm.assert_called_once()
 
 
-def test_clicked_typography_changes_all_requested_properties_without_rewriting_text():
+@mock.patch.object(TOOLS, '_agent_llm_call', side_effect=accept_suggested_styles)
+def test_clicked_typography_changes_all_requested_properties_without_rewriting_text(_llm):
     html = '<main><div data-el="title"><b><i><u>标题</u></i></b></div><p data-el="body">正文</p></main>'
     tree = TOOLS._HtmlTree(html)
     command = '字号改为 18pt，取消粗体，取消斜体，取消下划线，文字颜色改为 #123ABC'
@@ -585,6 +593,23 @@ class WholePageInsertionTests(unittest.TestCase):
 
 
 class PartialEditTests(unittest.TestCase):
+    def test_model_envelope_content_keeps_real_newlines_and_literal_escapes(self):
+        html = '<html>\n<style>\n.wrapper { width:1600px; }\n</style>\n<script>const s="\\n";</script></html>'
+        model = mock.Mock()
+        model.share.return_value = mock.Mock(return_value={
+            'content': html, 'reasoning_content': 'private', 'tool_calls': [],
+        })
+        lazyllm_module = mock.Mock()
+        lazyllm_module.AutoModel.return_value = model
+        with mock.patch.dict('sys.modules', {'lazyllm': lazyllm_module}):
+            self.assertEqual(TOOLS._agent_llm_call('system', 'user'), html)
+        self.assertEqual(TOOLS._model_response_text({'content': [
+            {'type': 'reasoning', 'text': 'private'},
+            {'type': 'text', 'text': 'first\n'},
+            {'type': 'output_text', 'text': 'second'},
+        ]}), 'first\nsecond')
+        self.assertEqual(TOOLS._model_response_text({'reasoning_content': 'private'}), '')
+
     def test_agent_llm_call_propagates_default_and_explicit_timeout(self):
         model = mock.Mock()
         shared = mock.Mock(return_value='generated')
@@ -733,7 +758,9 @@ class PartialEditTests(unittest.TestCase):
             'index': 2,
             'selected_text': '赛博朋克2077',
         }
-        with mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+        with mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+                'op': 'replace_text', 'value': '赛博朋克2077游戏介绍',
+        })) as llm:
             ops, old_text, new_text = TOOLS._selection_edit_ops(
                 '改为赛博朋克2077游戏介绍',
                 selection,
@@ -748,7 +775,7 @@ class PartialEditTests(unittest.TestCase):
         }])
         self.assertIn('赛博朋克', old_text)
         self.assertEqual(new_text, '赛博朋克2077游戏介绍')
-        llm.assert_not_called()
+        llm.assert_called_once()
 
         edited, _applied, _notes, _removed = TOOLS._apply_html_ops(
             DUPLICATE_TITLE_HTML, ops,
@@ -767,7 +794,10 @@ class PartialEditTests(unittest.TestCase):
                 TOOLS._HtmlTree(DUPLICATE_TITLE_HTML),
             )
 
-    def test_duplicate_selection_preview_preserves_occurrence_index(self):
+    @mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+        'op': 'replace_text', 'value': '赛博朋克2077游戏介绍',
+    }))
+    def test_duplicate_selection_preview_preserves_occurrence_index(self, _llm):
         with tempfile.TemporaryDirectory() as tmp:
             encoded = TOOLS.base64.b64encode(
                 DUPLICATE_TITLE_HTML.encode('utf-8'),
@@ -817,7 +847,10 @@ class PartialEditTests(unittest.TestCase):
         self.assertIn('First detail', removed[0])
         self.assertIn('grid tracks reduced 2 -> 1', notes)
 
-    def test_legacy_data_uri_artifact_can_preview_and_persist(self):
+    @mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+        'op': 'replace_text', 'value': 'Legacy edited',
+    }))
+    def test_legacy_data_uri_artifact_can_preview_and_persist(self, _llm):
         with tempfile.TemporaryDirectory() as tmp:
             encoded = TOOLS.base64.b64encode(LEGACY_PAGE_HTML.encode('utf-8')).decode('ascii')
             artifact = {'path': f'data:text/plain;base64,{encoded}', 'type': 'text'}
@@ -861,7 +894,9 @@ class PartialEditTests(unittest.TestCase):
             'el': 'title',
             'selected_text': '2025游戏行业趋势',
         }
-        with mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+        with mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+                'op': 'replace_text', 'value': '赛博朋克2077介绍',
+        })) as llm:
             ops, old_text, new_text = TOOLS._selection_edit_ops(
                 '修改为赛博朋克2077介绍', selection, TOOLS._HtmlTree(NESTED_TITLE_HTML),
             )
@@ -873,7 +908,7 @@ class PartialEditTests(unittest.TestCase):
         }])
         self.assertEqual(old_text, '2025游戏行业趋势')
         self.assertEqual(new_text, '赛博朋克2077介绍')
-        llm.assert_not_called()
+        llm.assert_called_once()
 
         edited, _applied, _notes, _removed = TOOLS._apply_html_ops(
             NESTED_TITLE_HTML, ops,
@@ -1002,7 +1037,7 @@ class PartialEditTests(unittest.TestCase):
         self.assertEqual(new_text, f'阖家团圆 / {original_body}')
         self.assertEqual(
             llm.call_args.kwargs['request_name'],
-            'ppt-selection-retext-segments',
+            'ppt-selection-edit',
         )
 
         edited, _applied, _notes, _removed = TOOLS._apply_html_ops(
@@ -1047,7 +1082,7 @@ class PartialEditTests(unittest.TestCase):
                 'styles': {'background': 'url(javascript:alert(1))'},
             }])
 
-    def test_common_relative_css_requests_do_not_call_llm(self):
+    def test_ambiguous_font_wording_uses_semantic_style_plan(self):
         selection = {
             'type': 'ppt_html',
             'page': 1,
@@ -1058,7 +1093,9 @@ class PartialEditTests(unittest.TestCase):
                 'height': '80px',
             },
         }
-        with mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+        with mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+                'op': 'set_style', 'styles': {'font-size': '46px', 'width': '510px'},
+        })) as llm:
             ops, old_text, new_text = TOOLS._selection_edit_ops(
                 '字体变大，宽度变小', selection, TOOLS._HtmlTree(PAGE_HTML),
             )
@@ -1069,10 +1106,10 @@ class PartialEditTests(unittest.TestCase):
         }])
         self.assertEqual(old_text, 'Old title')
         self.assertEqual(new_text, old_text)
-        llm.assert_not_called()
+        llm.assert_called_once()
 
-    def test_exact_css_sizes_and_alignment_are_deterministic(self):
-        with mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+    def test_exact_css_sizes_and_alignment_are_preserved(self):
+        with mock.patch.object(TOOLS, '_agent_llm_call', side_effect=accept_suggested_styles) as llm:
             ops, _old_text, _new_text = TOOLS._selection_edit_ops(
                 '字号改为 32px，宽度设置为 50%，文字居中并加粗',
                 {'type': 'ppt_html', 'page': 1, 'el': 'title'},
@@ -1084,10 +1121,10 @@ class PartialEditTests(unittest.TestCase):
             'font-weight': '700',
             'text-align': 'center',
         })
-        llm.assert_not_called()
+        llm.assert_called_once()
 
     def test_remove_background_is_a_style_edit_not_node_deletion(self):
-        with mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+        with mock.patch.object(TOOLS, '_agent_llm_call', side_effect=accept_suggested_styles) as llm:
             ops, _old_text, _new_text = TOOLS._selection_edit_ops(
                 '去掉背景色',
                 {'type': 'ppt_html', 'page': 1, 'el': 'title'},
@@ -1098,9 +1135,12 @@ class PartialEditTests(unittest.TestCase):
             'el': 'title',
             'styles': {'background': 'transparent'},
         }])
-        llm.assert_not_called()
+        llm.assert_called_once()
 
-    def test_selection_preview_then_apply_updates_export_source(self):
+    @mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+        'op': 'replace_text', 'value': 'New title',
+    }))
+    def test_selection_preview_then_apply_updates_export_source(self, _llm):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             deck, page = make_deck(root)
@@ -1155,7 +1195,10 @@ class PartialEditTests(unittest.TestCase):
             self.assertIn('早睡', page.read_text(encoding='utf-8'))
             self.assertEqual(other.read_text(encoding='utf-8'), PAGE_HTML)
 
-    def test_injected_portable_source_accepts_matching_content_with_stale_hash(self):
+    @mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+        'op': 'replace_text', 'value': 'New title',
+    }))
+    def test_injected_portable_source_accepts_matching_content_with_stale_hash(self, _llm):
         with tempfile.TemporaryDirectory() as tmp:
             upload_root = Path(tmp) / 'uploads'
             deck, page = make_deck(upload_root / 'workflow-workspaces' / 'ppt-workflow')
@@ -1275,7 +1318,8 @@ class PartialEditTests(unittest.TestCase):
             page_two = deck / 'pages' / 'page_002.html'
             page_two.write_text(PAGE_HTML.replace('Old title', 'Page two'), encoding='utf-8')
             with mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]):
-                with mock.patch.object(TOOLS, 'require_context'):
+                with mock.patch.object(TOOLS, 'require_context'), \
+                        mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=(None, 'text')):
                     with mock.patch.object(
                         TOOLS, '_save_artifact', return_value={'status': 'ok'},
                     ) as save:
@@ -1437,7 +1481,8 @@ class PartialEditTests(unittest.TestCase):
 
             self.assertEqual(result['status'], 'ok')
             self.assertEqual(result['published_count'], 2)
-            self.assertEqual(published, [2, 1, 2, 1, 2])
+            # A new Attempt republishes the cached success before waiting on page 1.
+            self.assertEqual(published, [2, 2, 1, 1, 2])
             self.assertEqual(attempts, {1: 2, 2: 1})
             self.assertEqual(result['retry_count'], 0)
             self.assertEqual(len(list(deck.glob('.page_retry_*.json'))), 2)
@@ -1806,14 +1851,63 @@ class DeferredTextOutlineTest(unittest.TestCase):
             model.assert_not_called()
             self.assertFalse((deck / 'outline.json').exists())
 
+    def test_page_document_publication_and_generation_reads_latest_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp)
+            artifacts = {'deck_outline': '## 标题\n已确认事实'}
+            def resolve(_ctx, key, sort_order=None):
+                return artifacts.get(key), 'text'
+            def save(**kwargs):
+                artifacts[kwargs.get('slot') or kwargs.get('key')] = kwargs['value']
+                return {'ok': True}
+            with (
+                mock.patch.object(TOOLS, 'require_context', return_value=object()),
+                mock.patch.object(TOOLS, '_resolve_artifact_text', side_effect=resolve),
+                mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
+                mock.patch.object(TOOLS, '_publish_ordered_ppt_artifact', side_effect=save),
+                mock.patch.object(TOOLS, '_save_artifact', side_effect=save),
+            ):
+                result = TOOLS._publish_text_page_briefs(
+                    deck, None, ['标题与事实；左文右图；浅色背景'],
+                    page_components=[{'content': '标题与事实', 'layout': '左文右图', 'assets': '图1'}],
+                    global_style='浅色背景')
+                self.assertEqual(result['published_count'], 1)
+                self.assertEqual(set(artifacts), {'deck_outline', 'slide_outline'})
+                prompt = TOOLS._load_slide_outline_briefs([1])[1]
+                for value in ('标题与事实', '左文右图', '图1', '浅色背景'):
+                    self.assertIn(value, prompt)
+                self.assertLess(prompt.index('## 风格'), prompt.index('## 布局'))
+                self.assertEqual(TOOLS._page_prompt_title(prompt), '标题与事实')
+                artifacts['slide_outline'] = prompt.replace('左文右图', '上下布局')
+                # Old split artifacts must not override this document after conversion.
+                artifacts.update(presentation_style='旧风格', page_layout='旧布局', page_assets='旧素材')
+                edited = TOOLS._load_slide_outline_briefs([1])[1]
+                self.assertIn('上下布局', edited)
+                self.assertNotIn('左文右图', edited)
+                self.assertNotIn('旧风格', edited)
+                self.assertEqual(edited, artifacts['slide_outline'])
+
+    def test_legacy_split_prompts_still_read_current_components(self):
+        artifacts = {'presentation_style': '浅色背景', 'page_layout': '左右布局', 'page_assets': '图1'}
+        with mock.patch.object(TOOLS, '_resolve_artifact_text',
+                               side_effect=lambda ctx, key, **kw: (artifacts.get(key), 'text')):
+            self.assertIn('左右布局', TOOLS._assemble_page_prompt(object(), 1, '正文'))
+            artifacts['page_layout'] = '上下布局'
+            self.assertIn('上下布局', TOOLS._assemble_page_prompt(object(), 1, '正文'))
+            del artifacts['page_assets']
+            with self.assertRaisesRegex(ValueError, 'incomplete prompt components'):
+                TOOLS._assemble_page_prompt(object(), 1, '正文')
+            artifacts.clear()
+            self.assertEqual(TOOLS._assemble_page_prompt(object(), 1, '正文'), '正文')
+
     def test_text_cards_use_edited_artifact_not_original_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp)
             (deck / 'outline_draft.md').write_text('## 原始标题\n原始内容')
             with (
                 mock.patch.object(TOOLS, 'require_context', return_value=object()),
-                mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=(
-                    '## 用户新标题\n用户删改后内容', 'text')),
+                mock.patch.object(TOOLS, '_resolve_artifact_text', side_effect=lambda _ctx, key: (
+                    '## 用户新标题\n用户删改后内容' if key == 'deck_outline' else None, 'text')),
                 mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]),
                 mock.patch.object(TOOLS, '_publish_ordered_ppt_artifact', return_value={'ok': True}) as publish,
             ):
@@ -1929,7 +2023,10 @@ class MultiTargetLegacyAndRasterEditTests(unittest.TestCase):
                 TOOLS._HtmlTree(MISSION_LIST_HTML),
             )
 
-    def test_legacy_dom_path_materializes_stable_anchor(self):
+    @mock.patch.object(TOOLS, '_agent_llm_call', return_value=json.dumps({
+        'op': 'replace_text', 'value': '算力',
+    }))
+    def test_legacy_dom_path_materializes_stable_anchor(self, _llm):
         with tempfile.TemporaryDirectory() as tmp:
             encoded = TOOLS.base64.b64encode(LEGACY_VISUAL_HTML.encode('utf-8')).decode('ascii')
             preview = TOOLS.ppt_preview_selection_edit(
@@ -2106,3 +2203,16 @@ class PageGenerationRecoveryTests(unittest.TestCase):
             self.assertEqual(generated, [1, 2])
             self.assertEqual((deck / 'outline.json').read_text(encoding='utf-8'), outline)
             self.assertEqual(len(list((deck / 'pages').glob('*.html'))), 2)
+
+
+def test_saved_notes_move_visible_sources_below_script_and_keep_business_footer():
+    html = ('<html><body><div class="wrapper"><p data-el="narrative">结果受样本范围限制</p>'
+            '<p class="source" data-el="footer">来源：<a href="ref.pdf">资料.pdf 第1页</a></p>'
+            '<p data-el="footer">欢迎交流</p></div><aside hidden data-el="speaker-notes">旧文稿</aside></body></html>')
+    updated = TOOLS._insert_saved_notes_html(html, '我的讲稿')
+    visible = updated.split('<aside hidden')[0]
+    assert '资料.pdf' not in visible
+    assert '结果受样本范围限制' in visible and '欢迎交流' in visible
+    assert '我的讲稿\n\n【知识来源｜不朗读】\n来源：资料.pdf 第1页' in updated
+    assert updated.count('data-el="speaker-notes"') == 1
+    assert '旧文稿' not in updated

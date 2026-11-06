@@ -201,3 +201,51 @@ def test_apply_rejects_stale_preview(monkeypatch, tmp_path):
         attachment_tools.string_replace(
             'stale.txt', action='apply', preview_id=stale['preview_id'],
         )
+
+
+def test_pptx_template_application_runs_in_main_chat_and_preserves_uploads(monkeypatch, tmp_path):
+    from pptx import Presentation
+
+    source = tmp_path / 'source.pptx'
+    template = tmp_path / 'template.pptx'
+    source_prs = Presentation()
+    slide = source_prs.slides.add_slide(source_prs.slide_layouts[1])
+    slide.shapes.title.text = 'Source title'
+    slide.placeholders[1].text = 'Source content'
+    source_prs.save(source)
+    template_prs = Presentation()
+    template_prs.slides.add_slide(template_prs.slide_layouts[1]).shapes.title.text = 'Template sample'
+    template_prs.save(template)
+    original_source, original_template = source.read_bytes(), template.read_bytes()
+
+    monkeypatch.setattr(
+        attachment_tools, '_resolve_attachment',
+        lambda name, turn=None: (str({'source.pptx': source, 'template.pptx': template}[name]), None),
+    )
+    monkeypatch.setattr(attachment_edit.lazyllm, 'globals', {
+        'agentic_config': {'user_id': 'user-1', 'conversation_id': 'conversation-1'},
+    })
+    monkeypatch.setattr(
+        attachment_edit, 'chat_agent_workspace',
+        lambda user_id, conversation_id: str(tmp_path / 'workspace'),
+    )
+    published = {}
+
+    def fake_save(filename, path, caption=None, artifact_id=None, replace_existing=False, **kwargs):
+        published.update(filename=filename, content=Path(path).read_bytes())
+        return {'artifact_id': artifact_id, 'filename': filename, 'message': 'saved'}
+
+    monkeypatch.setattr(attachment_edit, 'save_chat_file', fake_save)
+    result = attachment_tools.edit_presentation(
+        'source.pptx', 'apply_template', template_filename='template.pptx',
+    )
+
+    assert result['status'] == 'ok'
+    assert result['action'] == 'apply_template'
+    assert result['slide_count'] == 1
+    assert published['filename'] == 'source.pptx'
+    assert source.read_bytes() == original_source
+    assert template.read_bytes() == original_template
+    applied = tmp_path / 'applied.pptx'
+    applied.write_bytes(published['content'])
+    assert Presentation(applied).slides[0].shapes.title.text == 'Source title'

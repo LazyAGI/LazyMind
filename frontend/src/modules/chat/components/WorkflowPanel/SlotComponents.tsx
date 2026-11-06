@@ -1,3 +1,4 @@
+import { PptPromptDocument } from './PptPromptDocument';
 import { ArtifactSourceButton } from './ArtifactSourceButton';
 import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
 import { WriterProviderChoice } from "./DocumentProviderChoice";
@@ -1799,6 +1800,7 @@ interface SlotTextProps {
   revisionCount?: number;
   onRefresh?: () => void;
   readOnly?: boolean;
+  plainMarkdown?: boolean;
 }
 
 interface SlotTextEditViewport {
@@ -1854,7 +1856,7 @@ function rawTextOffsetAtPoint(
   return nearestRawTextOffset(rawText, offsetNode.textContent ?? '', offset, fallbackRatio);
 }
 
-export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
+export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly, plainMarkdown }: SlotTextProps) {
   const raw = slot.artifact_value;
   const isJsonBlock = widget?.widgetType === 'json-block';
   const { patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
@@ -1936,7 +1938,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   }, [isOffloaded, raw?.path, raw?.url]);
 
   const canEdit = Boolean(sessionId && slotId) && !readOnly;
-  const canEditMarkdown = canEdit && widget?.widgetType === 'text-markdown';
+  const canEditMarkdown = canEdit && widget?.widgetType === 'text-markdown' && !plainMarkdown;
   // For single slots, list_index is undefined from the backend; use 0 as the canonical index
   // for localStorage keys (front-end only convention).
   const effectiveListIndex = slot.list_index ?? 0;
@@ -2371,7 +2373,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         />
       ) : (
         <>
-          {widget?.widgetType === 'text-markdown' ? (
+          {widget?.widgetType === 'ppt-prompt' ? (
+            <PptPromptDocument key={editingKey} text={displayText}
+              onEdit={canEdit ? () => handleEdit() : undefined} maxHeight={widget.maxHeight} />
+          ) : widget?.widgetType === 'text-markdown' ? (
             <div
               className={`workflow-slot__text workflow-slot__text--markdown${canEdit ? ' workflow-slot__text--editable' : ''}`}
               {...textDisplayProps}
@@ -5402,6 +5407,26 @@ export function SlotRenderer({
   useTranslation();
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
+  }
+
+  // Presentation research/outline Markdown can include HTML comments, formulas
+  // and inline source notation. Render it as Markdown, not as an MDX document;
+  // keep source-text editing and the existing revision/permission guards.
+  if (['academic_brief', 'deck_outline'].includes(slot.slot)
+    && (!widget?.widgetType || widget.widgetType === 'text-markdown')) {
+    return <SlotText slot={slot} widget={{ ...widget, widgetType: 'text-markdown' }} plainMarkdown
+      sessionId={sessionId} slotId={slotId ?? slot.slot} revisionCount={revisionCount}
+      onRefresh={onRefresh} readOnly={readOnly || widget?.readOnly || !slot.selected
+        || Boolean(slot.document && (!slot.document.editable || !slot.document.capabilities.includes('save')))} />;
+  }
+
+  // PPT page prompts are literal text, including HTML examples. Historical
+  // sessions may still carry a Markdown document descriptor for this slot.
+  if (widget?.widgetType === 'ppt-prompt') {
+    return <SlotText slot={slot} widget={widget} sessionId={sessionId} slotId={slotId ?? slot.slot}
+      revisionCount={revisionCount} onRefresh={onRefresh}
+      readOnly={readOnly || widget.readOnly || !slot.selected
+        || Boolean(slot.document && (!slot.document.editable || !slot.document.capabilities.includes('save')))} />;
   }
 
   if (slot.artifact_id && slot.document) {

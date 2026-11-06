@@ -8,6 +8,11 @@ backgrounds, HUD or neon. Custom user colors may override catalog compatibility
 and must be retained in palette and primary_color.hex. If all choices are
 specified, keep the same visual identity rather than invent conflicting styles.
 
+For the built-in 科研风格 / academic default, every sample uses white #FFFFFF
+backgrounds and black #111111 text, with restrained scientific chart accents.
+Vary layout and typography within that identity. Explicit user colors and an
+uploaded template take precedence.
+
 Pick each sample's visual triple from the style catalog below. Do NOT invent styles from scratch.
 The catalog's IDs are pre-validated for compatibility.
 
@@ -67,3 +72,5 @@ Return JSON only, no markdown fences:
     backgrounds only disables generated raster backdrops; retain editable
     HTML/CSS/SVG design, respecting explicit plain backgrounds and whitespace.
     Keep effects export-safe and never invent images or KPI values.
+
+Default typography: unless the user explicitly requests another font or requires preserving template fonts, use `"Songti SC", "宋体-简", serif` for both headings and body text. This is 宋体-简, not SimSun. Keep this default across all style samples; vary layout and colors instead. Font resources must be embedded in the delivered HTML and editable PPTX; do not claim portability from a font name alone.

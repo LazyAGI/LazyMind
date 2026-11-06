@@ -432,11 +432,15 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
         ) from exc
     except ValueError as exc:
         code = str(getattr(exc, 'error_code', 'WORKFLOW_ACTION_INVALID'))
+        logger.warning('Workflow artifact action rejected: workflow=%s action=%s phase=%s code=%s reason=%s',
+                       request.workflow_id, request.action, request.phase, code, str(exc))
         detail: Dict[str, Any] = {'code': code, 'message': str(exc)}
         detail.update(getattr(exc, 'details', {}) or {})
         status = 409 if code in {'SELECTION_AMBIGUOUS', 'SELECTION_STALE'} else 422
         raise HTTPException(status_code=status, detail=detail) from exc
     except TypeError as exc:
+        logger.warning('Workflow artifact action arguments rejected: workflow=%s action=%s phase=%s reason=%s',
+                       request.workflow_id, request.action, request.phase, str(exc))
         raise HTTPException(
             status_code=422,
             detail={'code': 'WORKFLOW_ACTION_INVALID', 'message': str(exc)},
@@ -607,6 +611,7 @@ async def export_ppt_from_html(req: PptExportRequest):
         if os.name == 'nt':
             options['creationflags'] = subprocess.CREATE_NO_WINDOW
         export_env = os.environ.copy()
+        export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
         process = await asyncio.create_subprocess_exec(
