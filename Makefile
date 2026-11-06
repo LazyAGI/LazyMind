@@ -4,7 +4,7 @@
 
 LOCAL_CONFIG_ENV ?= local/config.env
 LOCAL_CONFIG_ENV_EXAMPLE ?= local/config.env.example
-_LOCAL_CONFIG_TARGETS := local-runtime-manager-build local-start localup local-up local-up-lan local-down local-clean local-reset reset-kb reset-all fresh-start
+_LOCAL_CONFIG_TARGETS := local-runtime-manager-build localup local-up local-up-lan local-down local-clean local-reset reset-kb reset-all fresh-start
 _NEEDS_LOCAL_CONFIG := $(filter $(_LOCAL_CONFIG_TARGETS),$(MAKECMDGOALS))
 ifneq (,$(_NEEDS_LOCAL_CONFIG))
 _LOCAL_CONFIG_BOOTSTRAP := $(shell if [ ! -f "$(LOCAL_CONFIG_ENV)" ]; then mkdir -p "$(dir $(LOCAL_CONFIG_ENV))"; cp "$(LOCAL_CONFIG_ENV_EXAMPLE)" "$(LOCAL_CONFIG_ENV)"; fi)
@@ -12,7 +12,6 @@ ifneq (,$(wildcard $(LOCAL_CONFIG_ENV)))
 include $(LOCAL_CONFIG_ENV)
 export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(LOCAL_CONFIG_ENV))
 endif
-export PNPM := $(CURDIR)/local/scripts/pnpm-project.sh
 endif
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -688,11 +687,6 @@ endif
 
 .PHONY: localup
 localup: local-up
-
-.PHONY: local-start
-# Start existing local builds with local/config.env, without Docker build steps.
-local-start:
-	@$(LOCAL_PANDOC_ENV) "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
 local-up: skills-materialize local-pandoc local-runtime-manager-build lazymind-cli-build
 	@$(LOCAL_PANDOC_ENV) "$(LOCAL_RUNTIME_MANAGER_BIN)" up
