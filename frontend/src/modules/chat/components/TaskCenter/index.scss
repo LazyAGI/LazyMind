@@ -729,6 +729,19 @@
   }
 }
 
+.task-center > .ordinary-queue-durations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+  color: #657286;
+  font-size: 11px;
+
+  time {
+    white-space: nowrap;
+  }
+}
+
 .ordinary-queue-summary-copy {
   min-width: 0;
   display: grid;

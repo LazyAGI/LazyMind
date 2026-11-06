@@ -1105,13 +1105,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return normalizedCiteMessage ? [normalizedCiteMessage] : [];
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
+    const hasSendableDraft = Boolean(value.trim())
+      || composerFiles.some(file => localUploadIds.has(file.id) && file.input?.input_type === 'image')
+      || transferredUploads.some(file => file.input?.input_type === 'image');
     const isSendDisabled =
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
       (runInBackground && (workspacePermissionSaving || !projectValid)) ||
       resolvingSkillWorkflow ||
-      !value?.trim() ||
+      !hasSendableDraft ||
       isUploading;
     const shouldShowPromptSuggestions =
       composerVariant !== "paper" && showPromptSuggestions &&
@@ -1889,7 +1892,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
-                      hasDraft={Boolean(value.trim())}
+                      hasDraft={hasSendableDraft}
                       sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}
                       sendLabel={t("chat.send")}

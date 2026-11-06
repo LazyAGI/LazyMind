@@ -2831,7 +2831,38 @@
   flex-direction: column;
   gap: 16px;
   min-height: 100%;
+  max-width: none;
   padding: 12px;
+
+  .model-provider-cloud-doc-grid {
+    container: cloud-doc-providers / inline-size;
+  }
+
+  .model-provider-cloud-doc-resource-row {
+    grid-template-columns: 44px minmax(0, 1fr) max-content max-content;
+    min-height: 92px;
+    height: auto;
+  }
+
+  .model-provider-cloud-doc-resource-controls {
+    grid-column: 4;
+  }
+}
+
+@container cloud-doc-providers (max-width: 560px) {
+  .model-provider-cloud-doc-hub {
+    .model-provider-cloud-doc-resource-row {
+      grid-template-columns: 44px minmax(0, 1fr);
+      min-height: 0;
+    }
+
+    .model-provider-cloud-doc-resource-status.ant-tag,
+    .model-provider-cloud-doc-resource-controls {
+      grid-column: 2;
+      justify-self: start;
+      margin-left: 0;
+    }
+  }
 }
 
 .model-provider-cloud-doc-page-header {

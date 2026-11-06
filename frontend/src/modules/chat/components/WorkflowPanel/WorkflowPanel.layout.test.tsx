@@ -1,6 +1,8 @@
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useLayoutEffect } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { message } from 'antd';
+import { setupAntdStaticCleanup } from '@/test/antdStatic';
 import i18n from '@/i18n';
 import type { SlotRevision, WorkflowSession, WorkflowUI } from '@/modules/chat/store/workflowPanel';
 import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingContextValue } from './slotEditingContext';
@@ -8,6 +10,8 @@ import { WorkflowPanel } from './index';
 import { controlActions, externalPanelAction, type WorkflowActionIntent, type WorkflowPanelActionIntent, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
 import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
+
+setupAntdStaticCleanup();
 
 // Use the same transport boundary as WorkflowRunPage; the panel never receives
 // capabilities, reviews or delivery state.
@@ -1402,12 +1406,80 @@ it('keeps saved output visible after execution fails and retries through externa
 });
 
 describe('workflow follow and session presentation', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   function enableFollowing() {
     fixture.ui = { ...fixture.ui, source_type: 'builtin', follow_mode: { default: 'following' } };
     fixture.session = { ...fixture.session, status: 'active', current_step_id: 'prepare', steps: [], projection: undefined };
   }
   const following = () => screen.getByRole('button', { name: '跟随进度' });
   const browsing = () => screen.getByRole('button', { name: '自由浏览' });
+
+  it('explains each explicit mode change without notifying on mount or repeated selection', async () => {
+    enableFollowing();
+    const notice = vi.spyOn(message, 'info');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '跟随进度' });
+    expect(notice).not.toHaveBeenCalled();
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toBeEnabled());
+    expect(notice).not.toHaveBeenCalled();
+    fireEvent.click(browsing());
+    expect(await screen.findByText('已切换为自由浏览，可手动查看各步骤，页面不再随进度自动跳转。')).toBeVisible();
+    expect(notice).toHaveBeenCalledTimes(1);
+    fireEvent.click(browsing());
+    expect(notice).toHaveBeenCalledTimes(1);
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toHaveAttribute('aria-pressed', 'true'));
+    expect(await screen.findByText('已切换为跟随进度，页面将自动跟随工作流当前步骤。')).toBeVisible();
+    expect(notice).toHaveBeenCalledTimes(2);
+    fireEvent.click(following());
+    await waitFor(() => expect(following()).toBeEnabled());
+    expect(notice).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes following a failed retry even when its previous attempt is stale', async () => {
+    enableFollowing();
+    fixture.session = { ...fixture.session, status: 'failed', current_step_id: '', slots: [],
+      steps: [
+        { id: 'old', session_id: 'layout-test', step_id: 'write_document', attempt: 1, task_id: '',
+          status: 'failed', validity: 'stale', created_at: '2026-09-16T00:00:00Z', updated_at: '' },
+        { id: 'retry', session_id: 'layout-test', step_id: 'write_document', attempt: 2, task_id: '',
+          status: 'failed', validity: 'effective', created_at: '2026-09-16T00:01:00Z', updated_at: '' },
+      ],
+      projection: { current: ['write_document'], stale: ['write_document'], nodes: {
+        write_document: { execution: 'failed', validity: 'effective', branch: 'active',
+          requires_approval: false, reachability: 'reachable', readiness: 'not_applicable' },
+      } },
+    };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('button', { name: '跟随进度' });
+    fireEvent.click(screen.getByRole('tab', { name: /写作准备/ }));
+    expect(browsing()).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(following());
+    await waitFor(() => expect(screen.getByRole('tab', { name: /成稿/ })).toHaveAttribute('aria-selected', 'true'));
+    expect(following()).toHaveAttribute('aria-pressed', 'true');
+    expect(send).not.toHaveBeenCalled();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  });
+
+  it('shows the retried step on the first render with the new runtime position', async () => {
+    enableFollowing();
+    fixture.ui.tabs!.splice(1, 0, { id: 'outline', step_id: 'write_outline', label: '大纲', slots: [] });
+    const selectedTab = vi.fn();
+    function Host({ retried }: { retried: boolean }) {
+      useLayoutEffect(() => {
+        if (retried) selectedTab(screen.getByRole('tab', { selected: true }).textContent);
+      }, [retried]);
+      return <WorkflowPanel conversationId='layout-test' />;
+    }
+    const view = render(<Host retried={false} />);
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+    fixture.session = { ...fixture.session, current_step_id: 'write_outline' };
+    view.rerender(<Host retried />);
+    expect(selectedTab).toHaveBeenCalledWith(expect.stringContaining('大纲'));
+  });
 
   it('freezes the current tab before any manual tab selection and resumes without execution', async () => {
     enableFollowing();
@@ -1448,6 +1520,7 @@ describe('workflow follow and session presentation', () => {
   });
 
   it('enters browse for editing and history and protects edits when resume saving fails', async () => {
+    const notice = vi.spyOn(message, 'info');
     enableFollowing();
     fixture.session.current_step_id = 'write_document';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
@@ -1462,8 +1535,11 @@ describe('workflow follow and session presentation', () => {
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     fixture.flush.mockResolvedValue(false);
     fixture.flush.mockClear();
+    notice.mockClear();
     fireEvent.click(following());
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
+    expect(await screen.findByText('保存未完成，请保存成功后再恢复跟随。')).toBeVisible();
+    expect(notice).not.toHaveBeenCalled();
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '成稿', selected: true })).toBeVisible();
     fixture.flush.mockResolvedValue(true);
@@ -1472,17 +1548,20 @@ describe('workflow follow and session presentation', () => {
   });
 
   it('ignores a late save after the user browses elsewhere or changes workflow runs', async () => {
+    const notice = vi.spyOn(message, 'info');
     enableFollowing();
     fixture.session.current_step_id = 'write_document';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('button', { name: '自由浏览' });
     fireEvent.click(browsing());
+    notice.mockClear();
     let complete!: (saved: boolean) => void;
     fixture.flush.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
     fireEvent.click(following());
     expect(following()).toBeDisabled();
     fireEvent.click(screen.getByRole('tab', { name: '写作准备' }));
     await act(async () => complete(true));
+    expect(notice).not.toHaveBeenCalled();
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     expect(following()).toBeEnabled();
@@ -1492,7 +1571,9 @@ describe('workflow follow and session presentation', () => {
     fixture.session = { ...fixture.session, session_id: 'next-run', current_step_id: 'prepare' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
     fireEvent.click(await screen.findByRole('button', { name: '自由浏览' }));
+    notice.mockClear();
     await act(async () => complete(true));
+    expect(notice).not.toHaveBeenCalled();
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();
     expect(following()).toBeEnabled();

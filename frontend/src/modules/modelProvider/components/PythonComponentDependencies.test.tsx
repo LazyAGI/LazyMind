@@ -1,4 +1,5 @@
 import { RAGComponentProvider } from "../contexts/RAGComponentContext";
+import i18n from "@/i18n";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ConfigProvider, message } from "antd";
@@ -18,7 +19,8 @@ async function begin() {
   fireEvent.click(await screen.findByRole("button", { name: "安装组件" }));
   fireEvent.click(screen.getByRole("button", { name: /下载并安装/ }));
 }
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.changeLanguage("zh-CN");
   vi.resetAllMocks();
   usePythonComponentTask.setState({ phase: "idle", id: null, error: "" });
   mocks.get.mockResolvedValue([missing]);
@@ -28,6 +30,15 @@ beforeEach(() => {
   vi.spyOn(message, "error");
 });
 afterEach(() => { cleanup(); message.destroy(); vi.restoreAllMocks(); });
+
+it("localizes the installed component and its source instructions", async () => {
+  await i18n.changeLanguage("en-US");
+  mocks.get.mockResolvedValue([{ ...enabled, installMethod: "source" }]);
+  mount();
+  expect(await screen.findByRole("heading", { name: "Local knowledge base (RAG)" })).toBeVisible();
+  expect(screen.getByText("Enabled")).toBeVisible();
+  expect(screen.getByText("Install dependencies from the local source configuration")).toBeVisible();
+});
 
 it("offers source RAG installation without a bundle URL", async () => {
   mocks.get.mockResolvedValue([{ ...missing, url: undefined, installMethod: "source" }]);

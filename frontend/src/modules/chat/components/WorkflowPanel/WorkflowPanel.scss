@@ -285,6 +285,13 @@
     min-height: 48px;
   }
 
+  &__heading {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+
   &__title {
     font-weight: 600;
     font-size: 13px;
@@ -292,6 +299,15 @@
     letter-spacing: 0.01em;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__app-version {
+    flex-shrink: 0;
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 

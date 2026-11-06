@@ -15,6 +15,7 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useAppVersion } from '@/runtime/useAppVersion';
 import { message as antdMessage, Popconfirm, Tooltip, Dropdown, Collapse } from 'antd';
 import {
   MoreOutlined,
@@ -1714,6 +1715,7 @@ export function WorkflowPanel({
   embedded = false, onRefresh, controlAdapter, externalPresentation,
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
+  const appVersion = useAppVersion();
   const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId, Boolean(onRefresh));
   const artifactPreview = useArtifactPreview();
   const previewTarget = artifactPreview?.target?.workflow && artifactPreview.target.workflow.sessionId === session?.session_id
@@ -1759,17 +1761,19 @@ export function WorkflowPanel({
   const tabs = useMemo(() => filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material,
     { steps: session?.steps, projection: session?.projection }, ui.hide_skipped_steps,
     ui.hide_unstarted_steps && session?.workflow_mode === 'dynamic'), [ui, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
-  const visibleActiveTabIdx = resolveWorkflowActiveTabIndex(tabs, activeTabId);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
+  const visibleActiveTabIdx = followingEnabled && view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
+    ? runtimeTabIdx
+    : resolveWorkflowActiveTabIndex(tabs, activeTabId);
   const navigation = useRef(0);
   const currentView = useRef({ key: viewKey, runtimeTabId });
   currentView.current = { key: viewKey, runtimeTabId };
   const enterBrowse = useCallback((tabId?: string) => {
     navigation.current++;
     if (!followingEnabled) return;
-    updateView({ mode: 'free', tabId: tabId ?? tabs[resolveWorkflowActiveTabIndex(tabs, activeTabId)]?.id ?? '' });
-  }, [followingEnabled, updateView, tabs, activeTabId]);
+    updateView({ mode: 'free', tabId: tabId ?? tabs[visibleActiveTabIdx]?.id ?? '' });
+  }, [followingEnabled, updateView, tabs, visibleActiveTabIdx]);
   const [resumingFollow, setResumingFollow] = useState(false);
   const resumePending = useRef<number | null>(null);
   useEffect(() => {
@@ -1956,6 +1960,9 @@ export function WorkflowPanel({
       artifactPreview?.close();
       updateView({ mode: 'following', ...(currentView.current.runtimeTabId ? { tabId: currentView.current.runtimeTabId } : {}) });
       setFocusedSortOrder(conversationId, undefined);
+      if (view.mode !== 'following') {
+        antdMessage.info({ key: 'workflow-follow-mode', content: t('chat.workflowFollowProgressChanged'), duration: 3 });
+      }
     } catch {
       if (isCurrent()) antdMessage.error(t('chat.workflowFollowSaveFailed'));
     } finally {
@@ -2269,7 +2276,16 @@ export function WorkflowPanel({
       {/* Header */}
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
-          <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
+          <div className='workflow-panel__heading'>
+            <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
+            {appVersion && (
+              <span className='workflow-panel__app-version'
+                title={t('settingsPage.appVersion', { version: appVersion })}
+                aria-label={t('settingsPage.appVersion', { version: appVersion })}>
+                v{appVersion}
+              </span>
+            )}
+          </div>
           <button
             type='button'
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
@@ -2301,7 +2317,12 @@ export function WorkflowPanel({
             <button type='button' aria-pressed={view.mode === 'following'} disabled={resumingFollow}
               onClick={() => void resumeFollowing()}>{t('chat.workflowFollowProgress')}</button>
             <button type='button' aria-pressed={view.mode === 'free'}
-              onClick={() => enterBrowse()}>{t('chat.workflowFreeBrowse')}</button>
+              onClick={() => {
+                enterBrowse();
+                if (view.mode !== 'free') {
+                  antdMessage.info({ key: 'workflow-follow-mode', content: t('chat.workflowFreeBrowseChanged'), duration: 3 });
+                }
+              }}>{t('chat.workflowFreeBrowse')}</button>
           </div>}
           {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'

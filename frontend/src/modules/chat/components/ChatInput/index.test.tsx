@@ -475,6 +475,21 @@ describe("ChatInput model switch save lock", () => {
     expect(contextPreview.build?.().input).toHaveLength(3);
   });
 
+  it('sends an uploaded image with Enter when there is no text', async () => {
+    const ref = createRef<ChatInputImperativeProps>();
+    const onSend = vi.fn();
+    render(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent onSend={onSend}
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+    expect(screen.getByRole('button', { name: 'chat.send' })).toBeDisabled();
+    await act(async () => ref.current?.uploadFiles([new File(['test'], 'photo.png', { type: 'image/png' })]));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'chat.send' })).toBeEnabled());
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'message editor' }), { key: 'Enter' });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
+      text: '',
+      referencedFiles: [expect.objectContaining({ input_type: 'image', uri: '/uploads/photo.png' })],
+    })));
+  });
+
   it('adapts a restored current-conversation file identically for preview and send', async () => {
     const mention = { mention_id: 'file-chip', type: 'file' as const, resource_id: 'history:h1:0', display_name: 'report.pdf', start: 0, end: 10 };
     useChatInputStore.getState().saveInputContent('file-conversation', 'report.pdf 总结', [mention]);

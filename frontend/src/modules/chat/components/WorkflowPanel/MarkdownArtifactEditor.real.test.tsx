@@ -1,4 +1,4 @@
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { MDXEditorMethods, MDXEditorProps } from '@mdxeditor/editor';
 const capture=vi.hoisted(()=>({change:undefined as MDXEditorProps['onChange'],editor:null as MDXEditorMethods|null}));
@@ -38,6 +38,31 @@ vi.mock('react-i18next',()=>({initReactI18next:{type:'3rdParty',init:()=>undefin
 vi.mock('./ArtifactRewriteDialog',()=>({ArtifactRewriteInlineDiff:()=>null}));
 import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
 beforeEach(()=>{capture.change=undefined;});
+it('uses application translations in the real image settings dialog', async () => {
+  vi.stubGlobal('Image', class {
+    onload?: () => void;
+    set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+  });
+  const onSave = vi.fn(async (markdown: string) => ({ markdown, revision: 2 }));
+  const editor = render(<MarkdownArtifactEditor
+    markdown='![Coast](assets/coast.jpg)'
+    sourceRevision={1}
+    resolveImageUrl={async () => '/assets/coast.jpg'}
+    onSave={onSave}
+  />);
+  try {
+    fireEvent.click(await editor.findByTitle('Edit image'));
+    const dialog = within(await editor.findByRole('dialog', { name: 'chat.writerMarkdown.uploadImage.dialogTitle' }));
+    expect(dialog.getByText('chat.writerMarkdown.uploadImage.alt')).toBeVisible();
+    expect(dialog.getByText('chat.writerMarkdown.uploadImage.title')).toBeVisible();
+    fireEvent.click(dialog.getByRole('button', { name: 'common.cancel' }));
+    expect(onSave).not.toHaveBeenCalled();
+  } finally {
+    editor.unmount();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('preserves file margins when real MDX does not emit initial normalization',async()=>{
  const onSave=vi.fn(async(markdown:string)=>({markdown,revision:2}));
  const {container}=render(<MarkdownArtifactEditor markdown={'Old plain\n'} sourceRevision={1} onSave={onSave} />);

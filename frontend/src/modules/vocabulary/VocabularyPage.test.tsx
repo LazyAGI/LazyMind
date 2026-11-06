@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "@/i18n";
 import VocabularyPage from "./VocabularyPage";
 import { createWordbook, getActiveVocabularyReviewSession, listVocabulary, listWordbooks, saveVocabularyProvider, startVocabularyReviewSession, submitVocabularySessionReview } from "./api";
 
@@ -27,6 +28,20 @@ vi.mock("./api", () => ({
 
 describe("VocabularyPage", () => {
   beforeEach(() => vi.clearAllMocks());
+  it("renders English labels without translating saved vocabulary", async () => {
+    const language = i18n.language;
+    await i18n.changeLanguage("en-US");
+    const page = render(<VocabularyPage />);
+    try {
+      expect(await screen.findByRole("columnheader", { name: "Meaning / part of speech" })).toBeVisible();
+      expect(screen.getByRole("tab", { name: "Vocabulary" })).toBeVisible();
+      expect(screen.getByRole("button", { name: /Add word/ })).toBeVisible();
+      expect(await screen.findByText("证据")).toBeVisible();
+    } finally {
+      page.unmount();
+      await i18n.changeLanguage(language);
+    }
+  });
   it("shows words with answers and memory state", async () => {
     render(<VocabularyPage />);
     expect(await screen.findByText("evidence")).toBeTruthy();

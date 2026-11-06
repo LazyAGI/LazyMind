@@ -39,6 +39,8 @@ export default {
   "authorizedPerson": "授权人",
   "authorizedId": "飞书用户标识（仅当前应用内有效）",
   "feishuAppId": "飞书应用 ID",
+  feishuDefaultAccountName: "飞书账号",
+  feishuGeneratedAssistantName: "飞书用户{{suffix}} 的 LazyMind 助手",
   "identityMissing": "信息缺失",
   "editAccountLabel": "修改备注",
   "accountRemark": "账号备注",

@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfigProvider } from "antd";
 import VocabularySettings from "./VocabularySettings";
+import i18n from "@/i18n";
 
 const mocks = vi.hoisted(() => ({
   desktop: vi.fn(),
@@ -20,9 +22,21 @@ vi.mock("./api", () => ({
 }));
 
 describe("VocabularySettings", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
     mocks.desktop.mockResolvedValue({ installed: true, executable_path: "/Applications/Anki.app", addon_code: "2055492159" });
     mocks.setting.mockResolvedValue({ selected_provider: "local", anki_endpoint: "http://127.0.0.1:8765", anki_deck_name: "LazyMind Vocabulary" });
+  });
+
+  it("localizes the Anki setup flow in English", async () => {
+    await i18n.changeLanguage("en-US");
+    mocks.desktop.mockResolvedValue({ installed: false });
+    mocks.status.mockResolvedValue({ connected: false });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><VocabularySettings /></ConfigProvider>);
+    expect(await screen.findByText("Anki setup")).toBeVisible();
+    expect(screen.getByText("Allow LazyMind to access Anki")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "View installation guide" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Install Anki" })).toBeVisible());
   });
 
   it("shows installation state when AnkiConnect is missing", async () => {

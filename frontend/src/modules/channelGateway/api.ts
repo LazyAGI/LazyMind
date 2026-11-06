@@ -107,8 +107,10 @@ export function channelAccountLabel(account: ChannelAccount, peers: ChannelAccou
     : storedLabel;
   const internalId = /^(?:ou|cli|ca)_[A-Za-z0-9_-]+$/;
   if (!candidate || candidate === '飞书' || internalId.test(candidate)) {
-    return '飞书账号';
+    return i18n.t('notifications.feishuDefaultAccountName');
   }
+  const generatedUser = /^飞书用户([A-Z0-9]+) 的 LazyMind 助手$/.exec(storedLabel);
+  if (generatedUser) return i18n.t('notifications.feishuGeneratedAssistantName', { suffix: generatedUser[1] });
   return storedLabel;
 }
 
