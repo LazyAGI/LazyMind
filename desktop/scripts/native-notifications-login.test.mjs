@@ -13,7 +13,7 @@ function fixture() {
   const calls = [];
   const bridge = {
     assistantSessionSet: async (value) => { calls.push(["set", value]); },
-    assistantSessionClear: async () => { calls.push(["clear"]); },
+    assistantSessionClear: async (request) => { calls.push(["clear", request]); },
   };
   const dispose = installNotificationSessionSync(window, bridge);
   return { window, bridge, calls, dispose, store: (value) => { stored = value; } };
@@ -49,11 +49,38 @@ test("clearing or corrupting login storage clears notifications instead of keepi
   h.store(null);
   h.window.dispatchEvent(new Event("storage"));
   assert.equal(h.calls[1][0], "clear");
+  assert.equal(h.calls[1][1].expected_session.access_token, user.token);
   h.store(JSON.stringify(user));
   h.window.dispatchEvent(new Event("lazymind:user-change"));
   h.store("invalid JSON");
   h.window.dispatchEvent(new Event("storage"));
   assert.equal(h.calls[3][0], "clear");
+});
+
+test("an initially empty renderer cannot delete another connector login", () => {
+  const h = fixture();
+  h.window.dispatchEvent(new Event("DOMContentLoaded"));
+  h.window.dispatchEvent(new Event("storage"));
+  assert.deepEqual(h.calls, []);
+  h.dispose();
+});
+
+test("failed logout cleanup retains its expected session for a later readiness retry", async () => {
+  const h = fixture();
+  h.store(JSON.stringify(user));
+  h.window.dispatchEvent(new Event("lazymind:user-change"));
+  let attempts = 0;
+  h.bridge.assistantSessionClear = async request => {
+    h.calls.push(["clear", request]);
+    if (++attempts === 1) throw new Error("runtime restarting");
+  };
+  h.store(null);
+  h.window.dispatchEvent(new Event("storage"));
+  await new Promise(setImmediate);
+  h.window.dispatchEvent(new Event("storage"));
+  assert.equal(attempts, 2);
+  assert.equal(h.calls.at(-1)[1].expected_session.access_token, user.token);
+  h.dispose();
 });
 
 test("destroying a renderer removes its observers without logging out the resident notification bridge", () => {

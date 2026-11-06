@@ -133,7 +133,7 @@ func TestControlledFailedRunRetriesWithinBudgetAndManualRetryAfterLimit(t *testi
 }
 
 func TestControlledFailedRunRetryKeepsAdmissionBarriers(t *testing.T) {
-	for _, barrier := range []string{"review", "binding", "edit", "stopped", "active", "other-step", "rewind"} {
+	for _, barrier := range []string{"review", "binding", "edit", "stopped", "other-step"} {
 		t.Run(barrier, func(t *testing.T) {
 			db, svc, _ := failedControlledRetryFixture(t)
 			target := "branch_b"
@@ -154,14 +154,8 @@ func TestControlledFailedRunRetryKeepsAdmissionBarriers(t *testing.T) {
 				if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Update("status", "stopped").Error; err != nil {
 					t.Fatal(err)
 				}
-			case "active":
-				if err := db.Create(&orm.WorkflowSessionStep{ID: "parallel", SessionID: "batch-session", StepID: "parallel", TaskID: "parallel", Attempt: 1, Status: "running", Validity: "effective"}).Error; err != nil {
-					t.Fatal(err)
-				}
 			case "other-step":
 				target = "blocked_d"
-			case "rewind":
-				target = "branch_c"
 			}
 			state := retryControlState(t, db)
 			_, err := svc.Execute(context.Background(), "batch-user", "batch-session", WorkflowControlCommand{CommandID: "blocked-begin", Kind: "begin", StepID: target, StateVersion: state.StateVersion})
@@ -177,13 +171,10 @@ func TestControlledFailedRunRetryKeepsAdmissionBarriers(t *testing.T) {
 			if errors.As(err, &rejection) {
 				code = rejection.response.Error.Code
 			}
-			want := "WORKFLOW_ADMISSION_DENIED"
-			if barrier == "edit" {
-				want = "EDITS_PENDING_CONTINUE"
-			}
-			if barrier == "stopped" {
-				want = "SESSION_STOPPED"
-			}
+			want := map[string]string{
+				"review": "WORKFLOW_APPROVAL_REQUIRED", "binding": "BINDING_REQUIRED",
+				"edit": "EDITS_PENDING_CONTINUE", "stopped": "WORKFLOW_PAUSED", "other-step": "STEP_NOT_READY",
+			}[barrier]
 			if code != want {
 				t.Fatalf("%s rejected for wrong reason: %v", barrier, err)
 			}

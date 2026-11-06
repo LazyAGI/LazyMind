@@ -2786,6 +2786,10 @@ def _publish_text_page_briefs(
             raise ValueError(f'Page {number} needs a non-empty generation prompt')
         if re.sub(r'\s+', '', prompt) == re.sub(r'\s+', '', briefs[number - 1]):
             raise ValueError(f'Page {number} copies the outline; add concrete layout, visuals and typography')
+    _load_sn_ppt_modules()
+    from material_images import record_material_aliases
+    workspace = getattr(ctx, 'workspace_path', '')
+    record_material_aliases(deck, [], Path(workspace) / 'inputs' / 'material_images' if workspace else None)
     published = []
     for number, prompt in zip(targets, prompts):
         brief = prompt.strip()
@@ -5149,6 +5153,9 @@ def _attach_material_images_to_deck(deck: Path) -> dict:
     ua['reference_images'] = ref_paths
     ua['reference_image_captions'] = captions
     ip_path.write_text(json.dumps(ip, ensure_ascii=False, indent=2), encoding='utf-8')
+    _load_sn_ppt_modules()
+    from material_images import record_material_aliases
+    record_material_aliases(deck, images)
     return {
         'attached': attached,
         'reference_images': ref_paths,

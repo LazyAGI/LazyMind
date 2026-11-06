@@ -94,6 +94,9 @@ func TestHostedStepsDoNotInvokeNativeDriver(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := SessionStatusWaiting
+			if status == subagent.StatusSucceeded {
+				want = SessionStatusActive
+			}
 			if status == subagent.StatusFailed {
 				want = SessionStatusFailed
 			}

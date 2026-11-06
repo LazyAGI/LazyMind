@@ -1146,6 +1146,46 @@ def test_workflow_uncertain_completion_is_reviewed_without_losing_artifacts(comp
     model.share.assert_called_once()
 
 
+@pytest.mark.parametrize('completed', [True, False])
+def test_workflow_completion_review_uses_current_step_contract(monkeypatch, completion_case, completed):
+    observed = []
+
+    def review(_model, prompt):
+        contract_line = next(line for line in prompt.splitlines()
+                             if line.startswith('Workflow step contract: '))
+        contract = json.loads(contract_line.split(': ', 1)[1])
+        assert contract['workflow_id'] == 'ppt-workflow'
+        assert contract['step_id'] == 'analyze_requirements'
+        assert contract['required_output_artifact_keys'] == ['requirement_analysis']
+        assert 'Do not require deliverables or actions assigned to later Workflow steps' in prompt
+        observed.append(contract)
+        return json.dumps({
+            'completed': completed, 'requires_artifact': True,
+            'artifact_keys': ['requirement_analysis'],
+            'reason': 'Requirements were analyzed; later steps will build the PPT.' if completed
+            else 'The required audience analysis is missing from this step.',
+        })
+
+    monkeypatch.setattr(runner_mod, '_silent_background_model_call', review)
+    events, _, _ = completion_case(
+        agent_type='workflow_step',
+        objective='User wants a 9-slide PPT with source images. '
+                  'This step only analyzes requirements; material collection and PPT generation follow later.',
+        params={'workflow_id': 'ppt-workflow', 'step_id': 'analyze_requirements',
+                'required_output_artifact_keys': ['requirement_analysis'],
+                'output_slot_types': {'requirement_analysis': 'text'}},
+        output_slots=['requirement_analysis'], save=('requirement_analysis', 'text'),
+        final='Requirements saved. Source images are missing and must be collected in the next step.',
+    )
+    terminal = _terminal(events)
+    assert observed
+    assert terminal['status'] == ('succeeded' if completed else 'failed')
+    assert any(event['type'] == 'artifact' for event in events)
+    if not completed:
+        assert terminal['current_phase'] == 'objective_incomplete'
+        assert 'audience analysis' in terminal['summary']
+
+
 @pytest.mark.parametrize('objective,final,completed', [
     ('使用记忆写入工具更新项目记忆文件。', '步骤结论：任务失败，缺少更新记忆文件工具，未写入任何文件。', False),
     ('读取章节并提出复核意见，不写入文件。', '已完成复核，情节与摘要一致。', True),

@@ -20,7 +20,8 @@ import (
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
-	"lazymind/core/workflow/publication"
+	"lazymind/core/workflow/graphsnapshot"
+	"lazymind/core/workflow/runstate"
 )
 
 const workflowDefinitionChangedCode = "WORKFLOW_DEFINITION_CHANGED"
@@ -109,91 +110,12 @@ func decodeSessionRevisionGraph(session *orm.WorkflowSession, revision *orm.Work
 }
 
 func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string, graph *graphengine.CompiledStateGraph) (graphengine.RuntimeSnapshot, error) {
-	var attempts []orm.WorkflowSessionStep
-	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Order("created_at ASC").Find(&attempts).Error; err != nil {
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return graphengine.RuntimeSnapshot{}, err
 	}
-	var revisions []orm.WorkflowSlotRevision
-	if err := db.WithContext(ctx).Where("session_id = ? AND selected = ?", sessionID, true).Find(&revisions).Error; err != nil {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	var inputBindings []orm.WorkflowInputBinding
-	if err := db.WithContext(ctx).Where("workflow_session_id = ? AND validity = 'effective'", sessionID).
-		Find(&inputBindings).Error; err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	var decisions []orm.WorkflowRouteDecision
-	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Order("created_at ASC").Find(&decisions).Error; err != nil {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	snapshot := graphengine.RuntimeSnapshot{}
-	var controlledSession orm.WorkflowSession
-	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&controlledSession).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	controlled := controlstore.Controlled(controlledSession)
-	acceptedRevisions := map[string]bool{}
-	if controlled {
-		var reviews []orm.WorkflowReviewCheckpoint
-		if err := db.WithContext(ctx).Where("session_id = ? AND status = ?", sessionID, "accepted").Find(&reviews).Error; err != nil {
-			return graphengine.RuntimeSnapshot{}, err
-		}
-		for _, review := range reviews {
-			var manifest controlstore.Manifest
-			if err := json.Unmarshal([]byte(review.ManifestJSON), &manifest); err != nil {
-				return graphengine.RuntimeSnapshot{}, err
-			}
-			for _, item := range manifest.Items {
-				acceptedRevisions[item.RevisionID] = true
-			}
-		}
-	}
-	for _, row := range attempts {
-		validity := row.Validity
-		if validity == "" {
-			validity = "effective"
-		}
-		snapshot.Attempts = append(snapshot.Attempts, graphengine.AttemptFact{StepID: row.StepID, Status: row.Status, Validity: validity})
-	}
-	for _, row := range revisions {
-		validity := row.Validity
-		if validity == "" {
-			validity = "effective"
-		}
-		valid := validity == "effective"
-		if controlled && valid {
-			valid = false
-			for _, producer := range attempts {
-				if producer.ID == row.ProducerAttemptID || (producer.StepID == row.StepID && producer.Attempt == row.Attempt) {
-					valid = producer.Status == "succeeded" && producer.Validity == "effective" && (!producer.ReviewRequired || acceptedRevisions[row.ID])
-					break
-				}
-			}
-		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: valid})
-	}
-	for _, row := range inputBindings {
-		// Startup answers may share a name with a normalized step output.
-		// They remain session inputs, but cannot witness a material whose
-		// pinned contract declares a step producer, even before it has run.
-		if graph.MaterialProducers[row.MaterialID].Kind == "step" {
-			continue
-		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{
-			MaterialID: row.MaterialID, RevisionID: row.ID, Valid: true,
-		})
-	}
-	for _, row := range decisions {
-		var active, pruned, bypassed []string
-		_ = json.Unmarshal(row.ActivatedJSON, &active)
-		_ = json.Unmarshal(row.PrunedJSON, &pruned)
-		_ = json.Unmarshal(row.BypassedJSON, &bypassed)
-		snapshot.Routes = append(snapshot.Routes, graphengine.RouteFact{From: row.FromStepID, Activated: active, Pruned: pruned, Bypassed: bypassed, Validity: row.Validity})
-	}
-	if err := publication.ProjectInputs(db.WithContext(ctx), controlledSession, &snapshot); err != nil {
-		return graphengine.RuntimeSnapshot{}, err
-	}
-	return snapshot, nil
+	session.ID = sessionID
+	return graphsnapshot.Load(db.WithContext(ctx), session, graph)
 }
 
 type projectionResponse struct {
@@ -577,10 +499,8 @@ func finalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, at
 			return nil
 		}
 		return freezeRouteDecision(ctx, db, sessionID, stepID, attemptID)
-	case "failed":
-		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusFailed)
-	case "cancelled", "interrupted":
-		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusWaiting)
+	case "failed", "cancelled", "canceled", "interrupted":
+		return reconcileRunStatus(ctx, db, &session)
 	default:
 		return gorm.ErrInvalidData
 	}
@@ -594,36 +514,12 @@ func reconcileSessionProjection(ctx context.Context, db *gorm.DB, session *orm.W
 	if err != nil {
 		return err
 	}
-	status := SessionStatusWaiting
-	if session.Status == "pausing" {
-		status = "pausing"
-	} else if projected.Projection.Completed {
-		status = SessionStatusCompleted
-	} else {
-		for _, id := range projected.Projection.Current {
-			switch projected.Projection.Nodes[id].Execution {
-			case "pending", "queued", "claimed", "running":
-				status = SessionStatusActive
-			case "failed":
-				if status != SessionStatusActive {
-					status = SessionStatusFailed
-				}
-			}
-		}
-		// A ready successor is part of the already admitted execution. Keep
-		// its preparation interval open until the driver advances or explicitly
-		// yields; no worker running between steps is not itself a failure.
-		if session.Status == SessionStatusActive && len(projected.Projection.Current) == 0 &&
-			len(projected.Projection.Ready) > 0 && projected.Display.Status == "running" {
-			status = SessionStatusActive
-		}
-	}
-	updates := map[string]any{
-		"status":        status,
-		"state_version": gorm.Expr("state_version + 1"),
-		"updated_at":    time.Now().UTC(),
-	}
-	if err := db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Updates(updates).Error; err != nil {
+	return writeSessionProjection(ctx, db, session, projected)
+}
+
+func writeSessionProjection(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession, projected projectionResponse) error {
+	status := projectedRunStatus(*session, projected)
+	if err := runstate.Write(db.WithContext(ctx), session, status, map[string]any{"state_version": gorm.Expr("state_version + 1")}); err != nil {
 		return err
 	}
 	session.Status, session.StateVersion = status, session.StateVersion+1

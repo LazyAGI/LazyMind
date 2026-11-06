@@ -31,6 +31,21 @@ describe('live DSH connection', () => {
     await expect(stop.ready).rejects.toThrow('missing connection')
     await stop()
   })
+  it('recovers after the initial authentication failure without recreating the watcher', async () => {
+    let loggedIn = false
+    let installs = 0
+    const stop = watchConnection(async () => {
+      if (!loggedIn) throw new Error('login required')
+      return value('http://localhost:8090')
+    }, async () => { installs++; return async () => {} }, () => {}, 2)
+    try {
+      await expect(stop.ready).rejects.toThrow('login required')
+      expect(installs).toBe(0)
+      loggedIn = true
+      await tick()
+      expect(installs).toBe(1)
+    } finally { await stop() }
+  })
   it('cannot install a resolver result after disposal' , async () => {
     let complete!: (c: Connection) => void
     const resolved = new Promise<Connection>(resolve => { complete = resolve })

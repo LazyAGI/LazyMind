@@ -20,16 +20,14 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/controlstore"
-	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
 type transitionCommandRequest struct {
-	ClarificationValues  map[string]any `json:"clarification_values,omitempty"`
-	HostedTaskID         string         `json:"-"`
-	controlAuthorized    bool
+	ClarificationValues  map[string]any      `json:"clarification_values,omitempty"`
+	HostedTaskID         string              `json:"-"`
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
@@ -630,27 +628,14 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 		// The execution mode is a session creation decision. Never allow a later
 		// chat request or transition command to change it.
 		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
-		// Resolve the requested target before admission: a failed run may retry
-		// within its budget, but may not start another step or rewind autonomously.
+		// Resolve the target before shared admission so every controller uses
+		// the same execution, retry and rewind rules and per-step retry budget.
 		if req.Operation == "advance" {
 			resolved, resolveErr := resolveAdvanceOperation(ctx, tx, session.ID, targets[0].TargetStepID)
 			if resolveErr != nil {
 				return resolveErr
 			}
 			req.Operation = resolved
-		}
-		if controlstore.Controlled(session) && !req.controlAuthorized {
-			guard := controlstore.GuardBegin
-			if req.Operation == "retry" {
-				guard = controlstore.GuardRetryBegin
-			}
-			if err := guard(tx, session); err != nil {
-				var rejected *controlstore.Error
-				if errors.As(err, &rejected) {
-					return rejectTransition(req.CommandID, &session, graphengine.Projection{}, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
-				}
-				return err
-			}
 		}
 
 		graphErr := error(nil)
@@ -678,20 +663,12 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
-		if session.Status == "pausing" {
-			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_PAUSING", "wait for execution to stop before continuing", false, nil)
-		}
-		if !controlstore.Controlled(session) {
-			display, err := displaystate.Read(tx, session)
-			if err != nil {
-				return err
+		if err := guardRunAdvance(tx, session); err != nil {
+			var rejected *controlstore.Error
+			if errors.As(err, &rejected) {
+				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
 			}
-			if display.ApprovalStepID != "" {
-				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing", false, nil)
-			}
-			if display.Status == "paused" {
-				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_PAUSED", "resume the workflow explicitly before starting another attempt", false, nil)
-			}
+			return err
 		}
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
@@ -854,10 +831,9 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
-				if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Update("status", SessionStatusActive).Error; err != nil {
+				if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
 					return err
 				}
-				session.Status = SessionStatusActive
 				// Hosted retries bypass the native launcher's TaskCenter reset.
 				// Reopen only this owner's completed run; removed or canceled tasks stay closed.
 				if req.Operation == "retry" || req.Operation == "rewind" {

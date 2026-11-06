@@ -374,8 +374,10 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	view, err := displaystate.Read(db.DB, *session)
-	if err != nil || view.Status != "waiting" || view.Reason != "next_step_required" || view.ApprovalStepID != "" {
-		t.Fatalf("successful image workflow misreported: %+v %v", view, err)
+	// A live handoff retains the admitted controller's preparation state. Older
+	// waiting snapshots still render next_step_required (covered in state_sync_test).
+	if err != nil || session.Status != SessionStatusActive || view.Status != "running" || view.Reason != "preparing" || view.ApprovalStepID != "" {
+		t.Fatalf("dynamic handoff lost admitted preparation: status=%s view=%+v err=%v", session.Status, view, err)
 	}
 	if feedbackPayload["task_id"] != "task-1" ||
 		!strings.Contains(fmt.Sprint(feedbackPayload["message"]), "Analyze Subject") ||
