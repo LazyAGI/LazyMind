@@ -162,6 +162,10 @@ def local_fonts() -> list[dict]:
 
 def local_font_css(html: str) -> str:
     """Self-contained fonts for browser previews; no expiring cloud URLs."""
+    from .portable_fonts import _PageText, _html_font_bytes
+    page = _PageText()
+    page.feed(html)
+    text = ''.join(page.text)
     blocks = []
     packaged = set()
     packaged_families = set()
@@ -179,12 +183,11 @@ def local_font_css(html: str) -> str:
         aliases = [name for name in record['aliases'] if name.casefold() in html.casefold()]
         if not aliases:
             continue
-        data = (font_library_root() / record['file']).read_bytes()
-        encoded = base64.b64encode(data).decode()
+        encoded = base64.b64encode(_html_font_bytes(record, text)).decode()
         for family in aliases:
             quoted = json.dumps(family, ensure_ascii=False).replace('<', '\\3c ')
             blocks.append(f'@font-face{{font-family:{quoted};font-weight:{record["weight"]};'
-                          f'font-style:{record["style"]};src:url(data:font/ttf;base64,{encoded})}}')
+                          f'font-style:{record["style"]};src:url(data:font/woff;base64,{encoded})}}')
     return '\n'.join(blocks)
 
 

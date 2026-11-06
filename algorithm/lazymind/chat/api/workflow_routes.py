@@ -611,6 +611,7 @@ async def export_ppt_from_html(req: PptExportRequest):
         if os.name == 'nt':
             options['creationflags'] = subprocess.CREATE_NO_WINDOW
         export_env = os.environ.copy()
+        export_env['LAZYMIND_FONT_SUBSET_PYTHON'] = sys.executable
         if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
             export_env['ELECTRON_RUN_AS_NODE'] = '1'
         process = await asyncio.create_subprocess_exec(

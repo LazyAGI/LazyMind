@@ -1,4 +1,4 @@
-"""Embed full font files into an existing package without rebuilding slides.
+"""Embed used font glyphs into an existing package without rebuilding slides.
 
 EOT 1.0 follows https://www.w3.org/submissions/EOT/ . Only the font resources,
 presentation font list, relationships and content types are changed here.
@@ -30,8 +30,20 @@ def _dump(node):
     return etree.tostring(node, xml_declaration=True, encoding='UTF-8', standalone=True)
 
 
-def eot_data(record):
+def eot_data(record, text=None):
     raw = font_bytes(record)
+    if text is not None:
+        from fontTools import subset
+        with TTFont(io.BytesIO(raw)) as font:
+            if not font['OS/2'].fsType & 256:
+                options = subset.Options()
+                options.layout_features = ['*']
+                subsetter = subset.Subsetter(options=options)
+                subsetter.populate(text=text)
+                subsetter.subset(font)
+                output = io.BytesIO()
+                font.save(output)
+                raw = output.getvalue()
     with TTFont(io.BytesIO(raw)) as font:
         os2 = font['OS/2']
         header = bytearray(82)
@@ -62,6 +74,11 @@ def eot_data(record):
 
 def embed_font_records(data, family, records):
     """Update a package mapping in memory; caller publishes only after success."""
+    # Include notes, chart labels and template text as well as visible slide runs.
+    text = ''.join(node.text or '' for name, raw in data.items()
+                   if name.startswith('ppt/') and name.endswith('.xml')
+                   for node in _xml(raw).iter()
+                   if isinstance(node.tag, str) and etree.QName(node).localname in {'t', 'v'})
     presentation = _xml(data['ppt/presentation.xml'])
     relationships = _xml(data['ppt/_rels/presentation.xml.rels'])
     content_types = _xml(data['[Content_Types].xml'])
@@ -85,9 +102,7 @@ def embed_font_records(data, family, records):
     report = []
     for variant, record in variants.items():
         part = f'ppt/fonts/lazymind-{record["id"]}.fntdata'
-        payload = eot_data(record)
-        if part in data and data[part] != payload:
-            raise ValueError('Conflicting embedded font resource')
+        payload = eot_data(record, text)
         data[part] = payload
         relation = next((r for r in relationships if r.get('Type') == R + '/font'
                          and r.get('TargetMode') != 'External'
@@ -108,7 +123,7 @@ def embed_font_records(data, family, records):
     order = ['font', 'regular', 'bold', 'italic', 'boldItalic']
     entry[:] = sorted(entry, key=lambda n: order.index(etree.QName(n).localname))
     presentation.set('embedTrueTypeFonts', '1')
-    presentation.set('saveSubsetFonts', '0')
+    presentation.set('saveSubsetFonts', '1')
     if not any(n.get('Extension') == 'fntdata' for n in content_types):
         etree.SubElement(content_types, f'{{{CT}}}Default', Extension='fntdata', ContentType='application/x-fontdata')
     data['ppt/presentation.xml'] = _dump(presentation)
@@ -119,7 +134,7 @@ def embed_font_records(data, family, records):
     for variant, record in variants.items():
         rid = entry.find(f'{{{P}}}{variant}').get(f'{{{R}}}id')
         target = posixpath.normpath(posixpath.join('ppt', rels[rid].get('Target')))
-        if data.get(target) != eot_data(record):
+        if data.get(target) != eot_data(record, text):
             raise ValueError('Embedded font validation failed')
     return report
 

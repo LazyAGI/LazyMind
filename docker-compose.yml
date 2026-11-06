@@ -927,6 +927,9 @@ services:
           || ! node -e "const v=require('./node_modules/playwright/package.json').version; process.exit(v==='1.58.2'?0:1)"; then
           npm install --omit=dev
         fi
+        if ! python3 -c 'import fontTools' 2>/dev/null; then
+          apt-get update && apt-get install -y --no-install-recommends python3-fonttools
+        fi
         exec node ppt_export_http_server.mjs
     expose:
       - "8099"

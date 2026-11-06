@@ -7,6 +7,9 @@
 // p:embeddedFontLst in ppt/presentation.xml.
 
 import JSZip from 'jszip';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
@@ -564,6 +567,16 @@ export async function embedGoogleFontsFromPages(pptxPath, pages, options = {}) {
     ...remote.filter(face => !families.has(normalizeFamily(face.family)))];
   const embedded = [...required.map(face => `${face.family}:${face.variant}`),
     ...await embedFontFacesInPptx(pptxPath, faces)];
+  if (embedded.length) {
+    try {
+      await promisify(execFile)(process.env.LAZYMIND_FONT_SUBSET_PYTHON || 'python3',
+        [fileURLToPath(new URL('../subset_fonts.py', import.meta.url)), pptxPath],
+        { timeout: 120_000, maxBuffer: 1024 * 1024 });
+    } catch (error) {
+      error.fontPortability = true;
+      throw error;
+    }
+  }
   if (embedded.length) process.stderr.write(`[fonts] Embedded ${embedded.join(', ')}\n`);
   return embedded;
 }

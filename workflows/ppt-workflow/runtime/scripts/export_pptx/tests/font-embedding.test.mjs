@@ -280,3 +280,54 @@ test('font embedding adds fntdata, relationships, and embeddedFontLst', async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('export embeds only glyphs used across slides and speaker notes', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const python = process.env.LAZYMIND_FONT_SUBSET_PYTHON || 'python3';
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'glyph-export-'));
+  try {
+    const fontPath = path.join(folder, 'test.ttf');
+    execFileSync(python, ['-c', `
+import sys
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+b = FontBuilder(1000, isTTF=True)
+chars = '甲乙丙丁'
+glyphs = ['.notdef'] + ['g' + str(i) for i in range(4)]
+b.setupGlyphOrder(glyphs)
+b.setupCharacterMap(dict(zip(map(ord, chars), glyphs[1:])))
+b.setupGlyf({g: TTGlyphPen(None).glyph() for g in glyphs})
+b.setupHorizontalMetrics({g: (500, 0) for g in glyphs})
+b.setupHorizontalHeader(ascent=800, descent=-200)
+b.setupNameTable({'familyName':'Test Web Font', 'styleName':'Regular', 'fullName':'Test Web Font'})
+b.setupOS2(fsType=0)
+b.setupPost()
+b.save(sys.argv[1])
+`, fontPath]);
+    const source = path.join(folder, 'page.html');
+    const output = path.join(folder, 'deck.pptx');
+    await writeFile(source, portableHtml(await readFile(fontPath)));
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types></Types>');
+    zip.file('ppt/_rels/presentation.xml.rels', '<Relationships></Relationships>');
+    zip.file('ppt/presentation.xml', '<p:presentation xmlns:p="urn:p"><p:defaultTextStyle/></p:presentation>');
+    zip.file('ppt/slides/slide1.xml', '<slide><t>甲</t></slide>');
+    zip.file('ppt/slides/slide2.xml', '<slide><t>乙</t></slide>');
+    zip.file('ppt/notesSlides/notesSlide1.xml', '<notes><t>丙</t></notes>');
+    await writeFile(output, await zip.generateAsync({ type: 'nodebuffer' }));
+    await embedGoogleFontsFromPages(output, [{ path: source }]);
+    const result = await JSZip.loadAsync(await readFile(output));
+    const parts = Object.keys(result.files).filter(name => name.endsWith('.fntdata'));
+    assert.equal(parts.length, 1);
+    const eot = await result.file(parts[0]).async('nodebuffer');
+    await writeFile(fontPath, eot.subarray(eot.length - eot.readUInt32LE(4)));
+    const chars = execFileSync(python, ['-c',
+      'from fontTools.ttLib import TTFont; import sys; print("".join(chr(c) for c in sorted(TTFont(sys.argv[1]).getBestCmap())))',
+      fontPath], { encoding: 'utf8' }).trim();
+    assert.deepEqual(new Set(chars), new Set('甲乙丙'));
+    assert.match(await result.file('ppt/presentation.xml').async('string'), /saveSubsetFonts="1"/);
+    assert.equal(await result.file('ppt/slides/slide2.xml').async('string'), '<slide><t>乙</t></slide>');
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+});

@@ -271,7 +271,15 @@ def test_repeated_font_edit_reuses_resources_and_preserves_other_slides(deck, tm
         assert len(fonts) == 1
         from lazymind.chat.engine.tools.file_resources.font_library import local_fonts, font_library_root
         raw = (font_library_root() / local_fonts()[0]['file']).read_bytes()
-        assert after.read(fonts[0]).endswith(raw)
+        import io
+        import struct
+        from fontTools.ttLib import TTFont
+        embedded = after.read(fonts[0])
+        size = struct.unpack_from('<I', embedded, 4)[0]
+        with TTFont(io.BytesIO(embedded[-size:])) as subset_font, TTFont(io.BytesIO(raw)) as original:
+            assert set(subset_font.getBestCmap()) < set(original.getBestCmap())
+            assert set(map(ord, '正文 textTitle01Keep notes')) <= set(subset_font.getBestCmap())
+        assert b'saveSubsetFonts="1"' in after.read('ppt/presentation.xml')
         from lxml import etree
         root = etree.fromstring(after.read('ppt/presentation.xml'))
         assert len(root.findall('.//{*}embeddedFont')) == 1
@@ -468,3 +476,52 @@ def test_generated_songti_page_contains_subset_font_before_publication(tmp_path,
     assert 'data:font/woff;base64,' in saved
     assert 'data-lazymind-font-required="true"' in saved
     assert '<h1>正文Title</h1>' in saved
+
+
+@pytest.mark.parametrize('no_subset', [False, True])
+def test_export_subsets_across_slides_and_notes(tmp_path, monkeypatch, no_subset):
+    import importlib.util
+    import io
+    import struct
+    from pathlib import Path
+    from fontTools.ttLib import TTFont
+    from lazymind.chat.engine.tools.file_resources.font_library import register_font
+    from lazymind.chat.engine.tools.file_resources.pptx_font_embedding import embed_pptx_file
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'library'))
+    record = register_font(make_font(tmp_path, text='甲乙丙丁', fs_type=256 if no_subset else 0))
+    prs = Presentation()
+    for text in ['甲', '乙']:
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = text
+        slide.notes_slide.notes_text_frame.text = '丙'
+    path = tmp_path / 'subset.pptx'
+    prs.save(path)
+    embed_pptx_file(path, 'Test Font', [record])
+    script = Path(__file__).parents[2] / 'workflows/ppt-workflow/runtime/scripts/export_pptx/subset_fonts.py'
+    spec = importlib.util.spec_from_file_location('export_font_subset', script)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    helper.subset_pptx(path)
+    with ZipFile(path) as archive:
+        fonts = [n for n in archive.namelist() if n.startswith('ppt/fonts/')]
+        assert len(fonts) == 1
+        eot = archive.read(fonts[0])
+        size = struct.unpack_from('<I', eot, 4)[0]
+        assert struct.unpack_from('<I', eot)[0] == len(eot)
+        with TTFont(io.BytesIO(eot[-size:])) as font:
+            assert set(font.getBestCmap()) == set(map(ord, '甲乙丙丁' if no_subset else '甲乙丙'))
+    assert Presentation(path).slides[1].shapes.title.text == '乙'
+
+
+def test_legacy_preview_font_injection_subsets_visible_text(tmp_path, monkeypatch):
+    import base64
+    import io
+    import re
+    from fontTools.ttLib import TTFont
+    from lazymind.chat.engine.tools.file_resources.font_library import register_font, local_font_css
+    monkeypatch.setenv('LAZYMIND_FONT_DIR', str(tmp_path / 'library'))
+    register_font(make_font(tmp_path, text='正文Unused'))
+    css = local_font_css('<style>body{font-family:"Test Font"}</style><body>正文</body>')
+    encoded = re.search(r'data:font/woff;base64,([A-Za-z0-9+/=]+)', css).group(1)
+    with TTFont(io.BytesIO(base64.b64decode(encoded))) as font:
+        assert set(font.getBestCmap()) == set(map(ord, '正文'))

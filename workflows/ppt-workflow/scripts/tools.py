@@ -1329,7 +1329,7 @@ def ppt_generate_native_pptx(slides: list[dict], template_file: str = '', notes_
     template = None
     slides = _pages_with_saved_notes(slides, notes_ref)
     digest = hashlib.sha256(json.dumps(slides, ensure_ascii=False, sort_keys=True).encode())
-    digest.update(b'native-pptx-v2-embedded-font')
+    digest.update(b'native-pptx-v3-subset-font')
     digest.update(font_family.encode())
     if template:
         digest.update(template.read_bytes())

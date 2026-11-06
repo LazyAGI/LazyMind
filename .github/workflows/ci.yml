@@ -32,6 +32,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: workflows/ppt-workflow/runtime/scripts/export_pptx/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install "fonttools>=4,<5"
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm test

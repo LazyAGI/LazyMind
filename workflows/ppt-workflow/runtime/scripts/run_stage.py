@@ -109,6 +109,7 @@ def _background_process_kwargs() -> dict[str, int]:
 
 def _subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
+    env["LAZYMIND_FONT_SUBSET_PYTHON"] = sys.executable
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
     return env
