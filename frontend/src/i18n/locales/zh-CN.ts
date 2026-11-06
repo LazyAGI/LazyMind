@@ -875,7 +875,7 @@ const zhCN = {
     },
     connection: {
       reason: {
-        model_list_unavailable: "供应商未提供模型列表接口，可手动添加模型并测试连接。",
+        model_list_unavailable: "当前模型列表接口不可用，请检查 API 地址；也可以手动添加模型并测试连接。",
       },
     },
     probe: {
@@ -914,7 +914,6 @@ const zhCN = {
     },
     catalog: {
       discoveryFailed: "获取失败",
-      builtInFallback: "未能获取在线模型列表，以下为内置参考模型；请确认账号已开通对应模型，或手动添加推理接入点 ID。",
       customGroup: "自定义",
       unsupportedType: "当前运行时暂不支持此模型类型",
       unclassifiedType: "模型类型未分类，请在自定义模型中明确选择类型后添加。",
@@ -1661,8 +1660,8 @@ const zhCN = {
     cannotDelete: "不可删除",
     confirmDeleteModel: "确认删除 {{name}}？",
     confirmDeleteModelDesc: "删除后，引用该模型的模块配置会被清空。",
-    embeddingInUse: "向量模型仍被已索引的知识库使用，请先移除关联知识库，再移除模型或重置供应商。",
-	confirmDeleteEmbeddingDesc: "移除向量模型后，所有已建立向量索引的知识库将降级为“解析并切片”。已有向量数据会保留，不会清除。确认继续吗？",
+    embeddingInUse: "当前向量模型正用于知识库索引。移除前需要安全清理旧文本向量；原文和切片会保留。",
+	confirmDeleteEmbeddingDesc: "移除正在使用的向量模型需要清理所有知识库的旧文本向量。原文和切片会保留，重新建立索引前向量检索暂不可用。",
     deleteModelAria: "删除 {{name}}",
     removeModelHint: "删除模型",
     disableModelAria: "禁用 {{name}}",
@@ -1749,7 +1748,13 @@ const zhCN = {
       siliconflow: "硅基流动提供高并发、广泛模型接入的模型 API 聚合与加速服务。\n\n获取 API秘钥：\nhttps://cloud.siliconflow.cn/account/ak",
     },
     embeddingChangeTitle: "向量模型变更提醒",
-    embeddingChangeContent: "更换向量模型可能导致整个知识库检索服务不可用。如果新模型与旧模型不同，建议先清空知识库中的文档，再切换模型，否则旧文档的向量将与新模型不兼容。",
+    embeddingChangeContent: "切换向量模型前会检测向量签名。签名不同时需要清理所有知识库的旧文本向量，再用新模型重建索引；原文和切片会保留。",
+    embeddingSignatureMatchedTitle: "向量签名一致",
+    embeddingSignatureMatched: "测试向量签名一致，可沿用现有索引；确认切换？",
+    embeddingIndexResetTitle: "需要重建向量索引",
+    embeddingIndexResetRequired: "候选模型的测试向量与当前记录不一致，或旧向量的模型身份尚未验证。切换前需安全清理所有知识库的旧文本向量；原文和切片会保留，重新建立索引前向量检索暂不可用。当前尚无法自动安全清理，因此本次未切换。",
+    embeddingSignatureCheckFailedTitle: "无法验证向量模型",
+    embeddingSignatureCheckFailed: "候选模型的向量签名检测未完成。请检查供应商连接和模型配置后重试；当前模型未更改。",
     confirmSwitch: "确认切换",
     cancelSwitch: "暂不切换",
     validation: {
@@ -5819,6 +5824,14 @@ const zhCN = {
     multimodalEmbeddingNotReadyBanner: "多模态向量模型尚未就绪，图文混合检索功能暂时不可用，请联系管理员配置多模态向量模型。",
     embeddingNotReadyBannerAdmin: "向量模型尚未就绪，知识库检索功能暂时不可用，请先配置向量模型。",
     multimodalEmbeddingNotReadyBannerAdmin: "多模态向量模型尚未就绪，图文混合检索功能暂时不可用，请先配置多模态向量模型。",
+    embeddingIndexStateTitle: "文本向量索引",
+    embeddingIndexModel: "当前模型：{{provider}} · {{model}}",
+    embeddingIndexIndexed: "已为 {{count}} 个知识库建立向量索引。",
+    embeddingIndexEmpty: "尚无知识库向量索引。",
+    embeddingIndexRebuilding: "向量索引需要重建，{{count}} 个知识库尚待完成。原文和切片会保留；重建完成前，向量检索暂不可用。",
+    embeddingIndexClearing: "正在清理旧向量索引。原文和切片会保留。",
+    embeddingIndexCleared: "旧文本向量已清理，原文和切片会保留。请选择新的向量模型，然后重新建立索引。",
+    embeddingIndexUnknown: "现有向量索引的模型身份尚未验证。切换模型前需重新建立索引。",
     goToConfig: "去配置",
   },
 

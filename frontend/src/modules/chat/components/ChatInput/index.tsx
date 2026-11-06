@@ -458,6 +458,7 @@ interface ChatInputProps {
   canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
   onConversationSettingsChange?: (settings: ConversationRuntimeSettings) => void;
   /** Initial workflow settings to pre-populate the config popover. */
@@ -611,6 +612,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       isStreaming = false,
       onStopGeneration,
       embeddingReady,
+      vlmReady,
       multimodalEmbeddingReady,
       rerankReady,
       disabled = false,
@@ -1059,6 +1061,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       (newFiles: File[], currentFiles: { name: string }[]) =>
         preprocessUpload(newFiles, currentFiles, hasKB, t),
       [hasKB, t],
+    );
+    const onFilesAdded = useCallback(
+      (files: File[]) => {
+        if (vlmReady === false && files.some(isImage)) {
+          message.warning(t("chat.vlmNotReadyWarning"));
+        }
+      },
+      [t, vlmReady],
     );
     const normalizedCiteMessages = useMemo(() => {
       if (citeMessages) {
@@ -1710,6 +1720,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         types={uploadTypes}
                         max={Math.max(0, MAX_UPLOAD_FILES - transferredUploads.length)}
                         onBeforeAddFiles={onBeforeAddFiles}
+                        onFilesAdded={onFilesAdded}
                         disabled={disabled || isPromptPolishing}
                         disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
                         icon={<span />}

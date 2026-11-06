@@ -22,6 +22,7 @@ import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import type { DocumentTranslationRequest } from "./types";
 import { touchCachedPdfChat } from "./cache";
 import { getDocumentParseStatus, ensureDocumentParsed, retryDocumentParsed, type DocumentParseResult } from "@/modules/knowledge/api/pdfArtifacts";
+import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
@@ -104,6 +105,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   onNavigateSelection,
 }: PdfTemporaryChatProps, ref) {
   const { t, i18n } = useTranslation();
+  const { vlmReady } = useChatModelProviderGuard();
   const zh = (i18n?.resolvedLanguage || i18n?.language || "en").startsWith("zh");
   const copy = zh ? {
     assistant:"论文助手", hint:"细读论文，随时提问。", ready:"论文已就绪", scope:"回答基于当前文档", quote:"原文摘录", page:"第", remove:"移除原文摘录", companion:"阅读助手", welcome:"从方法开始读懂论文", intro:"沿着方法走一遍，再回原文核对设计、实验和边界。点击下方问题可先编辑再发送。",
@@ -517,6 +519,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
           showThinkingDepth={false}
           showSkillDeposit={false}
           showConversationConfig={false}
+          vlmReady={vlmReady}
           showModelSelector={isPaper}
           composerVariant={isPaper ? "paper" : "default"}
           modelSelectionDraft={isPaper && !conversationCreated}

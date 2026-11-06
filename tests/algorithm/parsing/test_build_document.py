@@ -1,8 +1,141 @@
-import pytest
+import importlib
+import os
+from pathlib import Path
+import subprocess
+import sys
 
-import lazymind.parsing.service.build_document as build_document
+import pytest
+import lazyllm
+
+from lazymind.parsing.service import build_document
 from lazymind.parsing.engine.readers.native_office import NativeOfficeReader
 from lazymind.parsing.engine.readers.retained import RetainedReader
+
+
+def test_quiet_trace_clears_previous_request_model_configuration():
+    seen = []
+
+    def backend(*args, **kwargs):
+        seen.append(dict(lazyllm.globals['config']))
+        return 'ok'
+
+    with lazyllm.new_session():
+        lazyllm.globals['config']['dynamic_model_configs'] = {
+            'embed_main': {'embed': {'source': 'old-supplier', 'model': 'old-model'}},
+        }
+        lazyllm.globals['config']['old-supplier_api_key'] = {'embed_main': 'old-secret'}
+        assert build_document._quiet_trace({'kb': backend})('kb', 'retrieve') == 'ok'
+
+    assert seen == [{}]
+
+
+def test_processor_entrypoint_clears_previous_task_model_configuration(monkeypatch, tmp_path):
+    from lazymind.config import config
+
+    monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
+    original_injector = lazyllm.inject_model_config
+    try:
+        worker = importlib.import_module('lazymind.processor.service.worker')
+        importlib.reload(worker)
+        assert worker.DocumentProcessorWorker._Impl.__name__ == '_IsolatedDocumentWorkerImpl'
+        base_impl = worker.DocumentProcessorWorker._Impl.__mro__[1]
+        seen = []
+        static_models = tmp_path / 'static-models.yaml'
+        static_models.write_text('embed_main:\n  type: embed\n  source: openai\n  model: static-embed\n')
+
+        def run_task(_self, *_args, **_kwargs):
+            seen.append(dict(lazyllm.globals['config']))
+            assert lazyllm.inject_model_config is worker.inject_model_config
+            lazyllm.inject_model_config(None)
+            from lazymind.model_config import is_model_role_available
+            assert is_model_role_available('embed_main', config_path=str(static_models))
+
+        monkeypatch.setattr(base_impl, '_run_task', run_task)
+        impl = object.__new__(worker.DocumentProcessorWorker._Impl)
+        with lazyllm.new_session():
+            lazyllm.globals['config']['dynamic_model_configs'] = {
+                'embed_main': {'embed': {'source': 'old-supplier', 'model': 'old-model'}},
+            }
+            lazyllm.globals['config']['old-supplier_api_key'] = {'embed_main': 'old-secret'}
+            impl._run_task('task', 'DOC_ADD', {}, False)
+        assert seen == [{}]
+    finally:
+        lazyllm.inject_model_config = original_injector
+
+
+@pytest.mark.parametrize('serialize_as_main', [False, True])
+def test_serialized_processor_worker_resets_config_in_child_process(monkeypatch, tmp_path, serialize_as_main):
+    from lazymind.config import config
+
+    monkeypatch.setitem(config._impl, 'database_url', 'sqlite:///:memory:')
+    original_injector = lazyllm.inject_model_config
+    try:
+        worker = importlib.import_module('lazymind.processor.service.worker')
+        impl = object.__new__(worker.DocumentProcessorWorker._Impl)
+        serialized = tmp_path / 'worker.txt'
+        impl_class = type(impl)
+        original_module = impl_class.__module__
+        try:
+            if serialize_as_main:
+                impl_class.__module__ = '__main__'
+            serialized.write_text(lazyllm.dump_obj(impl))
+        finally:
+            impl_class.__module__ = original_module
+    finally:
+        lazyllm.inject_model_config = original_injector
+
+    static_models = tmp_path / 'static-models.yaml'
+    static_models.write_text('embed_main:\n  type: embed\n  source: openai\n  model: static-embed\n')
+    root = Path(__file__).resolve().parents[3]
+    env = os.environ.copy()
+    env['DATABASE_URL'] = 'sqlite:///:memory:'
+    env['LAZYMIND_DATABASE_URL'] = 'sqlite:///:memory:'
+    env['PYTHONPATH'] = os.pathsep.join((str(root / 'algorithm'), str(root / 'algorithm/lazyllm')))
+    code = '''
+import sys
+import lazyllm
+from lazymind.model_config import is_model_role_available
+
+with open(sys.argv[1]) as stream:
+    impl = lazyllm.load_obj(stream.read())
+assert type(impl).__name__ == '_IsolatedDocumentWorkerImpl'
+
+def run_task(_self, *_args, **_kwargs):
+    assert lazyllm.globals['config'] == {}
+    assert lazyllm.inject_model_config.__module__ == 'lazymind.model_config'
+    lazyllm.inject_model_config(None)
+    assert is_model_role_available('embed_main', config_path=sys.argv[2])
+
+impl._run_task.__func__.__globals__['_BaseDocumentWorkerImpl']._run_task = run_task
+with lazyllm.new_session():
+    lazyllm.globals['config']['dynamic_model_configs'] = {'embed_main': {'embed': {'model': 'old-model'}}}
+    lazyllm.globals['config']['old_api_key'] = {'embed_main': 'old-secret'}
+    impl._run_task('task', 'DOC_ADD', {}, False)
+
+class Store:
+    _group_embed_keys = {'code': {'embed_main'}}
+
+    def get_nodes(self, **_kwargs):
+        return []
+
+    def activated_groups(self):
+        return ['code']
+
+class Processor:
+    def __init__(self):
+        self._store = Store()
+        self._reembed_group = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('old fallback'))
+
+processor = Processor()
+impl._get_processor.__func__.__globals__['_BaseDocumentWorkerImpl']._get_processor = lambda _self: processor
+assert impl._get_processor() is processor
+processor._reembed_group('code', {'code': {'parent': 'lazyllm_root'}}, doc_ids=['doc'], kb_id='kb')
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', code, str(serialized), str(static_models)], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize('force,previous,expected', [

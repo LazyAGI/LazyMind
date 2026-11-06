@@ -4,7 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn(), scenes: vi.fn(), remove: vi.fn(), get: vi.fn() }));
 vi.mock("@/modules/learning/api", () => ({ getLearningCatalog: mocks.scenes }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
@@ -25,9 +25,7 @@ vi.mock("@/modules/knowledge/components/KnowledgeTag", () => ({ default: () => n
 vi.mock("@/modules/knowledge/components/KnowledgeBaseSyncNow", () => ({ default: () => null }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({}) } }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", localizeErrorCode: (_code: string, fallback: string) => fallback,
-  axiosInstance: { get: vi.fn((url: string) => Promise.resolve({ data: url.endsWith("/deletion")
-    ? { dataset_id: "local-id", display_name: "本地手册", status: "cleaning", total: 5, completed: 2, failed: 0 }
-    : { ready: true } })) } }));
+  axiosInstance: { get: mocks.get } }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceListDatasets: mocks.list, datasetServiceDeleteDataset: mocks.remove }) }));
 vi.mock("@/modules/dataSource/api/clients", () => ({ dataSourceScanApi: { listSources: mocks.scan } }));
 vi.mock("@/hooks/useModelFeatures", () => ({ fetchModelFeatures: vi.fn().mockResolvedValue({}), isImageEmbedRequired: () => false, MODEL_FEATURES_CHANGED_EVENT: "features-changed" }));
@@ -67,6 +65,9 @@ async function mount(search: string) {
 beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.endsWith("/deletion")
+    ? { dataset_id: "local-id", display_name: "本地手册", status: "cleaning", total: 5, completed: 2, failed: 0 }
+    : { ready: true } }));
   mocks.list.mockResolvedValue(localResponse);
   mocks.scenes.mockResolvedValue({ profiles: [
     { key: "general", name_i18n_key: "learning.profile.general.name" },
@@ -82,6 +83,38 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("knowledge list URL and data restoration", () => {
+  it("shows the current text embedding model and indexed knowledge-base count", async () => {
+    mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.includes("/embedding/index-state")
+      ? { data: {
+        status: "indexed", model_name: "Qwen3-Embedding-8B", provider_name: "硅基流动",
+        indexed_knowledge_bases: 3, pending_knowledge_bases: 0,
+      } }
+      : { ready: true } }));
+
+    await mount("");
+
+    const status = await screen.findByRole("status", { name: t("knowledge.embeddingIndexStateTitle") });
+    expect(status).toHaveTextContent("硅基流动");
+    expect(status).toHaveTextContent("Qwen3-Embedding-8B");
+    expect(status).toHaveTextContent("3 个知识库");
+  });
+
+  it("explains that vector search waits for rebuilding while source documents remain", async () => {
+    mocks.get.mockImplementation((url: string) => Promise.resolve({ data: url.includes("/embedding/index-state")
+      ? { data: {
+        status: "rebuilding", model_name: "新向量模型", provider_name: "测试供应商",
+        indexed_knowledge_bases: 0, pending_knowledge_bases: 2,
+      } }
+      : { ready: true } }));
+
+    await mount("");
+
+    const status = await screen.findByRole("status", { name: t("knowledge.embeddingIndexStateTitle") });
+    expect(status).toHaveTextContent("2 个知识库");
+    expect(status).toHaveTextContent("原文和切片");
+    expect(status).toHaveTextContent("向量检索");
+  });
+
   it("defaults the normal entry to all types and queries the selected existing scene", async () => {
     const router = await mount("");
     fireEvent.click(screen.getByRole("button", { name: t("knowledge.filterAndSort") }));

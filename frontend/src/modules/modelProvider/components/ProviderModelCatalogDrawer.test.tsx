@@ -7,11 +7,12 @@ import {
   within,
 } from "@testing-library/react";
 import { ConfigProvider } from "antd";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderModelCatalogDrawer } from "./ProviderModelCatalogDrawer";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 
-const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn(), builtIn: vi.fn() }));
+const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn() }));
 vi.mock("../api", () => ({ listRemoteGroupModels: mocks.remote }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,7 +24,6 @@ vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));
-vi.mock("../builtInCatalog", () => ({ builtInCatalog: mocks.builtIn }));
 vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: mocks.lookup }));
 
 const selected: ProviderModel[] = [
@@ -75,7 +75,7 @@ function fixture(models = selected, requiresVerification = false) {
     onCheckConnection: vi.fn(),
   };
 }
-function draw(props: ReturnType<typeof fixture>) {
+function draw(props: ComponentProps<typeof ProviderModelCatalogDrawer>) {
   return render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <ProviderModelCatalogDrawer {...props} />
@@ -86,7 +86,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.remote.mockResolvedValue({ models: remote });
   mocks.lookup.mockReturnValue(undefined);
-  mocks.builtIn.mockReturnValue([]);
 });
 
 describe("provider model catalog drawer", () => {
@@ -461,14 +460,57 @@ describe("provider model catalog drawer", () => {
     expect(screen.getByText("BAAI/bge-large")).toBeInTheDocument();
   });
 
-  it("shows built-in Doubao suggestions with a visible failed-fetch status", async () => {
-    mocks.builtIn.mockReturnValue([{ id: "doubao-seed-1-6-251015", name: "doubao-seed-1-6-251015", model_type: "llm", added: false }]);
+  it("does not use Doubao's static catalog when its model-list request fails", async () => {
+    mocks.remote.mockRejectedValue({ reason: "model_list_unavailable" });
+    draw({ ...fixture([]), providerName: "Doubao", protocolName: "Doubao" });
+    expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
+  });
+
+  it("does not borrow a static catalog for an unverified custom supplier", async () => {
+    draw({ ...fixture(selected, true), providerName: "Custom Doubao", protocolName: "Doubao" });
+    expect(await screen.findByText("modelProvider.catalog.verifyBeforeSync")).toBeInTheDocument();
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
+    expect(screen.getByText("qwen-private")).toBeInTheDocument();
+    expect(mocks.remote).not.toHaveBeenCalled();
+  });
+
+  it.each(["authentication_failed", "timeout"])("does not show Doubao reference models for %s", async (reason) => {
+    draw({ ...fixture(selected), providerName: "Doubao", protocolName: "Doubao", initialDiscoveryError: reason });
+    expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
+    expect(screen.getByText("qwen-private")).toBeInTheDocument();
+    expect(mocks.remote).not.toHaveBeenCalled();
+  });
+
+  it("does not use a static catalog while an official connection is unverified", async () => {
+    draw({ ...fixture([], true), providerName: "Doubao", protocolName: "Doubao", initialDiscoveryError: "model list unavailable" });
+    expect(await screen.findByText("modelProvider.catalog.verifyBeforeSync")).toBeInTheDocument();
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
+    expect(mocks.remote).not.toHaveBeenCalled();
+  });
+
+  it("shows saved SenseNova Classic models without importing its Token Plan static entry", async () => {
+    mocks.remote.mockRejectedValue({ reason: "model_list_unavailable" });
+    const saved = [{ id: "classic", name: "SenseChat-5", capability: "LLM_CHAT" as const, builtIn: true, enabled: true }];
+    draw({ ...fixture(saved), providerName: "SenseNova", protocolName: "SenseNova" });
+    expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
+    expect(screen.getByText("SenseChat-5")).toBeInTheDocument();
+    expect(screen.queryByText("sensenova-6.8-flash-lite")).not.toBeInTheDocument();
+  });
+
+  it("does not use a static catalog after an initial model-list failure", async () => {
+    draw({ ...fixture([]), providerName: "SenseNova", protocolName: "SenseNova", initialDiscoveryError: "model list unavailable" });
+    expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
+    expect(screen.queryByText("sensenova-6.8-flash-lite")).not.toBeInTheDocument();
+    expect(mocks.remote).not.toHaveBeenCalled();
+  });
+
+  it("does not infer a missing model-list endpoint from an unstructured fetch error", async () => {
     mocks.remote.mockRejectedValue(new Error("models endpoint unsupported"));
     draw({ ...fixture([]), providerName: "Doubao", protocolName: "Doubao" });
     expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
-    expect(await screen.findByText("doubao-seed-1-6-251015")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByText("modelProvider.catalog.missingRemote")).not.toBeInTheDocument();
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
   });
 
   it("allows removing saved models without mislabeling them when discovery fails", async () => {

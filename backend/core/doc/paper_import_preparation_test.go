@@ -180,6 +180,9 @@ func TestPaperExplicitReparseRetainedFilePreservesRequestedLevel(t *testing.T) {
 			installOriginalSourceTransport(t)
 			t.Setenv("LAZYMIND_RAG_ENABLED", "true")
 			db, ds, document, task := seedPaperImportPreparation(t, "academic_papers", level, "demand")
+			if level == ProcessingLevelIndexed {
+				seedSelectedEmbeddingForDocTest(t, db, "owner")
+			}
 			if document.LazyllmDocID != "" {
 				t.Fatal("fixture must exercise first submission of a retained file")
 			}

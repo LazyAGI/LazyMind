@@ -72,7 +72,7 @@ func newChatExecutionTestDB(t *testing.T) *orm.DB {
 		&orm.TaskCenterTask{}, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{},
 		&orm.TaskNotification{}, &orm.UserNotificationPreferences{}, &orm.UserSchedule{},
 		&orm.TaskRunInput{}, &orm.TaskRunOutput{}, &orm.AsyncJob{},
-		&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+		&orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
 		&orm.UserSelectedModel{}, &orm.UserSelectedProvider{}, &orm.UserSelectedCloudModel{},
 		&orm.UserChatSettings{}, &orm.UserUIPreferences{}, &orm.UserEnvironmentVariable{},
 		&orm.UserPersonalizationSetting{}, &orm.UserWorkflowSetting{}, &orm.UserDisabledTool{},

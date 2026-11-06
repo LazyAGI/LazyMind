@@ -225,6 +225,7 @@ export default function DefaultModelConfigPanel({
     lazyMindCloudAvailable,
     defaultLoadState,
     savingCapabilities,
+    previewingEmbedding,
     selectedModels,
     selectedModelMaxInputTokens,
     moduleModelOptions,
@@ -346,7 +347,7 @@ export default function DefaultModelConfigPanel({
     const selectedIsCloud = selectedOption?.source === "cloud";
 
     const configured = isModelConfigured(module.key);
-    const saving = savingCapabilities.has(module.key);
+    const saving = savingCapabilities.has(module.key) || (module.key === "embed_main" && previewingEmbedding);
     return { key: module.key, configured, node: (
       <div
         ref={module.key === highlightTarget ? highlightedRowRef : undefined}
@@ -493,7 +494,7 @@ export default function DefaultModelConfigPanel({
           }}
           onDropdownVisibleChange={(open) => {
             if (open) {
-              void loadModuleModels(module.key, true);
+              void loadModuleModels(module.key);
             } else {
               setKeyboardNavigation(false);
             }

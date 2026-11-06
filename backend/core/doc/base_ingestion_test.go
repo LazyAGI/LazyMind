@@ -36,6 +36,7 @@ func TestNativeIngestionWithoutRAGAndDeferredSubmission(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "test-internal-token")
 	db := newDocumentTestDB(t)
+	seedSelectedEmbeddingForDocTest(t, db, "u1")
 	installOriginalSourceTransport(t)
 	if err := db.AutoMigrate(&orm.DocumentProcessingState{}); err != nil {
 		t.Fatal(err)

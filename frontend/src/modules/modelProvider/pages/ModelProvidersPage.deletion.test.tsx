@@ -130,7 +130,7 @@ describe("custom supplier deletion", () => {
   });
 
   it("keeps the supplier and shows guidance when an embedding is occupied", async () => {
-    mocks.deleteSupplier.mockRejectedValue({ response: { status: 409, data: { message: "embedding model is in use; remove indexed knowledge bases before removing the model" } } });
+    mocks.deleteSupplier.mockRejectedValue({ response: { status: 409, data: { code: 2005089, message: "Clear the old text vectors before changing the embedding model; source documents and chunks remain" } } });
     await requestDeletion();
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
     expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();

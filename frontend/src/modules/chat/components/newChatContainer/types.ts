@@ -75,6 +75,7 @@ export interface ChatContainerProps {
   /** Disable workspace binding and approvals for document-only conversations. */
   allowLocalWorkspace?: boolean;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabledReason?: string;
