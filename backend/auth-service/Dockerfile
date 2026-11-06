@@ -23,10 +23,11 @@ RUN python3 /app/scripts/install_github_cli.py --release /app/github-cli-release
 ENV LAZYMIND_GITHUB_CLI_PATH=/opt/lazymind/github-cli/bin/gh
 COPY core /app/core
 COPY channel-gateway /channel-gateway
+COPY scan-control-plane /scan-control-plane
 
 RUN python3 /app/scripts/extract_api_permissions.py \
     --output /app/api_permissions.json \
     --exclude scripts,core,vendor \
-    /app/core /app /channel-gateway
+    /app/core /app /channel-gateway /scan-control-plane
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
