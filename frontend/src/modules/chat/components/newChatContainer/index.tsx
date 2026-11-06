@@ -560,8 +560,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         citeMessage,
         citeMessages: nextCiteMessages,
         appendCitations = false,
+        appendText = false,
       }) => {
-        if (text !== undefined) conversation.setContent(text);
+        if (text !== undefined) {
+          conversation.setContent(current => appendText && current.trim() ? `${current}\n\n${text}` : text);
+        }
         if (!appendCitations) {
           clearCiteMessages();
         }

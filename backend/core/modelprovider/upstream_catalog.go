@@ -82,10 +82,10 @@ func inferUpstreamCatalogModel(item upstreamCatalogModel) catalogModel {
 		encoded, _ := json.Marshal(ModelSettings{FeatureSupport: item.FeatureSupport})
 		model.ModelSettings = string(encoded)
 	}
-	if formatted := formatContextTokens(item.MaxInput); formatted != "" {
+	if formatted := formatContextTokens(item.Context); formatted != "" {
 		model.MaxInputTokensOverride = formatted
 	} else if model.Type == "llm" || model.Type == "vlm" || model.Type == "embed" || model.Type == "multimodal_embedding" || model.Type == "rerank" {
-		model.MaxInputTokensOverride = formatContextTokens(item.Context)
+		model.MaxInputTokensOverride = formatContextTokens(item.MaxInput)
 	}
 	return model
 }

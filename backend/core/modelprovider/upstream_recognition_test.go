@@ -196,6 +196,37 @@ func TestRemoteCatalogCompletionPreservesRemoteEvidence(t *testing.T) {
 	}
 }
 
+func TestRemoteModelUsesScopedCatalogContextWhenModelListHasOnlyID(t *testing.T) {
+	index := newUpstreamModelRecognitionIndex(upstreamCatalogFile{Providers: map[string][]upstreamCatalogModel{
+		"OpenAI":     {{Name: "gpt-6-sol", ModelType: "llm", Context: 1050000, MaxInput: 922000}},
+		"OpenRouter": {{Name: "gpt-6-sol", ModelType: "llm", Context: 262144}},
+	}})
+	for _, tc := range []struct {
+		provider string
+		want     string
+	}{
+		{provider: "OpenAI", want: "1050000"},
+		{provider: "OpenRouter", want: "262144"},
+	} {
+		got := remoteModelItem(openaiModelListEntry{ID: "gpt-6-sol"}, tc.provider, index)
+		if got.MaxInputTokens == nil || *got.MaxInputTokens != tc.want {
+			t.Errorf("%s context = %v, want %s", tc.provider, got.MaxInputTokens, tc.want)
+		}
+	}
+	got := remoteModelItem(openaiModelListEntry{ID: "gpt-6-sol"}, "Custom", index)
+	if got.MaxInputTokens != nil {
+		t.Errorf("custom provider inherited OpenAI context: %v", *got.MaxInputTokens)
+	}
+	got = remoteModelItem(openaiModelListEntry{ID: "gpt-6-sol"}, "VLLM", index)
+	if got.MaxInputTokens != nil {
+		t.Errorf("VLLM endpoint inherited OpenAI context: %v", *got.MaxInputTokens)
+	}
+	got = remoteModelItem(openaiModelListEntry{ID: "gpt-6-sol", ContextLength: 123456}, "OpenAI", index)
+	if got.MaxInputTokens == nil || *got.MaxInputTokens != "123456" {
+		t.Errorf("remote supplied context = %v, want 123456", got.MaxInputTokens)
+	}
+}
+
 func TestRemoteCompletionUsesOnlyTypedLegacyTokenLimits(t *testing.T) {
 	contextWindowsMu.RLock()
 	previousByType, previousOrder := contextWindowsByType, contextWindowTypeOrder

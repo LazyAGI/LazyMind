@@ -9,6 +9,19 @@ import (
 	"testing"
 )
 
+func TestResponsesProtocolRoutesOnlyChatModels(t *testing.T) {
+	config := BuildLLMConfig([]SelectedRuntimeModel{
+		{ModelType: "llm", TechnicalModelType: "llm", ProviderName: "OpenAI", ModelName: "gpt-5.6-sol", RequestProtocol: "openai-responses"},
+		{ModelType: "embed_main", TechnicalModelType: "embed", ProviderName: "OpenAI", ModelName: "text-embedding-3-small", RequestProtocol: "openai-responses"},
+	})
+	if got := config["llm"].(map[string]any)["source"]; got != "openai_responses" {
+		t.Fatalf("chat source = %v", got)
+	}
+	if got := config["embed_main"].(map[string]any)["source"]; got != "openai" {
+		t.Fatalf("embedding source = %v", got)
+	}
+}
+
 func TestBuildLLMConfigCarriesEffectiveFeaturesAndPrivateRequestOptions(t *testing.T) {
 	rows := []SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "vlm", ProviderName: "OpenAI", ModelName: "test", Vision: true,
 		ModelSettings:   `{"feature_support":{"vision":true,"tool_calling":true,"reasoning":true},"feature_enabled":{"vision":false,"tool_calling":false}}`,

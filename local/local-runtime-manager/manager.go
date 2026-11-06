@@ -768,6 +768,9 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 func (m *RuntimeManager) cleanupFailedStartupAttempt(cfg RuntimeConfig, paths RuntimePaths) error {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	if err := m.rememberRuntimeProcesses(cfg, paths); err != nil {
+		return err
+	}
 	if processComposeSupervisorAlive(paths) {
 		if m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond) {
 			_ = m.processCompose.Down(cleanupCtx, cfg, paths, m.out, m.errOut)
@@ -1055,6 +1058,9 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		return nil
 	}
 	cfg = applyStateConfig(cfg, state)
+	if err := m.rememberRuntimeProcesses(cfg, paths); err != nil {
+		return err
+	}
 	plan := buildRuntimeProcessPlan(cfg)
 	if state.ProcessCompose.APIPort > 0 {
 		cfg.ProcessComposePort = state.ProcessCompose.APIPort
@@ -1274,7 +1280,7 @@ func (m *RuntimeManager) stopStaleRuntimeIfNeeded(ctx context.Context, state Run
 func (m *RuntimeManager) killStaleRuntimeProcesses(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	startedAt := m.now()
 	for pass := 1; ; pass++ {
-		records, err := discoverLocalRuntimeProcessesChecked(paths, cfg, m.processScanner)
+		records, err := m.runtimeCleanupRecords(cfg, paths)
 		if err != nil {
 			return err
 		}
@@ -1285,6 +1291,9 @@ func (m *RuntimeManager) killStaleRuntimeProcesses(ctx context.Context, cfg Runt
 			return nil
 		}
 		m.progressf("stopping %d orphan local runtime process(es), pass %d: %s", len(records), pass, summarizeLocalProcessRecords(records))
+		if err := rememberLocalProcessRecords(paths, records); err != nil {
+			return err
+		}
 		if err := stopLocalProcessRecords(ctx, records); err != nil {
 			return err
 		}
@@ -1300,6 +1309,20 @@ func (m *RuntimeManager) killStaleRuntimeProcesses(ctx context.Context, cfg Runt
 			return nil
 		}
 	}
+}
+
+func (m *RuntimeManager) runtimeCleanupRecords(cfg RuntimeConfig, paths RuntimePaths) ([]LocalProcessRecord, error) {
+	return discoverLocalRuntimeProcessesWithDiagnostics(paths, cfg, m.processScanner, func(record LocalProcessRecord) {
+		m.progressf("skipping unowned local runtime candidate pid=%d executable=%s", record.PID, record.Executable)
+	})
+}
+
+func (m *RuntimeManager) rememberRuntimeProcesses(cfg RuntimeConfig, paths RuntimePaths) error {
+	records, err := m.runtimeCleanupRecords(cfg, paths)
+	if err != nil {
+		return err
+	}
+	return rememberLocalProcessRecords(paths, records)
 }
 
 func (m *RuntimeManager) stopProcessComposeSupervisor(ctx context.Context, paths RuntimePaths) error {

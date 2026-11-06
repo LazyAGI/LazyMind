@@ -18,6 +18,7 @@ const DefaultMaxRequestBodyBytes = 64 << 10
 
 type HandlerConfig struct {
 	ManagementOnly      bool
+	VocabularyOnly      bool
 	PaperSources        func(context.Context, capability.InvocationContext, capability.PaperSourcesInput) (capability.PaperSourcesResult, error)
 	ImportPapers        func(context.Context, capability.InvocationContext, capability.PaperImportInput) (capability.PaperImportResult, error)
 	AuthorizeCall       func(context.Context, *mcp.CallToolRequest) (capability.InvocationContext, error)
@@ -47,6 +48,8 @@ func NewHandler(service *capability.Service, config HandlerConfig) (http.Handler
 	server := newServer(service)
 	if config.ManagementOnly {
 		server = newManagementServer(service, config)
+	} else if config.VocabularyOnly {
+		server = newVocabularyServer(service)
 	}
 	if config.AuthorizeCall != nil {
 		server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -67,7 +70,7 @@ func NewHandler(service *capability.Service, config HandlerConfig) (http.Handler
 		})
 	}
 	scopes := []string{capability.RequiredPermission}
-	if service.SupportsKnowledgeManagement() {
+	if service.SupportsKnowledgeManagement() && !config.VocabularyOnly {
 		scopes = nil
 	}
 	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
@@ -169,20 +172,7 @@ func newServer(service *capability.Service) *mcp.Server {
 			return nil, result, err
 		})
 	}
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "vocabulary.wordbook.list", Title: "List vocabulary wordbooks",
-		Description: "List wordbooks from the user's currently selected vocabulary backend.", Annotations: annotations,
-	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.ListVocabularyWordbooksInput) (*mcp.CallToolResult, capability.ListVocabularyWordbooksResult, error) {
-		result, err := service.ListVocabularyWordbooks(ctx, invocation(ctx, request), input)
-		return nil, result, err
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "vocabulary.word.list", Title: "List vocabulary words",
-		Description: "List words in a selected wordbook or deck. Set due_only=true whenever the user asks which words need review; this uses the authoritative scheduler and must not be inferred from state or review_count.", Annotations: annotations,
-	}, func(ctx context.Context, request *mcp.CallToolRequest, input capability.ListVocabularyWordsInput) (*mcp.CallToolResult, capability.ListVocabularyWordsResult, error) {
-		result, err := service.ListVocabularyWords(ctx, invocation(ctx, request), input)
-		return nil, result, err
-	})
+	addVocabularyTools(server, service)
 	if service.HasExternalCapabilities() {
 		mcp.AddTool(server, &mcp.Tool{
 			Name: "model.list", Title: "List authorized LazyMind models",

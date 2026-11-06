@@ -960,11 +960,35 @@ async function dispatcherLock(pairingFile, instanceId) {
 
 //#endregion
 //#region src/presentation-config.ts
+const PRESENTATION_CONFIG_PATH = "/lazymind-workflow/config";
 const CONFIG_KEY = "__LAZYMIND_WORKFLOW_PRESENTATION__";
 /** DSH loads browser plugins independently of the Node plugin's config. */
 function installPresentationConfig(ctx, source) {
-	ctx.on("webserver/index-inject", (table) => {
+	const current = () => {
 		const config = typeof source === "function" ? source() : source;
+		return config && presentationLink("config-check", config.webUrl) ? {
+			serverName: config.serverName,
+			webUrl: config.webUrl
+		} : void 0;
+	};
+	ctx.inject(["webServer"], (scope) => {
+		scope.effect(() => scope.webServer.register({
+			kind: "exact",
+			path: PRESENTATION_CONFIG_PATH,
+			handler(req, res) {
+				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("Content-Type", "application/json");
+				if (req.method !== "GET") {
+					res.statusCode = 405;
+					res.end();
+					return;
+				}
+				res.end(JSON.stringify({ config: current() ?? null }));
+			}
+		}));
+	});
+	ctx.on("webserver/index-inject", (table) => {
+		const config = current();
 		if (!config) return;
 		table.push({
 			kind: "global",
@@ -1106,12 +1130,7 @@ async function apply(ctx, config) {
 		if (message) lastError = message;
 	});
 	ctx.effect(() => stop);
-	try {
-		await stop.ready;
-	} catch (error) {
-		await stop();
-		throw error;
-	}
+	await stop.ready.catch(() => {});
 }
 
 //#endregion

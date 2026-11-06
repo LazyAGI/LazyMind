@@ -51,8 +51,8 @@ export interface ImportTaskRef {
 interface IProps {
   storageOnly?: boolean;
   onOk: (payload?: { pId?: string; tasks?: ImportTaskRef[] }) => void;
-  onParsingStart?: () => void;
-  onParsingSettled?: () => void;
+  onUploadStart?: () => void;
+  onUploadSettled?: () => void;
 }
 
 const InitData = {
@@ -89,7 +89,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const isOnlyRead =
     (hasOnlyReadPermission || hasUploadPermission) && !hasWritePermission;
 
-  const { onOk, onParsingStart, onParsingSettled } = props;
+  const { onOk, onUploadStart, onUploadSettled } = props;
 
   const [form] = Form.useForm();
 
@@ -191,15 +191,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     taskIds: string[],
     startMode: string | undefined,
   ) {
-    onParsingStart?.();
-    try {
-      return await TaskServiceApi().startTasks(data.dataset_id, {
-        task_ids: taskIds,
-        ...(startMode ? { start_mode: startMode } : {}),
-      });
-    } finally {
-      onParsingSettled?.();
-    }
+    return TaskServiceApi().startTasks(data.dataset_id, {
+      task_ids: taskIds,
+      ...(startMode ? { start_mode: startMode } : {}),
+    });
   }
 
   /**
@@ -211,39 +206,44 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     tags: string[] | undefined,
     startMode: string | undefined,
   ) {
-    const items = await buildUploadTaskItems({
-      datasetId: data.dataset_id,
-      fileItems,
-      tags,
-      documentPid: data.p_id,
-      folderMode: isDirectoryMode,
-    });
+    onUploadStart?.();
+    try {
+      const items = await buildUploadTaskItems({
+        datasetId: data.dataset_id,
+        fileItems,
+        tags,
+        documentPid: data.p_id,
+        folderMode: isDirectoryMode,
+      });
 
-    if (!items.length) {
-      throw new Error(t("knowledge.uploadResultMissing"));
+      if (!items.length) {
+        throw new Error(t("knowledge.uploadResultMissing"));
+      }
+
+      const createRes = await TaskServiceApi().createTasks(data.dataset_id, {
+        items,
+      });
+
+      const taskIds = (createRes.data.tasks || [])
+        .map((task) => task.task_id)
+        .filter(Boolean) as string[];
+
+      if (!taskIds.length) {
+        throw new Error(localizeErrorCode("2000509"));
+      }
+
+      const started = await startTasksAfterUpload(taskIds, startMode);
+      return (started.data.tasks || []).map((task): ImportTaskRef => {
+        const created = createRes.data.tasks?.find((item) => item.task_id === task.task_id || (task.document_id && item.document_id === task.document_id));
+        return {
+          task_id: task.task_id,
+          target_pid: created?.target_pid || data.p_id,
+          display_name: task.display_name || created?.display_name,
+        };
+      });
+    } finally {
+      onUploadSettled?.();
     }
-
-    const createRes = await TaskServiceApi().createTasks(data.dataset_id, {
-      items,
-    });
-
-    const taskIds = (createRes.data.tasks || [])
-      .map((task) => task.task_id)
-      .filter(Boolean) as string[];
-
-    if (!taskIds.length) {
-      throw new Error(localizeErrorCode("2000509"));
-    }
-
-    const started = await startTasksAfterUpload(taskIds, startMode);
-    return (started.data.tasks || []).map((task): ImportTaskRef => {
-      const created = createRes.data.tasks?.find((item) => item.task_id === task.task_id || (task.document_id && item.document_id === task.document_id));
-      return {
-        task_id: task.task_id,
-        target_pid: created?.target_pid || data.p_id,
-        display_name: task.display_name || created?.display_name,
-      };
-    });
   }
 
   return (

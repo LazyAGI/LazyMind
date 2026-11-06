@@ -722,3 +722,15 @@ def test_management_group_is_separate_from_native_read_kb_and_requires_core_scop
     assert group['provider_id'] == 'lazymind-knowledge'
     lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
     assert _tool_group('knowledge_management')['active'] is False
+
+
+def test_vocabulary_queries_use_the_system_tool_controls():
+    assert _tool_group('vocabulary')['active'] is False
+    lazyllm.globals['agentic_config'] = {'system_mcp_config': [
+        {'id': 'lazymind-vocabulary', 'allowed_tools': ['vocabulary.wordbook.list', 'vocabulary.word.list']}]}
+    group = _tool_group('vocabulary')
+    assert group['active'] is True
+    assert group['can_disable'] is True
+    assert [method['name'] for method in group['methods']] == ['vocabulary.wordbook.list', 'vocabulary.word.list']
+    lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
+    assert _tool_group('vocabulary')['active'] is False

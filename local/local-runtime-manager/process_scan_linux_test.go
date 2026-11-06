@@ -4,8 +4,24 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
+
+func TestLinuxProcessStatHandlesSpacesAndParentheses(t *testing.T) {
+	fields := []string{"S", "100", "200"}
+	for len(fields) < 19 {
+		fields = append(fields, "0")
+	}
+	fields = append(fields, "123456")
+	parent, group, identity := parseLinuxProcessStat("123 (a worker (name)) " + strings.Join(fields, " "))
+	if parent != 100 || group != 200 || identity != 123456 {
+		t.Fatalf("stat = %d/%d/%d", parent, group, identity)
+	}
+	if _, _, identity := parseLinuxProcessStat("malformed"); identity != 0 {
+		t.Fatal("malformed stat accepted")
+	}
+}
 
 func TestSplitProcCmdlinePreservesArgumentBoundaries(t *testing.T) {
 	got := splitProcCmdline([]byte("python\x00-m\x00module with spaces\x00--url\x00http://127.0.0.1:18000/a//b\x00"))

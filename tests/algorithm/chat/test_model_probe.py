@@ -64,6 +64,15 @@ def test_chat_length_finish_is_reachable_not_a_false_failure():
     assert result['status'] == 'passed'
 
 
+def test_responses_protocol_probe_uses_responses_shape():
+    result, requests = run_probe(source='OpenAIResponses', response={
+        'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'OK'}]}],
+    })
+    assert result['status'] == 'passed'
+    assert requests[0].url.path == '/v1/responses'
+    assert json.loads(requests[0].content)['input'][0]['role'] == 'user'
+
+
 @pytest.mark.parametrize(('source', 'url', 'response'), [
     ('OpenAI', 'https://provider.example/v1/', {'data': [{'embedding': [0.1, 0.2, 0.3]}]}),
     ('Qwen', 'https://provider.example/api/v1/', {'output': {'embeddings': [{'embedding': [0.1, 0.2, 0.3]}]}}),

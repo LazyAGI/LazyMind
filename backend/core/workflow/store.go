@@ -24,6 +24,7 @@ import (
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/document"
+	"lazymind/core/workflow/runstate"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -31,10 +32,10 @@ import (
 // a failed attempt is reflected at session level so the UI does not present it as an
 // approval checkpoint.
 const (
-	SessionStatusActive    = "active"
-	SessionStatusCompleted = "completed"
-	SessionStatusFailed    = "failed"
-	SessionStatusWaiting   = "waiting"
+	SessionStatusActive    = runstate.Active
+	SessionStatusCompleted = runstate.Completed
+	SessionStatusFailed    = runstate.Failed
+	SessionStatusWaiting   = runstate.Waiting
 )
 
 func normalizeSessionWorkflowMode(value string) string {
@@ -214,60 +215,55 @@ func RestoreSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 	})
 }
 
-// healStaleActiveSession repairs a session that is stuck in "active" state after a crash.
-// A step is considered orphaned (and safe to mark interrupted) only when its backing
-// sub_agent_task is already in a terminal state (succeeded/failed/interrupted/canceled) while
-// the workflow_session_step still shows "running". This avoids incorrectly interrupting steps
-// that are genuinely still executing.
-//
-// If all orphaned running steps are resolved and no real running steps remain, the session
-// is flipped from "active" to "waiting".
-//
-// A grace period (staleThreshold) is applied to the session's updated_at to avoid touching
-// sessions that just started.
+// healStaleActiveSession reconciles orphaned native attempts through the same
+// terminal projection as live completion. An idle handoff alone is not evidence
+// of failure. Controlled attempts recover through their lease/receipt protocol.
 func healStaleActiveSession(ctx context.Context, db *gorm.DB, s *orm.WorkflowSession) {
 	const staleThreshold = 2 * time.Minute
-	if time.Since(s.UpdatedAt) < staleThreshold {
+	if controlstore.Controlled(*s) || time.Since(s.UpdatedAt) < staleThreshold {
 		return
 	}
-
-	now := time.Now().UTC()
-
-	// Fix orphaned running steps: workflow_session_step is "running" but the backing
-	// sub_agent_task has already reached a terminal state. Sync the step status to
-	// match the task status exactly (succeeded/failed/interrupted/canceled).
-	result := db.WithContext(ctx).Exec(`
-		UPDATE plugin_session_steps pss
-		SET status = sat.status, updated_at = ?
-		FROM sub_agent_tasks sat
-		WHERE pss.session_id = ?
-		  AND pss.task_id = sat.id
-		  AND pss.status = 'running'
-		  AND sat.status IN ('succeeded', 'failed', 'interrupted', 'canceled')
-		`, now, s.ID)
-	orphansFixed := result.RowsAffected
-
-	// Count genuinely running steps remaining after the fix.
-	var realRunning int64
-	db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-		Where("session_id = ? AND status = ?", s.ID, StepStatusRunning).
-		Count(&realRunning)
-
-	if realRunning > 0 {
-		// Some steps are still backed by a genuinely running task — don't touch the session.
-		if orphansFixed > 0 {
-			fmt.Printf("[plugin] healStaleActiveSession: session %s fixed %d orphan step(s), %d still running\n",
-				s.ID, orphansFixed, realRunning)
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		session, err := artifactgraph.LockSession(tx, s.ID)
+		if err != nil {
+			return err
 		}
-		return
+		if controlstore.Controlled(*session) || session.Status != SessionStatusActive {
+			return nil
+		}
+		var orphans []struct {
+			orm.WorkflowSessionStep
+			TaskStatus string
+		}
+		if err := tx.Table("plugin_session_steps AS pss").Select("pss.*, sat.status AS task_status").
+			Joins("JOIN sub_agent_tasks sat ON sat.id = pss.task_id").
+			Where("pss.session_id = ? AND pss.status = 'running' AND pss.validity <> 'stale' AND sat.status IN ?", s.ID,
+				[]string{"succeeded", "failed", "interrupted", "canceled"}).Scan(&orphans).Error; err != nil {
+			return err
+		}
+		for _, orphan := range orphans {
+			if err := UpdateStepStatus(ctx, tx, orphan.TaskID, orphan.TaskStatus); err != nil {
+				return err
+			}
+			if session.WorkflowRevisionID != "" {
+				if err := FinalizeHostAttempt(ctx, tx, session.ID, orphan.StepID, orphan.ID, orphan.TaskStatus); err != nil {
+					return err
+				}
+			} else {
+				status := SessionStatusWaiting
+				if orphan.TaskStatus == "failed" {
+					status = SessionStatusFailed
+				}
+				if err := UpdateSessionStatus(ctx, tx, session.ID, status); err != nil {
+					return err
+				}
+			}
+		}
+		return tx.First(s, "id = ?", s.ID).Error
+	})
+	if err != nil {
+		fmt.Printf("[plugin] reconcile orphaned attempts session=%s: %v\n", s.ID, err)
 	}
-
-	// No genuinely running steps → flip session to waiting.
-	db.WithContext(ctx).Model(s).
-		Updates(map[string]any{"status": SessionStatusWaiting, "updated_at": now})
-	s.Status = SessionStatusWaiting
-	fmt.Printf("[plugin] healStaleActiveSession: session %s repaired active→waiting (orphans=%d)\n",
-		s.ID, orphansFixed)
 }
 
 // GetSession loads a session by ID.
@@ -313,20 +309,23 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", sessionID).First(&session).Error; err != nil {
 			return err
 		}
+		if controlstore.Controlled(session) {
+			return nil
+		}
 		view, err := displaystate.Read(tx, session)
 		if err != nil {
 			return err
 		}
-		if view.Status == "paused" || view.ApprovalStepID != "" || session.Status == "pausing" || session.Status == SessionStatusCompleted {
+		// Dynamic hand-off can continue, but edited inputs still require an explicit user command.
+		inputsChanged := view.Status == "waiting" && view.Reason == "inputs_changed"
+		if view.Status == "paused" || view.ApprovalRequired() || inputsChanged || session.Status == "pausing" || session.Status == SessionStatusCompleted {
 			return nil
 		}
 		if session.Status != SessionStatusActive {
-			session.Status = SessionStatusActive
-			session.StateVersion++
-			session.UpdatedAt = time.Now().UTC()
-			if err := tx.Model(&session).Updates(map[string]any{"status": session.Status, "state_version": session.StateVersion, "updated_at": session.UpdatedAt}).Error; err != nil {
+			if err := acceptRunControl(ctx, tx, &session, "continue", map[string]any{"state_version": session.StateVersion + 1}, &session.StateVersion); err != nil {
 				return err
 			}
+			session.StateVersion++
 			if err := appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"active"}`)); err != nil {
 				return err
 			}
@@ -341,19 +340,25 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 // and a newer dispatch. A failed controller must never manufacture an approval.
 func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where("session_id = ? AND validity <> ? AND status IN ?", sessionID, "stale", []string{"pending", "queued", "claimed", "running"})
-		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status = ?", sessionID, SessionStatusActive).
-			Where("NOT EXISTS (?)", busy).Updates(map[string]any{"status": SessionStatusFailed, "updated_at": time.Now().UTC(), "state_version": gorm.Expr("state_version + 1")})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil
-		}
 		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
 			return err
 		}
+		if session.Status != SessionStatusActive {
+			return nil
+		}
+		var busy int64
+		if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND validity <> ? AND status IN ?",
+			sessionID, "stale", []string{"pending", "queued", "claimed", "running"}).Count(&busy).Error; err != nil {
+			return err
+		}
+		if busy != 0 {
+			return nil
+		}
+		if err := runstate.Write(tx, &session, SessionStatusFailed, map[string]any{"state_version": session.StateVersion + 1}); err != nil {
+			return err
+		}
+		session.StateVersion++
 		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"failed"}`))
 	})
 	if err == nil && OnAcademicRuntimeChanged != nil {
@@ -365,30 +370,45 @@ func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ? AND status <> ?", sessionID, status, "pausing")
-		if status == SessionStatusWaiting {
-			// Delayed pause callbacks cannot overwrite a terminal session or a
-			// newly dispatched attempt (which may still be queued/claimed).
-			busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where(
-				"session_id = ? AND validity = ? AND status IN ?", sessionID, "effective",
-				[]string{"pending", "queued", "claimed", "running"})
-			query = query.Where("status NOT IN ?", []string{"completed", "failed", "stopped"}).Where("NOT EXISTS (?)", busy)
+		var session orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
+			return err
 		}
-		updates := map[string]any{"status": status, "updated_at": time.Now().UTC()}
-		// Dispatch reserves one version for the entire batch before launching.
-		if status != SessionStatusActive {
-			updates["state_version"] = gorm.Expr("state_version + 1")
-		}
-		updated := query.Updates(updates)
-		if updated.Error != nil {
-			return updated.Error
-		}
-		if updated.RowsAffected == 0 {
+		if session.Status == status || session.Status == "pausing" {
 			return nil
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+		// A dispatch may have created a queued attempt. Read those durable facts
+		// instead of trusting a status requested by a legacy adapter.
+		if controlstore.Controlled(session) {
+			return reconcileRunStatus(ctx, tx, &session)
+		}
+		if status == SessionStatusWaiting {
+			if session.Status == SessionStatusCompleted || session.Status == SessionStatusFailed || session.Status == "stopped" {
+				return nil
+			}
+			var busy int64
+			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND validity = ? AND status IN ?",
+				sessionID, "effective", []string{"pending", "queued", "claimed", "running"}).Count(&busy).Error; err != nil {
+				return err
+			}
+			if busy != 0 {
+				return nil
+			}
+			if session.WorkflowRevisionID != "" {
+				// Yielding execution is not a user pause. Use the same graph facts
+				// as protocol completion to retain preparation and review barriers.
+				return reconcileRunStatus(ctx, tx, &session)
+			}
+		}
+		fields := map[string]any{}
+		if status != SessionStatusActive {
+			fields["state_version"] = session.StateVersion + 1
+		}
+		if err := runstate.Write(tx, &session, status, fields); err != nil {
 			return err
+		}
+		if status != SessionStatusActive {
+			session.StateVersion++
 		}
 		payload, _ := json.Marshal(map[string]any{"status": status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
@@ -439,12 +459,20 @@ func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) e
 			return err
 		}
 		for _, row := range rows {
-			if row.Status == status {
+			if row.Status == status || row.Validity == "stale" || row.Status == "succeeded" || row.Status == "failed" ||
+				row.Status == "interrupted" || row.Status == "cancelled" || row.Status == "canceled" {
+				continue
+			}
+			var session orm.WorkflowSession
+			if err := tx.Where("id = ?", row.SessionID).First(&session).Error; err != nil {
+				return err
+			}
+			if controlstore.Controlled(session) {
 				continue
 			}
 			q := tx.Model(&orm.WorkflowSessionStep{}).Where("id = ? AND status <> ?", row.ID, status).
 				Where("NOT (status = ? AND terminal_code = ?)", StepStatusInterrupted, "WORKFLOW_STOPPED")
-			terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted}
+			terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted, "cancelled", "canceled"}
 			if status == StepStatusRunning || status == StepStatusSucceeded || status == StepStatusFailed || status == StepStatusInterrupted {
 				q = q.Where("status NOT IN ?", terminal)
 			}
@@ -455,10 +483,6 @@ func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) e
 			}
 			if updated.RowsAffected == 0 {
 				continue
-			}
-			var session orm.WorkflowSession
-			if err := tx.Where("id = ?", row.SessionID).First(&session).Error; err != nil {
-				return err
 			}
 			payload, _ := json.Marshal(map[string]any{"attempt_id": row.ID, "status": status})
 			if err := tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: session.CreateUserID, ContractVersion: "workflow.v1", EventType: "attempt.patch", EntityID: row.ID, StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now}); err != nil {

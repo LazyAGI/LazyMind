@@ -220,6 +220,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                 raise
 
         attempted = set()
+        primary_model_error = None
         max_candidates = max(1, int(config['model_fallback_max_candidates']))
         sent_count = 0
 
@@ -354,14 +355,21 @@ class FallbackLLM(ModuleBase, LLMBase):
                 capacity_rejection = isinstance(exc, ContextCapacityError)
                 input_rejection = capacity_rejection or isinstance(exc, UnsupportedModelInput)
                 failure = exc.terminal.failure if isinstance(exc, ModelCallError) else None
+                if failure is not None and primary_model_error is None:
+                    primary_model_error = exc
                 unsupported_call = isinstance(exc, UnsupportedModelInput) or failure is not None and str(
                     failure.provider_error_code or '',
                 ).lower() in _UNSUPPORTED_CALL_CODES
-                if failure is None and not input_rejection:
-                    if not isinstance(exc, ModelCallError):
-                        exc._model_fallback_local_failure = True
+                if failure is None and not input_rejection and not isinstance(exc, ModelCallError):
+                    exc._model_fallback_local_failure = True
                     raise
-                if not input_rejection and failure.code.value not in _RECOVERABLE and not unsupported_call:
+                if not input_rejection and not unsupported_call and (
+                    failure is None or failure.code.value not in _RECOVERABLE
+                ):
+                    if primary_model_error is not None and primary_model_error is not exc:
+                        # No replacement was committed; attribute the failed recovery to the selected model.
+                        emit({'tag': 'model_fallback_failed', 'fallback_code': 'model_failure',
+                              'terminal': primary_model_error.terminal.public_dict()})
                     raise
                 if not input_rejection:
                     state.failed_candidates.add(current.candidate_id)

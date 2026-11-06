@@ -526,7 +526,10 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 		tokens := formatContextTokens(contextLength)
 		item.MaxInputTokens = &tokens
 	} else if hasInputLimit {
-		if tokens, ok := lookupMaxInputTokens(entry.ID, modelType); ok {
+		if context := recognition.contextWindow(providerName, entry.ID, modelType); context > 0 {
+			tokens := formatContextTokens(context)
+			item.MaxInputTokens = &tokens
+		} else if tokens, ok := lookupMaxInputTokens(entry.ID, modelType); ok {
 			item.MaxInputTokens = &tokens
 		}
 	}

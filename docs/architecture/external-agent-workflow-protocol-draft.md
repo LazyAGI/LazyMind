@@ -4,7 +4,7 @@
 
 ## 1. 总体架构
 
-用户通过 WorkflowPanel 提交审核、继续、停止等操作。Core 管理 Workflow，Host Connector 将控制通知送到外部应用的指定 Agent 会话。
+内部 Agent、外部 Agent 和 WorkflowPanel 复用 Core 的控制规则与状态变更。用户可以通过面板或向 Controller 表达继续、重试、回退等意图；外部 Controller 通过 MCP 提交对应操作，权限不因传输入口不同而额外收紧。人工审核与审核偏好沿用内部规则，恢复不会自动批准待审核结果。Host Connector 负责将控制通知送到外部应用的指定 Agent 会话。
 
 <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px;">
 
@@ -154,11 +154,15 @@ sequenceDiagram
 
 #### 4.2.1 步骤失败与自动重试
 
-步骤失败会将 run 标为 `failed`，但这本身不代表自动重试预算已耗尽。Core 按步骤累计已受理的自动执行次数，默认最多 3 次（首次执行 + 2 次自动重试）；被拒绝的请求和重复提交同一 command 不增加次数。用户明确点击重试走独立控制路径，不受此自动预算限制。
+步骤失败会将 run 标为 `failed`，但这本身不代表自动重试预算已耗尽。Core 按步骤累计已受理的自动执行次数，默认最多 3 次（首次执行 + 2 次自动重试）；被拒绝的请求和重复提交同一 command 不增加次数。用户明确要求的重试使用 `retry_origin=user`，不受此自动预算限制。
 
-失败 run 没有活跃执行、没有待审核或待继续的编辑、且绑定有效时，若仍有预算，`workflow.state` 返回 `control.continuation=continue`、`admission.can_begin=true` 和 `automatic_retry_steps`。Controller 应对列表中的失败步骤调用 `workflow.step.begin`；Core 在同一事务中再次检查目标步骤预算、失效旧 attempt 并创建新 attempt。失败 run 不能借此自动执行其他步骤或回退成功步骤。
+失败 run 没有活跃执行、没有待审核或待继续的编辑、且绑定有效时，若仍有预算，`workflow.state` 返回 `control.continuation=continue`、`admission.can_begin=true` 和 `automatic_retry_steps`。Controller 应对列表中的失败步骤调用 `workflow.step.begin`；Core 在同一事务中再次检查目标步骤预算、失效旧 attempt 并创建新 attempt。请求目标继续按内部 advance 规则校验；用户要求修改历史产物时，可选择 Runtime 返回的 rewindable 目标。
 
-预算耗尽时返回 `continuation=failed`、`admission.can_begin=false`、`reason=recovery_required`，Controller 应结束本轮并交由用户处理。若仍直接请求自动重试，返回 `WORKFLOW_AUTOMATIC_RETRY_LIMIT_EXCEEDED`。停止、审核、绑定、编辑和执行授权限制继续优先生效。`workflow.control.v1` 是创建 run 时保存的控制模式版本，不需要在步骤之间切换。
+预算耗尽时返回 `continuation=failed`、`admission.can_begin=false`、`reason=recovery_required`，Controller 应结束自动重试；用户明确要求重试时，可对 Runtime 返回的 retryable 目标调用 `workflow.step.begin` 并传 `retry_origin=user`，与内部 Controller 使用相同预算规则。若仍直接请求自动重试，返回 `WORKFLOW_AUTOMATIC_RETRY_LIMIT_EXCEEDED`。停止、审核、绑定、编辑和执行授权限制继续优先生效。`workflow.control.v1` 是创建 run 时保存的控制模式版本，不需要在步骤之间切换。
+
+#### 4.2.2 控制入口兼容
+
+`workflow.session.resume` 与面板 Resume 调用相同控制操作，执行停止状态恢复、审核检查及后续执行调度。返回 `execution_id` 时，Controller 使用 `workflow.step.claim` 查看或领取该执行，避免再次 begin 创建重复执行。步骤推进复用内部 advance 对 ready、retryable、rewindable 目标的判断。历史生命周期接口和已创建会话继续可用；命令幂等、版本校验、会话归属、绑定与执行租约仍由 Core 校验。
 
 **控制通道：Core 保存 HostAction，Connector 领取并调用外部应用的会话接口。**
 
@@ -204,7 +208,7 @@ Core 另行记录通知的投递状态 `status`，见 §4.3.5。
 | --- | --- | --- | --- |
 | 内部 Executor 完成步骤 | 无其他活跃执行；Workflow 可继续、已完成或已失败 | `continue`（带 `execution_id`） | 结算执行，更新状态。 |
 | 用户 Continue／确认并继续 | 允许继续且无活跃执行 | `continue`；已准备执行时带 `execution_id` | 接受审核结果（如有）；通常在 Controller 调用 `step.begin` 后创建执行。 |
-| 用户 Retry／Rewind／Resume | 操作通过校验，且有目标步骤可执行 | `continue`（带 `execution_id`） | 按需解除停止，创建目标步骤的执行。 |
+| 用户或 Controller Retry／Rewind／Resume | 操作通过校验，且有目标步骤可执行 | `continue`（带 `execution_id`） | 按需解除停止，创建目标步骤的执行。 |
 
 Controller 先读状态：需要等待或已结束时不发起新执行；允许处理时，无 `execution_id` 调用 `step.begin`，有 `execution_id` 调用 `step.claim`。通知可能关联已完成的内部执行，此时查看结果与后续状态，不重复执行该步骤。
 

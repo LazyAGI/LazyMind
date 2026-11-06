@@ -532,11 +532,21 @@ func (s *Server) handleExecutorPolicyAction(writer http.ResponseWriter, request 
 
 func (s *Server) handleSession(writer http.ResponseWriter, request *http.Request) {
 	if request.Method == http.MethodDelete {
-		if err := s.store.Clear(); err != nil {
+		var clear credentials.ClearRequest
+		if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&clear); err != nil || clear.ExpectedSession.AccessToken == "" || clear.ExpectedSession.RefreshToken == "" {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "expected LazyMind session is required"})
+			return
+		}
+		if origin := strings.TrimSpace(request.Header.Get("Origin")); origin != "" && !sameOrigin(origin, clear.ExpectedSession.ServerURL) {
+			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "LazyMind session server does not match the page origin"})
+			return
+		}
+		cleared, err := s.store.ClearIfCurrent(clear)
+		if err != nil {
 			writeError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+		writeJSON(writer, http.StatusOK, map[string]bool{"ok": true, "cleared": cleared})
 		return
 	}
 	var value credentials.Credentials

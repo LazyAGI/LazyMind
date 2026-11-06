@@ -9,3 +9,6 @@
 .pdf-citation-preview { display:block; width:100%; height:auto; max-height:200px; object-fit:contain; object-position:top left; margin:10px 0; background:white; }
 .pdf-citation-placeholder { display:flex; align-items:center; min-height:48px; margin:10px 0; padding:8px; border-radius:6px; color:var(--secondary-text-color,#65758a); background:var(--surface-background,#f5f8fb); font-size:12px; }
 .pdf-citation-footer { justify-content:flex-end; margin-top:10px; }
+.pdf-citation-footer .pdf-citation-add { color:var(--primary-color,#2f6297); background:color-mix(in srgb,var(--primary-color,#3973ad) 10%,var(--paper-background,#fff)); border-color:color-mix(in srgb,var(--primary-color,#3973ad) 28%,var(--border-color,#dbe2e9)); font-weight:600; }
+.pdf-citation-footer .pdf-citation-add:hover:not(:disabled) { background:color-mix(in srgb,var(--primary-color,#3973ad) 16%,var(--paper-background,#fff)); }
+.pdf-citation-footer button:disabled { opacity:.68; cursor:default; }

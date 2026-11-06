@@ -140,6 +140,24 @@ export async function previewReferenceImport(
   return previewItems(response.data);
 }
 
+/** Resolve one citation against a scholarly source and enqueue the ordinary PDF import. */
+export async function addCitationToPaperLibrary(targetDatasetId: string, referenceId: string): Promise<{ batch_id?: string; status?: string }> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, {
+    reference_ids: [referenceId],
+    target_dataset_id: targetDatasetId,
+    resolve_external: true,
+    verify_reference: true,
+    lookup_fulltext: true,
+  }, { silentError: true, timeout: 20000 } as never);
+  const item = previewItems(response.data).find(candidate => candidate.reference_ids?.includes(referenceId));
+  if (!item?.work_id || !item.preview_token) throw new Error('这条参考文献暂时无法识别为论文，请稍后重试');
+  if (item.disposition === 'already_present') return { status: 'already_present' };
+  if (!item.fulltext_candidates.length) {
+    throw new Error('已找到论文信息，但没有可导入的 PDF 来源');
+  }
+  return importPaperLink(targetDatasetId, item, crypto.randomUUID(), null, true);
+}
+
 export async function previewDocumentReferencesImport(sourceDocumentIds: string[], targetDatasetId: string): Promise<ImportPreviewItem[]> {
   const response = await axiosInstance.post(`${core}/imports:preview`, {
     source_document_ids: sourceDocumentIds,
@@ -208,7 +226,7 @@ export async function previewPaperPDF(workId: string, targetDatasetId: string): 
 export async function importPaperLink(targetDatasetId: string, item: ImportPreviewItem, idempotencyKey: string, folderId?: string | null, silentError = false) {
   const response = await axiosInstance.post(`${core}/imports`, {
     entry_type: 'paper_link', target_dataset_id: targetDatasetId, idempotency_key: idempotencyKey, preview_token: item.preview_token, folder_id: folderId || '',
-    items: [{ work_id: item.work_id, candidate: item.fulltext_candidates[0] }],
+    items: [{ work_id: item.work_id, reference_ids: item.reference_ids || [], candidate: item.fulltext_candidates[0] }],
   }, { silentError } as never);
   return unwrap<{ batch_id?: string; status?: string }>(response.data);
 }

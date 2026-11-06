@@ -24,15 +24,18 @@ function cacheReading(key:string,data:{source_sha256:string}){
  readingCache.delete(key);readingCache.set(key,{data,expires:Date.now()+300_000});
  if(readingCache.size>64)readingCache.delete(readingCache.keys().next().value!);
 }
-export function usePaperReaderResource<T extends {source_sha256:string}>(target:PdfIRTarget,sourceKey:string,sourceHash:string,resource:string,language:string,active:boolean){
+export function usePaperReaderResource<T extends {source_sha256:string}>(target:PdfIRTarget,sourceKey:string,sourceHash:string,resource:string,language:string,active:boolean,initialExplanation?:T,onExplanationChange?:(data:T)=>void){
  const identity=usePaperReaderSession();
  const key=`${identity}/${target.dataset}/${target.document}/${sourceKey}/${resource}/${language}`;
- const [state,setState]=useState<{key:string;status:'loading'|'ready'|'error'|'cancelled';data?:T;error?:string;sourceMismatch?:boolean}>();
+ const saved=initialExplanation?.source_sha256===sourceHash?initialExplanation:undefined;
+ const [state,setState]=useState<{key:string;status:'idle'|'loading'|'ready'|'error'|'cancelled';data?:T;error?:string;sourceMismatch?:boolean}|undefined>(()=>saved?{key,status:'ready',data:saved}:undefined);
  const current=useRef<AbortController>();
+ const onExplanationChangeRef=useRef(onExplanationChange);
+ onExplanationChangeRef.current=onExplanationChange;
  const load=useCallback(async(force=false)=>{
   current.current?.abort();
   const cached=readCachedReading<T>(key);
-  if(cached&&!force){setState({key,status:'ready',data:cached});return;}
+  if(cached&&!force){setState({key,status:'ready',data:cached});onExplanationChangeRef.current?.(cached);return;}
   const controller=new AbortController();current.current=controller;setState(previous=>({key,status:'loading',data:previous?.key===key?previous.data:cached}));
   try{
    const url=`${BASE_URL}/api/core/datasets/${encodeURIComponent(target.dataset)}/documents/${encodeURIComponent(target.document)}/pdf-ir/${resource}`;
@@ -41,9 +44,22 @@ export function usePaperReaderResource<T extends {source_sha256:string}>(target:
    if(response.data.data.source_sha256!==sourceHash){readingCache.delete(key);setState({key,status:'error',sourceMismatch:true});return;}
    cacheReading(key,response.data.data);
    setState({key,status:'ready',data:response.data.data});
+   onExplanationChangeRef.current?.(response.data.data);
   }catch(error){if(!controller.signal.aborted&&AgentAppsAuth.getSessionIdentity()===identity){const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;setState(previous=>({key,status:'error',data:previous?.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));}}
  },[key,target.dataset,target.document,sourceHash,resource,language,identity]);
- useEffect(()=>{if(active)void load();return()=>current.current?.abort();},[active,load]);
+ useEffect(()=>{
+  if(saved){
+   current.current?.abort();
+   cacheReading(key,saved);
+   setState({key,status:'ready',data:saved});
+  }else if(active)void load();
+  else{
+   const cached=readCachedReading<T>(key);
+   setState(cached?{key,status:'ready',data:cached}:{key,status:'idle'});
+   if(cached)onExplanationChangeRef.current?.(cached);
+  }
+  return()=>current.current?.abort();
+ },[active,load,key,saved]);
  const cancel=()=>{current.current?.abort();setState(previous=>({key,status:'cancelled',data:previous?.key===key?previous.data:undefined}));};
  return {...(state?.key===key?state:undefined),load,cancel};
 }

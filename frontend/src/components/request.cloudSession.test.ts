@@ -31,13 +31,13 @@ describe("Cloud and local authentication boundaries", () => {
 
   it("continues local authentication recovery for a real local 401 on a cloud URL", async () => {
     const error = unauthorized(2000104);
-    await expect(handleError(error)).rejects.toBe(error);
-    expect(mocks.restore).toHaveBeenCalledTimes(1); expect(mocks.logout).toHaveBeenCalledTimes(1);
+    await expect(handleError(error)).rejects.toThrow("fixture local restoration unavailable");
+    expect(mocks.restore).toHaveBeenCalledTimes(1); expect(mocks.logout).not.toHaveBeenCalled();
   });
 
   it("does not use a human-readable Cloud message to classify a local authentication error", async () => {
     const error = unauthorized(2000104, "/api/core/skills");
-    await expect(handleError(error)).rejects.toBe(error);
+    await expect(handleError(error)).rejects.toThrow("fixture local restoration unavailable");
     expect(mocks.restore).toHaveBeenCalledTimes(1);
   });
 

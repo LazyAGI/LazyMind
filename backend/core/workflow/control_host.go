@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -275,6 +276,36 @@ func (s WorkflowControlService) SettleHostAction(ctx context.Context, owner, act
 		}
 		if err := tx.Model(&action).Updates(updates).Error; err != nil {
 			return err
+		}
+		if receipt.Status == "failed" && action.Kind == "continue" && action.ExecutionID != "" && action.ConsumedAt == nil {
+			var attempt orm.WorkflowSessionStep
+			err := tx.Where("id = ? AND session_id = ? AND executor_host = 'external-agent' AND status = 'queued' AND validity = 'effective'", action.ExecutionID, session.ID).First(&attempt).Error
+			if err == nil {
+				// A definitively rejected dispatch cannot launch an unclaimed external
+				// execution. Native executors and already claimed work keep ownership.
+				if err := tx.Model(&attempt).Updates(map[string]any{"status": "failed", "terminal_code": "WORKFLOW_DELIVERY_FAILED", "lease_token": "", "lease_expires_at": nil, "fencing_generation": gorm.Expr("fencing_generation + 1")}).Error; err != nil {
+					return err
+				}
+				if err := FinalizeHostAttempt(ctx, tx, session.ID, attempt.StepID, attempt.ID, "failed"); err != nil {
+					return err
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		if receipt.Status == "failed" && action.Kind == "continue" && action.ExecutionID == "" && action.ConsumedAt == nil {
+			var newer int64
+			if err := tx.Model(&orm.WorkflowHostAction{}).Where("session_id = ? AND kind = 'continue' AND created_at > ? AND consumed_at IS NULL AND status NOT IN ?",
+				session.ID, action.CreatedAt, []string{"failed", "superseded"}).Count(&newer).Error; err != nil {
+				return err
+			}
+			if newer == 0 {
+				// Use native controller failure cleanup. A rejected wakeup cannot
+				// leave an idle workflow pretending that its controller is running.
+				if err := failIdleSession(ctx, tx, session.ID); err != nil {
+					return err
+				}
+			}
 		}
 		return controlstore.BumpEvent(tx, session, "delivery.changed", action.ID, "", map[string]any{"status": receipt.Status})
 	})

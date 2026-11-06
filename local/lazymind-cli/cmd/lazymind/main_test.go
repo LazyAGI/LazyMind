@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,43 @@ func TestInternalSessionSetAndClear(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "credentials.json")); !os.IsNotExist(err) {
 		t.Fatalf("credentials were not cleared: %v", err)
+	}
+}
+
+func TestInternalSessionConditionalClearPreservesNewLogin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", home)
+	var output bytes.Buffer
+	current := `{"server_url":"http://127.0.0.1:8090","access_token":"new","refresh_token":"new-refresh"}`
+	if err := runInternalSession([]string{"set"}, strings.NewReader(current), &output); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"expected_session":{"server_url":"http://127.0.0.1:8090","access_token":"old","refresh_token":"old-refresh"}}`
+	output.Reset()
+	if err := runInternalSession([]string{"clear-if-current"}, strings.NewReader(old), &output); err != nil {
+		t.Fatal(err)
+	}
+	var receipt struct {
+		Cleared bool `json:"cleared"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Cleared {
+		t.Fatalf("wrong clear receipt: %s", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "credentials.json")); err != nil {
+		t.Fatal("new credentials were deleted")
+	}
+	output.Reset()
+	if err := runInternalSession([]string{"clear-if-current"}, strings.NewReader(`{"expected_session":`+current+`}`), &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(output.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.Cleared {
+		t.Fatalf("explicit logout did not clear matching credentials: %s", output.String())
 	}
 }
 

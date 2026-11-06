@@ -11,6 +11,14 @@ import (
 	"testing"
 )
 
+func TestDecodeCoreNameConflictPreservesBusinessCode(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(`{"code":2001102,"message":"dataset name already exists"}`))}
+	err := decodeCoreError(resp)
+	if got := ErrorCodeOf(err); got != "2001102" {
+		t.Fatalf("name conflict must retain its business code, got %q", got)
+	}
+}
+
 func TestHTTPCoreClientResourceRoutesUseCoreDocumentAPIs(t *testing.T) {
 	t.Parallel()
 

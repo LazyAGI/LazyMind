@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -79,12 +80,15 @@ type Projection struct {
 }
 
 type StartInput struct {
-	WorkflowID      string         `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
-	RequestContext  string         `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
-	InputBindings   map[string]any `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
-	IdempotencyKey  string         `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it on retries"`
-	SessionID       string         `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
-	DriverSessionID string         `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
+	WorkflowID          string                   `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
+	RequestContext      string                   `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
+	RevisionID          string                   `json:"revision_id,omitempty" jsonschema:"Published Workflow revision; preserve the revision_id returned with needs_input when submitting answers"`
+	ClarificationValues map[string]any           `json:"clarification_values,omitempty" jsonschema:"Confirmed startup answers keyed by the exact question IDs returned by needs_input; merge previously confirmed clarification_values with new answers. Answers in request_context alone do not satisfy required fields."`
+	Inputs              map[string][]InputSource `json:"inputs,omitempty" jsonschema:"Files to import and bind before starting; use exact material_id keys from workflow.get startup_contract.input_materials, with ordered source arrays (use one item for a single material). Each source uses local_path or resource_id. Do not also name the same material in input_bindings."`
+	InputBindings       map[string]any           `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
+	IdempotencyKey      string                   `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it for unchanged-payload retries. Use a new key when answers, revision or inputs change."`
+	SessionID           string                   `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
+	DriverSessionID     string                   `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
 }
 
 type InputResource struct {
@@ -103,11 +107,17 @@ type InputImportResult struct {
 }
 
 type StartResult struct {
-	PreparationID string     `json:"preparation_id"`
-	SessionID     string     `json:"session_id"`
-	WorkflowID    string     `json:"workflow_id"`
-	RevisionID    string     `json:"revision_id"`
-	State         Projection `json:"state"`
+	Status                     string           `json:"status,omitempty"`
+	PreparationID              string           `json:"preparation_id"`
+	SessionID                  string           `json:"session_id,omitempty"`
+	WorkflowID                 string           `json:"workflow_id"`
+	RevisionID                 string           `json:"revision_id,omitempty"`
+	Questions                  []map[string]any `json:"questions,omitempty"`
+	ClarificationValues        map[string]any   `json:"clarification_values,omitempty"`
+	MissingClarificationFields []string         `json:"missing_clarification_fields,omitempty"`
+	MissingInputs              []string         `json:"missing_inputs,omitempty"`
+	AgentInstruction           string           `json:"agent_instruction,omitempty"`
+	State                      *Projection      `json:"state,omitempty"`
 }
 
 type SessionSummary struct {
@@ -134,11 +144,15 @@ type SessionLifecycleResult struct {
 	Status       string `json:"status"`
 	StateVersion int64  `json:"state_version"`
 	CommandID    string `json:"command_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	ActionID     string `json:"action_id,omitempty"`
+	ResumeReason string `json:"resume_reason,omitempty"`
 }
 
 type BeginInput struct {
+	RetryOrigin        string `json:"retry_origin,omitempty" jsonschema:"automatic by default; user only for recovery explicitly requested by the user"`
 	SessionID          string `json:"session_id" jsonschema:"required,Workflow session returned by workflow.start"`
-	StepID             string `json:"step_id" jsonschema:"required,One currently ready or retryable step"`
+	StepID             string `json:"step_id" jsonschema:"required,One Runtime-returned ready, retryable or rewindable step"`
 	CommandID          string `json:"command_id,omitempty" jsonschema:"Stable retry key; generated when omitted"`
 	Objective          string `json:"objective,omitempty" jsonschema:"Optional runtime refinement which cannot replace the Workflow prompt"`
 	RuntimeInstruction string `json:"runtime_instruction,omitempty" jsonschema:"Optional retry or execution note"`
@@ -282,6 +296,31 @@ func (c *Client) Get(ctx context.Context, workflowID, revisionID string) (map[st
 }
 
 func keepHostGetFiles(pkg map[string]any) {
+	if graph, ok := pkg["compiled_graph"].(map[string]any); ok {
+		producers, _ := graph["material_producers"].(map[string]any)
+		types, _ := graph["material_types"].(map[string]any)
+		cardinalities, _ := graph["material_cardinalities"].(map[string]any)
+		ids := make([]string, 0, len(producers))
+		for id, raw := range producers {
+			if producer, ok := raw.(map[string]any); ok && producer["kind"] == "external" {
+				ids = append(ids, id)
+			}
+		}
+		sort.Strings(ids)
+		materials := make([]map[string]any, 0, len(ids))
+		for _, id := range ids {
+			producer := producers[id].(map[string]any)
+			optional, _ := producer["optional"].(bool)
+			materials = append(materials, map[string]any{
+				"material_id": id, "type": types[id], "cardinality": cardinalities[id], "required": !optional,
+			})
+		}
+		contract := map[string]any{"revision_id": pkg["revision_id"], "input_materials": materials}
+		if runtime, ok := graph["runtime"].(map[string]any); ok {
+			contract["clarification_fields"] = runtime["clarification_fields"]
+		}
+		pkg["startup_contract"] = contract
+	}
 	delete(pkg, "compiled_graph")
 	raw, _ := pkg["files"].(map[string]any)
 	if raw == nil {
@@ -320,10 +359,14 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
 		steps, _ := json.Marshal(retries)
 		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
+	} else if continuation == "stopped" {
+		state.AgentInstruction = "The Workflow is stopped. If the user explicitly asks to continue, call workflow.session.resume on this run. Inspect or claim any returned execution_id with workflow.step.claim instead of beginning a duplicate; otherwise read workflow.state again. Without a new user request, END this turn."
+	} else if continuation == "completed" || continuation == "failed" {
+		state.AgentInstruction = "END this turn unless the user explicitly requested recovery. For a requested change, use an exact projection.rewindable target with workflow.step.begin; for a requested retry, use an exact projection.retryable target and retry_origin=user. Core applies the same rules as the internal controller. Do not create a replacement Workflow."
 	} else {
 		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
 			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "stopped" || continuation == "completed" || continuation == "binding_required" || continuation == "failed" {
+		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "binding_required" {
 			state.AgentInstruction = "END this turn. Do not continue Workflow execution or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
 		}
 	}
@@ -469,11 +512,21 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 			return StartResult{}, errors.New("LazyMind Core does not support controlled workflow sessions; update the server before starting")
 		}
 	}
+	input.InputBindings, err = c.prepareStartInputs(ctx, input.Inputs, input.InputBindings)
+	if err != nil {
+		return StartResult{}, err
+	}
 	request := map[string]any{
 		"control_protocol": ControlProtocol, "host_binding_required": c.RequireHostBinding, "host_provider": c.HostProvider,
 		"idempotency_key": input.IdempotencyKey, "workflow_id": input.WorkflowID,
 		"input_bindings": input.InputBindings, "origin_host": "external-agent", "origin_ref": "mcp",
 		"controller_host": "external-agent", "request_context": input.RequestContext,
+	}
+	if input.RevisionID != "" {
+		request["revision_id"] = input.RevisionID
+	}
+	if len(input.ClarificationValues) > 0 {
+		request["clarification_values"] = input.ClarificationValues
 	}
 	origin := c.origin
 	if c.HostProvider == "workbuddy" && c.RequireHostBinding {
@@ -498,10 +551,38 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		request["conversation_id"] = origin.ConversationID
 	}
 	var prepared struct {
-		PreparationID string `json:"preparation_id"`
+		PreparationID              string           `json:"preparation_id"`
+		Status                     string           `json:"status"`
+		WorkflowRevision           string           `json:"workflow_revision"`
+		Questions                  []map[string]any `json:"questions"`
+		ClarificationValues        map[string]any   `json:"clarification_values"`
+		MissingClarificationFields []string         `json:"missing_clarification_fields"`
+		MissingInputs              []string         `json:"missing_inputs"`
 	}
 	if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-preparations", request, &prepared); err != nil {
 		return StartResult{}, err
+	}
+	if strings.TrimSpace(prepared.PreparationID) == "" {
+		return StartResult{}, errors.New("Workflow preparation did not return an identifier")
+	}
+	switch prepared.Status {
+	case "needs_input":
+		revisionID := strings.TrimSpace(prepared.WorkflowRevision)
+		if revisionID == "" {
+			revisionID = input.RevisionID
+		}
+		return StartResult{
+			Status: "needs_input", PreparationID: prepared.PreparationID,
+			WorkflowID: input.WorkflowID, RevisionID: revisionID,
+			Questions: prepared.Questions, ClarificationValues: prepared.ClarificationValues,
+			MissingClarificationFields: prepared.MissingClarificationFields, MissingInputs: prepared.MissingInputs,
+			AgentInstruction: "No Workflow session has been created. Ask the returned questions using their exact field IDs. Merge the returned clarification_values with the user's answers and submit them as clarification_values to workflow.start, preserving request_context and revision_id. Resolve missing_inputs with actual imported sources via inputs or input_bindings. Use a new idempotency_key when answers or inputs change; preserve the key only for unchanged-payload retries. Do not call workflow.step.begin or open a Workflow panel before a session_id is returned.",
+		}, nil
+	case "", "ready":
+		// Older Core versions returned only preparation_id. Keep that contract
+		// working; all explicit non-ready statuses must stop before consumption.
+	default:
+		return StartResult{}, fmt.Errorf("Workflow preparation returned unsupported status %q; no session was created", prepared.Status)
 	}
 	var consumed struct {
 		SessionID  string `json:"session_id"`
@@ -526,8 +607,8 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		workflowID = input.WorkflowID
 	}
 	return StartResult{
-		PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, WorkflowID: workflowID,
-		RevisionID: strings.TrimSpace(consumed.RevisionID), State: state,
+		Status: "started", PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, WorkflowID: workflowID,
+		RevisionID: strings.TrimSpace(consumed.RevisionID), State: &state,
 	}, nil
 }
 
@@ -556,7 +637,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 		}
 		if err := c.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(input.SessionID)+"/executions:begin", map[string]any{
 			"command_id": input.CommandID, "step_id": input.StepID, "expected_state_version": state.StateVersion,
-			"objective": input.Objective, "runtime_instruction": input.RuntimeInstruction,
+			"objective": input.Objective, "runtime_instruction": input.RuntimeInstruction, "retry_origin": input.RetryOrigin,
 		}, &grant); err != nil {
 			return BeginResult{}, err
 		}
@@ -565,7 +646,7 @@ func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, erro
 	command := map[string]any{
 		"contract_version": contractVersion, "command_id": input.CommandID,
 		"tool": "advance_step_and_hand_off", "session_id": input.SessionID,
-		"expected_state_version": state.StateVersion, "retry_origin": "automatic",
+		"expected_state_version": state.StateVersion, "retry_origin": input.RetryOrigin,
 		"steps": []map[string]any{{"step_id": input.StepID, "objective": input.Objective, "runtime_instruction": input.RuntimeInstruction}},
 	}
 	var advanced struct {

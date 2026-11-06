@@ -34,10 +34,15 @@ func hostControlFixture(t *testing.T) (WorkflowControlService, WorkflowHostIdent
 }
 func expectControlCode(t *testing.T, err error, code string) {
 	t.Helper()
-	var e *controlstore.Error
-	if !errors.As(err, &e) || e.Code != code {
-		t.Fatalf("expected %s, got %v", code, err)
+	var rejected *controlstore.Error
+	var transition *transitionRejection
+	if errors.As(err, &rejected) && rejected.Code == code {
+		return
 	}
+	if errors.As(err, &transition) && transition.response.Error != nil && transition.response.Error.Code == code {
+		return
+	}
+	t.Fatalf("expected %s, got %v", code, err)
 }
 func currentControl(t *testing.T, db *gorm.DB) *controlstore.Snapshot {
 	t.Helper()
