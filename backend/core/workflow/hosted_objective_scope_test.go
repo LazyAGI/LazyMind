@@ -15,6 +15,14 @@ import (
 
 // This exercises the durable launch boundary, without calling a model.
 func TestHostedObjectiveUsesPinnedStepOnLaunchAndRetry(t *testing.T) {
+	testHostedObjectiveOnRetry(t, "", "")
+}
+
+func TestHostedObjectiveKeepsCurrentAttemptRefinements(t *testing.T) {
+	testHostedObjectiveOnRetry(t, "Keep exact fractions until final display.", "Correct CPM to 0.95.")
+}
+
+func testHostedObjectiveOnRetry(t *testing.T, refinement, instruction string) {
 	db, hash := setupBatchTransitionSession(t)
 	oldDB, oldState := store.DB(), store.State()
 	store.Init(db.DB, db.DB, nil)
@@ -79,7 +87,7 @@ func TestHostedObjectiveUsesPinnedStepOnLaunchAndRetry(t *testing.T) {
 	}
 	response, _ := transitionWorkflowSession(t.Context(), db.DB, session.ID, transitionCommandRequest{
 		CommandID: "retry-scope", Operation: "advance", ExpectedStateVersion: 5, GraphHash: hash,
-		Targets: []transitionTarget{{TargetStepID: node.ID}},
+		Targets: []transitionTarget{{TargetStepID: node.ID, Objective: refinement, RuntimeInstruction: instruction}},
 	})
 	if !response.Accepted {
 		t.Fatalf("retry rejected: %+v", response.Error)
@@ -88,8 +96,16 @@ func TestHostedObjectiveUsesPinnedStepOnLaunchAndRetry(t *testing.T) {
 	if err := db.First(&retried, "id = ?", response.TaskID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if retried.Objective != want {
+	if (refinement == "" && retried.Objective != want) || !strings.Contains(retried.Objective, want) {
 		t.Fatalf("retry did not derive pinned prompt: %q", retried.Objective)
+	}
+	var retryParams map[string]any
+	if err := json.Unmarshal(retried.Params, &retryParams); err != nil {
+		t.Fatal(err)
+	}
+	hint, _ := retryParams["retry_hint"].(string)
+	if !strings.Contains(hint, refinement) || !strings.Contains(hint, instruction) || strings.Contains(hint, input) {
+		t.Fatalf("lost or expanded runtime refinements: %q", hint)
 	}
 	var retryStep orm.WorkflowSessionStep
 	if err := db.First(&retryStep, "task_id = ?", response.TaskID).Error; err != nil {
@@ -99,7 +115,7 @@ func TestHostedObjectiveUsesPinnedStepOnLaunchAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retryStep.Attempt != 2 || retryContext.WorkflowRevision != "batch-revision" ||
+	if retryStep.Attempt != 2 || retryContext.WorkflowRevision != "batch-revision" || retryContext.Instruction != hint ||
 		!reflect.DeepEqual(retryContext.RequiredOutputs, node.RequiredOutputs) || !reflect.DeepEqual(retryContext.Acceptance, node.Acceptance) {
 		t.Fatalf("retry lost the pinned step contract: %+v", retryContext)
 	}
@@ -107,7 +123,7 @@ func TestHostedObjectiveUsesPinnedStepOnLaunchAndRetry(t *testing.T) {
 	if err := db.First(&historical, "id = ?", first.TaskID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if historical.Objective != task.Objective {
+	if historical.Objective != task.Objective || !reflect.DeepEqual(historical.Params, task.Params) {
 		t.Fatal("retry rewrote historical objective")
 	}
 	if err := db.First(&first, "id = ?", first.ID).Error; err != nil {

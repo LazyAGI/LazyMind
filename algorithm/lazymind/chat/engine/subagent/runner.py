@@ -615,7 +615,10 @@ def _completion_review_scope(ctx: 'SubAgentContext', required_outputs: List[str]
         'acceptance_criteria': scope.get('acceptance_criteria') or [],
         'declared_outputs': ctx.output_slots,
         'required_outputs': required_outputs,
-        'run_context': '\n'.join(_build_intent_context_section(ctx.params)),
+        'run_context': '\n'.join(_build_intent_context_section(ctx.params))
+        + '\nCurrent attempt refinements (only within the pinned step contract; '
+        'do not add downstream deliverables or change output/tool/approval boundaries):\n'
+        + str(ctx.params.get('retry_hint') or ''),
     }
 
 

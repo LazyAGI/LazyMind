@@ -2807,3 +2807,43 @@ def test_pinned_review_does_not_repeat_expanded_global_objective(workflow_step):
     assert 'Review completion of ONE assigned Workflow step' in prompt
     assert 'Actually saved artifacts:' in prompt and 'observed_error' in prompt
     assert 'Preserve unknown fields as unknown.' in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('saved,completed', [(True, True), (True, False), (False, True)])
+async def test_pinned_review_retains_current_attempt_refinements(monkeypatch, tmp_path, saved, completed):
+    request = 'Normalize metrics, then deliver a final performance report.'
+    hint = 'Current step objective refinement: Keep exact fractions. Retry: correct CPM to 0.95.'
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': completed, 'requires_artifact': True,
+        'artifact_keys': ['metrics'], 'reason': 'The current CPM requirement was checked.',
+    })
+    _, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        objective='Expanded global objective: ' + request,
+        params={
+            'step_id': 'normalize_metrics', 'launch_user_input': request,
+            'retry_hint': hint, 'runtime_instruction': 'Use the latest bound input.',
+            'legacy_tools': ['save_artifacts'],
+            'required_output_artifact_keys': ['metrics'], 'output_slot_types': {'metrics': 'text'},
+            '_display_plan_scope': {'prompt': 'Normalize metrics only from {{user_input}}.',
+                                    'acceptance_criteria': ['Compute before rounding.']},
+        }, output_slots=['metrics'],
+        artifacts=([{'slot': 'metrics', 'content_type': 'text', 'seq': 1,
+                     'value': {'text': 'CPM change 0.95.'}}] if saved else []),
+        final='The first attempt failed; the corrected metrics have now been saved.',
+    )
+    assert _terminal(events)['status'] == ('succeeded' if saved and completed else 'failed')
+    if not saved:
+        assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+        model.share.assert_not_called()
+        return
+    prompt = model.share.return_value.call_args.args[0]
+    assert hint in prompt and 'Use the latest bound input.' in prompt
+    assert 'Expanded global objective:' not in prompt
+    assert prompt.count(request) == 1
+    assert 'not a requirement to produce downstream deliverables in this step' in prompt
+    assert 'Compute before rounding.' in prompt
+    if not completed:
+        assert _terminal(events)['current_phase'] == 'objective_incomplete'
