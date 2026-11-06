@@ -36,3 +36,45 @@ func TestPreflightRelativeMarkdownDependencies(t *testing.T) {
 		})
 	}
 }
+
+func TestPreflightMarkdownLinksPreserveOtherPaths(t *testing.T) {
+	for _, tc := range []struct{ name, markdown, path string }{
+		{"same_basename", "[data](data.csv) and assets/data.csv", "assets/data.csv"},
+		{"longer_basename", "[data](data.csv) and assets/data.csv.json", "assets/data.csv.json"},
+		{"before_link", "assets/data.csv.json and [data](data.csv)", "assets/data.csv.json"},
+		{"image", "![data](data.csv) and assets/data.csv", "assets/data.csv"},
+		{"reference_link", "[data][source] and assets/data.csv\n\n[source]: data.csv", "assets/data.csv"},
+		{"inline_code", "[data](data.csv) and `read assets/data.csv`", "assets/data.csv"},
+		{"code_block", "[data](data.csv)\n\n```text\nassets/data.csv\n```", "assets/data.csv"},
+		{"html", "[data](data.csv)\n\n<div>\nassets/data.csv\n</div>", "assets/data.csv"},
+	} {
+		for _, existing := range []bool{false, true} {
+			name := "missing/" + tc.name
+			if existing {
+				name = "existing/" + tc.name
+			}
+			t.Run(name, func(t *testing.T) {
+				files := []skillPackageFile{
+					{Path: "SKILL.md", Content: "# Test\n" + tc.markdown},
+					{Path: "data.csv", Content: "a,b"},
+				}
+				if existing {
+					files = append(files, skillPackageFile{Path: tc.path, Content: "a,b"})
+				}
+				var found []skillConversionCheck
+				for _, check := range preflightSkillSnapshot(workflowSourceSkillSnapshot{Files: files}) {
+					if check.Code == "DEPENDENCY_RESOURCE_MISSING" || check.Code == "DEPENDENCY_OUTSIDE_PACKAGE" {
+						found = append(found, check)
+					}
+				}
+				if existing {
+					if len(found) != 0 {
+						t.Fatalf("unexpected dependency warning: %+v", found)
+					}
+				} else if len(found) != 1 || found[0].Code != "DEPENDENCY_RESOURCE_MISSING" || found[0].Path != tc.path || found[0].Severity != "warning" {
+					t.Fatalf("wanted missing dependency %s, got %+v", tc.path, found)
+				}
+			})
+		}
+	}
+}

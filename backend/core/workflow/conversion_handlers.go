@@ -259,7 +259,7 @@ func preflightSkillSnapshot(snapshot workflowSourceSkillSnapshot) []skillConvers
 func skillDependencyReferences(markdown string, byPath map[string]skillPackageFile) []string {
 	source := []byte(markdown)
 	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
-	prose := markdown
+	var prose []text.Segment
 	var refs []string
 	_ = ast.Walk(doc, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -271,19 +271,43 @@ func skillDependencyReferences(markdown string, byPath map[string]skillPackageFi
 			destination = link.Destination
 		case *ast.Image:
 			destination = link.Destination
+		case *ast.Text:
+			prose = append(prose, link.Segment)
+			return ast.WalkContinue, nil
+		case *ast.RawHTML:
+			prose = append(prose, link.Segments.Sliced(0, link.Segments.Len())...)
+			return ast.WalkContinue, nil
 		default:
+			if node.Type() == ast.TypeBlock && node.IsRaw() {
+				prose = append(prose, node.Lines().Sliced(0, node.Lines().Len())...)
+				if html, ok := node.(*ast.HTMLBlock); ok && html.HasClosure() {
+					prose = append(prose, html.ClosureLine)
+				}
+			}
 			return ast.WalkContinue, nil
 		}
-		// Do not let the legacy prose scanner reinterpret a URL or a path fragment.
-		prose = strings.ReplaceAll(prose, string(destination), "")
 		u, err := url.Parse(string(destination))
 		if err == nil && u.Scheme == "" && u.Host == "" && u.Path != "" {
 			refs = append(refs, path.Clean(u.Path))
 		}
-		return ast.WalkContinue, nil
+		// Links are handled above; scan only non-link source spans below.
+		return ast.WalkSkipChildren, nil
 	})
-	for _, match := range skillDependencyRefPattern.FindAllStringSubmatch(prose, -1) {
-		refs = append(refs, resolveSkillDependencyRef(cleanSkillDependencyRef(match[1]), byPath))
+	for i := 0; i < len(prose); i++ {
+		segment := prose[i]
+		// Markdown may split ordinary filenames at punctuation such as underscores.
+		for i+1 < len(prose) && segment.Stop == prose[i+1].Start {
+			i++
+			segment.Stop = prose[i].Stop
+		}
+		// Preserve the original preceding character for the legacy boundary check.
+		start := segment.Start
+		if start > 0 {
+			start--
+		}
+		for _, match := range skillDependencyRefPattern.FindAllStringSubmatch(string(source[start:segment.Stop]), -1) {
+			refs = append(refs, resolveSkillDependencyRef(cleanSkillDependencyRef(match[1]), byPath))
+		}
 	}
 	return refs
 }
