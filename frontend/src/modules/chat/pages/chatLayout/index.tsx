@@ -116,6 +116,7 @@ interface IChatLayoutProps {
   setChatConfigFn: (val: ChatConfig) => void;
   canChat: boolean;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   chatDisabledReason?: string;
@@ -134,6 +135,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     setChatConfigFn,
     canChat,
     embeddingReady,
+    vlmReady,
     multimodalEmbeddingReady,
     rerankReady,
     chatDisabledReason,
@@ -1085,6 +1087,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           hasWorkflowSession={hasWorkflowSession}
           knowledgeRefreshKey={knowledgeRefreshKey}
           embeddingReady={embeddingReady}
+          vlmReady={vlmReady}
           multimodalEmbeddingReady={multimodalEmbeddingReady}
           rerankReady={rerankReady}
           disabledReason={
@@ -1196,6 +1199,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
               onRetained={handleSideChatRetained}
               canChat={canChat}
               embeddingReady={embeddingReady}
+              vlmReady={vlmReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
               returnFocusRef={sideChatReturnFocusRef}

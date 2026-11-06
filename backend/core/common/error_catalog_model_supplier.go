@@ -51,7 +51,7 @@ func init() {
 		{2005036, http.StatusBadRequest, "Model ID must contain 1 to 512 bytes", []string{"model name must contain 1 to 512 bytes"}},
 		{2005037, http.StatusConflict, "Change the incompatible default model selection before editing this model", []string{"model update would invalidate a default selection; change the selection first"}},
 		{2005038, http.StatusConflict, "Change the fixed conversation model before editing this model", []string{"model update would invalidate a conversation selection; change the conversation model first"}},
-		{2005039, http.StatusConflict, "This embedding model is in use; change default selections and downgrade indexed knowledge bases before editing its identity", []string{"embedding model identity is in use; change the default model and downgrade indexed knowledge bases before editing"}},
+		{2005039, http.StatusConflict, "Clear the old text vectors before editing the active embedding model; source documents and chunks remain", []string{"embedding model identity is in use; change the default model and downgrade indexed knowledge bases before editing"}},
 		{2005040, http.StatusBadRequest, "The selected model does not support this default role", []string{"selected model does not support this default model role"}},
 		{2005050, http.StatusBadRequest, "Invalid advanced request configuration", []string{"invalid advanced request configuration", "invalid request configuration"}},
 		{2005051, http.StatusBadRequest, "Authentication, protocol and transport headers are managed by LazyMind", []string{"authentication, protocol and transport headers are managed by lazymind"}},
@@ -78,7 +78,7 @@ func init() {
 		{2005078, http.StatusBadRequest, "Token limits must be positive integers and may use a K or M suffix", []string{"model token limits must be positive integers or use a k or m suffix"}},
 		{2005079, http.StatusBadRequest, "Input and output token limits must not exceed the context window", []string{"model input and output token limits must not exceed the context window"}},
 		{2005080, http.StatusBadRequest, "This request protocol is not declared for the supplier service", []string{"request protocol is not declared for this supplier service"}},
-		{2005081, http.StatusConflict, "This embedding model is in use; remove indexed knowledge bases before removing the model", []string{"embedding model is in use; remove indexed knowledge bases before removing the model"}},
+		{2005081, http.StatusConflict, "Clear the old text vectors before removing the active embedding model; source documents and chunks remain", []string{"embedding model is in use; remove indexed knowledge bases before removing the model"}},
 		{2005082, http.StatusConflict, "A model supplier with this name already exists", []string{"model supplier name already exists"}},
 	} {
 		for _, source := range group.sources {

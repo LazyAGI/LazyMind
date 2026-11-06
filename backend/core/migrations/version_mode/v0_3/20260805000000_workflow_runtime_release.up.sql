@@ -3809,3 +3809,20 @@ CREATE INDEX idx_reading_job_enrollment ON async_jobs
     WHERE job_type = 'document_reading_preparation';
 CREATE INDEX idx_reading_job_daily ON async_jobs (job_type, resource_type, create_user_id, created_at);
 CREATE INDEX idx_reading_document_candidates ON documents (create_user_id, created_at, id) WHERE deleted_at IS NULL;
+
+-- One durable identity and transition state for the shared text-vector space.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS embedding_index_states (
+    scope VARCHAR(255) PRIMARY KEY,
+    active_model_id VARCHAR(255) NOT NULL DEFAULT '',
+    active_source VARCHAR(16) NOT NULL DEFAULT '',
+    active_model_name VARCHAR(255) NOT NULL DEFAULT '',
+    active_provider_name VARCHAR(255) NOT NULL DEFAULT '',
+    signature VARCHAR(255) NOT NULL DEFAULT '',
+    phase VARCHAR(32) NOT NULL DEFAULT 'ready',
+    generation BIGINT NOT NULL DEFAULT 1,
+    target_model_id VARCHAR(255) NOT NULL DEFAULT '',
+    target_source VARCHAR(16) NOT NULL DEFAULT '',
+    target_signature VARCHAR(255) NOT NULL DEFAULT '',
+    updated_at TIMESTAMP NOT NULL
+);

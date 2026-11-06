@@ -152,7 +152,12 @@ def test_persistent_query_dispatch_keeps_lazy_document_embeddings_on_passage_pre
             return index.query(**kwargs, group_name='block', similarity_name='cosine',
                                similarity_cut_off=-1.0, topk=3)
 
-        nodes = _quiet_trace({'kb': retrieve})('kb', 'retrieve', query='question')
+        nodes = _quiet_trace({'kb': retrieve})(
+            'kb', 'retrieve', query='question',
+            llm_config={'embed_main': {'source': 'openai', 'model': 'test', 'embedding': {
+                'query_prefix': 'q: ', 'passage_prefix': 'p: ', 'batch_size': 2,
+            }}},
+        )
     assert inputs == ['q: question', ['p: source text']]
     assert nodes[0].text == 'source text'
 

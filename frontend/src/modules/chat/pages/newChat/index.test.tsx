@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getKnowledgeMarketItem: vi.fn(),
   getChatSettings: vi.fn(),
   clearFiles: vi.fn(),
+  vlmReady: true,
   latestChatInputProps: null as any,
   latestChatLayoutProps: null as any,
 }));
@@ -153,7 +154,7 @@ vi.mock("@/modules/chat/hooks/useChatModelProviderGuard", () => ({
     embeddingReady: true,
     multimodalEmbeddingReady: true,
     rerankReady: true,
-    vlmReady: true,
+    vlmReady: mocks.vlmReady,
     needsModelProviderConfig: false,
     status: "ready",
     isRuntimeInitializing: false,
@@ -227,6 +228,7 @@ describe("NewChatPage featured templates", () => {
     mocks.getChatSettings.mockReset();
     mocks.getChatSettings.mockResolvedValue({ data: { data: entryDefaults } });
     mocks.clearFiles.mockReset();
+    mocks.vlmReady = true;
     mocks.latestChatInputProps = null;
     mocks.latestChatLayoutProps = null;
   });
@@ -244,6 +246,15 @@ describe("NewChatPage featured templates", () => {
         entryDefaults.quick_question.conversation_settings,
       );
     });
+  });
+
+  it("does not show a visual-model setup warning before an image is attached", async () => {
+    mocks.vlmReady = false;
+    render(<MemoryRouter initialEntries={["/agent/chat/home"]}><NewChatPage /></MemoryRouter>);
+
+    await waitFor(() => expect(mocks.latestChatInputProps).not.toBeNull());
+    expect(screen.queryByText("chat.vlmNotReadyWarningAdmin")).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.vlmNotReadyWarning")).not.toBeInTheDocument();
   });
 
   it("keeps the disclaimer inside the scrollable welcome content", async () => {

@@ -291,6 +291,7 @@ const AssistantMessage = (props: any) => {
     renderText,
     updateMessage,
     sessionId,
+    vlmReady,
     conversationFiles,
     onPreferenceSelect,
     isLatestDualAnswer,
@@ -1287,6 +1288,7 @@ const AssistantMessage = (props: any) => {
         <AskCard
           key={askPending.ask_id}
           askPending={askPending}
+          vlmReady={vlmReady}
           disabled={isReadOnly}
           answered={!!item.ask_answered}
           savedAnswers={item.ask_saved_answers}

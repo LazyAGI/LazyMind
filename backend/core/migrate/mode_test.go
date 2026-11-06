@@ -102,8 +102,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 146 {
-		t.Fatalf("v0_3 dev migration count=%d, want 146", len(v03.Dev))
+	if len(v03.Dev) != 147 {
+		t.Fatalf("v0_3 dev migration count=%d, want 147", len(v03.Dev))
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20261106040849) {
+		t.Fatal("v0_3 dev migrations are missing the global embedding index state")
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261105090000) {
 		t.Fatal("v0_3 dev migrations are missing paper note source positions")

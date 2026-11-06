@@ -155,7 +155,7 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	if ext.ProcessingLevel == ProcessingLevelStored {
 		return state, ""
 	}
-	nativeIndexing := state.ParseArtifactRef != "" && ext.ProcessingLevel == ProcessingLevelIndexed
+	nativeIndexing := (state.ParseArtifactRef != "" || state.EmbeddingVersion == embeddingVersionReembedPending || state.EmbeddingVersion == embeddingVersionReembedManual) && ext.ProcessingLevel == ProcessingLevelIndexed
 	if nativeIndexing && (state.IndexArtifactRef != "core-task:"+task.ID || ext.ProcessingRevision != snapshot.dataset.ProcessingRevision) {
 		return state, ""
 	}

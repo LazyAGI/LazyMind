@@ -877,7 +877,7 @@ const enUS = {
     },
     connection: {
       reason: {
-        model_list_unavailable: "This provider does not expose a model-list endpoint. Add a model manually and test its connection.",
+        model_list_unavailable: "The model-list endpoint is unavailable. Check the API URL, or add a model manually and test its connection.",
       },
     },
     probe: {
@@ -916,7 +916,6 @@ const enUS = {
     },
     catalog: {
       discoveryFailed: "Fetch failed",
-      builtInFallback: "The live model list could not be fetched. Built-in reference models are shown; ensure access is enabled or manually add your inference endpoint ID.",
       customGroup: "Custom",
       unsupportedType: "This model type is not supported by the current runtime yet",
       unclassifiedType: "Unclassified model. Choose its type explicitly when adding a custom model.",
@@ -1681,8 +1680,8 @@ const enUS = {
     cannotDelete: "Cannot delete",
     confirmDeleteModel: "Delete {{name}}?",
     confirmDeleteModelDesc: "Module configurations that reference this model will be cleared.",
-    embeddingInUse: "Embedding models are in use by indexed knowledge bases. Remove the associated knowledge bases before removing models or resetting the supplier.",
-	confirmDeleteEmbeddingDesc: "Removing the embedding model downgrades all indexed knowledge bases to Chunked. Existing embeddings are retained and not deleted. Continue?",
+    embeddingInUse: "The active embedding model is used by knowledge base indexes. Its old text vectors need a safe cleanup before removal; source documents and chunks will remain.",
+	confirmDeleteEmbeddingDesc: "Removing the active embedding model requires clearing old text vectors from every knowledge base. Source documents and chunks remain, and vector search pauses until the indexes are rebuilt.",
     deleteModelAria: "Delete {{name}}",
     removeModelHint: "Delete model",
     disableModelAria: "Disable {{name}}",
@@ -1780,7 +1779,13 @@ const enUS = {
         "SiliconFlow is an efficient model API aggregation and acceleration platform with broad model access, high concurrency, and cost-effective pricing.\n\nGet API Key:\nhttps://cloud.siliconflow.cn/account/ak\n\nSetup guide:\n\n1. Open SiliconFlow Cloud and register with phone, WeChat, or email.\n\n2. In the console, open API Keys from the left menu.\n\n3. Create a new API key, add an optional description, and copy it for model calls.",
     },
     embeddingChangeTitle: "Embedding Model Change Warning",
-    embeddingChangeContent: "Changing the embedding model may make the entire knowledge-base retrieval service unavailable. If the new model differs from the old one, it is strongly recommended to clear all documents from the knowledge base first — otherwise existing document vectors will be incompatible with the new model.",
+    embeddingChangeContent: "The embedding signature is checked before a switch. A different signature requires clearing old text vectors from every knowledge base and rebuilding their indexes with the new model; source documents and chunks remain.",
+    embeddingSignatureMatchedTitle: "Vector signatures match",
+    embeddingSignatureMatched: "The test vector signatures match, so existing indexes can be reused. Switch models?",
+    embeddingIndexResetTitle: "Vector indexes need rebuilding",
+    embeddingIndexResetRequired: "The candidate's test vectors differ from the recorded signature, or the model behind old vectors is unverified. Switching requires safely clearing old text vectors across all knowledge bases. Source documents and chunks remain; vector search pauses until indexes are rebuilt. Automatic cleanup is not yet safe, so the model was not switched.",
+    embeddingSignatureCheckFailedTitle: "Unable to verify embedding model",
+    embeddingSignatureCheckFailed: "The candidate's vector signature check did not complete. Check the provider connection and model configuration, then try again. The current model was not changed.",
     confirmSwitch: "Switch Anyway",
     cancelSwitch: "Not Now",
     validation: {
@@ -5907,6 +5912,14 @@ const enUS = {
     multimodalEmbeddingNotReadyBanner: "The multimodal embedding model is not ready. Mixed image-text retrieval is temporarily unavailable. Please ask an admin to configure the multimodal embedding model.",
     embeddingNotReadyBannerAdmin: "The embedding model is not ready. Knowledge-base retrieval is temporarily unavailable. Please configure the embedding model.",
     multimodalEmbeddingNotReadyBannerAdmin: "The multimodal embedding model is not ready. Mixed image-text retrieval is temporarily unavailable. Please configure the multimodal embedding model.",
+    embeddingIndexStateTitle: "Text vector index",
+    embeddingIndexModel: "Current model: {{provider}} · {{model}}",
+    embeddingIndexIndexed: "Vector indexes are ready for {{count}} knowledge bases.",
+    embeddingIndexEmpty: "No knowledge-base vector indexes have been built yet.",
+    embeddingIndexRebuilding: "Vector indexes need rebuilding; {{count}} knowledge bases remain. Source documents and chunks are retained. Vector search is unavailable until rebuilding finishes.",
+    embeddingIndexClearing: "Old vector indexes are being cleared. Source documents and chunks are retained.",
+    embeddingIndexCleared: "Old text vectors have been cleared. Source documents and chunks remain. Select a new embedding model, then rebuild the indexes.",
+    embeddingIndexUnknown: "The model behind existing vector indexes has not been verified. Rebuild the indexes before switching models.",
     goToConfig: "Go to Config",
   },
 

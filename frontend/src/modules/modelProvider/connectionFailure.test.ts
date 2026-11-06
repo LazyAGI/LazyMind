@@ -18,7 +18,7 @@ describe("provider connection failure messages", () => {
     expect(getProviderConnectionFailureMessage({ reason: "secret-unknown-code", message: "secret-body" }, t, "safe-fallback")).toBe("safe-fallback");
   });
 
-  it("explains a missing model-list endpoint without calling it a missing inference model", () => {
+  it("explains an unavailable model-list endpoint without calling it a missing inference model", () => {
     expect(getProviderConnectionFailureMessage({ success: false, reason: "model_list_unavailable" }, t)).toBe("modelProvider.connection.reason.model_list_unavailable");
   });
 

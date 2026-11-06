@@ -146,6 +146,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       allowMentions = true,
       allowLocalWorkspace = true,
       embeddingReady,
+      vlmReady,
       multimodalEmbeddingReady,
       rerankReady,
       disabledReason,
@@ -618,6 +619,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         <div className="chat-box">
           <div className="chat-main-column">
             <MessageList
+              vlmReady={vlmReady}
               onFork={props.onFork}
               forkPending={props.forkPending}
               messageList={conversation.messageList}
@@ -725,6 +727,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               allowMentions={allowMentions}
               allowLocalWorkspace={allowLocalWorkspace}
               embeddingReady={embeddingReady}
+              vlmReady={vlmReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
               sessionId={sessionId}

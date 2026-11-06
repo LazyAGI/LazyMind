@@ -50,6 +50,29 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
+export interface EmbeddingSwitchPreview {
+  outcome: "unchanged" | "empty" | "same" | "clear_required" | "probe_failed";
+  indexed_knowledge_bases: number;
+  active_model_name: string;
+  candidate_model_name: string;
+  signature_status: string;
+  generation: number;
+  can_switch: boolean;
+}
+
+export async function previewEmbeddingSwitch(input: {
+  model_id: string;
+  source: "own" | "cloud";
+}): Promise<EmbeddingSwitchPreview> {
+  const response = await axiosInstance.post(
+    `${BASE_URL}/api/core/model_providers/embedding/switch-preview`,
+    input,
+    // Core may spend up to 90 seconds probing a cold embedding runtime.
+    { silentError: true, timeout: 105000 } as never,
+  );
+  return unwrapModelProviderData<EmbeddingSwitchPreview>(response.data);
+}
+
 export async function updateProviderEndpoint(
   providerId: string,
   baseUrl: string,
@@ -479,7 +502,7 @@ export async function replaceProviderKey(
         keyId,
         replaceModelProviderKeyOpenAPIRequest: { api_key: apiKey },
       },
-      { timeout: 180000 },
+      withModelProviderJsonOptions({ timeout: 180000, silentError: true }),
     );
   return unwrapModelProviderData(response.data);
 }

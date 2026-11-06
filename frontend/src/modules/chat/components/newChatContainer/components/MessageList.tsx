@@ -138,6 +138,7 @@ interface MessageListProps {
   onScroll?: () => void;
   chatContentRef?: React.RefObject<HTMLDivElement>;
   sessionId?: string;
+  vlmReady?: boolean | null;
   onPreferenceSelect?: (preference: PreferenceType, sessionId?: string) => void;
   editingUserMessageIndex?: number | null;
   editingUserMessageText?: string;
@@ -321,6 +322,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onScroll,
   chatContentRef,
   sessionId = "",
+  vlmReady,
   onPreferenceSelect,
   editingUserMessageIndex = null,
   editingUserMessageText = "",
@@ -638,6 +640,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     updateAssistantMessage(msg, msg.id || msg.history_id, index)
                   }
                   sessionId={sessionId}
+                  vlmReady={vlmReady}
                   conversationFiles={conversationFiles}
                   supersededAskPending={(latestOrdinaryAsks.get(pending?.ask_id) ?? index) > index}
                   supersededMailDraftIds={mailDraftsFromAskPending(pending)

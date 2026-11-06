@@ -105,6 +105,8 @@ vi.mock("../ImageUpload", async () => {
       max: number;
       listNum: number;
       updateFiles: (files: (File & { uid: string; uri: string })[]) => void;
+      onBeforeAddFiles?: (incoming: File[], current: File[]) => { filesToAdd: File[]; clearFirst: boolean; toasts: string[] } | null;
+      onFilesAdded?: (files: File[]) => void;
     }, ref) {
       const files = React.useRef<(File & { uid: string; uri: string })[]>([]);
       React.useImperativeHandle(ref, () => ({
@@ -117,11 +119,18 @@ vi.mock("../ImageUpload", async () => {
           props.updateFiles(files.current);
         },
         uploadFiles: (incoming: File[]) => {
-          for (const file of incoming) {
+          const result = props.onBeforeAddFiles?.(incoming, files.current);
+          if (result?.clearFirst) files.current = [];
+          const accepted: File[] = [];
+          for (const file of result?.filesToAdd ?? incoming) {
             if (files.current.length >= props.max) break;
+            if (!props.types.some(type => file.name.toLowerCase().endsWith(type))) continue;
+            if (file.type.startsWith("image/") && file.size > 5 * 1024 * 1024) continue;
             files.current.push(Object.assign(file, { uid: file.name, uri: `/uploads/${file.name}` }));
+            accepted.push(file);
           }
           props.updateFiles(files.current);
+          if (accepted.length > 0) props.onFilesAdded?.(accepted);
         },
       }));
       return <>
@@ -188,6 +197,41 @@ vi.mock("@/modules/memory/toolApi", () => ({
 describe("ChatInput model switch save lock", () => {
   beforeEach(() => {
     vi.mocked(getRuntimeMode).mockReturnValue("local");
+  });
+
+  it("warns about missing visual understanding only when an image attachment is added", async () => {
+    const warning = vi.spyOn(message, "warning").mockImplementation(() => undefined as never);
+    const ref = createRef<ChatInputImperativeProps>();
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:notes");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const view = render(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent={false}
+        vlmReady={false} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+      await act(async () => ref.current?.uploadFiles([new File(["PDF"], "notes.pdf", { type: "application/pdf" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      await act(async () => ref.current?.uploadFiles([new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.png", { type: "image/png" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      await act(async () => ref.current?.uploadFiles([new File(["image"], "photo.png", { type: "image/png" })]));
+      expect(warning).toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      warning.mockClear();
+      view.rerender(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent={false}
+        vlmReady={true} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      await act(async () => ref.current?.uploadFiles([new File(["image"], "ready.png", { type: "image/png" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+    } finally {
+      warning.mockRestore();
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    }
   });
 
   it.each([

@@ -367,10 +367,60 @@ func TestDeleteEmbeddingModelBlocksUntilIndexedKnowledgeRemoved(t *testing.T) {
 	if err := db.Model(&ownerDataset).Update("deleted_at", now).Error; err != nil {
 		t.Fatal(err)
 	}
+	if rec := deleteRequest(false); rec.Code != http.StatusConflict {
+		t.Fatalf("another user's indexed knowledge must still protect the shared model: %d %s", rec.Code, rec.Body.String())
+	}
+	if err := db.Model(&otherDataset).Update("deleted_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
 	if rec := deleteRequest(false); rec.Code != http.StatusOK {
 		t.Fatalf("unreferenced embedding removal failed: %d %s", rec.Code, rec.Body.String())
 	}
 
+}
+
+func TestDeleteUnusedEmbeddingModelKeepsIndexedKnowledge(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.Dataset{}, &orm.DocumentProcessingState{}, &orm.EmbeddingIndexState{}); err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	provider := orm.UserModelProvider{ID: "provider", Capabilities: "has_models", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	group := orm.UserModelProviderGroup{ID: "group", UserModelProviderID: provider.ID, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	active := orm.UserModelProviderGroupModel{ID: "embed-active", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, Name: "active-embed", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	unused := orm.UserModelProviderGroupModel{ID: "embed-unused", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, Name: "unused-embed", ModelType: "embed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	indexed := orm.Dataset{ID: "kb-indexed", KbID: "kb-indexed", ProcessingLevel: "indexed", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	state := orm.EmbeddingIndexState{Scope: "global", ActiveModelID: active.ID, ActiveSource: "own", Phase: "ready", Generation: 1, UpdatedAt: now}
+	for _, row := range []any{&provider, &group, &active, &unused, &indexed, &state} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/model_providers/provider/groups/group/models/embed-unused", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID, "model_id": unused.ID})
+	rec := httptest.NewRecorder()
+	DeleteGroupModel(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unused model delete=%d %s", rec.Code, rec.Body.String())
+	}
+	var saved orm.Dataset
+	if err := db.Take(&saved, "id = ?", indexed.ID).Error; err != nil || saved.ProcessingLevel != "indexed" {
+		t.Fatalf("unrelated knowledge base changed: %+v, %v", saved, err)
+	}
+	if err := db.Model(&indexed).Update("deleted_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/core/model_providers/provider/groups/group/models/embed-active", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID, "model_id": active.ID})
+	rec = httptest.NewRecorder()
+	DeleteGroupModel(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("active model removal must wait for physical-vector cleanup even after KB rows disappear: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestListUserModelsWithoutTypeReturnsAnyVerifiedModel(t *testing.T) {
