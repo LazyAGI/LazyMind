@@ -1773,8 +1773,11 @@ def _workflow_trigger_tools(
                             semantic_values, bound_clarification,
                         ))
                         _write_agent_data('ask_pending', **card)
+                        # Use the framework's non-empty stop receipt; the chat
+                        # translator hides it after displaying ask_pending.
                         return {'status': 'needs_input', 'missing_clarification_fields': [f['id'] for f in missing],
-                                '_agent_control': {'stop': True, 'reason': 'awaiting_user', 'final_text': ''}}
+                                '_agent_control': {'stop': True, 'reason': 'awaiting_user',
+                                                   'final_text': '等待用户回答工作流启动问题。'}}
                     # Never append a second, model-guessed copy of fields after
                     # the resolver's canonical values (especially explicit opt-ins).
                     input_bindings = {key: value for key, value in input_bindings.items()

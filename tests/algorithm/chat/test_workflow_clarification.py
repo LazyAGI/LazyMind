@@ -16,6 +16,74 @@ def policy(name):
     return yaml.safe_load((ROOT / name / 'workflow.yaml').read_text(encoding='utf-8'))['runtime']
 
 
+def test_startup_card_stops_unmodified_agent_without_displaying_receipt(monkeypatch, tmp_path):
+    import uuid
+    from unittest.mock import MagicMock
+
+    import lazyllm
+    from lazyllm.tools import ReactAgent
+    from lazymind.chat.service.component import AgentEventFrameTranslator
+    from lazymind.chat.workflow import workflow_manager as manager
+
+    runtime = policy('ppt-workflow')
+    item = {'workflow_id': 'ppt-workflow', 'workflow_ref': 'builtin:ppt-workflow',
+            'revision_id': 'r1', 'runtime': runtime, 'tool_name': 'trigger_ppt_workflow'}
+    client = MagicMock()
+    client.get_workflow.return_value.result = item
+    monkeypatch.setattr(manager, '_client', lambda: client)
+    toolkit = MagicMock()
+    monkeypatch.setattr(manager, 'HostWorkflowToolkit', lambda *a, **kw: toolkit)
+    events = []
+    monkeypatch.setattr('lazyllm.tools.agent.base._write_agent_data',
+                        lambda tag, **data: events.append({'tag': tag, **data}))
+    contribution = manager.resolve_workflow_injection(
+        None, current_query='做一个PPT', workflow_catalog=[item],
+        allowed_workflow_refs=['builtin:ppt-workflow'], workflow_activations=[item],
+    )
+    pending, triggers = list(contribution.tools), []
+    while pending:
+        tool = pending.pop()
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        elif tool.__name__ == 'trigger_ppt_workflow':
+            triggers.append(tool)
+    assert len(triggers) == 1
+
+    class Model:
+        def __init__(self):
+            self._module_id = uuid.uuid4().hex
+            self.calls = 0
+
+        def share(self, **kwargs):
+            return self
+
+        def used_by(self, module_id):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            self.calls += 1
+            assert self.calls == 1, 'A startup question must wait for the user'
+            return {'content': '', 'tool_calls': [{
+                'id': 'startup', 'type': 'function',
+                'function': {'name': 'trigger_ppt_workflow', 'arguments': '{}'},
+            }]}
+
+    with lazyllm.locals._scope():
+        model = Model()
+        agent = ReactAgent(model, triggers, workspace=str(tmp_path), force_summarize=True,
+                           enable_builtin_tools=False, sandbox=None)
+        receipt = agent('做一个PPT')
+        assert isinstance(receipt, str) and receipt.strip()
+        assert model.calls == 1
+        assert 'workspace' not in lazyllm.locals['_lazyllm_agent']
+    toolkit.prepare_workflow.assert_not_called()
+    cards = [event for event in events if event['tag'] == 'ask_pending']
+    assert len(cards) == 1 and cards[0]['questions']
+    translator = AgentEventFrameTranslator(query='做一个PPT')
+    assert translator.feed(cards[0])[0]['ask_pending']['questions']
+    assert translator.finish(receipt) == []
+
+
 def test_multiple_one_and_other_are_preserved():
     card = question_card_payload([{'id': 'style', 'text': 'Style?', 'type': 'multiple',
                                   'reason': 'Changes appearance.', 'choices': ['A', 'B']}])
