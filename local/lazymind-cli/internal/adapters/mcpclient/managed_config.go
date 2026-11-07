@@ -17,11 +17,14 @@ import (
 )
 
 type managedConfigState struct {
-	configured bool
-	owned      bool
-	current    bool
-	command    string
-	arguments  []string
+	configured         bool
+	owned              bool
+	current            bool
+	command            string
+	arguments          []string
+	reference          string
+	workflowConfigured bool
+	workflowReference  string
 }
 
 type rawMCPFile map[string]json.RawMessage
@@ -50,16 +53,19 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string, controlled b
 	if kind == DeepSeekHarness {
 		return writeDSHConfig(path, self, home, hostID, controlled)
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	unlock, err := localfile.Lock(path + ".lazymind-lock")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
 		return err
 	}
-	if raw := servers[serverName]; raw != nil {
-		var existing stdioMCPDefinition
-		if json.Unmarshal(raw, &existing) != nil || !stateForStdio(existing, self, home, hostID, kind).owned {
-			return errors.New("refusing to replace unmanaged LazyMind MCP entry")
-		}
-	}
+
 	if _, err := connectorconfig.Save(connectorconfig.Config{Home: home, Provider: string(kind), HostID: hostID, Controlled: kind == WorkBuddy}); err != nil {
 		return err
 	}
@@ -84,9 +90,23 @@ func removeManagedConfig(kind Kind, path string) error {
 	if kind == DeepSeekHarness {
 		return removeDSHConfig(path)
 	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	unlock, err := localfile.Lock(path + ".lazymind-lock")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	root, servers, err := readJSONConfig(path)
 	if err != nil {
 		return err
+	}
+	if _, exists := servers[serverName]; !exists {
+		return nil
 	}
 	delete(servers, serverName)
 	encodedServers, err := json.Marshal(servers)
@@ -121,6 +141,12 @@ func readJSONConfig(path string) (rawMCPFile, map[string]json.RawMessage, error)
 		if err := json.Unmarshal(raw, &servers); err != nil {
 			return nil, nil, fmt.Errorf("decode mcpServers in %s: %w", path, err)
 		}
+	}
+	if root == nil {
+		root = rawMCPFile{}
+	}
+	if servers == nil {
+		servers = map[string]json.RawMessage{}
 	}
 	return root, servers, nil
 }
@@ -170,7 +196,7 @@ func stateForStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kin
 	return managedConfigState{
 		configured: true, owned: owned,
 		current: currentStdio(entry, self, home, hostID, kind),
-		command: entry.Command, arguments: append([]string(nil), entry.Args...),
+		command: entry.Command, arguments: append([]string(nil), entry.Args...), reference: entry.Env[connectorconfig.EnvironmentKey],
 	}
 }
 
@@ -245,12 +271,20 @@ func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) 
 	if err != nil {
 		return managedConfigState{}, err
 	}
+	workflowConfigured, workflowReference := false, ""
+	for _, row := range yamlSequence(document).Content {
+		if scalarValue(row, "id") == dshWorkflowRow && scalarValue(row, "disabled") != "true" {
+			workflowConfigured = true
+			workflowReference = scalarValue(mappingValue(row, "config"), "connectorConfig")
+		}
+	}
 	entry := findDSHEntry(document)
 	if entry == nil {
-		return managedConfigState{}, nil
+		return managedConfigState{workflowConfigured: workflowConfigured, workflowReference: workflowReference}, nil
 	}
 	stdio := decodeDSHStdio(entry)
 	state := stateForStdio(stdio, self, home, hostID, DeepSeekHarness)
+	state.workflowConfigured, state.workflowReference = workflowConfigured, workflowReference
 	if reference := stdio.Env[connectorconfig.EnvironmentKey]; reference != "" {
 		c, err := connectorconfig.Load(reference)
 		if err != nil || c.Profile != filepath.Dir(path) {

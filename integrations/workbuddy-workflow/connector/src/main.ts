@@ -3,12 +3,13 @@ import { parseArgs } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createDispatcher } from '../../../workflow-agent-core/src/dispatcher'
-import { HostBridge, type Pairing } from '../../../workflow-agent-core/src/transport'
+import { BridgeError, HostBridge, type Pairing } from '../../../workflow-agent-core/src/transport'
 import { dispatcherLock, DispatcherBusy } from '../../../workflow-agent-core/node/runtime-lock'
 import { WorkBuddyAdapter } from './adapter'
 import { Cdp } from './cdp'
 import { presentationLoop, type PresentationStatus } from './presentation'
 import { createDiagnostics, diagnosedTransport } from './diagnostics'
+import { BridgeHealth } from './bridge-health'
 
 async function main() {
   const { values } = parseArgs({ options: {
@@ -50,7 +51,8 @@ async function main() {
   const cdp = new Cdp(Number(values['cdp-port']))
   const log = createDiagnostics(pairing.connector_id)
   const adapter = new WorkBuddyAdapter(cdp, log)
-  const transport = diagnosedTransport(bridge, log)
+  const bridgeHealth = new BridgeHealth(issue => log('connector.warning', { kind: 'bridge-health', status: issue || 'connected' }))
+  const transport = diagnosedTransport(bridge, log, bridgeHealth)
   const instance = randomUUID()
   const unlock = await dispatcherLock(path, instance)
   // Parent is Assistant Bridge, never an MCP connection or iframe.
@@ -69,7 +71,7 @@ async function main() {
       let version = '', ready = false, issue = 'host_unavailable'
       try {
         const probe = await adapter.probe(signal)
-        version = probe.version; issue = probe.issue || ''; ready = !issue
+        version = probe.version; issue = probe.issue || bridgeHealth.issue(); ready = !issue
       } catch { /* A transport failure is not evidence of an unsupported version. */ }
       try {
         await writeFile(temporaryStatus, JSON.stringify({ connector_id: pairing.connector_id, checked_at: Date.now(),
@@ -80,15 +82,22 @@ async function main() {
     }
   }
   const request = async (route: string, body?: unknown) => {
-    const response = await fetch(values['bridge-url']! + '/v1/workbuddy/' + route, {
-      method: body === undefined ? 'GET' : 'POST', redirect: 'error',
-      signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-      headers: { Authorization: `Bearer ${pairing.token}`, 'X-LazyMind-Connector-Id': pairing.connector_id,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    await bridgeHealth.wait('workbuddy', signal)
+    return bridgeHealth.track('workbuddy', async () => {
+      const response = await fetch(values['bridge-url']! + '/v1/workbuddy/' + route, {
+        method: body === undefined ? 'GET' : 'POST', redirect: 'error',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+        headers: { Authorization: `Bearer ${pairing.token}`, 'X-LazyMind-Connector-Id': pairing.connector_id,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+      const value = await response.json().catch(() => {
+        if (!response.ok) return {}
+        throw new Error('Invalid WorkBuddy bridge response')
+      })
+      if (!response.ok) throw new BridgeError(typeof value?.code === 'string' ? value.code : 'BRIDGE_ERROR', 'WorkBuddy bridge unavailable', response.status)
+      return value
     })
-    if (!response.ok) throw Object.assign(new Error('WorkBuddy bridge unavailable'), { status: response.status })
-    return response.json() as Promise<any>
   }
   async function identities() {
     while (!signal.aborted) {

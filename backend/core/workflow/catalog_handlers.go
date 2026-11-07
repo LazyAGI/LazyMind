@@ -91,6 +91,15 @@ func applyWorkflowCatalogLocale(spec workflowCatalogSpec, acceptLanguage string)
 	applyCatalogLabels(spec["slots"], selected["slots"])
 	if ui := catalogStringMap(spec["ui"]); ui != nil {
 		applyCatalogLabels(ui["tabs"], selected["tabs"])
+		tabs, _ := ui["tabs"].([]any)
+		translations := catalogStringMap(selected["tabs"])
+		for _, value := range tabs {
+			tab := catalogStringMap(value)
+			id, _ := tab["id"].(string)
+			if reason, ok := catalogStringMap(translations[id])["skip_reason"].(string); ok && reason != "" {
+				tab["skip_reason"] = reason
+			}
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_HIDE_EVO?: string;
   readonly VITE_APP_LOGO?: string;
   readonly VITE_APP_CHAT_TITLE?: string;
+  readonly VITE_APP_VERSION?: string;
   readonly VITE_USER_AGREEMENT_VERSION?: string;
 }
 
@@ -18,6 +19,7 @@ declare global {
   interface Window {
     BASENAME?: string;
     lazymindDesktop?: {
+      appVersion?: () => Promise<string>;
       recordingNativeStart?: () => Promise<{ session_id: string; startedAt: number }>;
       recordingNativeStop?: (id: string) => Promise<import("./modules/chat/components/SkillRecording/nativeCapture").NativeRecordingResult>;
       recordingNativeCancel?: () => Promise<void>;

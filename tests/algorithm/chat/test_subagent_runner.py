@@ -1573,6 +1573,9 @@ def test_empty_output_contract_does_not_invite_undeclared_workflow_artifacts(tmp
       'current_user_input': '继续'}, '请写约200字的章节。'),
     ({'launch_user_input': '请写约200字的章节。', 'current_user_input': '重新执行',
       'runtime_instruction': '本次改为约300字。'}, '本次改为约300字。'),
+    ({'launch_user_input': '请写约200字的章节。', 'current_user_input': '重新执行',
+      'retry_hint': 'Current step objective refinement: preserve exact fractions.'},
+     'Current step objective refinement: preserve exact fractions.'),
 ])
 def test_workflow_plan_keeps_runtime_length_above_step_defaults_without_db(tmp_path, params, expected):
     from lazymind.chat.engine.subagent.context import SubAgentContext
@@ -2715,4 +2718,30 @@ async def test_workflow_terminal_delivery_uses_saved_result_summary(
     else:
         assert completion['status'] == 'succeeded'
         assert completion['summary'] == ('本步骤结果已保存。' if terminal else final)
+    model.share.assert_not_called()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('saved', [True, False])
+async def test_workflow_refinements_preserve_record_acceptance(monkeypatch, tmp_path, saved):
+    """A current-step amendment changes execution intent, not main's acceptance gate."""
+    hint = 'Current step objective refinement: preserve exact fractions; correct CPM to 0.95.'
+    model = MagicMock()
+    model.share.side_effect = AssertionError('Workflow must not run a second completion review')
+    _, events = await _run_completion_review_scenario(
+        monkeypatch, tmp_path, model, agent_type='workflow_step',
+        objective='Normalize metrics before a later step delivers the final report.',
+        params={
+            'step_id': 'normalize_metrics', 'retry_hint': hint,
+            'legacy_tools': ['save_artifacts'],
+            'required_output_artifact_keys': ['metrics'], 'output_slot_types': {'metrics': 'text'},
+            '_display_plan_scope': {'prompt': 'Normalize metrics only.',
+                                    'acceptance_criteria': ['Compute before rounding.']},
+        }, output_slots=['metrics'],
+        artifacts=([{'slot': 'metrics', 'content_type': 'text', 'seq': 1,
+                     'value': {'text': 'CPM change 0.95.'}}] if saved else []),
+        final='The first attempt failed; the metrics are now ready. The final report comes later.',
+    )
+    assert _terminal(events)['status'] == ('succeeded' if saved else 'failed')
+    if not saved:
+        assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
     model.share.assert_not_called()

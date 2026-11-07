@@ -123,13 +123,22 @@ it('connected account cards only expose disconnect even when a return callback e
 
 it('missing credentials offer original-robot reauthorization after resume fails', async () => {
   mocks.resume.mockRejectedValueOnce({ response: { data: { error: { code: 'FEISHU_REAUTHORIZATION_REQUIRED' } } } });
+  // Keep reauthorization pending until its UI and original-account request are observed.
+  let finishReauthorization!: () => void;
+  mocks.create.mockImplementationOnce(() => new Promise(resolve => {
+    finishReauthorization = () => resolve({ id: 'reauthorized-session', provider: 'feishu', mode: 'qr_code',
+      status: 'connected', account: original, allowed_actions: [] });
+  }));
   mount('disconnected'); await expand();
-  fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
+  const reconnect = await screen.findByRole('button', { name: 'notifications.reconnect' });
+  await act(async () => { fireEvent.click(reconnect); });
   await screen.findByText('notifications.reconnectPlatform');
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
     accountId: original.id, reauthorize: true,
   })));
   expect(mocks.unbind).not.toHaveBeenCalled();
+  await act(async () => { finishReauthorization(); });
+  expect(screen.queryByText('notifications.reconnectPlatform')).not.toBeInTheDocument();
 });
 
 it('an unbound account can reauthorize the original robot without creating another app', async () => {

@@ -20,6 +20,14 @@ export class BridgeError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) { super(message) }
 }
 
+export function isHostAuthorizationError(error: unknown): error is BridgeError {
+  // Core can reject an individual action or receipt with 403 (including HOST_AUTH_REQUIRED).
+  // The Bridge reports a missing LazyMind session with 401 and pairing failures with explicit codes.
+  return error instanceof BridgeError && (error.status === 401
+    || ['HOST_PAIRING_MISSING', 'HOST_PAIRING_DISABLED', 'HOST_ACCOUNT_MISMATCH',
+      'HOST_CREDENTIAL_MISMATCH', 'HOST_PAIRING_INVALID', 'HOST_PAIRING_UNREADABLE'].includes(error.code))
+}
+
 export class HostBridge {
   private readonly base: string
   constructor(url: string, private readonly pairing: Pairing) {
@@ -36,7 +44,13 @@ export class HostBridge {
         ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-    const value = await response.json()
+    const decoded = await response.json().catch(() => {
+      // Preserve authentication/transport status even when an upstream gateway
+      // sends HTML or an empty response. Never include that body in diagnostics.
+      if (!response.ok) return {}
+      throw new Error('Invalid Workflow Bridge response')
+    })
+    const value = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {}
     if (!response.ok) throw new BridgeError(typeof value.code === 'string' ? value.code : 'BRIDGE_ERROR', typeof value.error === 'string' ? value.error : 'Workflow Bridge request failed', response.status)
     return value as T
   }

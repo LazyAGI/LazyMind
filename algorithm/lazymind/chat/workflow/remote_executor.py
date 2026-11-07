@@ -29,6 +29,15 @@ from lazymind.chat.engine.tools.workspace_context import workflow_execution_scop
 
 LOG = logging.getLogger(__name__)
 
+_active_attempts: set[tuple[str, str]] = set()
+_active_attempts_lock = threading.Lock()
+
+
+def workflow_attempt_is_running(attempt_id: str, lease_token: str) -> bool:
+    """Include setup and cleanup, not just the Agent's token stream."""
+    with _active_attempts_lock:
+        return (attempt_id, lease_token) in _active_attempts
+
 
 def _base_url() -> str:
     return str(config['core_service_url'] or config['core_api_url']).rstrip('/')
@@ -81,9 +90,14 @@ class RemoteWorkflowExecutor:
                     await asyncio.sleep(self.poll_seconds)
 
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
+        execution = (str(claim['attempt_id']), str(claim['lease_token']))
+        with _active_attempts_lock:
+            _active_attempts.add(execution)
         try:
             await self._execute_claim(client, claim)
         finally:
+            with _active_attempts_lock:
+                _active_attempts.discard(execution)
             # A fenced lease stops publication immediately, but only executor
             # exit confirms tools have finished. Never acknowledge from heartbeat.
             await self.runtime.acknowledge_stop(client, str(claim['attempt_id']), str(claim['lease_token']))

@@ -47,6 +47,9 @@ const mocks = vi.hoisted(() => ({
   workflowSessions: {} as Record<string, any>,
   workflowUIs: {} as Record<string, WorkflowUI>,
   fetchWorkflowUI: vi.fn(),
+  refreshConversationExecution: vi.fn(),
+  subscribeConvEvents: vi.fn(),
+  unsubscribeConvEvents: vi.fn(),
   taskCenterDisplayCount: vi.fn((tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0)),
   dismissedWorkflowSessions: {} as Record<string, Array<{ session_id: string; workflow_id: string }>>,
   forkBegin: vi.fn(),
@@ -268,9 +271,9 @@ vi.mock("@/modules/chat/store/taskCenter", () => {
     artifactsByConversation: mocks.artifactsByConversation,
     _loadingTasks: mocks.taskLoading,
     _taskLoadErrors: {},
-    refreshConversationExecution: vi.fn(),
-    subscribeConvEvents: vi.fn(),
-    unsubscribeConvEvents: vi.fn(),
+    refreshConversationExecution: mocks.refreshConversationExecution,
+    subscribeConvEvents: mocks.subscribeConvEvents,
+    unsubscribeConvEvents: mocks.unsubscribeConvEvents,
   };
   return {
     useTaskCenterStore: Object.assign((selector: (value: typeof state) => unknown) => selector(state), { getState: () => state }),
@@ -329,6 +332,23 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.createNewChat).not.toHaveBeenCalled();
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it("starts workflow and history loading without waiting for generation status", async () => {
+    const status = deferred<any>();
+    mocks.getChatStatus.mockReturnValue(status.promise);
+    const { unmount } = render(<ChatLayout conversationId="source" setIsChatContent={vi.fn()}
+      initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    expect(mocks.subscribeConvEvents).toHaveBeenCalledWith('source');
+    await waitFor(() => expect(mocks.refreshConversationExecution).toHaveBeenCalledWith('source'));
+    expect(mocks.getConversationDetail).toHaveBeenCalledOnce();
+    expect(mocks.getConversationHistory).toHaveBeenCalledOnce();
+    expect(mocks.replaceMessageList).not.toHaveBeenCalled();
+    await act(async () => { status.resolve({ data: { is_generating: true } }); });
+    expect(mocks.replaceMessageList).toHaveBeenCalledWith('source', [{ conversation: 'source' }]);
+    expect(mocks.openResumeSSE).toHaveBeenCalledWith('source');
+    unmount();
+    expect(mocks.unsubscribeConvEvents).toHaveBeenCalledWith('source');
   });
 
   it.each(["codex", "workbuddy"])("aligns a directly opened %s task with the sidebar mode and source", async (assistant) => {

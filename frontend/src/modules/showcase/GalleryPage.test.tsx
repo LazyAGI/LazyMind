@@ -42,17 +42,20 @@ describe("GalleryPage", () => {
     } as never);
   });
 
-  it("opens one unified capability center from legacy typed URLs", async () => {
+  it.each(["chat", "work"] as const)("keeps %s capabilities separate in the full gallery", async (mode) => {
     render(
-      <MemoryRouter initialEntries={["/agent/chat/cases?type=work"]}>
+      <MemoryRouter initialEntries={[`/agent/chat/cases?showcase_entry=${mode}`]}>
         <GalleryPage />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Work skill")).toBeInTheDocument();
-    expect(screen.getByText("Work skill")).toHaveAttribute("data-primary-action", "details");
-    expect(screen.getByText("Workflow")).toBeInTheDocument();
-    expect(screen.getByText("Chat skill")).toBeInTheDocument();
+    expect(await screen.findByText("论文阅读")).toBeInTheDocument();
+    for (const title of ["Chat skill", "Work skill", "Workflow"]) {
+      const card = screen.queryByText(title);
+      expect(Boolean(card)).toBe(title === "Chat skill" ? mode === "chat" : mode === "work");
+      if (card) expect(card).toHaveAttribute("data-entry-type", mode);
+    }
+    expect(screen.queryByRole("combobox", { name: "showcase.filters.capabilityType" })).not.toBeInTheDocument();
   });
 
   it("keeps featured Skills as chat cases and chat enhancements", async () => {
@@ -68,11 +71,9 @@ describe("GalleryPage", () => {
       total: 5,
     } as never);
 
-    render(<MemoryRouter><GalleryPage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/agent/chat/cases?showcase_entry=chat"]}><GalleryPage /></MemoryRouter>);
     expect(await screen.findByText("MBTI")).toBeInTheDocument();
 
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.capabilityType" }));
-    fireEvent.click(await screen.findByText("showcase.filters.capability.chat"));
     ["MBTI", "Prompt Engineering", "Graphic Design", "Live Commerce", "Skill Creator"].forEach((title) => {
       expect(screen.getByText(title)).toBeInTheDocument();
     });
@@ -88,15 +89,10 @@ describe("GalleryPage", () => {
     expect(screen.getByText("showcase.noMatches")).toBeInTheDocument();
   });
 
-  it("finds paper reading under both entry filters and the page form", async () => {
-    render(<MemoryRouter initialEntries={["/agent/chat/cases?showcase_entry=work"]}><GalleryPage /></MemoryRouter>);
+  it.each(["chat", "work"] as const)("finds paper reading from the %s entry and the page form", async (mode) => {
+    render(<MemoryRouter initialEntries={[`/agent/chat/cases?showcase_entry=${mode}`]}><GalleryPage /></MemoryRouter>);
     await screen.findByText("论文阅读");
-    for (const mode of ["chat", "work"]) {
-      fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.capabilityType" }));
-      fireEvent.click(await screen.findByText(`showcase.filters.capability.${mode}`));
-      expect(screen.getByText("论文阅读")).toBeInTheDocument();
-      expect(screen.getByText("论文阅读")).toHaveAttribute("data-entry-type", "work");
-    }
+    expect(screen.getByText("论文阅读")).toHaveAttribute("data-entry-type", mode);
     fireEvent.change(screen.getByRole("textbox", { name: "showcase.searchLabel" }), { target: { value: "论文阅读" } });
     expect(screen.getByText("论文阅读")).toBeInTheDocument();
     expect(screen.queryByText("Workflow")).not.toBeInTheDocument();

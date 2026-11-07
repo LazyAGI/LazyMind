@@ -1053,7 +1053,14 @@ export function MarkdownArtifactEditor({
     defaultValue: string,
     interpolations?: Record<string, unknown>,
   ) => {
+    if (key.startsWith('uploadImage.')) {
+      return t(`chat.writerMarkdown.${key}`, { defaultValue, ...interpolations });
+    }
     switch (key) {
+      case 'dialogControls.save':
+        return t('common.save');
+      case 'dialogControls.cancel':
+        return t('common.cancel');
       case 'toolbar.blockTypes.paragraph':
         return t('chat.writerMarkdown.blockTypes.paragraph');
       case 'toolbar.blockTypes.quote':

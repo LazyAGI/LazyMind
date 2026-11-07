@@ -1,3 +1,5 @@
+@use '../../../../styles/taskStatus' as status;
+
 .task-center {
   display: flex;
   flex-direction: column;
@@ -469,6 +471,15 @@
   &.task-status-running {
     color: #2f6bff;
   }
+  &.task-status-canceled {
+    color: #7a8493;
+  }
+  &.task-status-paused {
+    color: status.$paused-text;
+    background: status.$paused-soft;
+    border-radius: 999px;
+    padding: 2px 7px;
+  }
 }
 
 // ── Artifacts ─────────────────────────────────────────────────────────────────
@@ -729,6 +740,19 @@
   }
 }
 
+.task-center > .ordinary-queue-durations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+  color: #657286;
+  font-size: 11px;
+
+  time {
+    white-space: nowrap;
+  }
+}
+
 .ordinary-queue-summary-copy {
   min-width: 0;
   display: grid;
@@ -841,6 +865,14 @@
     border-color: #f0caca;
     background: #fff1f0;
   }
+
+  &.is-paused .ordinary-step-node {
+    color: status.$paused-text;
+    border-color: status.$paused-border;
+    background: status.$paused-soft;
+  }
+
+  &.is-paused .ordinary-step-label { color: status.$paused-text; }
 
   &.is-outdated .ordinary-step-node {
     color: #657286;
@@ -1042,6 +1074,15 @@
   color: #b42318;
 }
 
+.ordinary-task-card.is-canceled .ordinary-task-status {
+  color: #7a8493;
+}
+
+.ordinary-task-card.is-paused {
+  border-color: status.$paused-border;
+  .ordinary-task-status { color: status.$paused-text; }
+}
+
 .ordinary-task-arrow {
   color: #8c98a8;
   font-size: 11px;
@@ -1179,6 +1220,16 @@
     border-color: #d92d20;
     background: #fff1f0;
   }
+}
+
+.ordinary-thinking-item.is-paused,
+.ordinary-thinking-terminal.is-paused {
+  .ordinary-thinking-marker {
+    color: status.$paused-text;
+    border-color: status.$paused-border;
+    background: status.$paused-soft;
+  }
+  .ordinary-process-status { color: status.$paused-text; }
 }
 
 .ordinary-thinking-item.is-outdated,
@@ -1376,6 +1427,13 @@
   }
 }
 
+.ordinary-parallel-card.is-paused {
+  .ordinary-parallel-symbol,
+  .ordinary-parallel-status { color: status.$paused-text; background: status.$paused-soft; }
+}
+
+.ordinary-parallel-tab-state.is-paused { color: status.$paused-text; }
+
 .ordinary-parallel-tabs {
   display: flex;
   gap: 6px;
@@ -1497,6 +1555,12 @@
   .ordinary-thinking-marker { font-size: 10px; }
 }
 
+.ordinary-plan-progress.is-paused {
+  strong { color: status.$paused-text; }
+  progress::-webkit-progress-value { background: status.$paused-accent; }
+  progress::-moz-progress-bar { background: status.$paused-accent; }
+}
+
 @keyframes ordinary-plan-loading {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }
@@ -1565,4 +1629,9 @@
   &::-webkit-progress-bar { background: #edf1f7; }
   &::-webkit-progress-value { background: #2f6bff; }
   &::-moz-progress-bar { background: #2f6bff; }
+  &.is-paused {
+    accent-color: status.$paused-accent;
+    &::-webkit-progress-value { background: status.$paused-accent; }
+    &::-moz-progress-bar { background: status.$paused-accent; }
+  }
 }

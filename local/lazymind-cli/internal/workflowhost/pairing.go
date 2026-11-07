@@ -14,11 +14,32 @@ import (
 	"strings"
 	"time"
 
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/localfile"
 )
 
 const DSHProvider = "deepseek-harness"
+
+// PairingError classifies local recovery without including credentials, account
+// identifiers or file contents in the public response.
+type PairingError struct{ Code string }
+
+func (e *PairingError) PairingCode() string { return e.Code }
+func (e *PairingError) Error() string {
+	switch e.Code {
+	case "HOST_PAIRING_MISSING":
+		return "workflow host is not paired; connect it in LazyMind"
+	case "HOST_PAIRING_DISABLED":
+		return "workflow host is disabled; enable it in LazyMind to continue"
+	case "HOST_ACCOUNT_MISMATCH":
+		return "workflow host belongs to another account; reconnect for the current account"
+	case "HOST_CREDENTIAL_MISMATCH":
+		return "workflow host credentials do not match; repair this connection in LazyMind"
+	case "HOST_PAIRING_UNREADABLE":
+		return "workflow host pairing could not be read; check access and retry"
+	default:
+		return "workflow host pairing is invalid; repair this connection explicitly"
+	}
+}
 
 type Pairing struct {
 	Provider     string    `json:"provider"`
@@ -81,10 +102,10 @@ func EnsureForProvider(home, provider, profile, accountScope string) (Pairing, e
 	if err == nil {
 		pair = Pairing{}
 		if err := json.Unmarshal(body, &pair); err != nil {
-			return Pairing{}, errors.New("invalid workflow host pairing; repair this connection explicitly")
+			return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
 		}
 		if !normalizeProvider(&pair) || pair.Provider != provider || pair.ConnectorID != id || pair.AccountScope != accountScope || pair.Profile != absolute || len(pair.Token) != 64 {
-			return Pairing{}, errors.New("workflow host pairing does not match this account and profile")
+			return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
 		}
 		pair.Enabled = true
 	} else if errors.Is(err, os.ErrNotExist) {
@@ -102,16 +123,27 @@ func EnsureForProvider(home, provider, profile, accountScope string) (Pairing, e
 func Verify(home, id, token, accountScope string) (Pairing, error) {
 	path, err := pairingPath(home, id)
 	if err != nil {
-		return Pairing{}, err
+		return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
 	}
 	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Pairing{}, &PairingError{Code: "HOST_PAIRING_MISSING"}
+	}
 	if err != nil {
-		return Pairing{}, errors.New("workflow host is not paired")
+		return Pairing{}, &PairingError{Code: "HOST_PAIRING_UNREADABLE"}
 	}
 	var pair Pairing
-	if json.Unmarshal(body, &pair) != nil || !normalizeProvider(&pair) || pair.ConnectorID != id || !pair.Enabled || pair.AccountScope != accountScope || !integrationstate.Allowed(home, pair.Provider) || token == "" ||
-		subtle.ConstantTimeCompare([]byte(token), []byte(pair.Token)) != 1 {
-		return Pairing{}, errors.New("workflow host pairing is invalid; reconnect for the current account")
+	if json.Unmarshal(body, &pair) != nil || !normalizeProvider(&pair) || pair.ConnectorID != id || len(pair.Token) != 64 {
+		return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
+	}
+	if !pair.Enabled {
+		return Pairing{}, &PairingError{Code: "HOST_PAIRING_DISABLED"}
+	}
+	if accountScope == "" || pair.AccountScope != accountScope {
+		return Pairing{}, &PairingError{Code: "HOST_ACCOUNT_MISMATCH"}
+	}
+	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(pair.Token)) != 1 {
+		return Pairing{}, &PairingError{Code: "HOST_CREDENTIAL_MISMATCH"}
 	}
 	return pair, nil
 }
@@ -127,7 +159,7 @@ func Configured(home, id, accountScope string) bool {
 		return false
 	}
 	var pair Pairing
-	return json.Unmarshal(body, &pair) == nil && normalizeProvider(&pair) && pair.ConnectorID == id && pair.Enabled && pair.AccountScope == accountScope && integrationstate.Allowed(home, pair.Provider) && len(pair.Token) == 64
+	return json.Unmarshal(body, &pair) == nil && normalizeProvider(&pair) && pair.ConnectorID == id && pair.Enabled && pair.AccountScope == accountScope && len(pair.Token) == 64
 }
 
 // Only pre-existing dsh identities may omit provider. Never infer a new host's

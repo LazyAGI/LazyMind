@@ -15,6 +15,28 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestWorkflowCatalogLocalizesSkipReason(t *testing.T) {
+	for _, language := range []string{"zh-CN", "en-US"} {
+		t.Run(language, func(t *testing.T) {
+			tab := map[string]any{"id": "prompts", "label": "Page Prompts", "skip_reason": "Quick generation skips prompt planning."}
+			spec := workflowCatalogSpec{
+				"ui": map[string]any{"tabs": []any{tab}},
+				"i18n": map[string]any{"zh-CN": map[string]any{"tabs": map[string]any{
+					"prompts": map[string]any{"label": "每页提示词", "skip_reason": "快速生成跳过提示词规划。"},
+				}}},
+			}
+			applyWorkflowCatalogLocale(spec, language)
+			want := "Quick generation skips prompt planning."
+			if language == "zh-CN" {
+				want = "快速生成跳过提示词规划。"
+			}
+			if tab["skip_reason"] != want {
+				t.Fatalf("skip reason=%q want=%q", tab["skip_reason"], want)
+			}
+		})
+	}
+}
+
 func TestWorkflowCatalogReadsPinnedRevisionInsteadOfLatestHead(t *testing.T) {
 	db := newHandlerTestDB(t)
 	seedCatalogWorkflow(t, db, "versioned-ui")

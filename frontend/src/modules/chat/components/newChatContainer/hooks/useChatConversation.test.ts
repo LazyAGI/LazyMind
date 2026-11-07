@@ -170,6 +170,22 @@ describe("useChatConversation regeneration recovery", () => {
     await act(async () => { await result.current.sendMessage({ text: 'Explain this', document_context: selection }); });
     expect(onOpenSSE).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ document_context: selection }));
   });
+
+  it("submits an image-only turn without an empty text input", async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList('image-only-chat', []));
+    const image = { input_type: 'image' as const, uri: '/uploads/photo.png', filename: 'photo.png' };
+
+    await act(async () => { expect(await result.current.sendMessage({ text: '' })).toBe(false); });
+    await act(async () => {
+      expect(await result.current.sendMessage({ text: ' ', referencedFiles: [image] })).toBe(true);
+    });
+    expect(result.current.messageList[0].inputs).toEqual([image]);
+    expect(onOpenSSE).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps terminal tool counts live and replaces them with zero on regeneration', async () => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
