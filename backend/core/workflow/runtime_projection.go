@@ -288,7 +288,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	if err != nil {
 		return projectionResponse{}, err
 	}
-	if display.ApprovalStepID != "" {
+	if display.Status == "waiting" || display.Status == "waiting_input" || display.Status == "paused" {
 		projection.Completed = false
 	}
 	return projectionResponse{

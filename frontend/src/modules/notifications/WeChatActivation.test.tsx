@@ -177,8 +177,8 @@ it('checks a complete unsaved selection once but excludes it from timers, focus 
 });
 
 it.each([
-  { state: 'unavailable', label: 'wechatConnectionUnavailable', hint: 'wechatConnectionUnavailableHint', code: '' },
-  { state: 'activation_required', label: 'wechatReconnectRequired', hint: 'wechatReconnectHint', code: 'WECHAT_REAUTHORIZATION_REQUIRED' },
+  { state: 'unavailable', label: 'unavailable', hint: 'wechatConnectionUnavailableHint', code: '' },
+  { state: 'activation_required', label: 'notConnected', hint: 'wechatReconnectHint', code: 'WECHAT_REAUTHORIZATION_REQUIRED' },
 ])('synchronizes recipient-specific $label guidance in both configuration pages', async ({ state, label, hint, code }) => {
   mocks.targets.mockResolvedValue({ items: [{ ...recipient(state === 'unavailable', state), connection_error_code: code }], next_cursor: '' });
   const config = makeRule(), onChange = vi.fn();
@@ -219,7 +219,8 @@ it('does not restart recipient polling when a check resolves after unmount', asy
   const config = makeRule(), onChange = vi.fn();
   const view = render(<MemoryRouter><RuleEditor variant="task" value={config} preferences={makePreferences(config)} onChange={onChange} /></MemoryRouter>);
   await flushUpdates(); expect(probes()).toHaveLength(1);
-  expect(status(view.container)).toHaveTextContent('notifications.wechatChecking');
+  expect(status(view.container)).toBeNull();
+  expect(within(wechatBlock(view.container)).getByRole('status')).toHaveTextContent('notifications.wechatChecking');
   expect(within(wechatBlock(view.container)).queryByText('notifications.wechatActivationRequired')).not.toBeInTheDocument();
   expect(within(wechatBlock(view.container)).queryByText('notifications.wechatConnectionIssue')).not.toBeInTheDocument();
   view.unmount(); await act(async () => { finish({ items: [recipient(false)] }); });

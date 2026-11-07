@@ -72,7 +72,10 @@ func TestNativePauseRetriesSQLiteContentionWithoutDuplicateCancellation(t *testi
 	var cancellations atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cancellations.Add(1)
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true, "executor_stopped": false}); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer srv.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
@@ -195,7 +198,7 @@ func TestNativeSessionPauseIsScopedAndWaitsForExecutor(t *testing.T) {
 					t.Error(err)
 				}
 				cancelled = append(cancelled, payload.TaskID)
-				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true, "executor_stopped": false})
 			}))
 			defer srv.Close()
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
@@ -536,6 +539,62 @@ func TestNativeRewindPreservesExistingTransitionAdmission(t *testing.T) {
 			view, err := displaystate.Read(db.DB, *current)
 			if err != nil || view.Status != "running" || view.ChatHistoryID != "rewind-turn" {
 				t.Fatalf("handoff lost Chat ownership: %+v %v", view, err)
+			}
+		})
+	}
+}
+
+func TestNativePauseReconcilesOnlyConfirmedExecutorExit(t *testing.T) {
+	for _, test := range []struct {
+		name, response  string
+		status          int
+		wantErr, paused bool
+	}{
+		{"still_running", `{"ok":true,"executor_stopped":false}`, 200, false, false},
+		{"exited_or_restarted", `{"ok":true,"executor_stopped":true}`, 200, false, true},
+		{"no_exit_receipt", `{"ok":true}`, 200, false, false},
+		{"worker_unavailable", `{"ok":false}`, 503, true, false},
+		{"invalid_receipt", `invalid`, 200, true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := newTestDB(t)
+			session := orm.WorkflowSession{ID: "orphan-pause", ConversationID: "chat", CreateUserID: "owner", ControllerHost: "lazymind", Status: "pausing", StateVersion: 2}
+			if err := db.Create(&session).Error; err != nil {
+				t.Fatal(err)
+			}
+			step := orm.WorkflowSessionStep{ID: "old-attempt", SessionID: session.ID, TaskID: "old-task", StepID: "write", Status: "interrupted", TerminalCode: "WORKFLOW_STOP_REQUESTED", LeaseToken: "old-lease", Validity: "effective"}
+			if err := db.Create(&step).Error; err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]string
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if body["task_id"] != "old-task" || body["attempt_id"] != "old-attempt" || body["lease_token"] != "old-lease" {
+					t.Errorf("wrong execution identity: %+v", body)
+				}
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.response))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			err := recoverNativeWorkflowStops(t.Context(), db.DB, nil)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("stop err=%v wantErr=%v", err, test.wantErr)
+			}
+			if err := db.First(&session, "id=?", session.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(&step, "id=?", step.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if test.paused {
+				if session.Status != "waiting" || step.TerminalCode != "WORKFLOW_STOPPED" || session.StateVersion != 3 {
+					t.Fatalf("receipt not reconciled: %+v %+v", session, step)
+				}
+			} else if session.Status != "pausing" || step.TerminalCode != "WORKFLOW_STOP_REQUESTED" {
+				t.Fatalf("unconfirmed executor marked stopped: %+v %+v", session, step)
 			}
 		})
 	}

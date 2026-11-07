@@ -1,0 +1,20 @@
+{
+  "adapted_skill_sha256": "69cc6da0a4fde32574d862a7867e45906ef115361eb5f8f1717c187aaef0cbd7",
+  "commit": "2574e29377c7173d0cecffef29a6ecbd7f8ccb5d",
+  "connector_configuration": "No connectors installed. .mcp.json is optional host configuration mentioned in prose; offline inputs only.",
+  "connector_path": "product-management/CONNECTORS.md",
+  "endorsement": "No upstream endorsement or collaboration implied.",
+  "files_sha256": {
+    "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "SKILL.md": "69cc6da0a4fde32574d862a7867e45906ef115361eb5f8f1717c187aaef0cbd7",
+    "references/CONNECTORS.md": "f52733eb0cd1b46f96cbf15bd9d8dd5215c9341d9323f42da076bcddccda2f5e"
+  },
+  "license": "Apache-2.0",
+  "license_path": "product-management/LICENSE",
+  "modification": "2026-11-02: change only ../../CONNECTORS.md to references/CONNECTORS.md",
+  "original_skill_sha256": "ae98c11102545c911a1ea5d8527be0e08a3db8e53327f2865f0db19bbb2d7e9c",
+  "path": "product-management/skills/synthesize-research/SKILL.md",
+  "repository": "https://github.com/anthropics/knowledge-work-plugins",
+  "upstream": "Anthropic knowledge-work-plugins contributors",
+  "variant": "adapted Skill; not the original unchanged package"
+}

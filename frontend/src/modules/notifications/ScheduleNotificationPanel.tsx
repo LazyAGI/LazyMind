@@ -19,6 +19,7 @@ type WeChatStatus = ReturnType<typeof useWeChatNotificationStatus>['status'];
 
 function WeChatStatusTag({ status }: { status: WeChatStatus }) {
   const { t } = useTranslation();
+  if (status === 'checking') return <span className="notification-status-progress" role="status">{t('notifications.wechatChecking')}</span>;
   return status ? <Tag className="notification-wechat-status" color={status === 'connected' ? 'success' : 'warning'}>{t('notifications.' + wechatStatusLabel(status))}</Tag> : null;
 }
 
@@ -32,7 +33,7 @@ function ConfiguredChannel({ channel, rule, unavailable, blocked, wechatStatus, 
     return () => { active = false; };
   }, [rule.account_id, refreshKey]);
   const displayAccount = liveAccount?.id === rule.account_id ? liveAccount : account?.id === rule.account_id ? account : undefined;
-  return <div className="notification-row"><ChannelBrand channel={channel} avatar={displayAccount?.avatar_url} /><div className="notification-grow"><strong>{t('notifications.' + channel)}</strong><p>{[displayAccount?.label || rule.account_id, rule.recipient_id].filter(Boolean).join(' · ')}</p></div><Tag color={blocked ? 'warning' : undefined}>{t('notifications.' + (blocked ? 'channelPaused' : rule.enabled ? 'on' : 'off'))}</Tag>{channel === 'wechat' && <WeChatStatusTag status={wechatStatus} />}{unavailable && rule.enabled && !blocked && <Tag color="warning">{t('notifications.unavailable')}</Tag>}</div>;
+  return <div className="notification-row"><ChannelBrand channel={channel} avatar={displayAccount?.avatar_url} /><div className="notification-grow"><strong>{t('notifications.' + channel)}</strong><p>{[displayAccount?.label || rule.account_id, rule.recipient_id].filter(Boolean).join(' · ')}</p>{blocked && <small>{t('notifications.channelPaused')}</small>}</div><Tag color={blocked ? 'warning' : undefined}>{t('notifications.' + (blocked || !rule.enabled ? 'off' : 'on'))}</Tag>{channel === 'wechat' && <WeChatStatusTag status={wechatStatus} />}{unavailable && rule.enabled && !blocked && <Tag color="warning">{t('notifications.unavailable')}</Tag>}</div>;
 }
 
 export default function ScheduleNotificationPanel({ scheduleId, taskId: selectedTaskId, compact = false, draftMode = false, showHistory = true, summaryCard = false, editorOnly = false, title, editorOpen, onEditorOpenChange, onDraftChange }: {
@@ -267,7 +268,7 @@ export default function ScheduleNotificationPanel({ scheduleId, taskId: selected
     refreshKey: JSON.stringify([scheduleId, selectedTaskId, config?.revision, accountsRefresh]),
   });
   const wechatStatus = watchWechat && !loading && !preferencesBusy ? wechat.status : undefined;
-  const wechatWarning = wechatStatus && !['connected', 'checking', 'unconfigured'].includes(wechatStatus) && <Alert
+  const wechatWarning = wechatStatus && !['connected', 'connecting', 'checking', 'unconfigured'].includes(wechatStatus) && <Alert
     className="notification-task-wechat-warning" type="warning" showIcon
     message={t('notifications.' + (wechatStatus === 'pending' ? 'wechatActivationRequired' : wechatStatus === 'targetUnavailable' ? 'wechatTargetUnavailable' : 'wechatConnectionIssue'))}
     description={<>{t('notifications.' + wechatStatusHint(wechatStatus))}{wechat.account?.label && <p>{[wechat.account.label, configuredWechat?.recipient_id].filter(Boolean).join(' · ')}</p>}</>}

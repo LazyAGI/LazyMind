@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { getTaskRemovalPreview } from './api';
+import { getWorkbench, getTaskRemovalPreview } from './api';
 import { TASKS_REMOVED_EVENT } from './events';
 import { batchCreateAutomationGroup, cancelSchedule, cancelTask, createAutomationGroup, createSchedule, deleteAutomationGroup, deleteSchedule, enableSchedule, getTask, getTaskGoal, listAutomationGroups, listSchedules, listScheduleTasks, listTasks, moveSchedule, removeTask, runScheduleNow, updateSchedule } from './api';
 const http = vi.hoisted(() => ({ request: vi.fn(), defaults: {} }));
@@ -86,4 +86,16 @@ it.each([
 ] as const)('encodes identifiers for %s', async (call, path, method) => {
   await call('a/b');
   expect(http.request.mock.lastCall![0]).toMatchObject({ method, url: '/api/core' + path });
+});
+
+it('requests one workbench summary with global filters and category pagination', async () => {
+  const summary = { groups: {}, page_size: 4 };
+  http.request.mockResolvedValueOnce({ data: summary });
+  expect(await getWorkbench({ keyword: '研究', task_type: 'workflow_run', category: 'attention', page: 2 })).toEqual(summary);
+  expect(http.request).toHaveBeenCalledTimes(1);
+  const request = http.request.mock.lastCall![0];
+  const url = new URL(request.url, 'http://localhost');
+  expect(request.method).toBe('GET');
+  expect(url.pathname).toBe('/api/core/task-center/workbench');
+  expect(Object.fromEntries(url.searchParams)).toEqual({ task_type: 'workflow_run', keyword: '研究', category: 'attention', page: '2' });
 });

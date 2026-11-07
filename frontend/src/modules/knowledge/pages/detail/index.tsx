@@ -22,6 +22,7 @@ import { useParams } from "react-router-dom";
 import {
   CopyOutlined,
   DownOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import { Link, useNavigate } from "react-router-dom";
 import { useKnowledgeListReturn } from "../../hooks/useKnowledgeListNavigation";
@@ -525,19 +526,32 @@ const Detail = () => {
       />}
       {(taskPollingError || importTaskFailures.length > 0) && (
         <Alert
-          className="knowledge-parsing-notice"
+          className="knowledge-parsing-notice knowledge-import-error"
           type="error"
           showIcon
-          message={importTaskFailures.length ? "文献导入出现错误" : "无法获取导入进度"}
-          description={
-            <div style={{ maxHeight: 180, overflowY: "auto", whiteSpace: "pre-wrap" }}>
-              {taskPollingError && <div>{taskPollingError}</div>}
-              {importTaskFailures.map((failure) => <div key={failure.taskId}>{failure.message}</div>)}
+          message={
+            <div className="knowledge-import-error__heading">
+              <span>{t(importTaskFailures.length ? "knowledge.importFailedTitle" : "knowledge.importProgressUnavailable")}</span>
+              {importTaskFailures.length > 0 && (
+                <span className="knowledge-import-error__count">
+                  {t("knowledge.importFailureCount", { count: importTaskFailures.length })}
+                </span>
+              )}
             </div>
           }
+          description={
+            <details className="knowledge-import-error__details">
+              <summary>{t("knowledge.importErrorDetails")}<DownOutlined aria-hidden /></summary>
+              <div className="knowledge-import-error__messages">
+                {taskPollingError && <div>{taskPollingError}</div>}
+                {importTaskFailures.map((failure) => <div key={failure.taskId}>{failure.message}</div>)}
+              </div>
+            </details>
+          }
           action={
-            <Button size="small" onClick={() => importTaskRef.current?.handleOpen({ dataset_id: id, initialTab: TaskTab.Failed })}>
-              查看失败任务
+            <Button size="small" icon={<RightOutlined />} iconPosition="end"
+              onClick={() => importTaskRef.current?.handleOpen({ dataset_id: id, initialTab: TaskTab.Failed })}>
+              {t("knowledge.viewFailedImportTasks")}
             </Button>
           }
         />

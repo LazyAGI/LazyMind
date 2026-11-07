@@ -211,6 +211,7 @@ type DesktopBridgeCommand =
 
 interface LazyMindDesktopBridge {
   platform?: string;
+  appVersion?: () => Promise<string>;
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
   openNotificationSettings?: () => Promise<void> | void;
@@ -774,6 +775,14 @@ export function exportDiagnostics(): Promise<string | null> {
 
 export function getDesktopPlatform(): string | undefined {
   return getDesktopBridge()?.platform;
+}
+
+export async function getDesktopAppVersion(): Promise<string | undefined> {
+  try {
+    return await getDesktopBridge()?.appVersion?.();
+  } catch {
+    return undefined;
+  }
 }
 
 async function callDesktopFileAction(

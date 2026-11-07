@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/displaystate"
 )
 
 // EnsureWorkflowTask joins a newly created session to its running trigger, or
@@ -95,14 +96,9 @@ func WorkflowWasStopped(ctx context.Context, db *gorm.DB, sessionID string) bool
 		Where("id = ?", sessionID).Take(&session).Error; err != nil {
 		return false
 	}
-	var attempts []struct {
-		Status       string
-		TerminalCode string
-		CreatedAt    time.Time
-		UpdatedAt    time.Time
-	}
+	var attempts []orm.WorkflowSessionStep
 	if err := db.WithContext(ctx).Table("plugin_session_steps AS step").
-		Select("step.status, step.terminal_code, step.created_at, step.updated_at").
+		Select("step.task_id, step.status, step.terminal_code, step.created_at, step.updated_at").
 		Where("step.session_id = ? AND step.validity <> ?", sessionID, "stale").
 		Where(`NOT EXISTS (SELECT 1 FROM plugin_session_steps newer
 			WHERE newer.session_id = step.session_id AND newer.step_id = step.step_id
@@ -110,16 +106,13 @@ func WorkflowWasStopped(ctx context.Context, db *gorm.DB, sessionID string) bool
 		Find(&attempts).Error; err != nil {
 		return false
 	}
-	var stoppedAt time.Time
-	if session.LastStoppedAt != nil {
-		stoppedAt = *session.LastStoppedAt
+	stoppedAt, err := displaystate.UserStoppedAt(db.WithContext(ctx), session.LastStoppedAt, attempts)
+	if err != nil {
+		return false
 	}
 	for _, attempt := range attempts {
 		if attempt.Status == "pending" || attempt.Status == "queued" || attempt.Status == "running" || attempt.Status == "claimed" {
 			return false
-		}
-		if attempt.Status == "interrupted" && attempt.TerminalCode == "WORKFLOW_STOPPED" && attempt.UpdatedAt.After(stoppedAt) {
-			stoppedAt = attempt.UpdatedAt
 		}
 	}
 	for _, attempt := range attempts {

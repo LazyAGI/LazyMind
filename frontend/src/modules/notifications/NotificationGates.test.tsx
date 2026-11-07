@@ -399,7 +399,9 @@ describe('task notification global channel gates', () => {
 
   it('refreshes channel gates when reopening a noncompact editor', async () => {
     const entry = await openTask();
-    fireEvent.click(screen.getByRole('button', { name: 'notifications.cancel' }));
+    const cancel = screen.getByRole('button', { name: 'notifications.cancel' });
+    await waitFor(() => expect(cancel).toBeEnabled());
+    fireEvent.click(cancel);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
     preferences = { ...preferences, revision: 4, defaults: { ...preferences.defaults, channels: { ...preferences.defaults.channels, feishu: { enabled: true } } } };
     fireEvent.click(entry);
