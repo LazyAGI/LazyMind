@@ -1071,6 +1071,24 @@ describe("ChatInput optional reranking", () => {
   });
 });
 
+it.each([
+  { work: false, type: 'workflow' as const },
+  { work: true, type: 'workflow' as const },
+  { work: false, type: 'skill' as const },
+  { work: true, type: 'skill' as const },
+])('submits a selected $type directly in Work=$work without a repair dialog', async ({ work, type }) => {
+  useChatInputStore.getState().clearAllInputContents();
+  vi.mocked(listSkillLinkedWorkflows).mockResolvedValue({ skill_id: 'skill-1', skill_name: 'Advisor', workflows: [] });
+  const mention: ChatMention = { mention_id: `selected-${type}`, type, resource_id: type === 'workflow' ? 'user:owner:workflow' : 'skill-1', display_name: 'Selected capability' };
+  const onSend = vi.fn();
+  render(<ChatInput value="Run this" onChange={vi.fn()} onSend={onSend} isChatContent runInBackground={work}
+    boundMentions={[mention]} initialConversationSettings={{ enable_workflow: true, workflow_mode: 'dynamic' }}
+    showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+  fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
+  await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: 'Run this', mentions: [mention] })));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 describe('paper composer scope',()=>{
  it('keeps model selection and send while removing toolbar extras only in paper mode',()=>{
   const props={value:'Read this paper',onChange:vi.fn(),isChatContent:true,showConversationConfig:false,showPromptSuggestions:false};

@@ -2,7 +2,7 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Input, message, Progress, Segmented, Select, Space, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, DeleteOutlined, EllipsisOutlined, HourglassOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, EllipsisOutlined, HourglassOutlined, PauseCircleOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import TaskRemovalDialog from './TaskRemovalDialog';
@@ -10,17 +10,19 @@ import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
 import { WORKFLOW_TASKS_CHANGED } from './events';
 import { listTasks } from './api';
 import type { Task } from './api';
-import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
+import TaskDetail, { formatDate } from './TaskDetail';
+import { StatusTag } from './StatusTag';
 import { CHAT_CONVERSATION_LIST_REFRESH_EVENT, CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
 import { RECOVERY_ARCHIVE_PATH } from '@/modules/settings/recoveryRoute';
 import { emitConversationListRefresh } from '@/modules/chat/utils/conversationActivity';
+import { taskStepProgress, useTaskSteps } from './useTaskSteps';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 5_000;
-const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'skipped', 'canceled']);
+const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'interrupted', 'skipped', 'canceled']);
 
 interface TaskListProps {
   active: boolean;
@@ -36,17 +38,18 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const request = useRef(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
-  const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, waiting_inputs: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
+  const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, waiting_inputs: 0, running: 0, paused: 0, succeeded: 0, completed: 0, failed: 0, interrupted: 0, canceled: 0 });
   const [type, setType] = useState('');
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [stepsRefreshVersion, setStepsRefreshVersion] = useState(0);
   const [removingTask, setRemovingTask] = useState<Task | null>(null);
   const [selected, setSelected] = useState<Task | null>(null);
   const [archiveTask, setArchiveTask] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
   const hasRunningTask = statusCounts.running > 0 || statusCounts.waiting_inputs > 0 || tasks.some((task) => task.status === 'running' || task.status === 'waiting_inputs');
 
-  const load = useCallback(async (silent = false) => {
+  const load = useCallback(async (silent = false, refreshSteps = false) => {
     const current = ++request.current;
     if (!silent) setLoading(true);
     try {
@@ -55,8 +58,9 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       const lastPage = Math.max(1, Math.ceil((response.total ?? 0) / PAGE_SIZE));
       if (page > lastPage) { onPageChange(lastPage); return; }
       setTasks(response.items ?? []);
+      if (refreshSteps) setStepsRefreshVersion(version => version + 1);
       setTotal(response.total ?? 0);
-      if (response.status_counts) setStatusCounts(response.status_counts);
+      if (response.status_counts) setStatusCounts(current => ({ ...current, ...response.status_counts }));
     } catch {
       if (current !== request.current) return;
       // API errors are reported by the shared request interceptor.
@@ -120,13 +124,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     },
     {
       title: t('taskCenter.statusAndNext'), key: 'state', width: '24%',
-      render: (_, task) => {
-        const done = task.steps?.filter((step) => ['completed', 'succeeded'].includes(step.status)).length ?? 0;
-        const count = task.steps?.length ?? 0;
-        const showProgress = count > 0 && !TERMINAL_TASK_STATUSES.has(task.status);
-        const stateCopy = task.waiting_reason || (count ? t('taskCenter.stepsCompleted', { done, total: count }) : task.conversation_title || task.title || t('taskCenter.noDescription'));
-        return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.workflow_session_id ? () => setGraphTask(task) : undefined} /><Tooltip title={stateCopy}><span className='task-list-state-copy'>{stateCopy}</span></Tooltip></div>{showProgress ? <Progress percent={Math.round(done / count * 100)} showInfo={false} size='small' /> : null}</div>;
-      },
+      render: (_, task) => <TaskListState task={task} refreshVersion={stepsRefreshVersion} onOpenGraph={() => setGraphTask(task)} />,
     },
     {
       title: t('taskCenter.time'),
@@ -142,15 +140,13 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   ];
 
   const statusOptions = [
-    { label: <span className='status-option status-all'><AppstoreOutlined /><span>{t('taskCenter.statusAll')}</span><b>{statusCounts.all}</b></span>, value: '' },
-    { label: <span className='status-option status-pending'><HourglassOutlined /><span>{t('taskCenter.statusPending')}</span><b>{statusCounts.pending}</b></span>, value: 'pending' },
-    { label: <span className='status-option status-waiting'><ClockCircleOutlined /><span>{t('taskCenter.statusWaiting')}</span><b>{statusCounts.waiting}</b></span>, value: 'waiting' },
-    { label: <span className='status-option'><StopOutlined /><span>{t('taskCenter.statusPaused')}</span></span>, value: 'paused' },
-    { label: <span className='status-option status-waiting'><ClockCircleOutlined /><span>{t('taskCenter.statusWaitingInputs')}</span><b>{statusCounts.waiting_inputs}</b></span>, value: 'waiting_inputs' },
-    { label: <span className='status-option status-running'><SyncOutlined /><span>{t('taskCenter.statusRunning')}</span><b>{statusCounts.running}</b></span>, value: 'running' },
-    { label: <span className='status-option status-succeeded'><CheckCircleOutlined /><span>{t('taskCenter.statusCompleted')}</span><b>{statusCounts.succeeded}</b></span>, value: 'succeeded' },
-    { label: <span className='status-option status-failed'><CloseCircleOutlined /><span>{t('taskCenter.statusFailed')}</span><b>{statusCounts.failed}</b></span>, value: 'failed' },
-    { label: <span className='status-option status-canceled'><StopOutlined /><span>{t('taskCenter.statusCanceled')}</span><b>{statusCounts.canceled}</b></span>, value: 'canceled' },
+    { className: 'segment-all', label: <span className='status-option status-all'><AppstoreOutlined /><span>{t('taskCenter.statusAll')}</span><b>{statusCounts.all}</b></span>, value: '' },
+    { className: 'segment-pending', label: <span className='status-option status-pending'><HourglassOutlined /><span>{t('taskCenter.statusAttention')}</span><b>{statusCounts.pending + statusCounts.waiting + statusCounts.waiting_inputs}</b></span>, value: 'attention' },
+    { className: 'segment-running', label: <span className='status-option status-running'><SyncOutlined /><span>{t('taskCenter.statusRunning')}</span><b>{statusCounts.running}</b></span>, value: 'running' },
+    { className: 'segment-paused', label: <span className='status-option status-paused'><PauseCircleOutlined /><span>{t('taskCenter.statusPaused')}</span><b>{statusCounts.paused}</b></span>, value: 'paused' },
+    { className: 'segment-failed', label: <span className='status-option status-failed'><CloseCircleOutlined /><span>{t('taskCenter.statusFailed')}</span><b>{statusCounts.failed + statusCounts.interrupted}</b></span>, value: 'failed' },
+    { className: 'segment-succeeded', label: <span className='status-option status-succeeded'><CheckCircleOutlined /><span>{t('taskCenter.statusCompleted')}</span><b>{statusCounts.succeeded + statusCounts.completed}</b></span>, value: 'succeeded' },
+    { className: 'segment-canceled', label: <span className='status-option status-canceled'><StopOutlined /><span>{t('taskCenter.statusCanceled')}</span><b>{statusCounts.canceled}</b></span>, value: 'canceled' },
   ];
 
   const openConversation = (id: string) => {
@@ -192,7 +188,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
             { value: 'background_chat', label: t('taskCenter.typeBackgroundChat') },
             { value: 'scheduled', label: t('taskCenter.typeScheduled') },
           ]} />
-          <Button icon={<ReloadOutlined />} onClick={() => void load()} aria-label={t('taskCenter.refresh')} />
+          <Button icon={<ReloadOutlined />} onClick={() => void load(false, true)} aria-label={t('taskCenter.refresh')} />
         </div>
       </div>
       <Table rowKey='id' className='task-table' tableLayout='fixed' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
@@ -216,6 +212,15 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );
+}
+
+function TaskListState({ task, refreshVersion, onOpenGraph }: { task: Task; refreshVersion: number; onOpenGraph: () => void }) {
+  const { t } = useTranslation();
+  const { steps, loading, failed } = useTaskSteps(task, refreshVersion);
+  const { done, total, percent } = taskStepProgress(steps);
+  const stateCopy = task.waiting_reason || (failed ? t('taskCenter.loadError') : loading ? t('common.loading')
+    : total ? t('taskCenter.stepsCompleted', { done, total }) : task.conversation_title || task.title || t('taskCenter.noDescription'));
+  return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.workflow_session_id ? onOpenGraph : undefined} /><Tooltip title={stateCopy}><span className='task-list-state-copy'>{stateCopy}</span></Tooltip></div>{total > 0 && !loading && !failed && !TERMINAL_TASK_STATUSES.has(task.status) ? <Progress percent={percent} showInfo={false} size='small' /> : null}</div>;
 }
 
 function typeLabel(value: string, t: (key: string) => string) {

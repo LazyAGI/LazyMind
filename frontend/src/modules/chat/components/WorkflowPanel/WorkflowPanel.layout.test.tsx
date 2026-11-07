@@ -154,6 +154,32 @@ async function waitForCompletedContinueButton() {
 }
 
 describe('shared workflow compact layout', () => {
+  it.each(['pruned', 'bypassed'])('explains a %s step in native Chat without waiting for nonexistent output', async branch => {
+    fixture.ui.tabs!.push({ id: 'prompts', step_id: 'plan_prompts', label: '每页提示词', layout: 'composite', slots: [{ id: 'prompts', label: '每页提示词', type: 'text' }],
+      skip_reason: '本次选择了快速生成，因此跳过提示词规划，直接生成幻灯片。' });
+    fixture.session.projection!.nodes = { plan_prompts: {
+      execution: 'none', branch, validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable',
+    } };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    const tab = await screen.findByRole('tab', { name: /每页提示词/ });
+    expect(tab.querySelector('.workflow-panel__step-status')).toBeNull();
+    fireEvent.click(tab);
+    const panel = screen.getByRole('tabpanel', { name: /每页提示词/ });
+    expect(within(panel).getByText('已跳过')).toBeVisible();
+    expect(within(panel).getByText(/本次选择了快速生成/)).toBeVisible();
+    expect(within(panel).queryByText('正在等待步骤结果…')).not.toBeInTheDocument();
+  });
+
+  it('explains skipped steps with a generic branch reason when the pinned package has no custom reason', async () => {
+    fixture.ui.tabs!.push({ id: 'optional', label: '可选步骤', slots: [] });
+    fixture.session.projection!.nodes = { optional: {
+      execution: 'none', branch: 'pruned', validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable',
+    } };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    fireEvent.click(await screen.findByRole('tab', { name: /可选步骤/ }));
+    expect(within(screen.getByRole('tabpanel', { name: /可选步骤/ })).getByText('本次流程的分支决策跳过了此步骤，无需等待执行结果。')).toBeVisible();
+  });
+
   it('replaces the UI for a new pinned version of the same workflow without displaying the old tabs', async () => {
     fixture.session.pinned_revision_id = 'v1';
     const view = render(<WorkflowPanel conversationId='layout-test' />);
@@ -929,6 +955,16 @@ describe('shared workflow compact layout', () => {
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
   });
 
+  it.each(['paused', 'failed'] as const)('classifies step interruptions from the authoritative %s display state', async status => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status, reason: status === 'paused' ? 'user_stopped' : 'interrupted', approval_step_id: '' };
+    fixture.session.steps![1].status = 'interrupted';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    const tab = await screen.findByRole('tab', { name: /成稿/ });
+    expect(tab.querySelector(`.workflow-panel__step-status--${status}`)).toHaveAttribute('title', status === 'paused' ? '已暂停' : '已失败');
+    expect(view.container.querySelector('.workflow-panel__step-status--interrupted')).not.toBeInTheDocument();
+  });
+
   it('offers retry after pausing a parallel run with an already failed branch', async () => {
     fixture.session.status = 'waiting';
     fixture.session.projection!.display = { status: 'paused', reason: 'user_stopped', approval_step_id: '' };
@@ -1108,6 +1144,10 @@ describe('external workflow surface boundary', () => {
       } as WorkflowControlView;
       const view = render(<WorkflowPanel conversationId='layout-test' />);
       await screen.findByRole('button', { name: '发布' });
+      if (interrupted) {
+        expect(view.container.querySelector('.workflow-panel__step-status--paused')).toHaveAttribute('title', '已暂停');
+        expect(view.container.querySelector('.workflow-panel__step-status--interrupted')).not.toBeInTheDocument();
+      }
       const footerButtons = () => within(screen.getByRole('group', { name: '工作流会话操作' }))
         .getAllByRole('button').map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled }));
       const native = footerButtons();
@@ -1436,6 +1476,26 @@ describe('workflow follow and session presentation', () => {
   }
   const following = () => screen.getByRole('button', { name: '跟随进度' });
   const browsing = () => screen.getByRole('button', { name: '自由浏览' });
+
+  it('points the browse marker at the completed retry instead of an earlier step', async () => {
+    fixture.ui.follow_mode = { default: 'following' };
+    fixture.session.current_step_id = '';
+    fixture.session.steps = [
+      { ...fixture.session.steps![0], updated_at: '2026-11-06T09:52:38Z' },
+      { ...fixture.session.steps![1], status: 'interrupted', validity: 'stale', updated_at: '2026-11-06T10:11:14Z' },
+      { ...fixture.session.steps![1], id: 'retry', attempt: 2, updated_at: '2026-11-06T10:15:33Z' },
+    ];
+    fixture.session.projection = { completed: true, stale: ['write_document'], nodes: {
+      prepare: { execution: 'succeeded', validity: 'effective', branch: 'active', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' },
+      write_document: { execution: 'succeeded', validity: 'effective', branch: 'active', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable' },
+    } };
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    const earlier = screen.getByRole('tab', { name: '写作准备' });
+    fireEvent.click(earlier);
+    expect(within(screen.getByRole('tab', { name: /成稿.*当前/ })).getByLabelText('当前')).toBeVisible();
+    expect(within(earlier).queryByLabelText('当前')).not.toBeInTheDocument();
+  });
 
   it('explains each explicit mode change without notifying on mount or repeated selection', async () => {
     enableFollowing();

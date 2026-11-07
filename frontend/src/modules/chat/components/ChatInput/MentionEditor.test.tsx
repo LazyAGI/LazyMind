@@ -64,6 +64,83 @@ describe("MentionEditor", () => {
     fireEvent.input(editor);
   };
 
+  it.each(["/", "/workflow:"])("waits for consent before inserting a workflow selected through %s", async (query) => {
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: "builtin:writer", name: "Writer", enabled: true }] } });
+    let confirm!: (allowed: boolean) => void;
+    const beforeWorkflowSelect = vi.fn(() => new Promise<boolean>(resolve => { confirm = resolve; }));
+    const onMentionsChange = vi.fn();
+    const onSend = vi.fn();
+    const { container } = render(<MentionEditor value="" placeholder="message" workflowDisabled
+      beforeWorkflowSelect={beforeWorkflowSelect} onChange={vi.fn()} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={onSend} onCompositionChange={vi.fn()} />);
+    enterQuery(query);
+    const option = await screen.findByRole("option", { name: /Writer/ });
+    expect(option).toHaveTextContent("Writer");
+    expect(option).not.toHaveTextContent("chat.workflowSelectionDisabledLabel");
+    const disabledIcon = screen.getByRole("img", { name: "chat.conversationConfigWorkflowDisabled" });
+    expect(disabledIcon.closest(".chat-mention-group-title")).toHaveTextContent("chat.mentionWorkflow");
+    expect(container.querySelectorAll(".chat-mention-workflow-disabled")).toHaveLength(1);
+    fireEvent.mouseDown(option);
+    expect(beforeWorkflowSelect).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".chat-mention-chip")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent(query);
+    confirm(true);
+    await waitFor(() => expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: "workflow", resource_id: "builtin:writer" })]));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("preserves the input when workflow consent is declined", async () => {
+    mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: "builtin:writer", name: "Writer", enabled: true }] } });
+    const beforeWorkflowSelect = vi.fn().mockResolvedValue(false);
+    const { container } = render(<MentionEditor value="" placeholder="message" beforeWorkflowSelect={beforeWorkflowSelect}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    enterQuery("/workflow:");
+    await screen.findByRole("option", { name: "Writer" });
+    expect(screen.queryByRole("img", { name: "chat.conversationConfigWorkflowDisabled" })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    await waitFor(() => expect(beforeWorkflowSelect).toHaveBeenCalledTimes(1));
+    expect(container.querySelector(".chat-mention-chip")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveTextContent("/workflow:");
+  });
+
+  it.each(['cancel-mode', 'decline-workflow', 'confirm', 'change-conversation'] as const)(
+    'checks workflow consent after mode confirmation: %s', async action => {
+      mocks.listShowcaseCases.mockResolvedValue({ cases: [{ id: 'ppt', type: 'workflow', workflow_ref: 'builtin:ppt' }] });
+      mocks.axiosGet.mockResolvedValue({ data: { workflows: [{ workflow_ref: 'builtin:ppt', name: 'PPT' }] } });
+      let resolveConsent!: (allowed: boolean) => void;
+      const beforeWorkflowSelect = vi.fn(() => new Promise<boolean>(resolve => { resolveConsent = resolve; }));
+      const props = { value: '', placeholder: 'message', beforeWorkflowSelect, onEntryModeChange: vi.fn(),
+        onChange: vi.fn(), onMentionsChange: vi.fn(), onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+      const view = render(<MentionEditor {...props} conversationId='original' />);
+      enterQuery('Draft /');
+      fireEvent.click(await screen.findByRole('option', { name: 'PPT' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(beforeWorkflowSelect).not.toHaveBeenCalled();
+      if (action === 'cancel-mode') {
+        fireEvent.click(within(dialog).getByRole('button', { name: 'common.cancel' }));
+        expect(beforeWorkflowSelect).not.toHaveBeenCalled();
+      } else {
+        fireEvent.click(within(dialog).getByRole('button', { name: 'chat.capabilityModeSwitchConfirm' }));
+        expect(beforeWorkflowSelect).toHaveBeenCalledOnce();
+        expect(props.onEntryModeChange).not.toHaveBeenCalled();
+        expect(view.container.querySelector('.chat-mention-chip')).toBeNull();
+        fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+        expect(props.onSend).not.toHaveBeenCalled();
+        if (action === 'change-conversation') view.rerender(<MentionEditor {...props} conversationId='new' />);
+        await act(async () => resolveConsent(action !== 'decline-workflow'));
+      }
+      if (action === 'confirm') {
+        expect(props.onEntryModeChange).toHaveBeenCalledWith('work', expect.objectContaining({
+          text: 'Draft PPT', featuredSelection: { caseId: 'ppt' },
+        }));
+      } else {
+        expect(props.onEntryModeChange).not.toHaveBeenCalled();
+        expect(view.container.querySelector('.chat-mention-chip')).toBeNull();
+      }
+    },
+  );
+
   const scrollMenu = (scrollTop = 600) => {
     const menu = screen.getByRole('listbox');
     Object.defineProperties(menu, {

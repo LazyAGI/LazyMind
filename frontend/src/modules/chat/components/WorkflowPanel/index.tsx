@@ -1,5 +1,5 @@
 import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
-import { hiddenUserSlots, workflowUIForAudience } from './workflowAudience';
+import { hiddenUserSlots, workflowTabsForAudience, workflowUIForAudience } from './workflowAudience';
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
@@ -26,11 +26,11 @@ import {
 } from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
 import {
-  filterWorkflowTabs,
   workflowTabAllowsDownload,
   useWorkflowStore,
 } from '@/modules/chat/store/workflowPanel';
 import { workflowDisplayLabel, type NativeWorkflowControl } from '@/modules/chat/store/workflowStatus';
+import { workflowTaskDisplayStatus } from '@/modules/chat/utils/workflowTaskStatus';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
@@ -66,6 +66,7 @@ import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditing
 import { findWriterArtifactStream, shouldShowArtifactStream } from './writerArtifactStream';
 import { PaperAnalysisProgress } from './PaperAnalysisProgress';
 import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
+import { workflowTabStatus } from './workflowStepStatus';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import type { WorkflowPanelActionIntent } from '@/modules/chat/utils/workflowControl';
 import {
@@ -1758,9 +1759,9 @@ export function WorkflowPanel({
   const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
   const activeTabId = view.tabId;
   const followingEnabled = Boolean(ui.follow_mode?.default);
-  const tabs = useMemo(() => filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material,
-    { steps: session?.steps, projection: session?.projection }, ui.hide_skipped_steps,
-    ui.hide_unstarted_steps && session?.workflow_mode === 'dynamic'), [ui, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
+  const tabs = useMemo(() => workflowTabsForAudience(rawUI ?? EMPTY_WORKFLOW_UI,
+    { slots: session?.slots, steps: session?.steps, projection: session?.projection, workflow_mode: session?.workflow_mode }, developerMode),
+  [rawUI, developerMode, session?.slots, session?.steps, session?.projection, session?.workflow_mode]);
   const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
   const runtimeTabId = tabs[runtimeTabIdx]?.id;
   const visibleActiveTabIdx = followingEnabled && view.mode === 'following' && !previewTarget && runtimeTabIdx !== -1
@@ -2428,15 +2429,8 @@ export function WorkflowPanel({
             <span className='workflow-panel__tabs-label'>{t('chat.workflowOutputs')}</span>
           )}
           {tabs.map((tab, idx) => {
-            const statusStepIds = tab.status_step_ids ?? [tab.step_id ?? tab.id];
-            const step = session.steps
-              ?.filter((s) => statusStepIds.includes(s.step_id) && s.validity !== 'stale')
-              .sort((a, b) => (
-                Number(b.step_id === session.current_step_id)
-                - Number(a.step_id === session.current_step_id)
-                || b.attempt - a.attempt
-              ))[0];
-            const stepStatus = step?.status;
+            const stepStatus = workflowTaskDisplayStatus(workflowTabStatus(tab, session), display?.status);
+            const stepStatusLabel = stepStatus ? t(stepStatus === 'waiting_input' ? 'taskCenter.statusWaitingInput' : `taskCenter.status${stepStatus.charAt(0).toUpperCase()}${stepStatus.slice(1)}`, { defaultValue: stepStatus }) : undefined;
             return (
               <React.Fragment key={tab.id}>
                 {idx > 0 && (
@@ -2464,11 +2458,11 @@ export function WorkflowPanel({
                         aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
                     )}
                   </span>
-                  {stepStatus && stepStatus !== 'succeeded' && !(followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx) && (
+                  {!['pending', 'succeeded', 'skipped'].includes(stepStatus) && !(followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx) && (
                     <span
                       className={`workflow-panel__step-status workflow-panel__step-status--${stepStatus}`}
-                      aria-label={`Step status: ${stepStatus}`}
-                      title={stepStatus}
+                      aria-label={stepStatusLabel}
+                      title={stepStatusLabel}
                     />
                   )}
                 </button>
@@ -2527,7 +2521,12 @@ export function WorkflowPanel({
                 <SlotDownloadContext.Provider value={!previewing && workflowTabAllowsDownload(tab, idx, tabs.length)}>
                   {isPaperAnalysis && <PaperAnalysisProgress session={session} active={idx === visibleActiveTabIdx} />}
                   {previewing && <div className="workflow-panel__preview-label" role="status">{t('chat.workflowGeneratingPreview')}</div>}
-                  <TabSlotGrid
+                  {workflowTabStatus(tab, session) === 'skipped' ? (
+                    <div className='workflow-panel__empty workflow-panel__empty--skipped' role='status'>
+                      <strong>{t('taskCenter.statusSkipped')}</strong>
+                      <span>{tab.skip_reason || t('chat.workflowSkipReasonBranch')}</span>
+                    </div>
+                  ) : <TabSlotGrid
                     tab={executionPreviewTab(tab, session, preview)}
                     session={preview}
                     readOnly={previewing}
@@ -2535,7 +2534,7 @@ export function WorkflowPanel({
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
-                  />
+                  />}
                 </SlotDownloadContext.Provider>
                 </WorkflowPanelTabActiveContext.Provider>
               </div>;

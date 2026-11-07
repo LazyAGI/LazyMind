@@ -8,9 +8,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Spin } from 'antd';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { localizeErrorCode } from '@/components/request';
 import StateGraphView, { type StateGraphData } from './StateGraphView';
+import { workflowTaskDisplayStatus } from '@/modules/chat/utils/workflowTaskStatus';
+import { workflowNodeStatus } from '@/modules/chat/components/WorkflowPanel/workflowStepStatus';
 import './index.scss';
 
 export const WORKFLOW_GRAPH_REFRESH_EVENT = 'workflow:graph:refresh';
@@ -36,11 +40,15 @@ const coreApiBase = `${BASE_URL}/api/core`;
 const EMPTY_FALLBACK_STEPS: { step_id: string; status: string }[] = [];
 
 type ProjectionEnvelope = {
+  display?: import('@/modules/chat/store/workflowStatus').WorkflowDisplayState;
   projection: {
     past?: string[]; current?: string[]; ready?: string[]; blocked?: string[];
     stale?: string[]; pruned?: string[]; bypassed?: string[];
-    nodes?: Record<string, { execution: string; readiness: string; branch: string }>;
-    edges?: { from: string; to: string; state: string }[];
+    nodes?: Record<string, {
+      execution: string; readiness: string; branch: string; validity?: string;
+      evaluation?: { missing_groups?: string[][] };
+    }>;
+    edges?: { from: string; to: string; state: string; when?: string }[];
     completed?: boolean;
   };
   graph: {
@@ -48,11 +56,11 @@ type ProjectionEnvelope = {
     nodes?: Record<string, { id: string; label?: string }>;
   };
   attempt_history?: Record<string, {
-    attempt: number; status: string; duration_sec: number; artifact_count: number; started_at: string;
+    attempt: number; status: string; validity?: string; duration_sec: number; artifact_count: number; started_at: string;
   }[]>;
 };
 
-function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
+function projectionToGraph(raw: ProjectionEnvelope, t: TFunction): StateGraphData {
   const projection = raw.projection ?? {};
   const graphNodes = raw.graph?.nodes ?? {};
   const order = raw.graph?.static_order ?? Object.keys(graphNodes);
@@ -60,20 +68,34 @@ function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
     { id: '__start__', label: '__start__', step_index: 0, status: 'succeeded', is_current: false },
     ...order.filter((id) => id !== '__start__' && id !== '__end__').map((id, index) => {
       const state = projection.nodes?.[id];
-      let status = state?.execution && state.execution !== 'none' ? state.execution : 'pending';
-      if (state?.readiness === 'ready') status = 'ready';
-      else if (state?.readiness === 'blocked') status = 'blocked';
-      else if (state?.branch === 'pruned') status = 'pruned';
-      else if (state?.branch === 'bypassed') status = 'bypassed';
-      if ((projection.stale ?? []).includes(id) && status === 'pending') status = 'stale';
+      let status = workflowNodeStatus(state, raw.display, id);
+      const hasEffectiveAttempt = state && state.execution !== 'none' && state.validity !== 'stale';
+      const statusNotes: string[] = [];
+      if (status === 'pending' && !hasEffectiveAttempt) {
+        if (state?.validity === 'stale') {
+          statusNotes.push(t('chat.workflowGraph.staleNote'));
+        } else if (state?.readiness === 'ready') {
+          statusNotes.push(t('chat.workflowGraph.readyNote'));
+        }
+        if (state?.readiness === 'blocked') {
+          const missingInputs = [...new Set((state.evaluation?.missing_groups ?? []).flat())];
+          statusNotes.push(missingInputs.length
+            ? t('chat.workflowGraph.blockedInputsNote', { inputs: missingInputs.join(t('chat.workflowGraph.inputSeparator')) })
+            : t('chat.workflowGraph.blockedNote'));
+        }
+      }
+      status = workflowTaskDisplayStatus(status, raw.display?.status);
+      const attempts = raw.attempt_history?.[id] ?? [];
+      const latestAttempt = Math.max(0, ...attempts.filter(attempt => attempt.validity !== 'stale').map(attempt => attempt.attempt));
       return {
         id,
         label: graphNodes[id]?.label || id,
         step_index: index + 1,
         status,
-        is_current: (projection.current ?? []).includes(id),
-        is_stale: (projection.stale ?? []).includes(id),
-        step_attempts: raw.attempt_history?.[id] ?? [],
+        status_notes: statusNotes,
+        is_current: status === 'waiting_input' || (projection.current ?? []).includes(id),
+        step_attempts: attempts.map(attempt => ({ ...attempt, status: workflowTaskDisplayStatus(attempt.status,
+          attempt.validity !== 'stale' && attempt.attempt === latestAttempt && status === 'paused' ? 'paused' : undefined) })),
       };
     }),
     { id: '__end__', label: '__end__', step_index: order.length + 1, status: projection.completed ? 'succeeded' : 'pending', is_current: false },
@@ -81,12 +103,11 @@ function projectionToGraph(raw: ProjectionEnvelope): StateGraphData {
   const edges = (projection.edges ?? []).map((edge) => ({
     from: edge.from,
     to: edge.to,
-    condition: '',
+    condition: edge.when ?? '',
     edge_type: edge.state === 'active'
       ? ((projection.past ?? []).includes(edge.to) || edge.to === '__end__' ? 'executed' : 'current_direct')
       : edge.state === 'pruned' ? 'pruned'
       : edge.state === 'bypassed' ? 'bypassed'
-      : edge.state === 'stale' ? 'stale'
       : 'inactive',
   } as const));
   return { nodes, edges, initial: '__start__' };
@@ -124,6 +145,7 @@ export default function StateGraphModal({
   conversationId,
   fallbackSteps = EMPTY_FALLBACK_STEPS,
 }: StateGraphModalProps) {
+  const { t } = useTranslation();
   const [data, setData] = useState<StateGraphData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,7 +161,7 @@ export default function StateGraphModal({
         { silentError: true } as never,
       );
       // ReplyOK wraps the payload as { code, message, data: {...} }.
-      const incoming = projectionToGraph(resp.data?.data ?? resp.data);
+      const incoming = projectionToGraph(resp.data?.data ?? resp.data, t);
       // Merge: preserve topology reference if node/edge IDs haven't changed,
       // so StateGraphView's useMemo layout cache stays valid.
       if (cachedDataRef.current) {
@@ -179,7 +201,7 @@ export default function StateGraphModal({
     } finally {
       setLoading(false);
     }
-  }, [fallbackSteps, sessionId]);
+  }, [fallbackSteps, sessionId, t]);
 
   // Fetch on open.
   useEffect(() => {
@@ -219,7 +241,7 @@ export default function StateGraphModal({
       open={open}
       onCancel={onClose}
       footer={null}
-      title='工作流图'
+      title={t('chat.workflowGraph.title')}
       width={modalWidth}
       style={{ top: 40 }}
       className='state-graph-modal'
@@ -228,7 +250,7 @@ export default function StateGraphModal({
       <div className='state-graph-modal__content'>
         {loading && !data && (
           <div className='state-graph-modal__loading'>
-            <Spin tip='加载中…' />
+            <Spin tip={t('common.loading')} />
           </div>
         )}
         {error && !data && (

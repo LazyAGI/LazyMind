@@ -2,6 +2,7 @@ import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 
 import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
+import { workflowTaskDisplayStatus } from "@/modules/chat/utils/workflowTaskStatus";
 
 export type OrdinaryTaskState =
   | "complete"
@@ -9,7 +10,7 @@ export type OrdinaryTaskState =
   | "waiting"
   | "failed"
   | "canceled"
-  | "interrupted"
+  | "paused"
   | "outdated";
 
 export interface OrdinaryTaskItem {
@@ -98,14 +99,18 @@ function taskState(
   task: SubAgentTask | undefined,
   step: WorkflowSessionStep | undefined,
   validity?: "effective" | "stale",
+  pausedWorkflowSessionId?: string,
 ): OrdinaryTaskState {
   if (validity === "stale") return "outdated";
   if (step?.ordinary?.input_required || task?.ordinary?.input_required
     || (task?.status === "interrupted" && task.current_phase === "awaiting_input")) return "waiting";
-  const status = step?.ordinary?.status || step?.status || task?.ordinary?.status || task?.status;
+  const rawStatus = step?.ordinary?.status || step?.status || task?.ordinary?.status || task?.status;
+  const workflowPaused = pausedWorkflowSessionId && (step?.session_id === pausedWorkflowSessionId
+    || task?.ordinary?.session_id === pausedWorkflowSessionId);
+  const status = workflowTaskDisplayStatus(rawStatus ?? '', workflowPaused ? 'paused' : undefined);
   if (status === "succeeded") return "complete";
   if (status === "running") return "running";
-  if (status === "interrupted") return "interrupted";
+  if (status === "paused") return "paused";
   if (status === "canceled" || status === "cancelled") return "canceled";
   if (status === "failed") return "failed";
   return "waiting";
@@ -163,6 +168,7 @@ export function buildOrdinaryTaskTimeline(
   workflowSteps: WorkflowSessionStep[] = [],
   now = Date.now(),
   plannedCount?: number,
+  pausedWorkflowSessionId?: string,
 ): OrdinaryTaskTimeline {
   const scopedTasks = currentExecutionTasks(tasks, workflowSteps);
   const taskById = new Map(scopedTasks.map((task) => [task.task_id, task]));
@@ -199,7 +205,7 @@ export function buildOrdinaryTaskTimeline(
       step: selectedAttempt,
       ordinal: 0,
       retryCount: Math.max(0, attempts.length - 1),
-      state: taskState(selectedTask, selectedAttempt, selectedAttempt.validity),
+      state: taskState(selectedTask, selectedAttempt, selectedAttempt.validity, pausedWorkflowSessionId),
       validity: selectedAttempt.validity,
       order: selectedAttempt.ordinary?.order ?? order,
       ...intervalFor(selectedTask, selectedAttempt, now),
@@ -214,7 +220,7 @@ export function buildOrdinaryTaskTimeline(
       task,
       ordinal: 0,
       retryCount: 0,
-      state: taskState(task, undefined),
+      state: taskState(task, undefined, undefined, pausedWorkflowSessionId),
       order: taskOrder(task, scopedTasks.length + index),
       ...intervalFor(task, undefined, now),
     });
@@ -238,7 +244,7 @@ export function buildOrdinaryTaskTimeline(
       ? Math.max(effectiveItems.length, plannedCount ?? 0)
       : 0,
     completedCount: effectiveItems.filter((item) => item.state === "complete").length,
-    failedCount: effectiveItems.filter((item) => ["failed", "canceled", "interrupted"].includes(item.state)).length,
+    failedCount: effectiveItems.filter((item) => item.state === "failed").length,
 
   };
 }

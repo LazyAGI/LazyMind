@@ -31,12 +31,27 @@ func TestParallelApprovalIsNotHiddenByLaterSibling(t *testing.T) {
 				t.Fatal(err)
 			}
 			view, err := displaystate.Read(db.DB, *s)
-			if err != nil || view.Status != "waiting" || view.ApprovalStepID != "branch_b" {
+			if err != nil || view.Status != map[bool]string{false: "waiting", true: "paused"}[stopped] || view.ApprovalStepID != "branch_b" {
 				t.Fatalf("unapproved human sibling hidden: %+v %v", view, err)
 			}
-			if _, err := BeginNativeControlTurn(t.Context(), db.DB, "batch-user", "batch-conversation", NativeControlCommand{SessionID: s.ID, Kind: "resume", ExpectedStateVersion: s.StateVersion}); err == nil {
-				t.Fatal("resume bypassed parallel approval")
+			_, err = BeginNativeControlTurn(t.Context(), db.DB, "batch-user", "batch-conversation", NativeControlCommand{SessionID: s.ID, Kind: "resume", ExpectedStateVersion: s.StateVersion})
+			if !stopped && err == nil {
+				t.Fatal("unpaused review accepted a resume")
 			}
+			if stopped {
+				if err != nil {
+					t.Fatal(err)
+				}
+				s, err = GetSession(t.Context(), db.DB, s.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				view, err = displaystate.Read(db.DB, *s)
+				if err != nil || view.Status != "waiting" || view.ApprovalStepID != "branch_b" {
+					t.Fatalf("resume lost review: %+v %v", view, err)
+				}
+			}
+
 		})
 	}
 }
@@ -114,7 +129,10 @@ func TestPauseAfterOneParallelBranchFailed(t *testing.T) {
 	}
 	OnSubAgentDone(ctx, db.DB, nil, "a", subagent.StatusFailed, "tool failed", func(string, map[string]any) {}, &WorkflowChatContext{SessionID: "parallel", StepID: "a", ConvID: "chat", WorkflowMode: "dynamic"})
 	notified := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { notified++; w.WriteHeader(http.StatusOK) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		notified++
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true, "executor_stopped": false})
+	}))
 	defer srv.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 	if err := StopWorkflowTurn(ctx, db.DB, nil, "owner", "chat", "turn"); err != nil {

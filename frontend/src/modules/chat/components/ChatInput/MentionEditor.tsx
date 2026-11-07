@@ -10,13 +10,14 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { message, Modal } from "antd";
+import { message, Modal, Tooltip } from "antd";
 import {
   AppstoreOutlined,
   BulbOutlined,
   CommentOutlined,
   DatabaseOutlined,
   FileTextOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { listSkillAssetsPage } from "@/modules/memory/skillApi";
@@ -273,6 +274,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   disabledMentionReasons?: Partial<Record<MentionType, string>>;
   allowKnowledgeBaseSelection?: boolean;
   allowMentions?: boolean;
+  workflowDisabled?: boolean;
+  beforeWorkflowSelect?: () => Promise<boolean>;
   runInBackground?: boolean;
   conversationId?: string;
   fileCandidates?: Array<{ id: string; name: string; disabled?: boolean }>;
@@ -296,6 +299,8 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   disabledMentionReasons,
   allowKnowledgeBaseSelection = true,
   allowMentions = true,
+  workflowDisabled = false,
+  beforeWorkflowSelect,
   runInBackground = false,
   conversationId,
   fileCandidates = EMPTY_FILES,
@@ -314,6 +319,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   const [retryCount, setRetryCount] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
+  const selectingWorkflow = useRef(false);
+  const selectionScope = useRef({});
+  useEffect(() => {
+    selectionScope.current = {};
+    return () => { selectionScope.current = {}; };
+  }, [conversationId, runInBackground, allowMentions, disabled]);
   const menuRef = useRef<HTMLDivElement>(null);
   const emittedRef = useRef<string | null>(null);
   const queryRef = useRef<QueryState | null>(null);
@@ -585,9 +596,23 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     candidate.disabled || Boolean(getDisabledReason(candidate))
   ), [getDisabledReason]);
 
-  const commitCandidate = useCallback((candidate: Candidate, currentQuery: QueryState, switchTo?: { entryType: ShowcaseEntryType; caseId: string }) => {
+  const commitCandidate = useCallback(async (candidate: Candidate, currentQuery: QueryState, switchTo?: { entryType: ShowcaseEntryType; caseId: string }) => {
     const editor = editorRef.current;
-    if (!editor || !editor.contains(currentQuery.range.startContainer)) return;
+    if (!editor || selectingWorkflow.current || !editor.contains(currentQuery.range.startContainer)) return;
+    // Run this only after any entry-mode confirmation, before changing the draft.
+    if (candidate.type === "workflow" && beforeWorkflowSelect) {
+      const currentScope = selectionScope.current;
+      const html = editor.innerHTML;
+      selectingWorkflow.current = true;
+      closeMenu();
+      try {
+        const allowed = await beforeWorkflowSelect();
+        if (!allowed || selectionScope.current !== currentScope || editorRef.current !== editor
+          || editor.innerHTML !== html) return;
+      } finally {
+        selectingWorkflow.current = false;
+      }
+    }
     const selection = window.getSelection();
     currentQuery.range.deleteContents();
     const mention: ChatMention = {
@@ -614,15 +639,15 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       emit();
       editor.focus();
     }
-  }, [closeMenu, emit, onEntryModeChange, t]);
+  }, [beforeWorkflowSelect, closeMenu, emit, onEntryModeChange, t]);
 
   const insertCandidate = useCallback(async (candidate: Candidate) => {
     const editor = editorRef.current;
     const currentQuery = queryRef.current;
-    if (!editor || !currentQuery || selectionRequestRef.current) return;
+    if (!editor || !currentQuery || selectingWorkflow.current || selectionRequestRef.current) return;
     const candidateDisabledReason = getDisabledReason(candidate);
     if (candidate.disabled || candidateDisabledReason) {
-      message.info(candidateDisabledReason || "该能力已停用");
+      message.info(candidateDisabledReason || t("chat.mentionCapabilityDisabled"));
       return;
     }
     if (
@@ -714,7 +739,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         aria-label={placeholder}
         data-placeholder={placeholder}
         data-empty={value === "" ? "true" : "false"}
-        onInput={() => { emit(); refreshQuery(); }}
+        onInput={() => { selectionScope.current = {}; emit(); refreshQuery(); }}
         onClick={(event) => {
           const button = (event.target as HTMLElement).closest('[data-remove-mention]');
           const chip = button?.closest<HTMLElement>('.chat-mention-chip');
@@ -725,7 +750,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         onCompositionEnd={() => { composingRef.current = false; onCompositionChange(false); refreshQuery(); }}
         onPaste={onPaste}
         onKeyDown={(event) => {
-          if (selecting || pendingCapability) {
+          if (selecting || selectingWorkflow.current || pendingCapability) {
             event.preventDefault();
             return;
           }
@@ -785,7 +810,13 @@ const MentionEditor = forwardRef<MentionEditorRef, {
             if (!items.length) return null;
             return <div className={`chat-mention-group${group.type === "conversation" ? " is-conversation" : ""}`} key={group.type}>
               <div className="chat-mention-group-title">
-                <span>{group.icon}{t(group.labelKey)}</span>
+                <span>{group.icon}{t(group.labelKey)}
+                  {group.type === "workflow" && workflowDisabled && (
+                    <Tooltip title={t("chat.workflowSelectionDisabledLabel")}>
+                      <StopOutlined className="chat-mention-workflow-disabled" aria-label={t("chat.conversationConfigWorkflowDisabled")} />
+                    </Tooltip>
+                  )}
+                </span>
                 <span className="chat-mention-shortcut"><code>{group.trigger}{group.shortcut}:</code>{t("chat.mentionShortcutHint")}</span>
               </div>
               <div className="chat-mention-options">
@@ -794,11 +825,11 @@ const MentionEditor = forwardRef<MentionEditorRef, {
                 const itemDisabled = isCandidateDisabled(item);
                 const itemDisabledReason = getDisabledReason(item);
                 const title = itemDisabled
-                  ? `${item.name}\n${itemDisabledReason || "该能力已停用"}`
+                  ? `${item.name}\n${itemDisabledReason || t("chat.mentionCapabilityDisabled")}`
                   : item.description ? `${item.name}\n${item.description}` : item.name;
                 return <button type="button" role="option" id={`${menuId}-${index}`} title={title} aria-selected={activeIndex === index} className={`chat-mention-option${activeIndex === index ? " is-active" : ""}`} disabled={itemDisabled} key={`${item.type}-${item.id}`} onClick={() => { if (!itemDisabled) insertCandidate(item); }} onMouseEnter={() => { if (!itemDisabled) setActiveKey(`${item.type}:${item.id}`); }} onMouseDown={(event) => { event.preventDefault(); if (!itemDisabled) insertCandidate(item); }}>
                   <span className="chat-mention-option-name">{item.name}</span>
-                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || "已停用"}</span> : null}
+                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || t("chat.mentionDisabled")}</span> : null}
                   {group.type === "conversation" && item.description ? <span className="chat-mention-option-description">{item.description}</span> : null}
                 </button>;
               })}

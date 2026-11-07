@@ -74,6 +74,23 @@ _SERIAL_WORKFLOW_EXECUTION_POLICY = (
     'starting the next Workflow SubAgent. '
 )
 
+_WORKFLOW_RESPONSE_GUIDANCE = (
+    'Workflow user-facing responses:\n'
+    'At step start, briefly state the goal and scope. After execution, lead with the actual '
+    'outcome and key findings, identifying relevant artifacts without reproducing their full contents. '
+    'At existing approval checkpoints, present the proposal, important choices and their rationale, '
+    'and the specific items requiring confirmation. '
+    'At final delivery, summarize the overall outcome, main conclusions or highlights, deliverables, '
+    'and material limitations or unfinished work. The user should understand the main result without '
+    'opening the artifacts.\n\n'
+    'Adapt detail to the task: keep routine progress brief, but provide enough substance to understand '
+    'analytical results, review proposals, and use deliverables. Avoid bare "completed/saved" notices, '
+    'repetitive status updates, internal logs, and raw parameters. Describe only confirmed results '
+    'and use only available artifact links.\n\n'
+    'These instructions govern presentation only. Preserve existing execution, artifact-saving, '
+    'and approval rules; do not add model or tool calls solely to compose these messages.\n'
+)
+
 _USER_BOUNDARY_HANDOFF_POLICY = (
     'When the user explicitly asks to stop after a particular step or to show its result before '
     'continuing, execute that last requested target with advance_step_and_hand_off, including '
@@ -421,6 +438,15 @@ def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _with_terminal_agent_control(result: Dict[str, Any], workflow_id: str = '') -> Dict[str, Any]:
+    if result.get('outcome') == 'workflow_paused':
+        return {
+            **result,
+            '_agent_control': {
+                'stop': True,
+                'reason': 'workflow_paused',
+                'final_text': '工作流已暂停，执行进度和已生成的结果已保留。你可以点击工作流中的「继续」恢复执行。',
+            },
+        }
     pending = _input_required_result(result)
     if pending:
         return {**result, **pending}
@@ -1604,6 +1630,7 @@ def build_workflow_discovery_context(
         'receives current_query as request_context/user_input; after a successful trigger, '
         'continue from returned ready_steps with advance_step until terminal, required input, '
         'explicit user boundary, or failure.\n'
+        + _WORKFLOW_RESPONSE_GUIDANCE
         + json.dumps({
             'current_query': current_query,
             'workflows': items,
@@ -2450,6 +2477,7 @@ def resolve_workflow_injection(
             + 'state_version or expected_state_version. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
             + _WORKFLOW_EDIT_SCOPE_POLICY
+            + _WORKFLOW_RESPONSE_GUIDANCE
             + _USER_BOUNDARY_HANDOFF_POLICY
             + 'If a Workflow tool returns user_notice, explicitly relay that notice to the '
             + 'user. advance_step waits for '
@@ -2538,6 +2566,7 @@ def resolve_workflow_injection(
             + 'selected and authorized this exact procedure. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
             + _WORKFLOW_EDIT_SCOPE_POLICY
+            + _WORKFLOW_RESPONSE_GUIDANCE
             + _USER_BOUNDARY_HANDOFF_POLICY
             + entry_instruction
             + checkpoint_guidance

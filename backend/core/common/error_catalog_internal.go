@@ -834,6 +834,7 @@ func init() {
 	registerAdditionalErrorAlias("unable to query conversation status", "Internal server error", http.StatusServiceUnavailable, 2000000)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("load workflow head revision %s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("reconcile workflow stop %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("session_ids must belong to user %q and must not contain plugin conversations", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("cron expression produces no future times within 5 years", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("cron expression has no previous time within 5 years", "Invalid request", http.StatusBadRequest, 2000103)

@@ -53,6 +53,7 @@ import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector"
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
+import { useWorkflowSelection } from "./useWorkflowSelection";
 import type { ConversationRuntimeSettings } from "../../utils/request";
 import { WorkflowSessionApi } from "../../utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
@@ -652,6 +653,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const inputDraftKey = sessionId ?? draftKey;
     const showWorkspaceEnvironment = composerVariant !== "paper" && runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
@@ -726,6 +728,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return [...merged.values()];
     }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions, ragReady]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
+    const handleRuntimeSettingsChange = useCallback((settings: ConversationRuntimeSettings) => {
+      setContextRuntimeSettings(settings);
+      onConversationSettingsChange?.(settings);
+    }, [onConversationSettingsChange]);
+    const { beforeWorkflowSelect, validateWorkflowSelection, busy: selectingWorkflow } = useWorkflowSelection({
+      conversationId: sessionId,
+      runInBackground,
+      settings: contextRuntimeSettings,
+      onChange: handleRuntimeSettingsChange,
+    });
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [menuHeight, setMenuHeight] = useState(420);
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -747,7 +759,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
-    const inputDraftKey = sessionId ?? draftKey;
     const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
@@ -1218,6 +1229,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         if (!useWorkflow) {
           return originalMentions;
         }
+        if (!await beforeWorkflowSelect()) return originalMentions;
         return [
           ...originalMentions.filter((mention) => (
             mention.type !== "skill" || mention.resource_id !== skillMention.resource_id
@@ -1232,7 +1244,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       } catch {
         return originalMentions;
       }
-    }, [t]);
+    }, [beforeWorkflowSelect, t]);
 
     const handleSend = async () => {
       if (disabled) {
@@ -1244,7 +1256,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
+      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy || selectingWorkflow) {
         return;
       }
       const normalizedText = value.trim();
@@ -1254,6 +1266,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       let resolvedMentions = references.mentions;
       try {
         resolvedMentions = await resolveSkillWorkflowMentions(references.mentions);
+        if (resolvedMentions.some((mention) => mention.type === "workflow")
+          && !await validateWorkflowSelection()) return;
       } finally {
         setResolvingSkillWorkflow(false);
       }
@@ -1606,6 +1620,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 onMentionsChange={handleMentionsChange}
                 allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
                 allowMentions={allowMentions}
+                workflowDisabled={contextRuntimeSettings?.enable_workflow === false}
+                beforeWorkflowSelect={beforeWorkflowSelect}
                 disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
@@ -1812,14 +1828,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     onOpenChange={open => setActiveMenu(open ? "config" : null)}
                     key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
-                    initialSettings={initialConversationSettings}
+                    initialSettings={contextRuntimeSettings}
                     disabled={disabled || isStreaming}
                     hasWorkflowSession={hasWorkflowSession}
                     lockedWorkflowMode={lockedWorkflowMode}
-                    onSave={(settings) => {
-                      setContextRuntimeSettings(settings);
-                      onConversationSettingsChange?.(settings);
-                    }}
+                    onSave={handleRuntimeSettingsChange}
                   />}
                   {composerVariant !== "paper" && showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
@@ -1893,7 +1906,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
                       hasDraft={hasSendableDraft}
-                      sendDisabled={isSendDisabled || featuredBusy}
+                      sendDisabled={isSendDisabled || featuredBusy || selectingWorkflow}
                       disabled={disabled}
                       sendLabel={t("chat.send")}
                       stopLabel={t("chat.stopGenerate")}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolvePendingApprovalStep } from './workflowApproval';
+import { resolveWorkflowContinueAction } from './workflowContinue';
 
 describe('resolvePendingApprovalStep', () => {
   it('finds the latest succeeded approval step when current_step_id was cleared', () => {
@@ -65,4 +66,17 @@ describe('resolvePendingApprovalStep', () => {
       },
     }, 'waiting')).toBeUndefined();
   });
+});
+
+it('resumes a paused final checkpoint before asking for its pending approval', () => {
+  const session: Parameters<typeof resolveWorkflowContinueAction>[0] = {
+    status: 'waiting', current_step_id: 'review', projection: {
+      completed: false,
+      display: { status: 'paused', reason: 'user_stopped', approval_step_id: 'review' },
+    },
+  };
+  expect(resolvePendingApprovalStep(session, 'stopped')).toBeUndefined();
+  expect(resolveWorkflowContinueAction(session, 'stopped')).toEqual({ kind: 'resume', stepId: 'review' });
+  session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'review' };
+  expect(resolveWorkflowContinueAction(session, 'waiting')).toEqual({ kind: 'approval', stepId: 'review' });
 });

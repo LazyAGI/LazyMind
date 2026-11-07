@@ -125,10 +125,13 @@ class TaskCancelRequest(BaseModel):
     task_id: Optional[str] = None
     conversation_id: Optional[str] = None
     history_id: Optional[str] = None
+    attempt_id: Optional[str] = None
+    lease_token: Optional[str] = None
 
 
 class TaskCancelResponse(BaseModel):
     ok: bool
+    executor_stopped: Optional[bool] = None
 
 
 class WorkflowDriverRequest(BaseModel):
@@ -480,7 +483,8 @@ async def workflow_driver(req: WorkflowDriverRequest) -> WorkflowDriverResponse:
     return WorkflowDriverResponse(message=result['message'])
 
 
-@router.post('/api/workflow/task-cancel', response_model=TaskCancelResponse, summary='Cancel a running SubAgent task')
+@router.post('/api/workflow/task-cancel', response_model=TaskCancelResponse, response_model_exclude_none=True,
+             summary='Cancel a running SubAgent task')
 async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     """Enqueue a cancel signal for a running SubAgent ReAct loop.
 
@@ -538,6 +542,13 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
         if req.conversation_id:
             steering_registry.stop_accepting_for_session(req.conversation_id, sid)
         request_cancel(sid)
+        if req.task_id and req.attempt_id and req.lease_token:
+            # Only the parent process owns the Workflow Executor, including in
+            # router mode. Model workers cannot confirm this attempt's exit.
+            from lazymind.chat.workflow.remote_executor import workflow_attempt_is_running
+
+            return TaskCancelResponse(ok=True, executor_stopped=not workflow_attempt_is_running(
+                req.attempt_id, req.lease_token))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return TaskCancelResponse(ok=True)
