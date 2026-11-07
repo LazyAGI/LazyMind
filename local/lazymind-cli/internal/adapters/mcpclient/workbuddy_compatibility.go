@@ -72,6 +72,9 @@ func workBuddyIssueMessage(code string) string {
 
 func workBuddyFailure(status agentintegration.Status, err error) agentintegration.Status {
 	code := workbuddyhost.SetupIssue(err)
+	if code == "quit_required" {
+		return agentintegration.RequireQuit(status, "connect")
+	}
 	if code == "" {
 		code = workBuddyPairingIssue(err)
 	}

@@ -2401,6 +2401,13 @@ const zhCN = {
     },
     waitingForApplication: "等待应用启动",
     waitingForApplicationDescription: "接入已开启，等待 {{agent}} 启动后检查连接。",
+    quitRequired: {
+      title: "请先退出 {{agent}}",
+      waiting: "等待退出 {{agent}}",
+      description: "请保存工作，并从 {{agent}} 的应用菜单或系统托盘选择「退出」，然后点击重试。仅关闭窗口可能仍在后台运行。",
+      retryInstall: "重试安装",
+      retryDisconnect: "重试关闭接入",
+    },
     setupFeedback: {
       environmentMismatch: "已有其他 LazyMind 的接入配置，请关闭后重新开启以切换。",
       readFailed: "无法读取接入配置，请重新检测。",
@@ -2408,6 +2415,7 @@ const zhCN = {
       disableFailed: "关闭失败，请重试。",
       connectionUnavailable: "配置已完成，连接暂不可用。",
       unknown: "状态未知",
+      diagnosticID: "诊断编号",
       copyDiagnostics: "复制诊断信息",
     },
     connectionErrors: {

@@ -207,7 +207,7 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 				return agentintegration.Fail(status, e.Error())
 			}
 			if e = prepareCodexDesktop(ctx, a.home); e != nil {
-				return agentintegration.Fail(status, e.Error())
+				return agentintegration.FailError(status, e)
 			}
 			return a.Status(ctx)
 		}

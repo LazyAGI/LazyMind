@@ -4,8 +4,9 @@ import { useTranslation } from "react-i18next";
 import { agentIntegrationStatuses, type DesktopAgentIntegrationStatus } from "@/runtime/desktopBridge";
 
 import { workbuddyErrorMessage } from "./workbuddyErrors";
+import { requiresAgentQuit } from "./agentActions";
 
-type Stage = "prepare" | "installing" | "login" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
+type Stage = "prepare" | "installing" | "login" | "quitRequired" | "installFailed" | "entry" | "trust" | "enable" | "verify" | "checking" | "notReady" | "success";
 
 export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin, onStatus, onClose, agent = "workbuddy" }: {
   agent?: "workbuddy" | "codex";
@@ -20,7 +21,7 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
   const confirmationStage = agent === "codex" ? "enable" : "entry";
   // An installed plugin survives a normal Codex launch without CDP. It must
   // still go through the explicit connection/restart step before confirmation.
-  const [stage, setStage] = useState<Stage>(status?.state === "enabled" && status.connection?.mcp_configured
+  const [stage, setStage] = useState<Stage>(requiresAgentQuit(status) ? "quitRequired" : status?.state === "enabled" && status.connection?.mcp_configured
     && (agent === "codex" ? status.connection.control_ready && !status.issue
       : !status.issue || ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) ? confirmationStage : "prepare");
   const [error, setError] = useState("");
@@ -37,7 +38,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     try {
       const result = await onConnect();
       if (!mounted.current) return;
-      setDiagnostic(result?.issue?.operation_id || "");
+      setDiagnostic(result?.issue?.operation_id || result?.diagnostic_id || "");
+      if (requiresAgentQuit(result)) {
+        setStage("quitRequired"); return;
+      }
       if (agent === "workbuddy" && result?.action?.kind === "login" && onLogin) {
         setStage("login");
         const login = await onLogin();
@@ -121,9 +125,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     return () => { window.clearInterval(timer); window.removeEventListener("focus", recheck); };
   }, [stage, agent]);
   const installing = stage === "installing", checking = stage === "checking", loggingIn = stage === "login";
-  const current = stage === "prepare" ? 0 : ["installing", "login", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
+  const current = stage === "prepare" ? 0 : ["installing", "login", "quitRequired", "installFailed", "entry", "trust", "enable"].includes(stage) ? 1 : 2;
   let primary;
   if (stage === "prepare" || stage === "installFailed") primary = <Button type="primary" onClick={() => void install()}>{text(stage === "prepare" ? "saveAndContinue" : "retryInstall")}</Button>;
+  else if (stage === "quitRequired") primary = <Button type="primary" onClick={() => void install()}>{t("agentIntegration.quitRequired.retryInstall")}</Button>;
   else if (stage === "entry") primary = <Button type="primary" onClick={() => setStage(agent === "codex" ? "enable" : "trust")}>{text("next")}</Button>;
   else if (stage === "trust") primary = <Button type="primary" onClick={() => setStage("enable")}>{text("trustConfirmation")}</Button>;
   else if (stage === "enable") primary = <Button type="primary" onClick={() => setStage("verify")}>{text("enabledConfirmation")}</Button>;
@@ -153,9 +158,12 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
     <div className="agent-integration-installation-content" aria-live="polite">
       {stage === "prepare" && <Typography.Paragraph>{text("saveDescription")}</Typography.Paragraph>}
       {loggingIn && <Alert type="info" showIcon message={text("waitingForLogin")} description={text("loginDescription")} />}
+      {stage === "quitRequired" && <Alert type="warning" showIcon
+        message={t("agentIntegration.quitRequired.title", { agent: status?.display_name || (agent === "codex" ? "Codex" : "WorkBuddy") })}
+        description={t("agentIntegration.quitRequired.description", { agent: status?.display_name || (agent === "codex" ? "Codex" : "WorkBuddy") })} />}
       {(installing || checking) && <Space direction="vertical" align="center" className="agent-integration-installation-progress"><Spin /><Typography.Text>{text(installing ? "installingDescription" : "checkingDescription")}</Typography.Text></Space>}
       {stage === "installFailed" && <Alert type="error" showIcon message={text("installFailedTitle")} description={error} />}
-      {stage === "installFailed" && diagnostic && <Typography.Text type="secondary" copyable>{text("diagnosticID")}: {diagnostic}</Typography.Text>}
+      {["installFailed", "quitRequired"].includes(stage) && diagnostic && <Typography.Text type="secondary" copyable>{t("agentIntegration.setupFeedback.diagnosticID")}: {diagnostic}</Typography.Text>}
       {(stage === "entry" || stage === "trust" || stage === "enable") &&
         <Alert type="success" showIcon message={text("installedTitle")} description={text("installedDescription")} />
       }

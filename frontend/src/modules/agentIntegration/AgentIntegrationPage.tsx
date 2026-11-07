@@ -40,6 +40,7 @@ import {
 import "./index.scss";
 import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
+import { requiresAgentQuit } from "./agentActions";
 
 interface AgentDefinition {
   id: DesktopAgent;
@@ -363,7 +364,7 @@ export default function AgentIntegrationPage() {
       invalidateRefresh();
       setStatuses((current) => ({ ...current, [agent]: result.data }));
       setError("");
-      if (nextAction === "disconnect" && !result.data.can_disconnect && !["enabled", "error", "conflict"].includes(result.data.state)) {
+      if (!requiresAgentQuit(result.data) && nextAction === "disconnect" && !result.data.can_disconnect && !["enabled", "error", "conflict"].includes(result.data.state)) {
         message.success(t("agentIntegration.disconnectSuccess", { agent: result.data.display_name }));
       } else if (nextAction === "login") {
         const definition = AGENTS.find((item) => item.id === agent);
@@ -588,6 +589,7 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 }
 
 function integrationErrorMessage(_agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
+  if (requiresAgentQuit(status)) return t("agentIntegration.quitRequired.description", { agent: status.display_name });
   const key = status.issue?.code === "configuration_unreadable" ? "readFailed"
     : status.state === "error" ? status.retry_action === "disconnect" ? "disableFailed" : "enableFailed"
       : status.state === "conflict" || status.issue?.code === "environment_mismatch" ? "environmentMismatch"
@@ -937,6 +939,7 @@ function AgentConfigurationFlow({
   const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || mcpState === "conflict" || Boolean(mcpStatus?.can_disconnect));
   const mcpCanToggle = mcpStatus?.issue?.code !== "configuration_unreadable" && (mcpState === "ready" || mcpChecked || Boolean(mcpStatus?.can_connect));
   const retryDisconnect = mcpStatus?.retry_action === "disconnect";
+  const quitRequired = requiresAgentQuit(mcpStatus);
   const mcpBindingConfigured = Boolean(agent.mcpBindingTarget && bindings[agent.mcpBindingTarget]);
   const mcpInstallationMissing = mcpRequirements.length > 0 && !mcpRequirements[0].satisfied;
 
@@ -1208,6 +1211,7 @@ function AgentConfigurationFlow({
               </Button>
             ) : undefined}
             status={mcpStatus?.issue?.code === "configuration_unreadable" ? t("agentIntegration.setupFeedback.unknown")
+              : quitRequired ? t("agentIntegration.quitRequired.waiting", { agent: mcpStatus?.display_name || agent.name })
               : mcpStatus?.connection?.runtime_state === "waiting" ? t("agentIntegration.waitingForApplication")
               : mcpStatus?.connection?.runtime_state === "connection_required" ? t("agentIntegration.connectionRequired")
               : mcpChecked && mcpStatus?.issue ? t("agentIntegration.configurationIssue")
@@ -1245,7 +1249,7 @@ function AgentConfigurationFlow({
           <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.setupFeedback.connectionUnavailable")}</div>
         )}
         {mcpStatus?.message && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue)) && (
-          <div className="agent-integration-stage-hint is-error" role="alert">
+          <div className={`agent-integration-stage-hint ${quitRequired ? "is-warning" : "is-error"}`} role={quitRequired ? "status" : "alert"}>
             <WarningOutlined />
             {integrationErrorMessage(agent.id, mcpStatus, t)}
             <Typography.Text copyable={{ text: diagnosticText(mcpStatus) }}>
@@ -1255,9 +1259,10 @@ function AgentConfigurationFlow({
         )}
         {mcpState !== "enabled" && (
           <Space>
-            {mcpState === "error" && (retryDisconnect || mcpStatus?.can_connect) && (
+            {(mcpState === "error" || quitRequired) && (retryDisconnect || mcpStatus?.can_connect) && (
               <Button disabled={Boolean(busyAction)} onClick={() => void onMCPAction(agent.id, retryDisconnect ? "disconnect" : "connect")}>
-                {t(retryDisconnect ? "agentIntegration.retryDisconnection" : "agentIntegration.retryConnection")}
+                {t(quitRequired ? retryDisconnect ? "agentIntegration.quitRequired.retryDisconnect" : "agentIntegration.quitRequired.retryInstall"
+                  : retryDisconnect ? "agentIntegration.retryDisconnection" : "agentIntegration.retryConnection")}
               </Button>
             )}
           </Space>

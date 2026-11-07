@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"lazymind/agentconnector/internal/desktopsetup"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -175,6 +176,9 @@ func ErrorReason(err error) string {
 }
 
 func FailError(status Status, err error) Status {
+	if errors.Is(err, desktopsetup.ErrQuitRequired) {
+		return RequireQuit(status, status.RetryAction)
+	}
 	status = Fail(status, err.Error())
 	status.DiagnosticReason = ErrorReason(err)
 	return status

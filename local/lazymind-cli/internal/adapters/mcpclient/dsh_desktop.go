@@ -488,7 +488,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	if running, err := agentexec.DSHDesktopRunning(ctx, cli); err != nil {
 		return dshFailure(s, fmt.Errorf("check running Desktop: %w", err))
 	} else if running {
-		return dshFailure(s, errors.New("fully quit DSH Desktop before changing the connection"))
+		return agentintegration.RequireQuit(s, r.Action)
 	}
 	if !connect {
 		globalPath := filepath.Join(dshHome(), "cordis.patch.yml")

@@ -95,7 +95,7 @@ export interface DesktopAgentRequirement {
 }
 
 export interface DesktopAgentAction {
-  kind: "open_url" | "login";
+  kind: "open_url" | "login" | "quit_agent";
   url?: string;
 }
 

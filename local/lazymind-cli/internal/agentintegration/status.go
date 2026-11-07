@@ -1,6 +1,9 @@
 package agentintegration
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type State string
 
@@ -84,6 +87,21 @@ func Fail(status Status, message string) Status {
 	status.State = Failed
 	status.Action = nil
 	status.Message = strings.TrimSpace(message)
+	return status
+}
+
+// RequireQuit preserves the actual configuration and connection while setup
+// waits for an explicit user retry. It must not advertise installation success.
+func RequireQuit(status Status, retryAction string) Status {
+	if retryAction == "" {
+		retryAction = "connect"
+	}
+	status.State = ActionRequired
+	status.Action = &Action{Kind: "quit_agent"}
+	status.Issue = &Issue{Code: "quit_required"}
+	status.RetryAction = retryAction
+	status.DiagnosticReason = ""
+	status.Message = fmt.Sprintf("Save your work and fully quit %s from its application or system tray menu, then retry.", status.DisplayName)
 	return status
 }
 

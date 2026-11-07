@@ -2433,6 +2433,13 @@ const enUS = {
     },
     waitingForApplication: "Waiting for app",
     waitingForApplicationDescription: "Integration is enabled. Waiting for {{agent}} to start before checking the connection.",
+    quitRequired: {
+      title: "Quit {{agent}} to continue",
+      waiting: "Waiting for {{agent}} to quit",
+      description: "Save your work, choose Quit or Exit from {{agent}}'s application or system tray menu, then retry. Closing its window may leave the app running in the background.",
+      retryInstall: "Retry installation",
+      retryDisconnect: "Retry disconnection",
+    },
     setupFeedback: {
       environmentMismatch: "An existing connection points to another LazyMind environment. Turn this switch off and on to switch.",
       readFailed: "Unable to read connection settings. Check again.",
@@ -2440,6 +2447,7 @@ const enUS = {
       disableFailed: "Could not disable the connection. Try again.",
       connectionUnavailable: "Configuration is saved. The connection is currently unavailable.",
       unknown: "Status unknown",
+      diagnosticID: "Diagnostic ID",
       copyDiagnostics: "Copy diagnostics",
     },
     connectionErrors: {

@@ -50,9 +50,10 @@ vi.mock("./externalCapabilitiesApi", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
+      if (key.startsWith("agentIntegration.quitRequired.")) return retryI18n.t(key, options);
       if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
         key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
-        return retryI18n.t(key);
+        return retryI18n.t(key, options);
       }
       const agent = options?.agent || "Agent";
       const values: Record<string, string> = {
@@ -1592,6 +1593,35 @@ describe("AgentIntegrationPage", () => {
       expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
     } else expect(within(card).getByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable)).toBeInTheDocument();
     expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it.each(["workbuddy", "codex", "deepseek-harness"])("shows a recoverable quit request for %s", async (agent) => {
+    const name = agent === "workbuddy" ? "WorkBuddy" : agent === "codex" ? "Codex" : "DeepSeek Harness";
+    const status = { agent, display_name: name, state: "action_required", enabled: true,
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" }, message: "quit required",
+      can_connect: true, can_disconnect: true, requirements: [{ id: "installed", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    await within(card).findByText(retryI18n.t("agentIntegration.quitRequired.waiting", { agent: name }));
+    expect(within(card).getByRole("button", { name: zhCN.agentIntegration.quitRequired.retryInstall })).toBeEnabled();
+    expect(card.querySelector(".agent-integration-stage-hint.is-warning")).not.toBeNull();
+    expect(card.querySelector(".agent-integration-stage-hint.is-error")).toBeNull();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it("preserves disconnect intent when retrying a manual quit request", async () => {
+    const agent = "deepseek-harness";
+    const status = { agent, display_name: "DeepSeek Harness", state: "action_required", enabled: true,
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" }, message: "quit required", retry_action: "disconnect",
+      can_connect: true, can_disconnect: true, requirements: [{ id: "installed", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: status } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "ready", enabled: false, can_disconnect: false, action: undefined, issue: undefined, message: "" } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent(agent);
+    fireEvent.click(await within(card).findByRole("button", { name: zhCN.agentIntegration.quitRequired.retryDisconnect }));
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith(agent, "disconnect"));
+    expect(mocks.action).not.toHaveBeenCalledWith(agent, "connect");
   });
 
   it("refreshes WorkBuddy health on focus without resetting its enabled choice", async () => {
