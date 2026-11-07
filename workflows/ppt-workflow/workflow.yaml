@@ -834,7 +834,6 @@ ui:
     - id: page_prompts
       step_id: plan_page_prompts
       label: Page Prompts
-      skip_reason: Quick generation was selected without an uploaded template, so slides are generated directly without a separate page-prompt planning step.
       layout: composite
       page_group: presentation
       slot_scope: step
@@ -899,9 +898,7 @@ i18n:
       analysis: {label: 分析}
       materials: {label: 素材}
       outline: {label: 大纲}
-      page_prompts:
-        label: 每页提示词
-        skip_reason: 本次选择了快速生成且未使用上传模板，因此跳过单独的每页提示词规划，直接生成幻灯片。
+      page_prompts: {label: 每页提示词}
       background_prompts: {label: 底图提示词}
       background_images: {label: 底图}
       composite_preview: {label: 幻灯片}

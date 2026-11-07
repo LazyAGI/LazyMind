@@ -73,6 +73,58 @@ describe('definition-based task step progress', () => {
     expect(mocks.get).toHaveBeenCalledTimes(3);
   });
 
+  it('opens a drawer from an already loaded card without repeating runtime reads', async () => {
+    mockWorkflow();
+    const card = renderHook(() => useTaskSteps(task));
+    await waitFor(() => expect(card.result.current.steps).toHaveLength(5));
+    const drawer = renderHook(() => useTaskSteps({ ...task }));
+    await waitFor(() => expect(drawer.result.current.steps).toEqual(card.result.current.steps));
+    expect(mocks.get).toHaveBeenCalledTimes(3);
+
+    card.unmount();
+    const anotherDrawer = renderHook(() => useTaskSteps(task));
+    await waitFor(() => expect(anotherDrawer.result.current.steps).toHaveLength(5));
+    expect(mocks.get).toHaveBeenCalledTimes(3);
+    drawer.unmount();
+    anotherDrawer.unmount();
+
+    // Leaving the page releases runtime snapshots; returning reads fresh data.
+    const reopened = renderHook(() => useTaskSteps(task));
+    await waitFor(() => expect(reopened.result.current.steps).toHaveLength(5));
+    expect(mocks.get).toHaveBeenCalledTimes(5);
+  });
+
+  it('loads the definition while a slower projection is still pending', async () => {
+    const { session, projection, ui } = mockWorkflow();
+    let resolveProjection!: (response: { data: typeof projection }) => void;
+    const pendingProjection = new Promise<{ data: typeof projection }>(resolve => { resolveProjection = resolve; });
+    mocks.get.mockImplementation((url: string) => url.endsWith('/projection') ? pendingProjection
+      : Promise.resolve(url.includes('/workflow-sessions/') ? { data: { session } } : { data: { ui } }));
+    const view = renderHook(() => useTaskSteps(task));
+    await waitFor(() => expect(mocks.get.mock.calls.filter(([url]) => url.includes('/workflows/'))).toHaveLength(1));
+    expect(view.result.current.loading).toBe(true);
+    await act(async () => { resolveProjection({ data: projection }); });
+    await waitFor(() => expect(view.result.current.steps).toHaveLength(5));
+  });
+
+  it('does not share a failed runtime read with a newly opened drawer', async () => {
+    const { session, projection, ui } = mockWorkflow();
+    let fail = true;
+    mocks.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/projection')) {
+        if (fail) throw new Error('projection unavailable');
+        return { data: projection };
+      }
+      return url.includes('/workflow-sessions/') ? { data: { session } } : { data: { ui } };
+    });
+    const card = renderHook(() => useTaskSteps(task));
+    await waitFor(() => expect(card.result.current.failed).toBe(true));
+    fail = false;
+    const drawer = renderHook(() => useTaskSteps(task));
+    await waitFor(() => expect(drawer.result.current.steps).toHaveLength(5));
+    expect(drawer.result.current.failed).toBe(false);
+  });
+
   it('reuses runtime data for language and audience changes but loads the matching definition language', async () => {
     mockWorkflow();
     const view = renderHook(() => useTaskSteps(task));

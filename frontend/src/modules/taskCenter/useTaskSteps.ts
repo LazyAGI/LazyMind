@@ -19,21 +19,32 @@ type Projection = {
 };
 
 type StepRuntime = { payload: Projection; session?: WorkflowSession };
-const runtimeLoads = new Map<string, Promise<StepRuntime>>();
+type RuntimeLoad = { request: Promise<StepRuntime>; session: Promise<WorkflowSession | undefined>; readers: number };
+// Retain a snapshot while its card/row/drawer is mounted, not just while it is
+// in flight. The versioned key prevents reuse after execution facts change.
+const runtimeLoads = new Map<string, RuntimeLoad>();
 
-function loadStepRuntime(sessionID: string, key: string): Promise<StepRuntime> {
-  const pending = runtimeLoads.get(key);
-  if (pending) return pending;
+function retainStepRuntime(sessionID: string, key: string, previous?: RuntimeLoad): RuntimeLoad {
+  const shared = runtimeLoads.get(key);
+  if (shared) {
+    shared.readers += 1;
+    return shared;
+  }
   const encodedID = encodeURIComponent(sessionID);
-  const request = Promise.all([
+  const session = previous?.session ?? axiosInstance.get(`${BASE_URL}/api/core/workflow-sessions/${encodedID}`, { silentError: true } as never)
+    .then(response => (response.data?.data ?? response.data)?.session as WorkflowSession | undefined);
+  const request = previous?.request ?? Promise.all([
     axiosInstance.get(`${BASE_URL}/api/core/workflow-sessions/${encodedID}/projection`, { silentError: true } as never),
-    axiosInstance.get(`${BASE_URL}/api/core/workflow-sessions/${encodedID}`, { silentError: true } as never),
-  ]).then(([projectionResponse, sessionResponse]) => ({
+    session,
+  ]).then(([projectionResponse, session]) => ({
     payload: projectionResponse.data?.data ?? projectionResponse.data,
-    session: (sessionResponse.data?.data ?? sessionResponse.data)?.session,
-  })).finally(() => { runtimeLoads.delete(key); });
-  runtimeLoads.set(key, request);
-  return request;
+    session,
+  }));
+  const entry = { request, session, readers: 1 };
+  runtimeLoads.set(key, entry);
+  // A failed read must not prevent a newly opened drawer from trying again.
+  void request.catch(() => { if (runtimeLoads.get(key) === entry) runtimeLoads.delete(key); });
+  return entry;
 }
 
 export function workflowPlannedSteps(ui: WorkflowUI, session: WorkflowSession, payload: Projection, developer: boolean): TaskStep[] | null {
@@ -56,7 +67,7 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
   const { i18n } = useTranslation();
   const [developer, setDeveloper] = useState(isDeveloperModeActive);
   const [snapshot, setSnapshot] = useState<{ sessionID: string; steps: TaskStep[] | null; failed: boolean }>();
-  const runtimeCache = useRef<{ key: string; request: Promise<StepRuntime> }>();
+  const runtimeCache = useRef<{ key: string; entry: RuntimeLoad }>();
   const sessionID = task?.workflow_session_id;
   // Polling creates new arrays even when execution facts have not changed.
   const runtimeKey = JSON.stringify([task?.user_id, sessionID, task?.updated_at, task?.status,
@@ -71,15 +82,16 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
   useEffect(() => {
     if (!sessionID) return;
     let active = true;
-    if (runtimeCache.current?.key !== runtimeKey) {
-      runtimeCache.current = { key: runtimeKey, request: loadStepRuntime(sessionID, runtimeKey) };
-    }
-    void runtimeCache.current.request.then(async ({ payload, session }) => {
+    const entry = retainStepRuntime(sessionID, runtimeKey,
+      runtimeCache.current?.key === runtimeKey ? runtimeCache.current.entry : undefined);
+    runtimeCache.current = { key: runtimeKey, entry };
+    // The immutable definition depends only on the session, not its projection.
+    const definition = entry.session.then(session => session?.workflow_id
+      ? loadWorkflowUI(session.workflow_id, session.pinned_revision_id, { language, silentError: true }) : undefined);
+    void Promise.all([entry.request, definition]).then(([{ payload, session }, ui]) => {
       if (!active) return;
       let steps: TaskStep[] | null;
-      if (session?.workflow_id) {
-        const ui = await loadWorkflowUI(session.workflow_id, session.pinned_revision_id, { language, silentError: true });
-        if (!active) return;
+      if (session?.workflow_id && ui) {
         const runtime: WorkflowSession = { ...session,
           current_step_id: payload.current_step_id ?? session.current_step_id,
           steps: workflowSnapshotSteps(session.session_id, payload.attempt_history) ?? session.steps,
@@ -97,7 +109,11 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
       }
       if (active) setSnapshot({ sessionID, steps, failed: false });
     }).catch(() => { if (active) setSnapshot(previous => ({ sessionID, steps: previous?.sessionID === sessionID ? previous.steps : null, failed: true })); });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      entry.readers -= 1;
+      if (!entry.readers && runtimeLoads.get(runtimeKey) === entry) runtimeLoads.delete(runtimeKey);
+    };
   }, [sessionID, runtimeKey, language, developer]);
 
   if (sessionID) {

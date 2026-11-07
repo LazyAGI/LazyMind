@@ -211,9 +211,9 @@ describe('TaskDetail', () => {
   it('uses the same workflow tab labels and effective step statuses as the conversation panel', async () => {
     const workflowTask = { ...task, workflow_session_id: 'workflow-session', status: 'paused', steps: [] };
     vi.mocked(getTask).mockResolvedValue(workflowTask);
-    vi.mocked(axiosInstance.get)
-      .mockResolvedValueOnce({ data: { data: { projection: { nodes: {} }, graph: { static_order: [] } } } })
-      .mockResolvedValueOnce({ data: { data: { session: {
+    vi.mocked(axiosInstance.get).mockImplementation(async (url: string) => {
+      if (url.endsWith('/projection')) return { data: { data: { projection: { nodes: {} }, graph: { static_order: [] } } } };
+      if (url.includes('/workflow-sessions/')) return { data: { data: { session: {
         session_id: 'workflow-session',
         conversation_id: task.conversation_id,
         workflow_id: 'find-skill',
@@ -228,11 +228,12 @@ describe('TaskDetail', () => {
           { id: 'one', session_id: 'workflow-session', step_id: 'extract_search_plan', attempt: 1, task_id: 'one', status: 'succeeded', created_at: task.created_at, updated_at: task.updated_at },
           { id: 'two', session_id: 'workflow-session', step_id: 'search_skillhub', attempt: 1, task_id: 'two', status: 'interrupted', created_at: task.created_at, updated_at: task.updated_at },
         ],
-      } } } })
-      .mockResolvedValueOnce({ data: { ui: { tabs: [
+      } } } };
+      return { data: { ui: { tabs: [
         { id: 'plan', step_id: 'extract_search_plan', label: '检索计划', slots: [{ id: 'search_plan' }] },
         { id: 'search', step_id: 'search_skillhub', label: 'Search SkillHub', slots: [{ id: 'search_plan' }] },
-      ] } } });
+      ] } } };
+    });
 
     render(<TaskDetail task={workflowTask} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
 
