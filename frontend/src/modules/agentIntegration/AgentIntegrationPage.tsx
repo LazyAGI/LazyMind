@@ -933,7 +933,7 @@ function AgentConfigurationFlow({
   const mcpEnabled = mcpState === "enabled";
   const mcpChecked = mcpStatus?.enabled ?? (mcpEnabled || mcpState === "conflict" || Boolean(mcpStatus?.can_disconnect));
   const mcpCanToggle = mcpStatus?.issue?.code !== "configuration_unreadable" && (mcpState === "ready" || mcpChecked || Boolean(mcpStatus?.can_connect));
-  const retryDisconnect = mcpStatus?.retry_action === "disconnect" && Boolean(mcpStatus?.can_disconnect);
+  const retryDisconnect = mcpStatus?.retry_action === "disconnect";
   const mcpBindingConfigured = Boolean(agent.mcpBindingTarget && bindings[agent.mcpBindingTarget]);
   const mcpInstallationMissing = mcpRequirements.length > 0 && !mcpRequirements[0].satisfied;
 

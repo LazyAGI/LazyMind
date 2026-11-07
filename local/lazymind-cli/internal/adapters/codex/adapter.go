@@ -29,6 +29,7 @@ const (
 )
 
 var prepareCodexDesktop = codexhost.PrepareDesktopForInstallation
+var cleanupCodexPresentation = codexhost.CleanupPresentation
 
 type Adapter struct {
 	binary         string
@@ -285,19 +286,20 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 		if err != nil {
 			return agentintegration.FailError(status, err)
 		}
-		if enabled {
-			if record.Home == a.home {
-				if err := workflowhost.Disable(a.home, record.ConnectorID); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return agentintegration.FailError(status, err)
-				}
+		if record.Home == a.home {
+			if err := workflowhost.Disable(a.home, record.ConnectorID); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return agentintegration.FailError(status, err)
 			}
+		}
+		if enabled {
 			if _, err := a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json"); err != nil {
 				return agentintegration.Fail(status, "remove Codex Workflow plugin: "+err.Error())
 			}
-			if err := codexhost.CleanupPresentation(a.home); err != nil {
-				return agentintegration.Fail(status, "remove Codex Workflow panel: "+err.Error())
-			}
 		}
+		if err := cleanupCodexPresentation(a.home); err != nil {
+			return agentintegration.FailError(status, err)
+		}
+
 	}
 
 	if _, exists, err := a.getConfig(); err != nil {

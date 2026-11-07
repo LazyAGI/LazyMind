@@ -1437,6 +1437,22 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).toHaveBeenCalledWith(agent, "disconnect");
   });
 
+  it("retries failed cleanup after the Agent entry has already been removed", async () => {
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "error", enabled: false,
+      retry_action: "disconnect", can_disconnect: false, can_connect: true,
+      issue: { code: "configuration_failed" }, message: "startup cleanup failed",
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    mocks.action.mockResolvedValue({ ok: true, data: { ...status, state: "ready", issue: undefined, retry_action: undefined, message: "" } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("workbuddy");
+    await within(card).findByText(zhCN.agentIntegration.setupFeedback.disableFailed);
+    expect(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).not.toBeChecked();
+    fireEvent.click(within(card).getByRole("button", { name: zhCN.agentIntegration.retryDisconnection }));
+    await waitFor(() => expect(mocks.action).toHaveBeenCalledWith("workbuddy", "disconnect"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("keeps configuration status unknown when it cannot be read", async () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { raccoon: {
       agent: "raccoon", display_name: "Raccoon", state: "error", message: "private raw failure",
