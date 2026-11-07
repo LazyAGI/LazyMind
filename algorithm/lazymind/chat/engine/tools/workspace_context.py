@@ -112,6 +112,7 @@ class WorkspaceContext:
 class ToolResolutionContext:
     managed_roots: tuple[str, ...] = ()
     managed_files: frozenset[str] = frozenset()
+    acl_read_roots: tuple[str, ...] = ()
     citation_state: dict = field(default_factory=dict)
 
 

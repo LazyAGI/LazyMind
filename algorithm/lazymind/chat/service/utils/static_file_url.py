@@ -1,9 +1,10 @@
 import hashlib
 import hmac
 import os
+import re
 import time
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 
 from lazymind.config import config as _cfg
 
@@ -129,6 +130,35 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
         if candidate.is_file():
             return str(candidate)
     return ''
+
+
+_LEGACY_GENERATED_NAME = re.compile(
+    r'^[0-9a-f]{32}(?:_[A-Za-z0-9_-]+)?\.[A-Za-z0-9]{1,10}$', re.IGNORECASE,
+)
+
+
+def verified_legacy_generated_path(path_or_url: str) -> str:
+    """Resolve one legacy generated file by its unguessable file id.
+
+    This intentionally grants no directory capability: callers receive one
+    canonical file path, and only for the historical global ai_generated tree.
+    """
+    raw = str(path_or_url or '').strip()
+    parsed = urlsplit(raw)
+    path = parsed.path
+    marker = '/static-files/'
+    if marker in path:
+        rel = unquote(path.split(marker, 1)[1].lstrip('/')).replace('\\', '/')
+    else:
+        local = local_path_from_static_file_url(raw)
+        rel = file_relative_path(local) if local else ''
+    if not rel.startswith('ai_generated/'):
+        return ''
+    name = rel.removeprefix('ai_generated/')
+    if '/' in name or not _LEGACY_GENERATED_NAME.fullmatch(name):
+        return ''
+    local = _resolve_upload_relative_path(Path(_upload_root()).resolve(), rel)
+    return local if local and Path(local).is_file() else ''
 
 
 def resolve_local_image_path(path_or_url: str) -> str:
