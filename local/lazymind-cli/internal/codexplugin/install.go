@@ -73,12 +73,18 @@ func Read() (Installation, error) {
 }
 
 func Enabled(profile, marketplace string) (bool, error) {
+	_, enabled, err := Registration(profile, marketplace)
+	return enabled, err
+}
+
+// Registration distinguishes saved plugin settings from the native enable switch.
+func Registration(profile, marketplace string) (exists, enabled bool, err error) {
 	body, err := os.ReadFile(filepath.Join(profile, "config.toml"))
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	var config struct {
 		Plugins map[string]struct {
@@ -86,9 +92,10 @@ func Enabled(profile, marketplace string) (bool, error) {
 		} `toml:"plugins"`
 	}
 	if err := toml.Unmarshal(body, &config); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return config.Plugins[Name+"@"+marketplace].Enabled, nil
+	entry, exists := config.Plugins[Name+"@"+marketplace]
+	return exists, entry.Enabled, nil
 }
 
 func FindNode(ctx context.Context) (string, error) { return findNode(ctx, "") }

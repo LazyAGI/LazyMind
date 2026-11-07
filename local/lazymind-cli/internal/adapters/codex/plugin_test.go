@@ -154,6 +154,17 @@ exit 1
 	if status := second.Connect(context.Background()); status.State != agentintegration.Enabled || status.Enabled == nil || !*status.Enabled {
 		t.Fatalf("second environment install: %+v", status)
 	}
+	// A native-disabled plugin is still a saved registration and can be cleared.
+	savedConfig, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(savedConfig), "enabled = true", "enabled = false")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if status := second.Status(context.Background()); status.Enabled == nil || !*status.Enabled || status.Connection == nil || status.Connection.MCPEnabled {
+		t.Fatalf("native-disabled registration: %+v", status)
+	}
 	if status := adapter.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled || !status.CanDisconnect {
 		t.Fatalf("first environment did not detect replacement: %+v", status)
 	}

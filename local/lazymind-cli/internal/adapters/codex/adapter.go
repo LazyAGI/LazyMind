@@ -282,7 +282,7 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 	status.Issue = nil
 	status.State = agentintegration.Ready
 	if record, err := codexplugin.Read(); err == nil {
-		enabled, err := codexplugin.Enabled(profile, record.Marketplace)
+		installed, _, err := codexplugin.Registration(profile, record.Marketplace)
 		if err != nil {
 			return agentintegration.FailError(status, err)
 		}
@@ -291,7 +291,7 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 				return agentintegration.FailError(status, err)
 			}
 		}
-		if enabled {
+		if installed {
 			if _, err := a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json"); err != nil {
 				return agentintegration.Fail(status, "remove Codex Workflow plugin: "+err.Error())
 			}

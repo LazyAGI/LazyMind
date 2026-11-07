@@ -24,11 +24,17 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 	}
 	record, recordErr := codexplugin.Read()
 	if recordErr == nil {
-		installed, e := codexplugin.Enabled(profile, record.Marketplace)
+		installed, nativeEnabled, e := codexplugin.Registration(profile, record.Marketplace)
 		if e != nil {
 			unreadable = true
 		}
 		if installed {
+			if !nativeEnabled && status.State != agentintegration.Failed {
+				status.State = agentintegration.Enabled
+				status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, MCPTrusted: true, MCPEnabled: false, PresentationStatus: "unavailable"}
+				status.Issue = &agentintegration.Issue{Code: "mcp_enable_required"}
+				status.Message = "Enable the installed plugin in Codex."
+			}
 			exists = true
 			item.Command = record.Self
 			item.Reference = connectorconfig.Path(record.Home, "codex", record.Profile)
