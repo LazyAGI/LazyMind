@@ -52,7 +52,6 @@ vi.mock('./api', () => ({
 }));
 vi.mock('./TaskDetail', () => ({
   default: () => null,
-  StatusTag: ({ status }: { status: string }) => <span>{status}</span>,
   formatDate: (value?: string) => value ?? '',
 }));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));

@@ -2,10 +2,11 @@ import NotificationHistory from '@/modules/notifications/NotificationHistory';
 import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import '@/modules/notifications/index.scss';
 import ScheduleRunHistory from './ScheduleRunHistory';
+import { StatusTag } from './StatusTag';
 import { describeCron } from './scheduleTime';
 import { useEffect, useMemo, useState } from 'react';
 import { WORKFLOW_TASKS_CHANGED } from './events';
-import { Alert, Button, Drawer, Dropdown, Empty, Spin, Tag, Tooltip } from 'antd';
+import { Alert, Button, Drawer, Dropdown, Empty, Spin, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { CheckOutlined, CloseCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, PauseOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -191,23 +192,6 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
       ) : null}
     </Drawer>
   );
-}
-
-export function StatusTag({ status, onClick }: { status: string; onClick?: () => void }) {
-  const { t } = useTranslation();
-  const color = isDone(status)
-    ? 'success'
-    : ['failed', 'interrupted'].includes(status)
-      ? 'error'
-      : status === 'running'
-        ? 'processing'
-        : status === 'paused'
-          ? 'gold'
-          : status === 'canceled'
-            ? 'default'
-            : 'orange';
-  const key = status === 'succeeded' ? 'Completed' : status === 'interrupted' ? 'Failed' : status === 'waiting_inputs' ? 'WaitingInputs' : `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
-  return <Tag className={`task-status-tag status-${status}${onClick ? ' clickable-status' : ''}`} color={color} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
 }
 
 export function formatDate(value?: string) {

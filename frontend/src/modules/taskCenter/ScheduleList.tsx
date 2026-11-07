@@ -43,7 +43,7 @@ import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { getLocalizedErrorMessage, axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import { taskStatusDescription } from './taskStatusDescription';
-import { StatusTag } from './TaskDetail';
+import { StatusTag } from './StatusTag';
 import { TASKS_REMOVED_EVENT } from './events';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */

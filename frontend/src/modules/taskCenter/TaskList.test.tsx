@@ -18,7 +18,7 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('@/components/request', () => ({ getLocalizedErrorMessage: () => 'failure', axiosInstance: { get: mocks.requestGet, defaults: {} }, BASE_URL: '' }));
 vi.mock('./TaskDetail', () => ({
   default: ({ task, onArchive }: { task: Task | null; onArchive: (task: Task) => void }) => task && <button onClick={() => onArchive(task)}>Archive task</button>,
-  StatusTag: () => null, formatDate: () => '',
+  formatDate: () => '',
 }));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
 vi.mock('@/modules/chat/components/ArchiveConversationModal', () => ({
