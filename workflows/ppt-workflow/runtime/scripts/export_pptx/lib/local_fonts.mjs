@@ -32,8 +32,53 @@ export async function localFontFaces() {
 }
 
 export async function localFontCss(html) {
+  const packagedFamilies = new Set();
+  const packaged = new Set([...html.matchAll(/\/\*lazymind-font:([A-Za-z0-9+/=]+)\*\//g)].flatMap(([, token]) => {
+    try {
+      const record = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
+      packagedFamilies.add(record.family.toLowerCase());
+      return [record.sha256];
+    } catch { return []; }
+  }));
   const faces = await localFontFaces();
-  return faces.filter(face => html.toLowerCase().includes(face.family.toLowerCase())).map(face =>
+  return faces.filter(face => !packaged.has(face.id)
+    && !face.aliases.some(alias => packagedFamilies.has(alias.toLowerCase()))
+    && html.toLowerCase().includes(face.family.toLowerCase())).map(face =>
     `@font-face{font-family:${JSON.stringify(face.family).replaceAll('<', '\\3c ')};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
   ).join('\n');
+}
+
+/** Substitute only unavailable CJK families with the managed, embeddable font.
+ * Install before DOM measurement so geometry and embedded font bytes agree.
+ * Never alias a font that is already installed or supplied by the document.
+ */
+export async function installMissingFontFallbacks(page) {
+  const faces = (await localFontFaces()).filter(face => face.family === 'Noto Sans SC');
+  if (!faces.length) return [];
+  const missing = await page.evaluate(async () => {
+    const allowed = new Set(['microsoft yahei', '微软雅黑', 'pingfang sc', 'noto sans cjk sc']);
+    const names = new Set();
+    for (const el of document.querySelectorAll('body *')) {
+      for (const part of getComputedStyle(el).fontFamily.split(',')) {
+        const name = part.trim().replace(/^['"]|['"]$/g, '');
+        if (allowed.has(name.toLowerCase())) names.add(name);
+      }
+    }
+    const missing = [];
+    for (const name of names) {
+      // document.fonts.check alone returns true for nonexistent families.
+      if ([...document.fonts].some(face => face.family.replace(/^['"]|['"]$/g, '').toLowerCase() === name.toLowerCase())) continue;
+      try { await new FontFace('__ppt_font_probe', `local(${JSON.stringify(name)})`).load(); }
+      catch { missing.push(name); }
+    }
+    return missing;
+  });
+  if (!missing.length) return [];
+  const css = missing.flatMap(family => faces.map(face =>
+    `@font-face{font-family:${JSON.stringify(family)};font-weight:${face.weight};font-style:${face.style};src:url(data:font/ttf;base64,${face.data.toString('base64')})}`,
+  )).join('\n');
+  await page.addStyleTag({ content: css });
+  await page.evaluate(() => document.fonts.ready);
+  process.stderr.write(`[fonts] Missing ${missing.join(', ')}; using managed Noto Sans SC before layout measurement.\n`);
+  return missing;
 }

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/common/askuser"
+
 	"lazymind/core/evolution"
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
@@ -152,6 +154,7 @@ type ChatAgentOptions struct {
 }
 
 type ChatWorkflowOptions struct {
+	Clarification            map[string]any   `json:"clarification,omitempty"`
 	EnableWorkflow           *bool            `json:"enable_workflow,omitempty"`
 	WorkflowContext          map[string]any   `json:"workflow_context,omitempty"`
 	Catalog                  []map[string]any `json:"catalog,omitempty"`
@@ -220,17 +223,13 @@ type ArtifactCreatedEvent struct {
 
 // AskQuestion is a single question within an AskPendingEvent.
 // type is one of "boolean", "single", "multiple", "text".
-type AskQuestion struct {
-	Text       string   `json:"text"`
-	Type       string   `json:"type"`
-	Choices    []string `json:"choices,omitempty"`
-	AllowOther *bool    `json:"allow_other,omitempty"`
-}
+type AskQuestion = askuser.Question
 
 // AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
+	Workflow                   map[string]string          `json:"workflow,omitempty"`
 	KnowledgeManagementPreview map[string]any             `json:"knowledge_management_preview,omitempty"`
 	KnowledgeManagement        map[string]string          `json:"knowledge_management,omitempty"`
 	AskID                      string                     `json:"ask_id"`
@@ -736,6 +735,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if workflowContext, ok := body["workflow_context"].(map[string]any); ok && len(workflowContext) > 0 {
 		req.Workflow.WorkflowContext = workflowContext
+	}
+	if clarification, ok := body["workflow_clarification"].(map[string]any); ok {
+		req.Workflow.Clarification = clarification
 	}
 	if catalog, ok := body["workflow_catalog"].([]map[string]any); ok {
 		req.Workflow.Catalog = catalog

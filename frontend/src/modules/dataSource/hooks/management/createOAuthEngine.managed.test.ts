@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ManagementContext } from "./context";
 import { createOAuthEngine, startFeishuCLISession, startManagedOAuthSession } from "./createOAuthEngine";
+import { mapCloudConnectionToNotionAccount } from "../../mappers/dataSourceConnection";
+import { getOAuthStateFromConnection } from "../../common/feishuAccounts";
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -16,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   openManagedAuthorization: vi.fn(),
   reserveManagedAuthorizationPopup: vi.fn(),
   requestFeishuAuthorizeUrl: vi.fn(),
+  requestCloudAuthorizeUrl: vi.fn(),
   openLegacyPopup: vi.fn(),
 }));
 
@@ -55,7 +58,7 @@ vi.mock("@/modules/dataSource/common/feishuOAuth", () => ({
   consumeFeishuDataSourceOAuthResult: vi.fn(),
   enableCloudConnectionForChat: mocks.enableCloudConnectionForChat,
   peekFeishuDataSourceWizardDraft: vi.fn(() => null),
-  requestCloudDataSourceAuthorizeUrl: vi.fn(),
+  requestCloudDataSourceAuthorizeUrl: mocks.requestCloudAuthorizeUrl,
   openCenteredPopup: mocks.openLegacyPopup,
   requestFeishuDataSourceAuthorizeUrl: mocks.requestFeishuAuthorizeUrl,
   saveFeishuDataSourceWizardDraft: vi.fn(),
@@ -70,7 +73,7 @@ vi.mock("../../utils/cloudSync", () => ({
 }));
 
 vi.mock("../../mappers/dataSourceConnection", () => ({
-  getCloudConnectionItems: vi.fn(() => [{}]),
+  getCloudConnectionItems: vi.fn((data) => data?.items || data?.data?.items || []),
   mapCloudConnectionToDataSourceConnection: vi.fn(),
   mapCloudConnectionToFeishuAccount: vi.fn(() => ({
     status: "connected",
@@ -108,6 +111,7 @@ describe("createOAuthEngine managed OAuth", () => {
       .mockReset()
       .mockReturnValue({ kind: "popup" });
     mocks.listConnections.mockResolvedValue({ data: { items: [{}] } });
+    mocks.requestCloudAuthorizeUrl.mockReset().mockResolvedValue("https://notion.so/fixture-authorize");
     mocks.requestFeishuAuthorizeUrl.mockReset().mockResolvedValue("https://accounts.feishu.cn/fixture");
     mocks.openLegacyPopup.mockReset().mockReturnValue({ closed: false, focus: vi.fn() });
   });
@@ -317,6 +321,10 @@ describe("createOAuthEngine managed OAuth", () => {
 
     const pending = createOAuthEngine(context).startCloudOAuth("notion");
     expect.soft(mocks.reserveManagedAuthorizationPopup).toHaveBeenCalledOnce();
+    expect(mocks.reserveManagedAuthorizationPopup.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.listConnections.mock.invocationCallOrder[0],
+    );
+    await vi.advanceTimersByTimeAsync(0);
     expect.soft(mocks.createSession).toHaveBeenCalledOnce();
     resolveSession({ data: {} });
     await expect(pending).resolves.toBe(false);
@@ -362,7 +370,8 @@ describe("createOAuthEngine managed OAuth", () => {
     );
   });
 
-  it("reauthorizes an existing managed connection without entering the legacy BYO flow", async () => {
+  it.each([true, false])("reauthorizes the existing managed Notion connection (explicit selection=%s)", async (explicit) => {
+    mocks.listConnections.mockResolvedValue({ data: { items: [{ connection_id: "managed-connection" }] } });
     mocks.reauthorize.mockResolvedValueOnce({
       data: {
         session_id: "managed-reauthorize-session",
@@ -400,9 +409,9 @@ describe("createOAuthEngine managed OAuth", () => {
       oauthConnection: { connectionId: "managed-connection" },
     } as unknown as ManagementContext;
 
-    const pending = createOAuthEngine(context).startCloudOAuth("notion", {
+    const pending = createOAuthEngine(context).startCloudOAuth("notion", explicit ? {
       reauthorizeConnectionId: "managed-connection",
-    } as never);
+    } : undefined);
     await vi.advanceTimersByTimeAsync(1000);
 
     await expect(pending).resolves.toBe(true);
@@ -412,6 +421,67 @@ describe("createOAuthEngine managed OAuth", () => {
     expect(mocks.createSession).not.toHaveBeenCalledWith(
       { providerConnectionCreateRequest: { provider: "notion" } },
     );
+  });
+
+  it.each(["ACTIVE", "EXPIRED"])("reuses a saved %s Notion connection for BYO authorization", async (status) => {
+    const setup = { appId: "fixture-notion-client", appSecret: "fixture-notion-secret" };
+    mocks.listConnections.mockResolvedValue({ data: { items: [{ connection_id: "existing-notion", status }] } });
+    const context = legacyContext(false);
+    expect(await createOAuthEngine(context).startCloudOAuth("notion", { setup, draftWizardOpen: false })).toBe(true);
+    expect(mocks.requestCloudAuthorizeUrl).toHaveBeenCalledWith("notion", expect.objectContaining({
+      reauthorizeConnectionId: "existing-notion",
+    }));
+    expect(mocks.requestCloudAuthorizeUrl.mock.calls[0][1]).not.toHaveProperty("appSecret");
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    createOAuthEngine(context).clearOauthAttempt();
+  });
+
+  it.each([false, true])("does not start Notion authorization when connections cannot be checked (managed=%s)", async (managed) => {
+    mocks.listConnections.mockRejectedValueOnce(new Error("fixture connection list unavailable"));
+    const context = legacyContext(managed);
+    const setup = { appId: "fixture-client", appSecret: "fixture-secret" };
+    expect(await createOAuthEngine(context).startCloudOAuth("notion", managed ? undefined : { setup })).toBe(false);
+    expect(mocks.requestCloudAuthorizeUrl).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    if (managed) expect(mocks.closeManagedAuthorizationPopup).toHaveBeenCalledWith({ kind: "popup" });
+  });
+
+  it("allows the first BYO Notion connection when no connection is saved", async () => {
+    mocks.listConnections.mockResolvedValue({ data: { items: [] } });
+    const context = legacyContext(false);
+    const setup = { appId: "fixture-client", appSecret: "fixture-secret" };
+    expect(await createOAuthEngine(context).startCloudOAuth("notion", { setup, draftWizardOpen: false })).toBe(true);
+    expect(mocks.requestCloudAuthorizeUrl).toHaveBeenCalledWith("notion", expect.objectContaining(setup));
+    expect(mocks.requestCloudAuthorizeUrl.mock.calls[0][1]).not.toHaveProperty("reauthorizeConnectionId");
+    createOAuthEngine(context).clearOauthAttempt();
+  });
+
+  it("reauthorizes the displayed connection when older Notion connections still exist", async () => {
+    mocks.listConnections.mockResolvedValue({ data: { items: [
+      { connection_id: "older-notion" }, { connection_id: "displayed-notion" },
+    ] } });
+    const context = legacyContext(false);
+    context.notionOauthConnection = { provider: "notion", connectionId: "displayed-notion" } as never;
+    const setup = { appId: "fixture-client", appSecret: "fixture-secret" };
+    expect(await createOAuthEngine(context).startCloudOAuth("notion", { setup, draftWizardOpen: false })).toBe(true);
+    expect(mocks.requestCloudAuthorizeUrl).toHaveBeenCalledWith("notion", expect.objectContaining({
+      reauthorizeConnectionId: "displayed-notion",
+    }));
+    createOAuthEngine(context).clearOauthAttempt();
+  });
+
+  it("retains an expired Notion connection for management without marking it verified", async () => {
+    const connection = { connectionId: "expired-notion", status: "expired" };
+    vi.mocked(mapCloudConnectionToNotionAccount).mockReturnValueOnce({
+      id: "expired-notion", status: "expired", connection,
+    } as never);
+    vi.mocked(getOAuthStateFromConnection).mockReturnValueOnce("expired");
+    const context = legacyContext(false);
+    context.selectedType = "notion";
+    await createOAuthEngine(context).refreshNotionAuthAccounts();
+    expect(context.setNotionOauthConnection).toHaveBeenCalledWith(connection);
+    expect(context.setOauthState).toHaveBeenCalledWith("expired");
+    expect(context.setConnectionVerified).toHaveBeenCalledWith(false);
   });
 
   it.each([false, true])("reads local Feishu accounts after Cloud reconciliation (offline=%s)", async (offline) => {

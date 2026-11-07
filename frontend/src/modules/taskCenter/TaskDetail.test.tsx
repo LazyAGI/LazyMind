@@ -38,6 +38,7 @@ const translations: Record<string, string> = {
   'taskCenter.statusRunning': '进行中',
   'taskCenter.statusSucceeded': '已完成',
   'taskCenter.statusWaiting': '等待审批',
+  'taskCenter.statusWaitingInput': '等待输入',
   'taskCenter.stepFallback': '执行步骤 {{index}}',
   'taskCenter.stepPrepare': '准备任务',
   'taskCenter.taskGoal': '任务目标',
@@ -264,6 +265,7 @@ describe('TaskDetail', () => {
 
   it.each([
     ['waiting', 'waiting', 'attention'],
+    ['waiting_inputs', 'waiting_input', 'input'],
     ['running', 'running', 'running'],
     ['paused', 'interrupted', 'paused'],
     ['failed', 'failed', 'failed'],
@@ -279,6 +281,7 @@ describe('TaskDetail', () => {
     expect(step).toHaveTextContent('当前步骤');
     if (taskStatus === 'failed') expect(step).toHaveTextContent('执行失败');
     if (taskStatus === 'paused') expect(step).toHaveTextContent('已暂停');
+    if (stepStatus === 'waiting_input') expect(step).toHaveTextContent('等待输入');
     expect(step).not.toHaveTextContent('已中断');
   });
 

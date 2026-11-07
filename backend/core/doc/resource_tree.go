@@ -190,9 +190,30 @@ func verifyResourceSnapshot(op ResourceOperationContext, trees []resourceTree) e
 	return nil
 }
 func (s *ResourceService) Delete(ctx context.Context, op ResourceOperationContext, req DeleteResourcesRequest) (ResourceOperationResult, error) {
+	return s.deleteWithRelatedMutation(ctx, op, req, nil)
+}
+
+// DeleteWithRelatedMutation commits a domain mutation and document tombstones
+// in one transaction. Cleanup begins only after the transaction commits.
+func (s *ResourceService) DeleteWithRelatedMutation(ctx context.Context, op ResourceOperationContext, req DeleteResourcesRequest, related func(*gorm.DB) error) (ResourceOperationResult, error) {
+	if related == nil || op.OperationKey != "" {
+		return ResourceOperationResult{}, resourceErr("INVALID_ARGUMENT", "related mutation required; replay keys unsupported")
+	}
+	return s.deleteWithRelatedMutation(ctx, op, req, related)
+}
+
+func (s *ResourceService) deleteWithRelatedMutation(ctx context.Context, op ResourceOperationContext, req DeleteResourcesRequest, related func(*gorm.DB) error) (ResourceOperationResult, error) {
 	committedTrees := []resourceTree{}
 	result, err := s.mutate(ctx, op, "knowledge.resource.delete", req, func(tx *gorm.DB) (ResourceOperationResult, error) {
 		var out ResourceOperationResult
+		if related != nil {
+			if err := related(tx); err != nil {
+				return out, err
+			}
+			if len(req.Targets) == 0 {
+				return out, nil
+			}
+		}
 		trees, err := s.trees(ctx, tx, op, req.Targets)
 		if err != nil {
 			return out, err

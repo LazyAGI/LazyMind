@@ -1,11 +1,14 @@
 """Real local-file coverage for Obsidian links pasted after a Writer mention."""
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
+from threading import Barrier, Event, current_thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -34,7 +37,8 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assertEqual(resources.provider_reference(prefix + self.locator), self.locator)
 
-    def test_legacy_link_loads_and_writes_the_same_file(self):
+    @patch('lazymind.document_tools.obsidian.os.walk', wraps=os.walk)
+    def test_legacy_link_loads_and_writes_the_same_file(self, discovery):
         loaded = json.loads(resources.WriterResourceCapabilities().load_document(self.request))
         self.assertEqual(loaded['representation'], 'markdown')
         self.assertIn('Original text.', loaded['source_document'])
@@ -45,6 +49,100 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
         self.assertTrue(result['provider_synced'])
         self.assertEqual(self.note.read_text(encoding='utf-8'), revised)
         self.assertEqual(list(self.note.parent.glob('*.md')), [self.note])
+        self.assertEqual(discovery.call_count, 1)
+
+    def test_concurrent_discovery_shares_results_and_allows_retry(self):
+        from lazymind.document_tools.obsidian import _PublicationObsidianFS
+
+        discover = _PublicationObsidianFS.discover_vaults_for_root
+        cached, walk = discover(self.root), os.walk
+        for outcome in ('ready', 'empty', 'failed'):
+            with self.subTest(outcome=outcome):
+                started, joined, release = Event(), Event(), Event()
+
+                class ObservedFuture(Future):
+                    def result(self, timeout=None, *, joined=joined):
+                        joined.set()
+                        return super().result(timeout)
+
+                def blocked_walk(*args, started=started, release=release, outcome=outcome, **kwargs):
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError('Test did not release discovery.')
+                    if outcome == 'failed':
+                        raise OSError('Discovery failed.')
+                    return iter(()) if outcome == 'empty' else walk(*args, **kwargs)
+
+                with patch('lazymind.document_tools.obsidian.Future', ObservedFuture), \
+                        patch('lazymind.document_tools.obsidian.os.walk', side_effect=blocked_walk) as scan, \
+                        ThreadPoolExecutor(max_workers=2) as workers:
+                    first = workers.submit(discover, self.root, refresh=True)
+                    try:
+                        self.assertTrue(started.wait(5))
+                        second = workers.submit(discover, self.root, refresh=True)
+                        self.assertTrue(joined.wait(5))
+                        self.assertFalse(second.done())
+                        self.assertEqual(discover(self.root), cached)
+                    finally:
+                        release.set()
+                    expected = [] if outcome == 'empty' else cached
+                    for task in (first, second):
+                        if outcome == 'failed':
+                            with self.assertRaisesRegex(OSError, 'Discovery failed'):
+                                task.result(timeout=5)
+                        else:
+                            self.assertEqual(task.result(timeout=5), expected)
+                    self.assertEqual(scan.call_count, 1)
+                    self.assertEqual(discover(self.root), expected)
+                    scan.side_effect = walk
+                    self.assertEqual(discover(self.root, refresh=True), cached)
+                    self.assertEqual(scan.call_count, 2)
+
+    def test_parallel_discovery_preserves_vaults_and_releases_workers(self):
+        from lazymind.document_tools.obsidian import _PublicationObsidianFS
+
+        for name in ('One', 'Two'):
+            (self.root / name / 'Subtree' / '.obsidian').mkdir(parents=True)
+        (self.root / 'One' / 'Alias').symlink_to(self.root / 'Two' / 'Subtree', target_is_directory=True)
+        (self.note.parent / 'Ignored' / '.obsidian').mkdir(parents=True)
+        expected = ObsidianFS.discover_vaults_for_root(str(self.root))
+        discover, walk = _PublicationObsidianFS.discover_vaults_for_root, os.walk
+        gate, threads = Barrier(2), set()
+
+        def parallel_walk(top, **kwargs):
+            if Path(top).name == 'Subtree':
+                threads.add(current_thread())
+                gate.wait(timeout=5)
+            return walk(top, **kwargs)
+
+        with patch('lazymind.document_tools.obsidian.os.walk', side_effect=parallel_walk):
+            self.assertEqual(discover(self.root, refresh=True), expected)
+        self.assertEqual(len(threads), 2)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+
+        def failing_walk(top, **kwargs):
+            if Path(top).name == 'Subtree':
+                raise OSError('subtree scan failed')
+            return walk(top, **kwargs)
+
+        with patch('lazymind.document_tools.obsidian.os.walk', side_effect=failing_walk):
+            with self.assertRaisesRegex(OSError, 'subtree scan failed'):
+                discover(self.root, refresh=True)
+        self.assertEqual(discover(self.root), expected)
+        self.assertEqual(discover(self.root, refresh=True), expected)
+
+    def test_cached_target_rejects_a_removed_vault(self):
+        (self.root / 'Other Vault' / '.obsidian').mkdir(parents=True)
+        provider = resources.get_writer_provider('obsidian')
+        target = provider.load_document(provider.resolve(self.locator))['target_document']
+        (self.note.parent / '.obsidian').rmdir()
+        with self.assertRaises(ValueError):
+            provider.load_document(target)
+        with self.assertRaises(ValueError):
+            provider.prepare_target(target=target)
+        with self.assertRaises(ValueError):
+            provider.replace_document('# Unwanted\n', target)
+        self.assertIn('Original text.', self.note.read_text())
 
     def test_missing_note_does_not_become_a_new_document(self):
         self.note.unlink()
@@ -257,13 +355,17 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
     def test_prepared_target_resumes_without_selecting_another_vault(self):
         from lazymind.document_tools.obsidian import LazyMindObsidianProvider
         provider = LazyMindObsidianProvider()
+        original = provider.status()['vaults']
         target = provider.prepare_target('Prepared')
-        (self.root / 'Another' / '.obsidian').mkdir(parents=True)
+        nested = self.root / 'Deep' / 'Nested' / 'Another'
+        (nested / '.obsidian').mkdir(parents=True)
         self.assertEqual(len(provider.status()['vaults']), 2)
         provider.prepare_target(target=target)
         resources.write_document(resources.convert_document('# Prepared\n', 'obsidian'), target.model_dump())
         self.assertTrue((self.note.parent / 'Prepared.md').exists())
-        self.assertFalse((self.root / 'Another' / 'Prepared.md').exists())
+        self.assertFalse((nested / 'Prepared.md').exists())
+        (nested / '.obsidian').rmdir()
+        self.assertEqual(provider.status()['vaults'], original)
 
     def test_attachments_are_copied_and_missing_attachment_blocks_confirmation(self):
         from lazymind.document_tools.actions import invoke_document_action

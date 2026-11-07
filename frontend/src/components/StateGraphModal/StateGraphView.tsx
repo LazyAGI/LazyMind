@@ -52,6 +52,7 @@ const TERMINAL_IDS = new Set(['__start__', '__end__']);
 const S: Record<string, { color: string; dot: string; label: string }> = {
   succeeded:   { color: '#389e0d', dot: '#52c41a', label: 'taskCenter.statusCompleted' },
   running:     { color: '#0958d9', dot: '#1677ff', label: 'taskCenter.statusRunning' },
+  waiting_input: { color: '#b74616', dot: '#e66a3c', label: 'taskCenter.statusWaitingInput' },
   waiting:     { color: '#d46b08', dot: '#fa8c16', label: 'taskCenter.statusWaiting' },
   failed:      { color: '#cf1322', dot: '#ff4d4f', label: 'taskCenter.statusFailed' },
   paused:      { color: '#a87913', dot: '#e5b544', label: 'taskCenter.statusPaused' },

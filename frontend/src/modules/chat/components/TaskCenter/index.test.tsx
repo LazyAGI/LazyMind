@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
-import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
+import { useWorkflowStore, type WorkflowSession, type WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 import TaskCenter from "./index";
 import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
 import { ordinary } from "./ordinaryTestFixtures";
@@ -234,13 +234,32 @@ describe("TaskCenter display modes", () => {
 
   afterEach(() => {
     cleanup();
-    useWorkflowStore.setState({ sessionByConversation: {} });
+    useWorkflowStore.setState({ sessionByConversation: {}, workflowUIByWorkflow: {} });
     useTaskCenterStore.setState({
       tasksByConversation: {},
       _loadingTasks: {},
       _taskLoadErrors: {},
       runsByConversation: {},
     });
+  });
+
+  it("labels a revision awaiting input separately from interrupted execution", () => {
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{
+      ...task("revise_document", 1, "interrupted"), current_phase: "awaiting_input", progress_pct: 7,
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" developerMode />);
+    expect(screen.getByText("chat.workflowInputRequired")).toBeInTheDocument();
+  });
+
+  it("shows the public clarification question in ordinary mode", () => {
+    const view = ordinary("revision", { status: "canceled", input_required: "请确认采用哪些意见" });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{
+      ...task("revision", 1, "interrupted"), ordinary: view,
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
+    expect(screen.getAllByText("chat.workflowInputRequired")).toHaveLength(2);
+    expect(screen.getByText("请确认采用哪些意见")).toHaveAttribute("role", "status");
+    expect(screen.queryByText("taskCenter.ordinaryFailedSummary")).not.toBeInTheDocument();
   });
 
   it('reads task presentation from the session-pinned revision rather than the workflow cache', () => {
@@ -346,6 +365,23 @@ describe("TaskCenter display modes", () => {
     render(<TaskCenter sessionId="conversation-1" />);
     expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0");
     expect(screen.getByRole("progressbar")).toHaveAttribute("max", "1");
+  });
+
+  it('preserves developer task cards even when a workflow declares grouped presentation', () => {
+    const visible = { ...workflowSteps[0], ordinary: ordinary('public-stage', {
+      title: '文献综述', workflow_step_id: 'analyze', status: 'succeeded',
+    }) };
+    useWorkflowStore.setState({
+      sessionByConversation: { 'conversation-1': {
+        session_id: 'session-1', workflow_id: 'paper-writing', status: 'completed', steps: [visible],
+      } as WorkflowSession },
+      workflowUIByWorkflow: { 'paper-writing:zh-CN': {
+        task_presentation: { grouped: true, hidden_steps: ['prepare'] },
+      } },
+    });
+    render(<TaskCenter sessionId="conversation-1" developerMode workflowSteps={[visible]} />);
+    expect(screen.queryByRole('article', { name: '工作流任务执行记录' })).not.toBeInTheDocument();
+    expect(screen.getByText('raw trace analyze')).toBeInTheDocument();
   });
 
   it("shows the designed progress bar and estimated timeline for a completed plan", () => {

@@ -47,8 +47,9 @@ class AdapterModel:
         return {'source': 'test-provider', 'model': 'test-model', 'api_key': 'DO-NOT-LOG'}
 
     def __call__(self, prompt, **options):
-        control = options['call_control']
-        control.validate_request(SimpleNamespace(payload={'messages': [], **options}))
+        control = options.get('call_control')
+        if control is not None:
+            control.validate_request(SimpleNamespace(payload={'messages': [], **options}))
         self.calls.append(options)
         return self.respond(prompt, control)
 
@@ -56,18 +57,23 @@ class AdapterModel:
 def prepare_batch(monkeypatch, tmp_path, tools, pages, respond):
     deck = tmp_path / 'deck'
     (deck / 'pages').mkdir(parents=True)
+    (deck / 'task_pack.json').write_text(json.dumps({'params': {'page_count': pages}}))
+    (deck / 'info_pack.json').write_text('{}')
     (deck / 'outline.json').write_text(json.dumps({'pages': [
         {'page_no': number, 'title': str(number)} for number in range(1, pages + 1)
     ]}))
     model = AdapterModel(respond)
     monkeypatch.setattr(lazyllm, 'AutoModel', lambda **_kwargs: model)
 
-    def capture(_command, current_deck, number, *args, llm_call):
+    def capture(_command, current_deck, number=None, *args, llm_call, **_kwargs):
+        if _command is runtime.cmd_ensure_style:
+            return 0, {'status': 'ok'}
         html = llm_call('system', str(number), request_name=f'page-html:{number}')
         (current_deck / 'pages' / f'page_{number:03d}.html').write_text(html)
         return 0, {'status': 'ok'}
 
-    runtime = SimpleNamespace(cmd_page_html=None, cmd_page_html_from_brief=None, _capture_cmd=capture)
+    runtime = SimpleNamespace(cmd_page_html=None, cmd_page_html_from_brief=None,
+                              cmd_ensure_style=object(), _capture_cmd=capture)
     monkeypatch.setattr(tools, '_load_sn_ppt_modules', lambda: (None, runtime))
     monkeypatch.setattr(tools, '_load_slide_outline_briefs', lambda _numbers: {})
     monkeypatch.setattr(tools, '_ui_slot_order_list', lambda _slot: [])
@@ -149,6 +155,219 @@ def test_ppt_model_calls_without_page_budget_also_honor_pause(monkeypatch, tools
     with lazyllm.globals._bind_sid('ppt-task'), pytest.raises(UserCancelledError):
         tools._agent_llm_call('system', 'outline')
     assert len(model.calls) == 1
+
+
+def publication_store(monkeypatch, tools):
+    """Fake the public artifact transport, retaining stable indices across Attempts."""
+    orders = {'preview_html': [], 'preview_notes': []}
+    selected = {}
+    history = []
+    attempt = [1]
+
+    def save(**kwargs):
+        slot, index = kwargs['key'], kwargs['publisher_list_index']
+        if index not in orders[slot]:
+            orders[slot].append(index)
+        selected[slot, index] = {
+            'slot': slot, 'list_index': index, 'selected': True, 'validity': 'effective',
+            'attempt': attempt[0], 'value': {'text': kwargs['value']},
+        }
+        return {'ok': True}
+
+    def artifacts(_session):
+        rows = []
+        for item in [*history, *selected.values()]:
+            order = orders[item['slot']]
+            position = order.index(item['list_index']) + 1 if item['list_index'] in order else None
+            rows.append({**item, 'sort_order': position})
+        return SimpleNamespace(result={'artifacts': rows})
+
+    def invalidate():
+        history.extend({**item, 'selected': False, 'validity': 'stale'} for item in selected.values())
+        selected.clear()
+        attempt[0] += 1
+
+    monkeypatch.setattr(tools, '_save_artifact', save)
+    monkeypatch.setattr(tools, '_workflow_session_id', lambda: 'retry-session')
+    monkeypatch.setattr(tools, '_ui_slot_order_list', lambda slot: list(orders[slot]))
+    monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(list_artifacts=artifacts))
+    monkeypatch.setattr(tools, '_load_saved_notes', lambda: None)
+    return SimpleNamespace(orders=orders, selected=selected, invalidate=invalidate)
+
+
+def test_retry_republishes_cached_successes_in_new_attempt_before_model_calls(monkeypatch, tmp_path, tools):
+    failures = {1, 2, 5, 6, 7}
+    retry = [False]
+
+    def respond(prompt, _control):
+        if retry[0]:
+            for number in (3, 4):
+                page = store.selected['preview_html', number - 1]
+                assert page['attempt'] == 2
+                assert not tools._is_ppt_placeholder(page['value']['text'])
+        if int(prompt) in failures:
+            raise transport_failure()
+        return HTML.replace('Generated page', f'Generated page {prompt}')
+
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 7, respond)
+    store = publication_store(monkeypatch, tools)
+    first = tools._batch_page_html_publish_progressive(deck)
+    assert first['published_count'] == 2
+    assert first['unpublished_pages'] == [1, 2, 5, 6, 7]
+    store.invalidate()
+    failures.clear()
+    retry[0] = True
+    second = tools._batch_page_html_publish_progressive(deck)
+    assert second['status'] == 'ok'
+    assert second['published_count'] == 7
+    assert second['unpublished_pages'] == []
+    assert len(model.calls) == 12  # 7 initial requests + only 5 missing pages
+    status = tools.ppt_list_pages(str(deck))
+    assert status['fully_published'] is True
+    assert status['missing_pages'] == status['placeholder_pages'] == []
+    assert status['ui_published_count'] == status['ui_notes_published_count'] == 7
+
+
+def test_retry_page_five_first_replaces_placeholders_for_cached_three_and_four(monkeypatch, tmp_path, tools):
+    failures = {1, 2, 5, 6, 7}
+
+    def respond(prompt, _control):
+        if int(prompt) in failures:
+            raise transport_failure()
+        return HTML.replace('Generated page', f'Generated page {prompt}')
+
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 7, respond)
+    store = publication_store(monkeypatch, tools)
+    tools._batch_page_html_publish_progressive(deck)
+    store.invalidate()
+    failures.clear()
+    # The retry finishes page 5 first, reserving positions 1..4 as placeholders.
+    for order in store.orders.values():
+        order.clear()
+    runtime = tools._load_sn_ppt_modules()[1]
+    runtime._capture_cmd(runtime.cmd_page_html, deck, 5, llm_call=tools._agent_llm_call)
+    assert tools._publish_one_page(deck, 5)['ok']
+    for number in (3, 4):
+        assert tools._is_ppt_placeholder(store.selected['preview_html', number - 1]['value']['text'])
+    result = tools._run_stage_inprocess('page-html', deck, page=1)
+    assert result.get('status') == 'ok', result
+    assert not result.get('publish_error'), result
+    for number in (3, 4):
+        assert tools._page_checkpoint_matches(deck, number, None), result
+        assert not tools._is_ppt_placeholder(store.selected['preview_html', number - 1]['value']['text'])
+    for number in (2, 6, 7):
+        tools._run_stage_inprocess('page-html', deck, page=number)
+    assert len(model.calls) == 12
+    assert store.orders == {'preview_html': list(range(7)), 'preview_notes': list(range(7))}
+    status = tools.ppt_list_pages(str(deck))
+    assert status['fully_published'] is True
+    assert status['published_pages'] == list(range(1, 8))
+
+
+@pytest.mark.parametrize('problem', ['placeholder', 'legacy_placeholder', 'notes_placeholder',
+                                     'stale', 'wrong_notes', 'missing_file', 'changed_file'])
+def test_seven_positions_do_not_prove_seven_real_pages(monkeypatch, tmp_path, tools, problem):
+    deck, _model, _saved = prepare_batch(
+        monkeypatch, tmp_path, tools, 7, lambda prompt, _control: HTML.replace('Page', f'Page {prompt}'))
+    store = publication_store(monkeypatch, tools)
+    tools._batch_page_html_publish_progressive(deck)
+    html = store.selected['preview_html', 2]
+    notes = store.selected['preview_notes', 2]
+    if problem == 'placeholder':
+        for index in (2, 3):
+            store.selected['preview_html', index]['value']['text'] = '<!-- lazymind-ppt-placeholder -->' + HTML
+    elif problem == 'legacy_placeholder':
+        html['value']['text'] = '<html><body><p>第 3 页尚未生成或发布成功，请重试该页。</p></body></html>'
+    elif problem == 'notes_placeholder':
+        notes['value']['text'] = '<!-- lazymind-ppt-placeholder --> Missing speaker notes'
+    elif problem == 'stale':
+        html['validity'] = 'stale'
+    elif problem == 'wrong_notes':
+        notes['value'] = dict(store.selected['preview_notes', 1]['value'])
+    elif problem == 'missing_file':
+        (deck / 'pages/page_003.html').unlink()
+    else:
+        (deck / 'pages/page_003.html').write_text(HTML + '<!-- changed -->')
+    status = tools.ppt_list_pages(str(deck))
+    assert status['ui_slot_count'] == 7
+    assert status['fully_published'] is False
+    missing = [3, 4] if problem == 'placeholder' else [3]
+    assert status['missing_pages'] == missing
+    if problem == 'placeholder':
+        assert status['ui_published_count'] == 5
+    if problem in {'placeholder', 'legacy_placeholder', 'notes_placeholder'}:
+        assert status['placeholder_pages'] == missing
+
+
+def test_deferred_republish_rejects_files_from_changed_inputs(monkeypatch, tmp_path, tools):
+    deck, _model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 2, lambda *_args: HTML)
+    store = publication_store(monkeypatch, tools)
+    tools._batch_page_html_publish_progressive(deck)
+    store.invalidate()
+    (deck / 'info_pack.json').write_text('{"requirement":"new evidence"}')
+    assert tools._publish_ready_trailing_pages(deck, 1) == []
+    assert store.selected == {}
+
+
+def test_notes_injection_does_not_invalidate_success_checkpoint(monkeypatch, tmp_path, tools):
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 1, lambda *_args: HTML)
+    store = publication_store(monkeypatch, tools)
+    monkeypatch.setattr(tools, '_load_saved_notes', lambda: {1: 'Approved English speaker script.'})
+    tools._batch_page_html_publish_progressive(deck)
+    store.invalidate()
+    result = tools._batch_page_html_publish_progressive(deck)
+    assert result['status'] == 'ok'
+    assert len(model.calls) == 1
+    assert store.selected['preview_notes', 0]['value']['text'] == 'Approved English speaker script.'
+
+
+def test_single_page_success_is_reused_by_a_later_batch_attempt(monkeypatch, tmp_path, tools):
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 2, lambda *_args: HTML)
+    store = publication_store(monkeypatch, tools)
+    assert tools._run_stage_inprocess('page-html', deck, page=2)['status'] == 'ok'
+    store.invalidate()
+    result = tools._batch_page_html_publish_progressive(deck)
+    assert result['status'] == 'ok'
+    assert len(model.calls) == 2  # Page 2 was not sent to the model again.
+    assert tools.ppt_list_pages(str(deck))['fully_published'] is True
+
+
+def test_completion_uses_display_positions_and_fails_closed_on_read_errors(monkeypatch, tmp_path, tools):
+    deck, _model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 2, lambda *_args: HTML)
+    store = publication_store(monkeypatch, tools)
+    for order in store.orders.values():
+        order.extend([42, 7])  # Stable list indices are not page numbers.
+    tools._batch_page_html_publish_progressive(deck)
+    assert tools.ppt_list_pages(str(deck))['fully_published'] is True
+
+    def unavailable(_session):
+        raise ConnectionError('Artifact service unavailable')
+
+    monkeypatch.setattr(tools, '_workflow_client', lambda: SimpleNamespace(list_artifacts=unavailable))
+    result = tools.ppt_list_pages(str(deck))
+    assert result['fully_published'] is False
+    assert result['missing_pages'] == [1, 2]
+    assert result['publication_error'] == 'Artifact service unavailable'
+
+
+@pytest.mark.parametrize('change', ['brief', 'html', 'checkpoint', 'evidence'])
+def test_retry_regenerates_only_pages_without_a_matching_checkpoint(monkeypatch, tmp_path, tools, change):
+    deck, model, _saved = prepare_batch(monkeypatch, tmp_path, tools, 2, lambda *_args: HTML)
+    store = publication_store(monkeypatch, tools)
+    tools._batch_page_html_publish_progressive(deck)
+    store.invalidate()
+    if change == 'brief':
+        monkeypatch.setattr(tools, '_load_slide_outline_briefs', lambda _numbers: {1: 'Changed page request'})
+    elif change == 'html':
+        (deck / 'pages/page_001.html').write_text(HTML + '<!-- locally changed -->')
+    elif change == 'checkpoint':
+        (deck / '.page_retry_001.json').unlink()
+    else:
+        (deck / 'info_pack.json').write_text('{"evidence":"changed"}')
+    result = tools._batch_page_html_publish_progressive(deck)
+    assert result['status'] == 'ok'
+    assert len(model.calls) == (4 if change == 'evidence' else 3)
+    assert tools.ppt_list_pages(str(deck))['fully_published'] is True
 
 
 def test_failed_pages_do_not_block_successful_pages_and_recovery_keeps_indices(monkeypatch, tmp_path, tools):

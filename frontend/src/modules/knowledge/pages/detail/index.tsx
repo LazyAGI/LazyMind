@@ -150,6 +150,7 @@ const Detail = () => {
   >(null);
   const [documentParsingEnabled, setDocumentParsingEnabled] = useState<boolean | null>(null);
   const [uploadingNoticeVisible, setUploadingNoticeVisible] = useState(false);
+  const [queuedTotal, setQueuedTotal] = useState(0);
   const [taskPollingError, setTaskPollingError] = useState("");
   const [importTaskFailures, setImportTaskFailures] = useState<ImportTaskFailure[]>([]);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
@@ -297,9 +298,7 @@ const Detail = () => {
         newTaskList.forEach((task: ImportTaskState) => {
           if (task.task_id) taskInspectionTokensRef.current.delete(task.task_id);
         });
-        // Tasks in WORKING state are actively being parsed by the algorithm service.
-        // Tasks in WAITING state are still uploading / queued before parsing starts.
-        const uploadingTasks = newTaskList.filter(
+        const queuedTasks = newTaskList.filter(
           (t: any) => t.task_state === "WAITING",
         );
         if (newTaskList.length === 0) {
@@ -309,9 +308,7 @@ const Detail = () => {
         // Use total_size from the backend for an accurate count; fall back to
         // the length of the current page if total_size is absent.
         setRunningTotal(data.total_size ?? newTaskList.length);
-        // Show notice only while files are still uploading; once upload is done
-        // the user can safely close the tab even if parsing continues in the background.
-        setUploadingNoticeVisible(uploadingTasks.length > 0);
+        setQueuedTotal(queuedTasks.length);
         importingTaskListRef.current = newTaskList;
       },
       onError: (error) => {
@@ -552,6 +549,10 @@ const Detail = () => {
           type="warning"
           showIcon
         />
+      )}
+      {!paperLibrary && !uploadingNoticeVisible && queuedTotal > 0 && (
+        <Alert className="knowledge-parsing-notice" type="info" showIcon
+          message={t("knowledge.documentsQueuedForParsing", { count: queuedTotal })} />
       )}
       {paperLibrary && detail ? (
         <div className="paper-library-page">
@@ -831,8 +832,8 @@ const Detail = () => {
       <ImportKnowledgeModal
         storageOnly={detail?.processing_level === "stored"}
         ref={importKnowledgeRef}
-        onParsingStart={() => setUploadingNoticeVisible(true)}
-        onParsingSettled={() => setUploadingNoticeVisible(false)}
+        onUploadStart={() => setUploadingNoticeVisible(true)}
+        onUploadSettled={() => setUploadingNoticeVisible(false)}
         onOk={({ pId, tasks = [] } = {}) => {
           importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, tasks);
           getImportingTotal();

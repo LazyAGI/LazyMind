@@ -459,6 +459,7 @@ interface ChatInputProps {
   canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
   onConversationSettingsChange?: (settings: ConversationRuntimeSettings) => void;
   /** Initial workflow settings to pre-populate the config popover. */
@@ -493,6 +494,9 @@ interface ChatInputProps {
   showConversationConfig?: boolean;
   /** Hide the main-chat model picker in specialized composers that own a separate model contract. */
   showModelSelector?: boolean;
+  /** Minimal toolbar for document reading; resource invocation remains in the editor. */
+  composerVariant?: "default" | "paper";
+  modelSelectionDraft?: boolean;
   /** Locks model switching after a message was submitted but before the stream opens. */
   modelSelectorBusy?: boolean;
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
@@ -511,7 +515,7 @@ interface ChatInputProps {
 interface ShowcaseSelectControl {
   value?: string;
   selectedLabel?: string;
-  options: Array<{ value: string; label: string; description?: string }>;
+  options: Array<{ value: string; label: string; description?: string; pageAction?: string }>;
   ariaLabel: string;
   placeholder?: string;
   heading: string;
@@ -609,6 +613,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       isStreaming = false,
       onStopGeneration,
       embeddingReady,
+      vlmReady,
       multimodalEmbeddingReady,
       rerankReady,
       disabled = false,
@@ -635,6 +640,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
+      composerVariant = "default",
+      modelSelectionDraft = false,
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
       onWorkspacePermissionSavingChange,
@@ -646,7 +653,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onThinkingDepthChange,
     } = props;
     const inputDraftKey = sessionId ?? draftKey;
-    const showWorkspaceEnvironment = runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
+    const showWorkspaceEnvironment = composerVariant !== "paper" && runInBackground && allowLocalWorkspace && isLocalLikeRuntimeMode(getRuntimeMode());
     const [workspaceId, setWorkspaceId] = useState<string>();
     const [projectName, setProjectName] = useState<string>();
     const [projectValid, setProjectValid] = useState(true);
@@ -782,7 +789,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const session = state.sessionByConversation[sessionId];
       return (
         session?.status === "active" ||
-        session?.status === "waiting" ||
         Boolean(state.autoRunningByConversation[sessionId])
       );
     });
@@ -1067,6 +1073,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         preprocessUpload(newFiles, currentFiles, hasKB, t),
       [hasKB, t],
     );
+    const onFilesAdded = useCallback(
+      (files: File[]) => {
+        if (vlmReady === false && files.some(isImage)) {
+          message.warning(t("chat.vlmNotReadyWarning"));
+        }
+      },
+      [t, vlmReady],
+    );
     const normalizedCiteMessages = useMemo(() => {
       if (citeMessages) {
         return citeMessages.map((item) => item.trim()).filter(Boolean);
@@ -1085,7 +1099,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       !value?.trim() ||
       isUploading;
     const shouldShowPromptSuggestions =
-      showPromptSuggestions &&
+      composerVariant !== "paper" && showPromptSuggestions &&
       !disabled &&
       !isStreaming &&
       value.trim().length > 0;
@@ -1228,10 +1242,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       } finally {
         setResolvingSkillWorkflow(false);
       }
-      const storedInitialModelSelection = !sessionId
+      const storedInitialModelSelection = (!sessionId || modelSelectionDraft)
         ? toChatModelSelectionRequest(
             useModelSelectionStore.getState().selections[
-              NEW_CHAT_MODEL_SELECTION_KEY
+              modelSelectionDraft && sessionId ? sessionId : NEW_CHAT_MODEL_SELECTION_KEY
             ],
           )
         : undefined;
@@ -1272,7 +1286,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
         ...(runInBackground && workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
-        ...(!sessionId && effectiveInitialModelSelection
+        ...((!sessionId || modelSelectionDraft) && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
       };
@@ -1474,7 +1488,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     return (
       <div
-        className={`input-wrapper${disabled ? " is-disabled" : ""}`}
+        className={`input-wrapper${disabled ? " is-disabled" : ""}${composerVariant === "paper" ? " paper-chat-composer" : ""}`}
         ref={innerRef}
       >
         <div ref={setApprovalContainer} className="workspace-approval-slot" />
@@ -1602,7 +1616,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               <div className="input-bottom-actions">
                 <div className="input-bottom-actions-left chat-core-actions">
                   <div className="chat-add-resource">
-                    <Popover
+                    {composerVariant !== "paper" && <Popover
                       trigger="click"
                       open={addMenuOpen}
                       onOpenChange={(open: boolean) => {
@@ -1699,8 +1713,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           <PlusOutlined className="chat-add-resource-icon" aria-hidden="true" />
                         </button>
                       </Tooltip>
-                    </Popover>
-                    {allowKnowledgeBaseSelection ? (
+                    </Popover>}
+                    {composerVariant !== "paper" && allowKnowledgeBaseSelection ? (
                       <div className="chat-add-resource-hidden-selector">
                         <ChatSelector
                           ref={knowledgeSelectorRef}
@@ -1722,6 +1736,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         types={uploadTypes}
                         max={Math.max(0, MAX_UPLOAD_FILES - transferredUploads.length)}
                         onBeforeAddFiles={onBeforeAddFiles}
+                        onFilesAdded={onFilesAdded}
                         disabled={disabled || isPromptPolishing}
                         disabledReason={isPromptPolishing ? t("chat.promptPolishing") : disabledReason}
                         icon={<span />}
@@ -1730,12 +1745,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   {showModelSelector ? (
                     <ChatModelSelector
+                      iconOnly={composerVariant === "paper"}
                       key={`${sessionId || "new"}:${configResetKey ?? ""}`}
-                      conversationId={sessionId}
+                      conversationId={modelSelectionDraft ? undefined : sessionId}
+                      draftSelectionKey={modelSelectionDraft ? sessionId : undefined}
                       menuHeight={menuHeight}
                       open={activeMenu === "model"}
                       onOpenChange={open => setActiveMenu(open ? "model" : null)}
-                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
+                      thinkingDepth={composerVariant !== "paper" && showThinkingDepth ? effectiveThinkingDepth : undefined}
                       thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
                       onThinkingDepthChange={handleThinkingDepthChange}
                       disabled={
@@ -1759,13 +1776,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       onSelectionChange={handleModelSelectionChange}
                     />
                   ) : null}
-                  {allowMentions && <FeaturedCapabilityMenu
+                  {composerVariant !== "paper" && allowMentions && <FeaturedCapabilityMenu
                     menuHeight={menuHeight} selectionKey={sessionId || "new"} controls={showcaseSelection} runInBackground={runInBackground}
                     open={activeMenu === 'featured'} onOpenChange={open => setActiveMenu(open ? 'featured' : null)}
                     disabled={disabled || isStreaming} onBindingChange={handleFeaturedBindingChange}
                     onPromptChange={prompt => textAreaRef.current?.setPlainText(prompt)}
                   />}
-                  {showHistoryButton && openHistory && (
+                  {composerVariant !== "paper" && showHistoryButton && openHistory && (
                     <div
                       className={`input-bottom-actions-left-item ${showHistoryList ? "selected" : ""}`}
                       onClick={openHistory}
@@ -1773,8 +1790,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  {sideChatAction}
-                  {showConversationConfig && <ChatConfigModal
+                  {composerVariant !== "paper" && sideChatAction}
+                  {composerVariant !== "paper" && showConversationConfig && <ChatConfigModal
                     menuHeight={menuHeight}
                     open={activeMenu === "config"}
                     onOpenChange={open => setActiveMenu(open ? "config" : null)}
@@ -1786,13 +1803,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     lockedWorkflowMode={lockedWorkflowMode}
                     onSave={handleRuntimeSettingsChange}
                   />}
-                  {showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
+                  {composerVariant !== "paper" && showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
                   )}
                 </div>
 
                 <div className="input-bottom-actions-right">
-                  {showThinkingDepth && !showModelSelector && (
+                  {composerVariant !== "paper" && showThinkingDepth && !showModelSelector && (
                     <Select
                       aria-label={t("chat.thinkingDepth")}
                       className="chat-thinking-depth-select"
@@ -1807,7 +1824,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       }))}
                     />
                   )}
-                  <div className="input-bottom-actions-right-item">
+                  {composerVariant !== "paper" && <div className="input-bottom-actions-right-item">
                     <ContextUsageButton
                       disabled={disabled || isUploading || isStreaming || featuredBusy || prepareReferences().unavailable}
                       resetKey={`${sessionId ?? "new"}:${contextUsageReset}`}
@@ -1853,7 +1870,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         };
                       }}
                     />
-                  </div>
+                  </div>}
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       canStopGeneration={props.canStopGeneration ?? isStreaming}
@@ -1927,7 +1944,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             </div>
           ) : null}
         </div>
-        {showPerformanceStats ? (
+        {composerVariant !== "paper" && showPerformanceStats ? (
           <PerformanceStatsBar stats={performanceStats} running={isStreaming} />
         ) : null}
         <PromptModal

@@ -177,9 +177,9 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
                 {steps.map((step, index) => {
                   const focused = index === focusedStepIndex;
                   const status = workflowTaskDisplayStatus(step.status, task.status);
-                  const focusTone = status === 'failed' ? 'failed' : stepTone;
+                  const focusTone = status === 'waiting_input' ? 'input' : status === 'failed' ? 'failed' : stepTone;
                   const current = focused && !['completed', 'neutral'].includes(stepTone);
-                  return <div className={`task-step${isDone(status) ? ' is-done' : status === 'running' ? ' is-running' : status === 'failed' ? ' is-failed' : ['skipped', 'pruned', 'bypassed'].includes(status) ? ' step-tone-skipped' : ['canceled', 'cancelled'].includes(status) ? ' step-tone-canceled' : ''}${focused ? ` is-focus step-tone-${focusTone}` : ''}${current ? ' is-current' : ''}`} key={`${step.step_id}-${index}`}>
+                  return <div className={`task-step${isDone(status) ? ' is-done' : status === 'running' ? ' is-running' : status === 'failed' ? ' is-failed' : status === 'waiting_input' ? ' step-tone-input' : ['skipped', 'pruned', 'bypassed'].includes(status) ? ' step-tone-skipped' : ['canceled', 'cancelled'].includes(status) ? ' step-tone-canceled' : ''}${focused ? ` is-focus step-tone-${focusTone}` : ''}${current ? ' is-current' : ''}`} key={`${step.step_id}-${index}`}>
                     <span className='task-step-dot'>{isDone(status) ? <CheckOutlined /> : focused && focusTone === 'paused' ? <PauseOutlined /> : status === 'running' ? <SyncOutlined spin /> : index + 1}</span>
                     <div className='task-step-copy'><span className='task-step-title'><strong>{taskStepLabel(step.title, step.step_id, index, t)}</strong>{current ? <span className='task-step-current-badge'>{t('taskCenter.currentStep')}</span> : null}</span><small>{taskStatusLabel(step.status, t, stepTone)}</small></div>
                   </div>;
@@ -238,7 +238,7 @@ function taskStepTone(taskStatus?: string): TaskStepTone {
 
 function resolveFocusedStepIndex(steps: PlannedStep[], tone: TaskStepTone) {
   const statuses: Partial<Record<TaskStepTone, string[]>> = {
-    attention: ['waiting', 'waiting_inputs', 'pending', 'blocked', 'ready'],
+    attention: ['waiting_input', 'waiting', 'waiting_inputs', 'pending', 'blocked', 'ready'],
     running: ['running', 'waiting', 'waiting_inputs', 'pending'],
     paused: ['interrupted', 'paused', 'running'],
     failed: ['failed', 'interrupted'],
@@ -304,6 +304,7 @@ function taskStatusLabel(status: string, t: (key: string, options?: Record<strin
     running: t('taskCenter.statusRunning'),
     pending: t('taskCenter.statusPending'),
     waiting: t('taskCenter.statusWaiting'),
+    waiting_input: t('taskCenter.statusWaitingInput'),
     paused: t('taskCenter.statusPaused'),
     waiting_inputs: t('taskCenter.statusWaitingInputs'),
     canceled: t('taskCenter.statusCanceled'),

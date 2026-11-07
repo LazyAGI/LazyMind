@@ -1,8 +1,12 @@
 package chat
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "")
 	body := map[string]any{"system_mcp_config": []any{map[string]any{"id": "untrusted"}}}
@@ -14,7 +18,8 @@ func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
 		t.Fatalf("configs=%v", configs)
 	}
 	cfg := configs[0].(map[string]any)
-	if cfg["id"] != "lazymind-knowledge" || len(cfg["allowed_tools"].([]string)) != 10 {
+	tools := cfg["allowed_tools"].([]string)
+	if cfg["id"] != "lazymind-knowledge" || !slices.Contains(tools, "knowledge.paper.sources") || !slices.Contains(tools, "knowledge.paper.import") || !slices.Contains(tools, "knowledge.document.upload") {
 		t.Fatalf("config=%v", cfg)
 	}
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "false")
@@ -27,6 +32,7 @@ func TestKnowledgeDefaultReleaseReplacesUntrustedConfig(t *testing.T) {
 }
 
 func TestKnowledgeDisabledOnlyAffectsRunConfiguration(t *testing.T) {
+	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "false")
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "false")
 	t.Setenv("LAZYMIND_KNOWLEDGE_MANAGEMENT_ENABLED", "true")
 	body := map[string]any{"disabled_tools": []string{"knowledge_management"}}

@@ -383,7 +383,17 @@ var CodexAdapter = class {
 			status: "sending"
 		});
 		const result = await this.native.interrupt(thread, target.id, expectedOwnership, this.signal);
-		if (result?.rejected) throw new AdmissionRejected(result.rejected);
+		if (result?.rejected) {
+			await this.receipts.write({
+				actionId: claim.action.id,
+				runId: claim.action.session_id,
+				threadId: thread,
+				kind: "cancel",
+				turnId: target.id,
+				status: "rejected"
+			});
+			throw new AdmissionRejected(result.rejected);
+		}
 		if (result.interruptedTurnId !== target.id) throw new Error("The target turn interruption was not confirmed");
 		await this.receipts.write({
 			actionId: claim.action.id,
@@ -733,19 +743,74 @@ function readPresentationSession(readView = readCodexView) {
 
 //#endregion
 //#region src/presentation-surface.ts
-/** Locate the desktop's existing browser service by capabilities, not minified names. */
-async function prepareCodexBrowser() {
+/** Locate the existing browser service through the desktop's loaded entry modules. */
+async function prepareCodexBrowser(loadModule = (url) => import(
+	/* @vite-ignore */
+	url
+)) {
 	const host = window;
 	if (typeof host.__lazymindCodexBrowser?.pages?.getWebview === "function") return;
-	const link = Array.from(document.querySelectorAll("link[href]")).find((element) => /^app:\/\/-\/assets\/app-initial-[^/]+\.js$/.test(element.href));
-	if (!link) throw Error("Codex browser module is unavailable");
-	const exports = await import(
-		/* @vite-ignore */
-		link.href
-);
-	const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
-	if (!manager) throw Error("Codex native browser interface is unavailable");
-	host.__lazymindCodexBrowser = manager;
+	const key = "__lazymindCodexBrowserDiscovery";
+	const previous = host[key];
+	if (previous?.pending) return previous.pending;
+	if (previous?.retryAfter > Date.now()) throw Error("Codex browser discovery is cooling down");
+	const state = {
+		pending: void 0,
+		retryAfter: 0
+	};
+	host[key] = state;
+	state.pending = (async () => {
+		const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/;
+		const urls = Array.from(document.querySelectorAll("link[href],script[type=\"module\"][src]")).map((element) => "href" in element ? element.href : element.src).filter((url) => asset.test(url));
+		const queue = [...new Set(urls)].sort((a, b) => Number(!a.includes("/app-initial-")) - Number(!b.includes("/app-initial-")));
+		const seen = /* @__PURE__ */ new Set();
+		for (let count = 0; queue.length && count < 4; count++) {
+			const url = queue.shift();
+			if (seen.has(url)) continue;
+			seen.add(url);
+			if (url.includes("/app-initial-")) {
+				const exports = await loadModule(url);
+				const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
+				if (!manager) throw Error("Codex native browser interface is unavailable");
+				host.__lazymindCodexBrowser = manager;
+				return;
+			}
+			const response = await fetch(url, {
+				signal: AbortSignal.timeout(2e3),
+				redirect: "error"
+			});
+			if (!response.ok) throw Error("Codex browser entry module is unavailable");
+			const reader = response.body?.getReader();
+			if (!reader) throw Error("Codex browser entry module is unreadable");
+			let source = "", size = 0;
+			const decoder = new TextDecoder();
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					size += value.byteLength;
+					if (size > 64 * 1024) throw Error("Codex browser entry module exceeds discovery limit");
+					source += decoder.decode(value, { stream: true });
+				}
+			} finally {
+				await reader.cancel().catch(() => {});
+				reader.releaseLock();
+			}
+			for (const match of source.matchAll(/["'`](\.\/app-(?:main|initial)-[a-zA-Z0-9_-]+\.js)["'`]/g)) {
+				const next = new URL(match[1], url).href;
+				if (asset.test(next) && !seen.has(next) && !queue.includes(next)) queue.push(next);
+			}
+		}
+		throw Error("Codex browser module is unavailable");
+	})();
+	try {
+		await state.pending;
+	} catch (error) {
+		state.retryAfter = Date.now() + 5e3;
+		throw error;
+	} finally {
+		state.pending = void 0;
+	}
 }
 /** Native browser guest: its own process and CSP, using the desktop's registration. */
 function createCodexSurface(target, url, receive, changed) {
@@ -1295,6 +1360,12 @@ async function presentationLoop(port, request, bridgeURL, signal, report) {
 /** Runs inside the existing desktop renderer, never in a new App Server. */
 async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 	const host = globalThis;
+	const data = (value, key) => {
+		for (let depth = 0; value && depth < 6; depth++, value = Object.getPrototypeOf(value)) {
+			const descriptor = Object.getOwnPropertyDescriptor(value, key);
+			if (descriptor) return "value" in descriptor ? descriptor.value : void 0;
+		}
+	};
 	const capable = (value) => {
 		try {
 			return value && typeof value === "object" && [
@@ -1302,46 +1373,89 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 				"getConversation",
 				"startTurn",
 				"interruptConversation"
-			].every((key) => typeof value[key] === "function") && value.getHostId() === "local";
+			].every((key) => typeof data(value, key) === "function") && data(value, "getHostId").call(value) === "local";
 		} catch {
 			return false;
 		}
 	};
+	const rpcManager = (state) => {
+		const client = data(state, "client"), rpc$1 = data(client, "rpc");
+		if (typeof data(state, "status") !== "string" || data(client, "hostId") !== "local" || typeof rpc$1 !== "function") return null;
+		return {
+			__lazymindRpc: rpc$1,
+			getHostId: () => "local",
+			getConversation: (id) => rpc$1.getConversation(id),
+			getStreamRole: (id) => rpc$1.getStreamRole(id),
+			startTurn: (id, request) => rpc$1.startTurn(id, request),
+			interruptConversation: (id, reason, turn) => rpc$1.interruptConversation(id, reason, turn)
+		};
+	};
+	const dispose = (value) => {
+		if (typeof value?.[Symbol.dispose] === "function") value[Symbol.dispose]();
+	};
 	let manager = host.__lazymindCodexManager;
 	if (!capable(manager)) {
+		manager = null;
+		const now = performance.now();
+		const previous = host.__lazymindCodexDiscovery;
+		if (previous?.version === 3 && now < previous.retryAt) {
+			if (input.kind === "probe") return { ready: false };
+			throw new Error("Codex native conversation interface is unavailable");
+		}
+		host.__lazymindCodexDiscovery = {
+			version: 3,
+			retryAt: now + 5e3
+		};
+		const deadline = now + 12;
+		let remaining = 4e3;
+		const available = () => remaining-- > 0 && performance.now() < deadline;
 		const roots = [];
 		if (host.__codexRoot?._internalRoot?.current) roots.push(host.__codexRoot._internalRoot.current);
 		for (const element of Array.from(document.querySelectorAll("#root, #app, body > div"))) for (const key of Object.keys(element)) if (key.startsWith("__reactContainer$") || key.startsWith("__reactFiber$")) roots.push(element[key]);
 		const fibers = /* @__PURE__ */ new Set(), values = /* @__PURE__ */ new Set();
 		const find = (value, depth) => {
 			try {
-				if (!value || typeof value !== "object" || values.has(value) || values.size > 2e4) return null;
+				if (!value || typeof value !== "object" || values.has(value) || !available()) return null;
 				values.add(value);
 				if (capable(value)) return value;
-				const bindings = value.node?.familyBindings;
+				const bindings = data(data(value, "node"), "familyBindings");
 				if (bindings instanceof Map) {
-					for (const family of bindings.values()) {
+					let count$1 = 0;
+					const size = Math.min(bindings.size, 256);
+					for (const [definition, family] of bindings) {
+						if (count$1++ >= size || !available()) break;
+						if (data(definition, "kind") !== "signal-family") continue;
 						if (!(family instanceof Map)) continue;
-						for (const binding of family.values()) {
-							const cell = binding?.value;
-							if (cell?.atom && cell.store && typeof cell.get === "function") try {
-								const current = cell.get();
-								if (capable(current)) return current;
-							} catch {}
-						}
+						const cell = data(family.get("local"), "value");
+						const atom = data(cell, "atom"), store = data(cell, "store");
+						if (!atom || !Object.hasOwn(atom, "init") || typeof data(cell, "set") !== "function" || typeof data(store, "get") !== "function") continue;
+						const current$1 = data(store, "get").call(store, atom);
+						if (capable(current$1)) return current$1;
+						const remote = rpcManager(current$1);
+						if (remote) return remote;
 					}
 					return null;
 				}
-				if (!depth || value instanceof Node || value.$$typeof || "tag" in value && "memoizedState" in value) return null;
-				const entries = value instanceof Map ? Array.from(value.values()) : Object.values(Object.getOwnPropertyDescriptors(value)).flatMap((d) => "value" in d ? [d.value] : []);
-				for (const entry of entries) {
-					const found = find(entry, depth - 1);
+				if (!depth || value instanceof Node || data(value, "$$typeof") || "tag" in value && "memoizedState" in value) return null;
+				let count = 0;
+				if (value instanceof Map) {
+					const size = Math.min(value.size, 256);
+					for (const entry of value.values()) {
+						if (count++ >= size || !available()) break;
+						const found = find(entry, depth - 1);
+						if (found) return found;
+					}
+				} else for (const key in value) {
+					if (count++ >= 256 || !available()) break;
+					const descriptor = Object.getOwnPropertyDescriptor(value, key);
+					if (!descriptor || !("value" in descriptor)) continue;
+					const found = find(descriptor.value, depth - 1);
 					if (found) return found;
 				}
 			} catch {}
 			return null;
 		};
-		while (roots.length && fibers.size < 3e4 && !manager) {
+		while (roots.length && !manager && available()) {
 			const fiber = roots.pop();
 			if (!fiber || fibers.has(fiber)) continue;
 			fibers.add(fiber);
@@ -1353,14 +1467,24 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 			let dependency = fiber.dependencies?.firstContext;
 			for (let i = 0; dependency && i < 30 && !manager; i++, dependency = dependency.next) manager = find(dependency.memoizedValue, 2);
 		}
-		if (!capable(manager)) throw new Error("Codex native conversation interface is unavailable");
+		if (!capable(manager)) {
+			if (input.kind === "probe") return { ready: false };
+			throw new Error("Codex native conversation interface is unavailable");
+		}
 		host.__lazymindCodexManager = manager;
 	}
+	const rpc = data(manager, "__lazymindRpc");
+	if (rpc) try {
+		if (await rpc.getHostId() !== "local") throw new Error("Unexpected Codex RPC host");
+	} catch {
+		delete host.__lazymindCodexManager;
+		if (input.kind === "probe") return { ready: false };
+		throw new Error("Codex native conversation connection is unavailable");
+	}
 	if (input.kind === "probe") return { ready: true };
-	const raw = manager.getConversation(input.threadId);
-	if (!raw || raw.id !== input.threadId) return { missing: true };
-	const snapshot = () => {
-		const state = manager.getConversation(input.threadId);
+	if (rpc && input.kind === "interrupt") return { rejected: "This Codex version cannot safely interrupt a Workflow turn. Stop the current response in Codex." };
+	const capture = (state, stream, streaming) => {
+		if (!state || state.id !== input.threadId) return { missing: true };
 		const history = state?.turnHistory;
 		const turns = (history?.kind === "canonical" ? history.history.islands.flatMap((island) => island.entries.map((entry) => history.history.entitiesByKey[entry.value])).filter(Boolean) : state?.turns ?? []).map((turn) => ({
 			id: turn.turnId ?? turn.id,
@@ -1368,23 +1492,39 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 			startedAt: turn.turnStartedAtMs ?? turn.startedAtMs,
 			items: turn.items ?? []
 		}));
-		const role = manager.getStreamRole?.(input.threadId)?.role;
-		const ready = state.resumeState === "resumed" && ["owner", "follower"].includes(role) && manager.isConversationStreaming?.(input.threadId) === true;
+		const role = stream?.role;
+		const ready = state.resumeState === "resumed" && ["owner", "follower"].includes(role) && streaming;
 		return {
 			id: state.id,
 			turns,
 			ready,
 			owner: role === "owner",
+			ownerScope: rpc ? "host" : "window",
 			active: state.threadRuntimeStatus?.type === "active" || turns.some((turn) => turn.status === "inProgress")
 		};
 	};
-	if (input.kind === "read") return snapshot();
+	const localSnapshot = () => capture(manager.getConversation(input.threadId), manager.getStreamRole?.(input.threadId), manager.isConversationStreaming?.(input.threadId) === true);
+	const snapshot = async () => {
+		if (!rpc) return localSnapshot();
+		const state = await manager.getConversation(input.threadId);
+		let stream;
+		try {
+			stream = await manager.getStreamRole(input.threadId);
+			return capture(state, stream, stream != null);
+		} finally {
+			dispose(stream);
+			dispose(state);
+		}
+	};
+	const current = await snapshot();
+	if (current.missing) return current;
+	if (input.kind === "read") return current;
 	if (input.kind === "start") {
-		if (!snapshot().ready) return {
+		if (!current.ready) return {
 			rejected: "Codex conversation is still restoring; no message was sent",
 			retryable: true
 		};
-		if (snapshot().active) return { rejected: "Codex chat is busy; no message was sent" };
+		if (current.active) return { rejected: "Codex chat is busy; no message was sent" };
 		const result = await manager.startTurn(input.threadId, {
 			request: {
 				threadId: input.threadId,
@@ -1402,12 +1542,18 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 				commentAttachments: []
 			}
 		});
-		const turn = result?.turn ?? result?.result?.turn ?? result?.result?.result?.turn;
-		if (turn?.id || result?.turnId) return {
-			accepted: true,
-			turnId: turn?.id ?? result.turnId
-		};
-		const matches = snapshot().turns.filter((turn$1) => turn$1.items.some((item) => item.type === "userMessage" && item.clientId === input.clientId));
+		try {
+			const turn = result?.turn ?? result?.result?.turn ?? result?.result?.result?.turn;
+			if (turn?.id || result?.turnId) return {
+				accepted: true,
+				turnId: turn?.id ?? result.turnId
+			};
+		} finally {
+			if (rpc) dispose(result);
+		}
+		const after = await snapshot();
+		if (after.missing) throw new Error("Native turn receipt is uncertain");
+		const matches = after.turns.filter((turn) => turn.items.some((item) => item.type === "userMessage" && item.clientId === input.clientId));
 		if (matches.length !== 1) throw new Error("Native turn receipt is uncertain");
 		return {
 			accepted: true,
@@ -1415,9 +1561,11 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 		};
 	}
 	if (input.kind === "interrupt") {
-		const target = snapshot().turns.find((turn) => turn.id === input.turnId);
+		const latest = localSnapshot();
+		if (latest.missing) return { interruptedTurnId: null };
+		const target = latest.turns.find((turn) => turn.id === input.turnId);
 		if (!target || target.status !== "inProgress") return { interruptedTurnId: null };
-		if (manager.getStreamRole?.(input.threadId)?.role !== "owner" || JSON.stringify(readEvidence(target)) !== input.expectedOwnership) return { rejected: "Codex execution ownership changed; no interruption was sent" };
+		if (!latest.owner || JSON.stringify(readEvidence(target)) !== input.expectedOwnership) return { rejected: "Codex execution ownership changed; no interruption was sent" };
 		return { interruptedTurnId: await manager.interruptConversation(input.threadId, "user-stop", input.turnId) ?? null };
 	}
 	throw new Error("Unknown Codex operation");
@@ -1449,8 +1597,8 @@ var CodexNative = class {
 			}, signal)
 		})))).flatMap((result) => result.status === "fulfilled" && !result.value.state?.missing && result.value.state?.id === threadId ? [result.value] : []);
 		const owners = matches.filter((match) => match.state.owner);
-		if (owners.length > 1) throw Error("Codex reports conflicting owners for this chat");
-		const selected = owners[0] ?? matches.sort((a, b) => a.id.localeCompare(b.id))[0];
+		if (owners.length > 1 && !owners.every((match) => match.state.ownerScope === "host")) throw Error("Codex reports conflicting owners for this chat");
+		const selected = (owners.length ? owners : matches).sort((a, b) => a.id.localeCompare(b.id))[0];
 		if (!selected) throw Error("Open the original Codex chat before continuing");
 		return selected;
 	}

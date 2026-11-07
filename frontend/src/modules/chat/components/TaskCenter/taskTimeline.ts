@@ -102,6 +102,8 @@ function taskState(
   pausedWorkflowSessionId?: string,
 ): OrdinaryTaskState {
   if (validity === "stale") return "outdated";
+  if (step?.ordinary?.input_required || task?.ordinary?.input_required
+    || (task?.status === "interrupted" && task.current_phase === "awaiting_input")) return "waiting";
   const rawStatus = step?.ordinary?.status || step?.status || task?.ordinary?.status || task?.status;
   const workflowPaused = pausedWorkflowSessionId && (step?.session_id === pausedWorkflowSessionId
     || task?.ordinary?.session_id === pausedWorkflowSessionId);

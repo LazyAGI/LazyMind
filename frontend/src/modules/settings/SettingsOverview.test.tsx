@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
     fetchSettingsOverview: vi.fn(),
     fetchUserUiPreferences: vi.fn(),
     applySettingsChange: vi.fn(),
+    runSettingsChecks: vi.fn(),
   };
 });
 
@@ -48,7 +49,7 @@ vi.mock("@/runtime/cloud/session", () => ({
 vi.mock("./api", () => ({
   fetchSettingsOverview: mocks.fetchSettingsOverview,
   applySettingsChange: mocks.applySettingsChange,
-  runSettingsChecks: vi.fn(),
+  runSettingsChecks: mocks.runSettingsChecks,
 }));
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
   fetchUserUiPreferences: mocks.fetchUserUiPreferences,
@@ -115,6 +116,20 @@ describe("Settings overview", () => {
       sensitive_word_filter_enabled: false,
     });
     mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "document_parsing_enabled", enabled: false });
+  });
+
+  it("uses consistent quick actions and opens diagnostics with the check results", async () => {
+    mocks.runSettingsChecks.mockResolvedValue({ results: [], finished_at: "2026-11-03T00:00:00Z" });
+    const t = await renderOverview();
+    expect(card(t("settingsPage.sections.models")).getByRole("button", { name: t("settingsPage.quickConfig") })).toHaveClass("settings-dashboard-quick-action");
+    const diagnostics = card(t("settingsPage.sections.diagnostics"));
+    const check = diagnostics.getByRole("button", { name: t("settingsPage.check") });
+    expect(check).toHaveClass("settings-dashboard-quick-action");
+    expect(diagnostics.getByRole("button", { name: t("settingsPage.viewable") })).toHaveClass("settings-dashboard-quick-action");
+    fireEvent.click(check);
+    await waitFor(() => expect(routeParams().get("section")).toBe("diagnostics"));
+    expect(mocks.runSettingsChecks).toHaveBeenCalledTimes(1);
+    expect(routeParams().get("return_to")).toBe("/agent/chat/home/test-conversation");
   });
 
   it.each([

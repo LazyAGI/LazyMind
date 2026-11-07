@@ -89,6 +89,7 @@ type ShowcaseCase struct {
 	Tasks             []ShowcaseCaseTask `json:"tasks"`
 	BuiltinSkillUID   string             `json:"builtin_skill_uid,omitempty"`
 	WorkflowRef       string             `json:"workflow_ref,omitempty"`
+	PageAction        string             `json:"page_action,omitempty"`
 	Featured          bool               `json:"featured"`
 	Hot               bool               `json:"hot"`
 	FeaturedOrder     int                `json:"featured_order"`
@@ -179,7 +180,7 @@ func validateFeaturedBindings(catalog Catalog, builtinCatalogPath string) error 
 		byUID[entry.UID] = entry
 	}
 	for _, definition := range catalog.Cases {
-		if definition.Type == TypeWorkflow {
+		if definition.Type == TypeWorkflow || definition.Type == TypePage {
 			continue
 		}
 		if definition.Skill == nil {

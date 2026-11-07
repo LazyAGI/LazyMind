@@ -54,10 +54,13 @@ vi.mock("react-i18next", async (importOriginal) => ({
 vi.mock("../ChatModelSelector", () => ({
   default: ({
     onSavingChange,
+    disabled,
   }: {
     onSavingChange?: (saving: boolean) => void;
+    disabled?: boolean;
   }) => (
     <>
+      <button type="button" aria-label="model selection" disabled={disabled}>model selection</button>
       <button type="button" onClick={() => onSavingChange?.(true)}>
         begin model save
       </button>
@@ -102,6 +105,8 @@ vi.mock("../ImageUpload", async () => {
       max: number;
       listNum: number;
       updateFiles: (files: (File & { uid: string; uri: string })[]) => void;
+      onBeforeAddFiles?: (incoming: File[], current: File[]) => { filesToAdd: File[]; clearFirst: boolean; toasts: string[] } | null;
+      onFilesAdded?: (files: File[]) => void;
     }, ref) {
       const files = React.useRef<(File & { uid: string; uri: string })[]>([]);
       React.useImperativeHandle(ref, () => ({
@@ -114,11 +119,18 @@ vi.mock("../ImageUpload", async () => {
           props.updateFiles(files.current);
         },
         uploadFiles: (incoming: File[]) => {
-          for (const file of incoming) {
+          const result = props.onBeforeAddFiles?.(incoming, files.current);
+          if (result?.clearFirst) files.current = [];
+          const accepted: File[] = [];
+          for (const file of result?.filesToAdd ?? incoming) {
             if (files.current.length >= props.max) break;
+            if (!props.types.some(type => file.name.toLowerCase().endsWith(type))) continue;
+            if (file.type.startsWith("image/") && file.size > 5 * 1024 * 1024) continue;
             files.current.push(Object.assign(file, { uid: file.name, uri: `/uploads/${file.name}` }));
+            accepted.push(file);
           }
           props.updateFiles(files.current);
+          if (accepted.length > 0) props.onFilesAdded?.(accepted);
         },
       }));
       return <>
@@ -185,6 +197,58 @@ vi.mock("@/modules/memory/toolApi", () => ({
 describe("ChatInput model switch save lock", () => {
   beforeEach(() => {
     vi.mocked(getRuntimeMode).mockReturnValue("local");
+  });
+
+  it("warns about missing visual understanding only when an image attachment is added", async () => {
+    const warning = vi.spyOn(message, "warning").mockImplementation(() => undefined as never);
+    const ref = createRef<ChatInputImperativeProps>();
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:notes");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      const view = render(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent={false}
+        vlmReady={false} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+      await act(async () => ref.current?.uploadFiles([new File(["PDF"], "notes.pdf", { type: "application/pdf" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      await act(async () => ref.current?.uploadFiles([new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.png", { type: "image/png" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      await act(async () => ref.current?.uploadFiles([new File(["image"], "photo.png", { type: "image/png" })]));
+      expect(warning).toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+
+      await act(async () => ref.current?.clearFiles());
+      warning.mockClear();
+      view.rerender(<ChatInput ref={ref} value="" onChange={vi.fn()} isChatContent={false}
+        vlmReady={true} showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      await act(async () => ref.current?.uploadFiles([new File(["image"], "ready.png", { type: "image/png" })]));
+      expect(warning).not.toHaveBeenCalledWith("chat.vlmNotReadyWarning");
+    } finally {
+      warning.mockRestore();
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    }
+  });
+
+  it.each([
+    ["waiting", false, false],
+    ["active", false, true],
+    ["waiting", true, true],
+  ] as const)("model recovery for workflow %s, auto running %s", (status, autoRunning, blocked) => {
+    useWorkflowStore.setState({ sessionByConversation: { "model-recovery": {
+      session_id: "waiting-flow", conversation_id: "model-recovery", controller_host: "lazymind",
+      workflow_id: "workflow", workflow_mode: "dynamic", status, current_step_id: "step", created_at: "", updated_at: "",
+    } }, autoRunningByConversation: { "model-recovery": autoRunning } });
+    onTestFinished(() => useWorkflowStore.setState({ sessionByConversation: {}, autoRunningByConversation: {} }));
+    render(<ChatInput value="继续" onChange={vi.fn()} sessionId="model-recovery" isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false}
+      showSkillDeposit={false} showThinkingDepth={false} />);
+    if (blocked) expect(screen.getByRole("button", { name: "model selection" })).toBeDisabled();
+    else expect(screen.getByRole("button", { name: "model selection" })).toBeEnabled();
   });
 
   it.each([
@@ -909,4 +973,26 @@ it.each([
   fireEvent.click(screen.getByRole('button', { name: 'chat.send' }));
   await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({ text: 'Run this', mentions: [mention] })));
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+describe('paper composer scope',()=>{
+ it('keeps model selection and send while removing toolbar extras only in paper mode',()=>{
+  const props={value:'Read this paper',onChange:vi.fn(),isChatContent:true,showConversationConfig:false,showPromptSuggestions:false};
+  const view=render(<ChatInput {...props} composerVariant="paper"/>);
+  expect(screen.getByRole('button',{name:'begin model save'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'chat.send'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'chat.addResource'})).toBeNull();
+  expect(view.container.querySelector('.chat-core-actions .chat-add-resource-trigger')).toBeNull();
+  expect(view.container.querySelector('.chat-featured-capability')).toBeNull();
+  view.rerender(<ChatInput {...props}/>);
+  expect(screen.getByRole('button',{name:'chat.addResource'})).toBeInTheDocument();
+ });
+});
+
+it('paper draft uses its isolated model selection on the first send',async()=>{
+ const selected={mode:'fixed' as const,model_id:'paper-model',source:'own' as const,version:0};
+ useModelSelectionStore.getState().setSelection('pdf-draft',selected);
+ const send=vi.fn();render(<ChatInput composerVariant="paper" modelSelectionDraft sessionId="pdf-draft" value="Explain this paper" onChange={vi.fn()} onSend={send} isChatContent showConversationConfig={false}/>);
+ fireEvent.click(screen.getByRole('button',{name:'chat.send'}));
+ await waitFor(()=>expect(send).toHaveBeenCalledWith(expect.objectContaining({initial_model_selection:{mode:'fixed',model_id:'paper-model',source:'own'}})));
 });

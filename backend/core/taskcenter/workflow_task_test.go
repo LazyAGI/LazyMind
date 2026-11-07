@@ -10,6 +10,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/graphengine"
 )
 
 func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
@@ -276,5 +277,22 @@ func TestStoppedWorkflowIsPausedUntilExplicitRetry(t *testing.T) {
 	}
 	if got, err := resolveTaskForResponse(t.Context(), db.DB, task); err != nil || got.Status != "failed" {
 		t.Fatalf("waiting without an approval checkpoint status=%s error=%v", got.Status, err)
+	}
+}
+
+func TestWorkflowInputCheckpointBelongsToAttention(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowRevision{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowReviewCheckpoint{}, &orm.WorkflowSlotRevision{})
+	now := time.Now().UTC()
+	session := orm.WorkflowSession{ID: "input-session", ConversationID: "conv", CreateUserID: "owner", WorkflowID: "workflow", WorkflowRevisionID: "revision", ControllerHost: "lazymind", Status: "active", CreatedAt: now, UpdatedAt: now}
+	graph := graphengine.CompiledStateGraph{Nodes: map[string]graphengine.CompiledNode{"collect": {ID: "collect", Mode: "auto"}}, Runtime: graphengine.RuntimePolicy{InputCheckpoint: &graphengine.InputCheckpoint{AfterStep: "collect", BeforeSteps: []string{"outline"}, Slot: "questions"}}}
+	for _, row := range []any{&session, &orm.WorkflowRevision{ID: "revision", CompiledGraph: graph.JSON()}, &orm.WorkflowSessionStep{ID: "attempt", SessionID: session.ID, StepID: "collect", Status: "succeeded", Validity: "effective", CreatedAt: now}, &orm.WorkflowSlotRevision{ID: "slot", SessionID: session.ID, SlotID: "questions", Slot: "questions", Selected: true, Validity: "effective", ContentSnapshot: json.RawMessage(`{"checkpoint_token":"card","questions":[{"text":"Date?"}]}`)}} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := orm.TaskCenterTask{ID: "task", UserID: "owner", ConversationID: "conv", WorkflowSessionID: &session.ID, Status: "running", TaskType: "workflow_run", CreatedAt: now}
+	got, err := resolveTaskForResponse(context.Background(), db.DB, task)
+	if err != nil || got.Status != "waiting_inputs" || !taskMatchesStatusFilter(got.Status, "attention") || workbenchCategory(got, now) != "attention" {
+		t.Fatalf("input task must belong to attention: %+v err=%v", got, err)
 	}
 }

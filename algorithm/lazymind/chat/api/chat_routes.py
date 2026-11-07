@@ -147,7 +147,17 @@ async def steer_chat(
     content = request.input.strip()
     if not conversation_id or not run_id or not steer_id or not content:
         raise HTTPException(status_code=400, detail='conversation_id, run_id, steer_id and input are required')
-    accepted, code = steering_registry.accept(run_id, conversation_id, steer_id, content)
+    from lazymind.chat.service.knowledge_management import KnowledgeConfirmationUnavailable
+
+    try:
+        accepted, code = await asyncio.to_thread(
+            steering_registry.accept, run_id, conversation_id, steer_id, content,
+        )
+    except KnowledgeConfirmationUnavailable:
+        return ChatSteerResponse(
+            accepted=False, steer_id=steer_id, code='knowledge_confirmation_unavailable',
+            message='Could not settle the pending knowledge confirmation',
+        )
     if not accepted:
         return ChatSteerResponse(
             accepted=False, steer_id=steer_id, code=code,

@@ -11,7 +11,6 @@ type PaperLibraryEntry struct {
 	ID             string          `gorm:"type:varchar(255);primaryKey"`
 	AcademicWorkID string          `gorm:"type:varchar(36);not null;uniqueIndex:uk_library_work,priority:2"`
 	FolderID       string          `gorm:"type:varchar(255);not null;default:'';index"`
-	Status         string          `gorm:"type:varchar(16);not null;default:'unread'"`
 	TagsJSON       json.RawMessage `gorm:"type:json;not null"`
 	MetadataJSON   json.RawMessage `gorm:"type:json;not null"`
 	Source         string          `gorm:"type:varchar(32);not null;default:'unknown'"`
@@ -40,14 +39,15 @@ type PaperLibraryFolder struct {
 func (PaperLibraryFolder) TableName() string { return "paper_library_folders" }
 
 type PaperLibraryNote struct {
-	DatasetID string `gorm:"type:varchar(255);primaryKey"`
-	ID        string `gorm:"type:varchar(255);primaryKey"`
-	PaperID   string `gorm:"type:varchar(255);not null;index"`
-	Title     string `gorm:"type:text;not null"`
-	Content   string `gorm:"type:text;not null"`
-	Kind      string `gorm:"type:varchar(32);not null;default:'note'"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	DatasetID  string `gorm:"type:varchar(255);primaryKey"`
+	ID         string `gorm:"type:varchar(255);primaryKey"`
+	PaperID    string `gorm:"type:varchar(255);not null;index"`
+	Title      string `gorm:"type:text;not null"`
+	Content    string `gorm:"type:text;not null"`
+	Kind       string `gorm:"type:varchar(32);not null;default:'note'"`
+	SourceJSON string `gorm:"type:json;not null;default:'{}'"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 func (PaperLibraryNote) TableName() string { return "paper_library_notes" }

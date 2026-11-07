@@ -96,7 +96,7 @@ func TestPopulatedLegacyLibraryUpgrade(t *testing.T) {
 					t.Fatalf("lost auxiliary field %s: %s", key, raw)
 				}
 			}
-			if err = db.Model(&orm.PaperLibraryEntry{}).Where("dataset_id=?", "legacy-dataset").Update("status", "reading").Error; err != nil {
+			if err = db.Model(&orm.AcademicUserPaperState{}).Where("dataset_id=? AND user_id=?", "legacy-dataset", "owner").Update("reading_status", "reading").Error; err != nil {
 				t.Fatal(err)
 			}
 			view, err = paperlibrary.Load(t.Context(), db.Session(&gorm.Session{NewDB: true}), "legacy-dataset", "owner", nil, true)

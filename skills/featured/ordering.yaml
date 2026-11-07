@@ -5,6 +5,7 @@ schema_version: 1
 # unlisted capabilities keep their relative placement.order order afterward.
 home:
   chat:
+    - paper-reading
     - novel-generator
     - chat-eq-reply
     - xiaohongshu-copywriter
@@ -17,6 +18,7 @@ home:
     - cute-baby-avatar
     - landscape-art-postcard
   work:
+    - paper-reading
     - ppt-workflow
     - image-workflow
     - academic_research_pipeline

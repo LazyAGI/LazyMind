@@ -328,10 +328,14 @@ func syncProcessingTaskStates(r *http.Request, datasetID string) {
 		}
 		if ext.ProcessingLevel == ProcessingLevelIndexed {
 			updates["index_status"] = status
+			if status == "succeeded" {
+				updates["index_error_code"] = ""
+				updates["index_error_message"] = ""
+			}
 		}
 		var base orm.DocumentProcessingState
 		if store.DB().WithContext(r.Context()).Where("dataset_id = ? AND document_id = ?", datasetID, task.DocID).
-			Take(&base).Error == nil && base.ParseArtifactRef != "" {
+			Take(&base).Error == nil && (base.ParseArtifactRef != "" || base.EmbeddingVersion == embeddingVersionReembedPending || base.EmbeddingVersion == embeddingVersionReembedManual) {
 			if ext.ProcessingLevel == ProcessingLevelIndexed && base.IndexArtifactRef != "core-task:"+task.ID {
 				continue // A previous generation must not complete a newly prepared artifact.
 			}
@@ -372,7 +376,8 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := service.EnsureDocumentParsed(r, EnsureDocumentParsedRequest{
-		UserID: userID, DatasetID: datasetID, DocumentID: documentID,
+		ObserveOnly: r.Method == http.MethodGet,
+		UserID:      userID, DatasetID: datasetID, DocumentID: documentID,
 		Caller: caller,
 	})
 	if err != nil {

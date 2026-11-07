@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -150,7 +151,7 @@ func TestLaunchWorkflowAttemptRollsBackSessionWhenTaskCenterCreateFails(t *testi
 	}
 }
 
-func TestBuildWorkflowArtifactsSummaryExecutesJoinQuery(t *testing.T) {
+func TestBuildWorkflowArtifactsSummaryUsesOnlyCurrentEffectiveRevisions(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
 	if err := db.Create(&orm.WorkflowSessionStep{ID: "attempt-1", SessionID: "session-1", StepID: "step-1",
@@ -161,11 +162,28 @@ func TestBuildWorkflowArtifactsSummaryExecutesJoinQuery(t *testing.T) {
 		ContentType: "text", Value: json.RawMessage(`{"value":"done"}`), Seq: 1, CreatedAt: now}).Error; err != nil {
 		t.Fatalf("create artifact: %v", err)
 	}
+	seq := 1
+	for _, row := range []orm.WorkflowSlotRevision{
+		{ID: "selected", SessionID: "session-1", SlotID: "output", Slot: "output", Revision: 4, StepID: "step-1", Attempt: 1, ArtifactSeq: &seq, Selected: true, Validity: "effective"},
+		{ID: "old", SessionID: "session-1", SlotID: "old", Slot: "old", Revision: 1, Selected: true, Validity: "stale", ContentSnapshot: json.RawMessage(`{"value":"outdated missing evidence"}`)},
+	} {
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A superseded but otherwise effective revision must also be excluded.
+	old := orm.WorkflowSlotRevision{ID: "unselected", SessionID: "session-1", SlotID: "output", Slot: "output", Revision: 2, Validity: "effective", ContentSnapshot: json.RawMessage(`{"value":"superseded claim"}`)}
+	if err := db.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&old).Update("selected", false).Error; err != nil {
+		t.Fatal(err)
+	}
 	summary, err := buildWorkflowArtifactsSummary(t.Context(), db.DB, "session-1", "step-1")
 	if err != nil {
 		t.Fatalf("build summary: %v", err)
 	}
-	if !strings.Contains(summary, "output: done") {
+	if !strings.Contains(summary, `"value":"done"`) || strings.Contains(summary, "outdated") || strings.Contains(summary, "superseded") {
 		t.Fatalf("unexpected summary: %q", summary)
 	}
 }
@@ -330,6 +348,12 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 		t.Fatalf("step: %v", err)
 	}
 
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "ps-1").Update("controller_host", "lazymind").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentTask{InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), ID: "task-1", ConversationID: "conv-1", Params: json.RawMessage(`{"hand_off":true,"workflow_mode":"dynamic","session_id":"ps-1","step_id":"analyze_subject"}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
 	// workflow_mode=dynamic in pctx → step_waiting with reason=dynamic_pause
 	pctx := &WorkflowChatContext{
 		SessionID:    "ps-1",
@@ -361,6 +385,16 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	}
 	if gotPayload["reason"] != "dynamic_pause" {
 		t.Fatalf("expected reason=dynamic_pause, got %v", gotPayload["reason"])
+	}
+	session, err := GetSession(ctx, db.DB, "ps-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := displaystate.Read(db.DB, *session)
+	// A live handoff retains the admitted controller's preparation state. Older
+	// waiting snapshots still render next_step_required (covered in state_sync_test).
+	if err != nil || session.Status != SessionStatusActive || view.Status != "running" || view.Reason != "preparing" || view.ApprovalStepID != "" {
+		t.Fatalf("dynamic handoff lost admitted preparation: status=%s view=%+v err=%v", session.Status, view, err)
 	}
 	if feedbackPayload["task_id"] != "task-1" ||
 		!strings.Contains(fmt.Sprint(feedbackPayload["message"]), "Analyze Subject") ||
@@ -557,6 +591,9 @@ func TestOnSubAgentDone_ExplicitNoHandOffWaitsForChatAgent(t *testing.T) {
 
 	if gotEvent != "step_waiting" || gotReason != "inline_complete" {
 		t.Fatalf("expected inline_complete step_waiting, got event=%q reason=%v", gotEvent, gotReason)
+	}
+	if admitted, err := prepareContinuation(ctx, db.DB, "ps-inline"); err != nil || !admitted {
+		t.Fatalf("inline Chat continuation blocked: admitted=%v err=%v", admitted, err)
 	}
 }
 

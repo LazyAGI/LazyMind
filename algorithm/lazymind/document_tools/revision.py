@@ -30,6 +30,7 @@ from .artifacts import (
     _write_document_input,
     _write_input_artifact,
     cleanup_writer_temporary,
+    normalize_generated_markdown,
     writer_schema,
 )
 from .resources import _target_from_document, sync_writer_documents
@@ -53,6 +54,7 @@ plan, analysis, commentary, or an outer Markdown code fence. The source document
 only document source of truth. Preserve unaffected content and the user's latest edits.
 Apply the requested changes directly; do not merely describe them. Do not invent facts,
 data, methods, results, citations, or source metadata.
+Headings contain section names; the document editor supplies section numbers.
 
 Constraints:
 {constraints}
@@ -79,7 +81,7 @@ Source Markdown:
             revised = revised[first_heading.start():].strip()
     if not revised:
         raise ValueError('Shared Writer returned no revised Markdown document.')
-    return revised
+    return normalize_generated_markdown(revised)
 
 
 def modify_plan_needs_media(plan: dict[str, Any]) -> bool:

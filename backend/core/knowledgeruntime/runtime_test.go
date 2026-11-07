@@ -367,3 +367,62 @@ func TestCoreOwnsConfirmationPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestGuidanceAndApprovalShareTheConfirmationDecision(t *testing.T) {
+	st, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	execution := Execution{UserID: "u", ConversationID: "conv", HistoryID: "history", RunID: "run"}
+	const tool = "knowledge.folder.create"
+	rt, err := New(st, func(context.Context, Execution) (Identity, error) {
+		return Identity{Principal: capability.Principal{UserID: "u"}, AllowedTools: []string{tool}}, nil
+	}, func(context.Context, Identity, string, json.RawMessage) (doc.ResourceSnapshot, error) {
+		return doc.ResourceSnapshot{Digest: "v1"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, guidanceFirst := range []bool{true, false} {
+		callID := "approval-first"
+		if guidanceFirst {
+			callID = "guidance-first"
+		}
+		t.Run(callID, func(t *testing.T) {
+			req := PrepareRequest{Execution: execution, WireName: tool, CallID: callID, Arguments: json.RawMessage(`{"folders":["Archive"]}`)}
+			p, err := rt.Prepare(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.ConfirmationID, req.OperationKey, req.ArgumentsDigest, req.Snapshot = p.ConfirmationID, p.OperationKey, p.ArgumentsDigest, p.Snapshot
+			approve := func() error {
+				return rt.Decide(ctx, "u", "", p.ConfirmationID, "approved", p.ArgumentsDigest, p.Snapshot)
+			}
+			if !guidanceFirst {
+				if err := approve(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := "approved"
+			if guidanceFirst {
+				want = "superseded"
+			}
+			other := execution
+			other.RunID = "other"
+			if _, err := rt.Supersede(ctx, other, p.ConfirmationID); err == nil {
+				t.Fatal("another run superseded the confirmation")
+			}
+			if got, err := rt.Supersede(ctx, execution, p.ConfirmationID); err != nil || got != want {
+				t.Fatalf("supersede = %q, %v, want %q", got, err, want)
+			}
+			if err := approve(); (err != nil) != guidanceFirst {
+				t.Fatalf("approval after guidance: %v", err)
+			}
+			if _, err := rt.Claim(ctx, req); (err != nil) != guidanceFirst {
+				t.Fatalf("claim after guidance: %v", err)
+			}
+		})
+	}
+}

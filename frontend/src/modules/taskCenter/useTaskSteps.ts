@@ -11,6 +11,7 @@ export type TaskStep = { step_id: string; title?: string; status: string; curren
 export const isTaskStepDone = (status: string) => ['completed', 'succeeded'].includes(status);
 
 type Projection = {
+  display?: import('@/modules/chat/store/workflowStatus').WorkflowDisplayState;
   current_step_id?: string;
   graph?: { static_order?: string[]; nodes?: Record<string, { label?: string }> };
   projection?: WorkflowSession['projection'];
@@ -82,7 +83,7 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
         const runtime: WorkflowSession = { ...session,
           current_step_id: payload.current_step_id ?? session.current_step_id,
           steps: workflowSnapshotSteps(session.session_id, payload.attempt_history) ?? session.steps,
-          projection: payload.projection,
+          projection: { ...payload.projection, display: payload.display },
         };
         steps = workflowPlannedSteps(ui, runtime, payload, developer);
       } else {
@@ -91,7 +92,7 @@ export function useTaskSteps(task: Task | null, refreshVersion = 0) {
           const node = payload.projection?.nodes?.[id];
           return { step_id: id, title: payload.graph?.nodes?.[id]?.label,
             current: payload.current_step_id === id || payload.projection?.current?.includes(id),
-            status: workflowNodeStatus(node) };
+            status: workflowNodeStatus(node, payload.display, id) };
         });
       }
       if (active) setSnapshot({ sessionID, steps, failed: false });

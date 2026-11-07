@@ -185,3 +185,22 @@ func assertEnvNotContains(t *testing.T, env []string, forbidden string) {
 		}
 	}
 }
+
+func TestCoreServiceEnvChatModelFallback(t *testing.T) {
+	for _, value := range []string{"", "true", "false"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED", value)
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := value
+			if want == "" {
+				want = "true"
+			}
+			assertEnvContains(t, coreServiceEnv(cfg, paths), "LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED="+want)
+		})
+	}
+}

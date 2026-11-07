@@ -20,6 +20,7 @@ from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvS
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, set_trace_context
+from lazymind.chat.engine.agent_runtime.executor import AGENT_MODULE_TRACE
 from fastapi.responses import StreamingResponse
 from lazymind.chat.config import (
     IMAGE_EXTENSIONS,
@@ -91,6 +92,7 @@ from lazymind.chat.engine.agent_runtime.summary_range import (
     is_runtime_summary_message,
 )
 from lazymind.chat.engine.agent_runtime.steering import (
+    continue_before_invocation,
     continue_in_workspace,
     SteeringInterruptedError,
     install_stream_interrupt_hook,
@@ -666,7 +668,9 @@ def _build_user_attachment_tools(has_files: bool, disabled=()) -> list:
     return [config.tool for config in visible_attachment_configs(disabled)]
 
 
-def _build_ask_user_tool(runtime_policy: Any = None) -> list:
+def _build_ask_user_tool(
+    runtime_policy: Any = None, workflow_catalog: Any = None, *, discovery_mode: bool = False,
+) -> list:
     """Return the ask_user stop-tool for ChatAgent.
 
     Intentionally NOT added to DEFAULT_TOOLS so SubAgents never receive it.
@@ -676,13 +680,15 @@ def _build_ask_user_tool(runtime_policy: Any = None) -> list:
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.workflow.workflow_manager import enforce_startup_clarification_policy
 
-    if not runtime_policy:
+    if not runtime_policy and not (discovery_mode and workflow_catalog):
         return [ask_user]
 
     @wraps(ask_user)
     def governed_ask_user(questions, title=None, description=None):
         return ask_user(
-            enforce_startup_clarification_policy(questions, runtime_policy),
+            enforce_startup_clarification_policy(
+                questions, runtime_policy, workflow_catalog, discovery_mode=discovery_mode,
+            ),
             title=title,
             description=description,
         )
@@ -693,14 +699,30 @@ def _build_ask_user_tool(runtime_policy: Any = None) -> list:
 def _should_register_ask_user(
     agentic_config: Dict[str, Any],
     disabled_tools: set[str] | None = None,
+    task_profile: Any = None,
+    query: str = '',
 ) -> bool:
     """Respect explicit non-interactive requests and legacy auto workflow sessions."""
     if 'ask_user' in (disabled_tools or set()):
+        return False
+    if _is_ready_simple_answer(task_profile, query):
         return False
     return not (
         agentic_config.get('enable_workflow', True)
         and agentic_config.get('workflow_mode') == 'auto'
     )
+
+
+def _is_ready_simple_answer(profile: Any, query: str = '') -> bool:
+    """Reuse the existing router's high-confidence fast path; no extra classifier."""
+    if re.search(r'问我|向我提问|采访我|访谈我|ask\s+me|interview\s+me', query, re.IGNORECASE):
+        return False
+    return bool(profile is not None and profile.primary_outcome == 'answer'
+                and not profile.secondary_outcomes and profile.complexity == 'simple'
+                and profile.freshness == 'stable' and profile.input_mode == 'query_only'
+                and profile.request_assessment.status == 'ready'
+                and profile.request_assessment.interaction_need == 'none'
+                and not profile.routing_review_required and profile.confidence >= 0.9)
 
 
 def _workflow_startup_clarification_available(
@@ -710,9 +732,9 @@ def _workflow_startup_clarification_available(
     *,
     discovery_mode: bool = False,
 ) -> bool:
-    """Allow a declaratively interactive Workflow to clarify before Session creation."""
+    """Keep declared clarification available during an interactive Workflow too."""
     context = workflow_context if isinstance(workflow_context, dict) else {}
-    if str(context.get('session_id') or '').strip():
+    if str(context.get('session_id') or '').strip() and context.get('workflow_mode') == 'auto':
         return False
 
     def has_fields(policy: Any) -> bool:
@@ -728,11 +750,24 @@ def _workflow_startup_clarification_available(
 
     if has_fields(runtime_policy):
         return True
+    if str(context.get('session_id') or '').strip():
+        return False
     if not discovery_mode:
         return False
     return any(
         isinstance(item, dict) and has_fields(item.get('runtime'))
         for item in (workflow_catalog or [])
+    )
+
+
+def _has_document_preview_input(request: ChatRequest) -> bool:
+    # Preview papers are supplied through an authorized document read, not an
+    # uploaded attachment. Their availability must not become a missing-file
+    # blocker before the agent can perform that read.
+    context = request.document_context or {}
+    return request.conversation.surface == 'knowledge_document_preview' and all(
+        isinstance(context.get(key), str) and bool(context[key].strip())
+        for key in ('dataset_id', 'document_id')
     )
 
 
@@ -764,7 +799,7 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
             ),
         ),
         'intent': request.conversation.intent_context,
-        'has_attachments': bool(request.message.files),
+        'has_attachments': bool(request.message.files) or _has_document_preview_input(request),
         'explicit_resources': explicit_resources,
         'thinking_depth': thinking_depth,
     }
@@ -778,7 +813,7 @@ def _resolve_task_profile_with_model(
 ) -> Any:
     set_trace_context({
         'trace_id': trace_id,
-        'session_id': session_id or trace_id,
+        'session_id': trace_id or session_id,
         'sampled': True,
     })
 
@@ -988,6 +1023,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     has_explicit_workflow = bool(
         request.explicit_resource_bindings.workflow_refs
         or request.workflow.allowed_workflow_refs
+        or request.workflow.clarification
         or str((request.workflow.workflow_context or {}).get('workflow_ref') or '').strip()
     )
     if has_explicit_workflow or not provisional.routing_review_required:
@@ -1087,6 +1123,25 @@ def _register_steering_before_stream(request: ChatRequest) -> str:
     return run_id
 
 
+def _document_selection_contract(document_context: Dict[str, Any]) -> str:
+    target = 'The Selected text in Quoted Message is the exact target of the current user instruction. '
+    if document_context.get('expand_paper_context') is True:
+        return (
+            target
+            + 'Use the Surrounding passage as primary context. If explaining this selection requires a '
+            'paper-specific definition or its connection to the method, use KBToolkit_read_document '
+            'with the exact IDs in the Active Document Contract to read relevant passages from the '
+            'current document only. Keep the lookup focused on the selected text; distinguish what '
+            'the paper states from general background and do not invent details that the paper does not provide.'
+        )
+    return (
+        target
+        + 'Use the Surrounding passage only to disambiguate meaning. For direct translation, '
+        'transformation, explanation, definition, summary, or rewrite, answer from this supplied '
+        'content without searching the knowledge base.'
+    )
+
+
 async def _handle_chat_impl(
     request: ChatRequest,
     *,
@@ -1107,7 +1162,6 @@ async def _handle_chat_impl(
         guard_workflow_agent_stream,
         resolve_workflow_injection_async,
         update_intentwriter,
-        workflow_startup_clarification_already_asked,
     )
 
     conversation_id = (conversation.conversation_id or '').strip()
@@ -1143,6 +1197,7 @@ async def _handle_chat_impl(
         resolved_context = resolve_document_selection_context(
             document_context,
             cited_message_context,
+            user_id=user_id,
         )
         cited_message_context = render_document_selection(selected_text, resolved_context)
     language_query = user_input.strip()
@@ -1399,7 +1454,7 @@ async def _handle_chat_impl(
                 classifier=None,
                 enable_llm_fallback=False,
                 thinking_depth=thinking_depth,
-                has_attachments=bool(files_map),
+                has_attachments=bool(files_map) or _has_document_preview_input(request),
                 explicit_resources=explicit_resource_payload,
             )
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
@@ -1461,6 +1516,7 @@ async def _handle_chat_impl(
         allowed_workflow_refs=effective_allowed_workflow_refs,
         workflow_activations=workflow.activations,
         conversation_history=agent_history,
+        clarification=workflow.clarification,
     )
     agentic_config.update(workflow_contribution.agentic_config_patch)
     from lazymind.chat.host_extensions.registry import apply_host_extensions
@@ -1530,13 +1586,16 @@ async def _handle_chat_impl(
     configuration_preview = runtime.context_usage_preview or runtime.context_prompt_export
     preview_capabilities = {item['service'][4:]: item for item in runtime.mcp_capabilities or []}
     from lazymind.chat.service.knowledge_management import build_knowledge_runtime, bind_knowledge_server
+    from lazymind.chat.service.vocabulary_mcp import bind_vocabulary_server
     knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
 
     def bind_runtime_mcp(server):
-        return server if configuration_preview else bind_knowledge_server(server, knowledge_management)
+        if configuration_preview:
+            return server
+        return bind_knowledge_server(bind_vocabulary_server(server, agentic_config), knowledge_management)
 
     def load_runtime_mcp(server, namespace='user'):
-        return _load_mcp_server_tools(bind_knowledge_server(server, knowledge_management), namespace)
+        return _load_mcp_server_tools(bind_runtime_mcp(server), namespace)
 
     if (not sidechat_readonly and not workflow_turn_is_bound and conversation_id and user_id
             and (configuration_preview or (conversation.history_id and conversation.run_id))):
@@ -1659,28 +1718,22 @@ async def _handle_chat_impl(
             effective_workflow_catalog,
             discovery_mode=not workflow_turn_is_bound,
         )
-        workflow_startup_clarification_asked = (
-            workflow_startup_clarification_declared
-            and workflow_startup_clarification_already_asked(
-                agent_history,
-                workflow_contribution.runtime_policy,
-                effective_workflow_catalog,
-                discovery_mode=not workflow_turn_is_bound,
-                current_query=language_query,
-            )
-        )
-        allow_ask_user = False if workflow_startup_clarification_asked else (
+        allow_ask_user = (
             (
                 not workflow_turn_is_bound
-                and _should_register_ask_user(agentic_config, disabled)
+                and _should_register_ask_user(agentic_config, disabled, task_profile, language_query)
             )
             or (
                 workflow_startup_clarification_declared
                 and 'ask_user' not in disabled
+                and not _is_ready_simple_answer(task_profile, language_query)
             )
         )
         ask_user_tools = (
-            _build_ask_user_tool(workflow_contribution.runtime_policy)
+            _build_ask_user_tool(
+                workflow_contribution.runtime_policy, effective_workflow_catalog,
+                discovery_mode=not workflow_turn_is_bound,
+            )
             if allow_ask_user else []
         )
         ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
@@ -1775,21 +1828,12 @@ async def _handle_chat_impl(
             workflow_skill_dir = workflow_skills_dir()
     set_trace_context({
         'trace_id': conversation_id or conversation.session_id,
-        'session_id': conversation.session_id, 'sampled': True,
-        'module_trace': {
-            'by_class': {
-                'FunctionCall': False, 'ToolManager': False,
-                'Pipeline': False, 'Diverter': False,
-                'AgentInvocation': False,
-            },
-            'by_name': {
-                '_build_history': False, '_post_action': False,
-                '_safe_call': False, '_indexed_call': False,
-            },
-        },
+        'session_id': conversation_id or conversation.session_id, 'sampled': True,
+        'module_trace': AGENT_MODULE_TRACE,
         'request_tags': ['handle_chat'],
         'trace_metadata': {
             'conversation_id': conversation_id,
+            'run_id': run_id,
             'task_profile_source': task_profile.source if task_profile else 'disabled',
             'task_profile': task_profile.to_trace_dict() if task_profile else {},
             'router_latency_ms': task_profile.router_latency_ms if task_profile else 0,
@@ -1968,6 +2012,8 @@ async def _handle_chat_impl(
         'chat_workflow_runtime', 'Workflow State', workflow_contribution.runtime_context,
         'workflow.runtime', priority=10, authoritative=True, content_kind='state',
     )
+    if mcp_issues:
+        LOG.warning(f'[MCP] unavailable services: {json.dumps(mcp_issues, ensure_ascii=False)}')
     prompt_builder.runtime(
         'chat_mcp_availability', 'Unavailable MCP Services',
         json.dumps(mcp_issues, ensure_ascii=False) if mcp_issues else '',
@@ -1998,12 +2044,8 @@ async def _handle_chat_impl(
         'database.intent', priority=30, content_kind='instruction',
     )
     prompt_builder.runtime(
-        'chat_document_selection_contract', 'Document Selection Contract', (
-            'The Selected text in Quoted Message is the exact target of the current user '
-            'instruction. Use the Surrounding passage only to disambiguate meaning. For direct '
-            'translation, transformation, explanation, definition, summary, or rewrite, answer '
-            'from this supplied content without searching the knowledge base.'
-        ),
+        'chat_document_selection_contract', 'Document Selection Contract',
+        _document_selection_contract(document_context),
         'backend.document_selection', priority=39, authoritative=True,
         content_kind='instruction', skip_if=lambda: not has_document_selection,
     )
@@ -2013,10 +2055,16 @@ async def _handle_chat_impl(
             f'Its knowledge_base_id is {document_context.get("dataset_id")!r} and its '
             f'document_id is {document_context.get("document_id")!r}. Treat references such as '
             '“this document”, “this paper”, or “it” as that exact document. For questions that '
-            'need document content, call KBToolkit.read_document with these exact IDs. This read '
+            'need document content, call KBToolkit_read_document with these exact IDs before answering. This read '
             'also starts on-demand parsing and works without semantic chunks or a vector index. '
             'Do not ask the user to paste or identify the document merely because kb_search '
-            'returns no results.'
+            'returns no results. If the read result is spilled to a workspace file, inspect that '
+            'file using search_file_resource and read_file_resource. Search in the paper’s source '
+            'language: for example, a Chinese question about 表1 may refer to Table 1 in an English '
+            'paper. Also search the requested method/model name and metric, then read the matching '
+            'passage or table window. One absent literal phrase in the question’s language does '
+            'not establish that the paper lacks the requested content. Support the answer with '
+            'the actual source passage or table values, and page/table labels when available.'
         ),
         'backend.document_preview', priority=38, authoritative=True,
         content_kind='instruction', skip_if=lambda: not is_document_preview_chat,
@@ -2208,13 +2256,16 @@ async def _handle_chat_impl(
                 (['KBToolkit'] if (agentic_config.get('filters') or {}).get('kb_id') else [])
                 + (['MailToolkit'] if confirm_id or mailbox_confirm else [])
             ),
-            required_tool_names=tuple(getattr(tool, '__name__', '') for tool in (
-                [] if sidechat_readonly else [
-                    *workflow_tools, *attachment_tools,
+            required_tool_names=() if sidechat_readonly else (
+                *workflow_contribution.required_tool_names,
+                *(getattr(tool, '__name__', '') for tool in [
+                    *attachment_tools,
                     *([directory_runtime.list_document_directories, directory_runtime.open_document_directory,
                        directory_runtime.folders.inspect_document_folder,
                        directory_runtime.folders.submit_document_directory_organization]
-                      if directory_runtime else [])])),
+                      if directory_runtime else []),
+                ]),
+            ),
             tool_state_scope='sidechat' if sidechat_readonly else 'chat',
             context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
             configuration_runtime=configuration_runtime,
@@ -2337,53 +2388,41 @@ async def _handle_chat_impl(
         outcome = RunOutcome.FAILED
 
         try:
-            for issue in mcp_issues:
-                if translator.language == 'zh':
-                    reason = ('需要重新授权，请在 MCP 设置中连接账号' if issue['status'] == 'needs_authorization'
-                              else '暂时无法连接，请稍后重试')
-                    if issue['status'] == 'naming_error':
-                        reason = '工具命名失败：' + issue['detail']
-                    notice = f"MCP 服务 {issue['server']} {reason}。本轮继续使用其他可用工具。"
-                else:
-                    reason = ('needs authorization; reconnect in MCP settings'
-                              if issue['status'] == 'needs_authorization' else 'is unavailable; try again later')
-                    if issue['status'] == 'naming_error':
-                        reason = 'has invalid tool names: ' + issue['detail']
-                    notice = f"MCP server {issue['server']} {reason}. Continuing with other available tools."
-                yield log_and_emit_frame(
-                    {'think': notice + '\n', 'text': None, 'sources': []},
-                    round(time.time() - start_time, 3), query, conversation.session_id, tag='MCP_STATUS',
-                )
             async with rag_sem:
                 current_plan = plan
                 current_query = query
+                pending_ask = workflow_contribution.pending_ask
                 while True:
-                    # runtime_llm builds ReactAgent's FunctionCall first, then
-                    # returns the configured model copy carrying this agent's
-                    # prompt, formatter, tools, and complete chat history.
-                    install_stream_interrupt_hook(executor.runtime_llm(react_agent))
                     invocation_result: Any = None
                     response_text: list[str] = []
                     steering_interrupted = False
-                    initial_agent_stream = lazyllm.enable_trace(
-                        AgentInvocation(executor, react_agent, current_plan),
-                        # Continuations share the stable outer run correlation ID.
-                        trace_id=translator.run.run_id,
-                        session_id=conversation.session_id,
-                        request_tags=['handle_chat', 'agent'],
-                        debug_capture_payload=False,
-                    )
-                    guarded_agent_stream = guard_workflow_agent_stream(
-                        initial_agent_stream,
-                        all_tools=all_tools,
-                        query=current_query,
-                        runtime_prompt=prompt_bundle.system_prompt,
-                        agent=agent,
-                        runtime_config=_cfg,
-                        fs=FS,
-                        stop_tools=stop_tools,
-                        history=current_plan.history,
-                    )
+                    if pending_ask:
+                        async def pending_question_stream(card=pending_ask):
+                            yield 'event', {'tag': 'ask_pending', **card}
+                            yield 'final', None
+                        guarded_agent_stream = pending_question_stream()
+                    else:
+                        # runtime_llm builds ReactAgent's FunctionCall first, then
+                        # returns the configured model copy carrying this agent's
+                        # prompt, formatter, tools, and complete chat history.
+                        install_stream_interrupt_hook(executor.runtime_llm(react_agent))
+                        initial_agent_stream = AgentInvocation(executor, react_agent, current_plan).stream(
+                            # Turns and their workflow tasks share the conversation trace.
+                            trace_id=conversation_id or conversation.session_id,
+                            session_id=conversation_id or conversation.session_id,
+                            request_tags=['handle_chat', 'agent'],
+                        )
+                        guarded_agent_stream = guard_workflow_agent_stream(
+                            initial_agent_stream,
+                            all_tools=all_tools,
+                            query=current_query,
+                            runtime_prompt=prompt_bundle.system_prompt,
+                            agent=agent,
+                            runtime_config=_cfg,
+                            fs=FS,
+                            stop_tools=stop_tools,
+                            history=current_plan.history,
+                        )
                     try:
                         async with aclosing(guarded_agent_stream):
                             async for kind, payload in guarded_agent_stream:
@@ -2444,14 +2483,22 @@ async def _handle_chat_impl(
                     assistant_context = (
                         ''.join(response_text) if steering_interrupted else str(invocation_result or '')
                     )
-                    current_plan = continue_in_workspace(
-                        current_plan, late_guidance, assistant_context,
-                    )
+                    if pending_ask:
+                        # A host-generated card has not invoked the agent, so
+                        # the original input is not in model history yet.
+                        current_plan = continue_before_invocation(current_plan, late_guidance)
+                        pending_ask = None
+                    else:
+                        current_plan = continue_in_workspace(
+                            current_plan, late_guidance, assistant_context,
+                        )
                     # intentwrite validates evidence against user input, not the
                     # model's reply. Accepted guidance is additional user input
                     # for this run and must be available to the same tool.
                     append_intentwrite_guidance(intentwriter, [item.content for item in late_guidance])
                     current_query = current_plan.prompt.current_input
+                    if knowledge_management is not None:
+                        knowledge_management.steering_segment += len(late_guidance)
                     for frame in translator.begin_steering_segment():
                         yield log_and_emit_frame(
                             frame, round(time.time() - start_time, 3), query,

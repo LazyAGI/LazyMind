@@ -1,7 +1,9 @@
+import type { WorkflowDisplayState } from '../../store/workflowStatus';
 import type { TabDef, WorkflowSession, WorkflowSessionStep } from '../../store/workflowPanel';
 
 /** Execution facts take precedence over branch labels, including completed retries. */
-export function workflowNodeStatus(node?: { execution?: string; branch?: string; validity?: string }): string {
+export function workflowNodeStatus(node?: { execution?: string; branch?: string; validity?: string }, display?: Pick<WorkflowDisplayState, 'status' | 'input_step_id'>, stepId?: string): string {
+  if (display?.status === 'waiting_input' && stepId && display.input_step_id === stepId) return 'waiting_input';
   if (!node || node.validity === 'stale') return 'pending';
   if (node.execution && node.execution !== 'none') return node.execution;
   return node.execution === 'none' && ['pruned', 'bypassed'].includes(node.branch ?? '') ? 'skipped' : 'pending';
@@ -28,6 +30,9 @@ export function workflowTabStatus(
   tab: Pick<TabDef, 'id' | 'step_id' | 'status_step_ids'>,
   session: Pick<WorkflowSession, 'steps' | 'current_step_id' | 'projection'>,
 ): string {
+  const inputStepId = session.projection?.display?.input_step_id;
+  if (session.projection?.display?.status === 'waiting_input' && inputStepId
+    && (tab.status_step_ids ?? [tab.step_id ?? tab.id]).includes(inputStepId)) return 'waiting_input';
   const attempt = resolveWorkflowTabStep(tab, session.steps, session.current_step_id);
   if (attempt) return attempt.status;
   const ids = tab.status_step_ids ?? [tab.step_id ?? tab.id];

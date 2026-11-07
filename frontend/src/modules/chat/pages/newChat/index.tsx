@@ -22,7 +22,6 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
-import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
 import {
@@ -47,6 +46,7 @@ import {
   parseShowcaseEntryType,
   showcaseEntryType as resolveShowcaseEntryType,
   SHOWCASE_ENTRY_QUERY_PARAM,
+  showcasePagePath,
   type ShowcaseEntryType,
 } from "@/modules/showcase/classification";
 import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
@@ -91,7 +91,6 @@ const NewChatPage = () => {
   const showcaseTaskId = searchParams.get("showcase_task");
   const officialKnowledgeId = searchParams.get("officialKnowledge");
   const modelProviderGuard = useChatModelProviderGuard();
-  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const getGreeting = () => {
     const currentHour = new Date().getHours();
     return currentHour < 12 ? t("chat.greetingMorning") : t("chat.greetingAfternoon");
@@ -310,16 +309,6 @@ const NewChatPage = () => {
   // Warn when knowledge base is selected but embedding is not ready.
   const hasKnowledgeBase = Boolean(chatConfig.knowledgeBaseId?.length);
   const showEmbeddingWarning = hasKnowledgeBase && modelProviderGuard.embeddingReady === false;
-  // Warn when VLM is not configured (informational only, does not block any feature).
-  const showVlmWarning = modelProviderGuard.vlmReady === false;
-  const vlmWarningText = isAdmin ? t("chat.vlmNotReadyWarningAdmin") : t("chat.vlmNotReadyWarning");
-  const mergeVlmWarningIntoDisabledNotice = showVlmWarning && modelProviderGuard.status === "missing";
-  const chatDisabledDescriptionContent = mergeVlmWarningIntoDisabledNotice ? (
-    <>
-      <span>{chatDisabledDescription}</span>
-      <span>{vlmWarningText}</span>
-    </>
-  ) : chatDisabledDescription;
   const hideSharedNoticeForRuntime =
     modelProviderGuard.isRuntimeInitializing &&
     !modelProviderGuard.needsModelProviderConfig &&
@@ -341,7 +330,7 @@ const NewChatPage = () => {
     || showcaseCapabilityFailed
     || hideSharedNoticeForRuntime
     ? undefined
-    : chatDisabledDescriptionContent;
+    : chatDisabledDescription;
   const inputDisabledAction = showcaseCapabilityFailed ? (
     <Button size="small" onClick={retryShowcaseCapability}>
       {t("showcase.retryCapabilityPrepare")}
@@ -394,7 +383,12 @@ const NewChatPage = () => {
       setSearchParams({}, { replace: true });
       return;
     }
-    const resolvedEntryType = resolveShowcaseEntryType(showcaseCase.type);
+    const resolvedEntryType = resolveShowcaseEntryType(showcaseCase.type, requestedShowcaseEntry ?? (entryModeRef.current ? "work" : "chat"));
+    const pagePath = showcasePagePath(showcaseCase.page_action, resolvedEntryType);
+    if (pagePath) {
+      navigate(pagePath, { replace: true });
+      return;
+    }
     applyShowcaseEntryMode(resolvedEntryType);
     if (requestedShowcaseEntry !== resolvedEntryType
       || (showcaseTaskId && !selectedShowcaseTask)) {
@@ -410,6 +404,7 @@ const NewChatPage = () => {
     setInputValue(selectedShowcasePrompt);
   }, [
     applyShowcaseEntryMode,
+    navigate,
     officialKnowledgeId,
     requestedShowcaseEntry,
     selectedShowcaseTask,
@@ -446,6 +441,11 @@ const NewChatPage = () => {
   }, [locale, officialKnowledgeId, showcaseCaseId, t]);
 
   const selectShowcaseTask = (item: ShowcaseCase, taskId?: string | null) => {
+    const pagePath = showcasePagePath(item.page_action, activeShowcaseEntryType);
+    if (pagePath) {
+      navigate(pagePath);
+      return;
+    }
     const task = taskId && taskId !== FULL_CAPABILITY_TASK_VALUE
       ? item.tasks.find((candidate) => candidate.id === taskId)
       : undefined;
@@ -659,13 +659,14 @@ const NewChatPage = () => {
         value: item.id,
         label: item.title,
         description: `${item.category}${t("showcase.capabilitySeparator")}${item.output_label}`,
+        pageAction: item.page_action,
       })),
       ariaLabel: t("showcase.selectedSkill"),
       placeholder: t("showcase.chooseSkill"),
       heading: t("showcase.quickSelectTitle"),
       subheading: t("showcase.quickSelectDescription"),
       moreLabel: t("showcase.exploreMoreCapabilities"),
-      onMore: () => navigate("/agent/chat/cases"),
+      onMore: () => navigate(`/agent/chat/cases?showcase_entry=${activeShowcaseEntryType}`),
       disabled: showcaseCasesLoading || availableShowcaseCases.length === 0,
       onChange: (skillId) => {
         const item = availableShowcaseCases.find((candidate) => candidate.id === skillId);
@@ -712,6 +713,7 @@ const NewChatPage = () => {
             initchatConfig={chatConfig}
             canChat={modelProviderGuard.canChat}
             embeddingReady={modelProviderGuard.embeddingReady}
+            vlmReady={modelProviderGuard.vlmReady}
             multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}
             rerankReady={modelProviderGuard.rerankReady}
             chatDisabledReason={inputDisabledReason}
@@ -795,21 +797,6 @@ const NewChatPage = () => {
                       </span>
                     </div>
                   ) : null}
-                  {showVlmWarning && !mergeVlmWarningIntoDisabledNotice ? (
-                    <div className="model-provider-warning-banner vlm-warning-banner" role="alert">
-                      <span className="model-provider-warning-text">
-                        {vlmWarningText}
-                      </span>
-                      <Button
-                        type="primary"
-                        size="small"
-                        className="model-provider-warning-action"
-                        onClick={() => navigate("/settings?section=model_defaults")}
-                      >
-                        {t("knowledge.goToConfig")}
-                      </Button>
-                    </div>
-                  ) : null}
                   {modelProviderGuard.isRuntimeInitializing ? (
                     <div
                       className="model-provider-warning-banner"
@@ -874,6 +861,7 @@ const NewChatPage = () => {
                     setChatConfig={setChatConfig}
                     disabled={isWelcomeInputDisabled}
                     embeddingReady={modelProviderGuard.embeddingReady}
+                    vlmReady={modelProviderGuard.vlmReady}
                     multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}
                     rerankReady={modelProviderGuard.rerankReady}
                     disabledReason={inputDisabledReason}

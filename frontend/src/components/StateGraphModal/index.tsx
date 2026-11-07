@@ -40,7 +40,7 @@ const coreApiBase = `${BASE_URL}/api/core`;
 const EMPTY_FALLBACK_STEPS: { step_id: string; status: string }[] = [];
 
 type ProjectionEnvelope = {
-  display?: { status: string };
+  display?: import('@/modules/chat/store/workflowStatus').WorkflowDisplayState;
   projection: {
     past?: string[]; current?: string[]; ready?: string[]; blocked?: string[];
     stale?: string[]; pruned?: string[]; bypassed?: string[];
@@ -68,7 +68,7 @@ function projectionToGraph(raw: ProjectionEnvelope, t: TFunction): StateGraphDat
     { id: '__start__', label: '__start__', step_index: 0, status: 'succeeded', is_current: false },
     ...order.filter((id) => id !== '__start__' && id !== '__end__').map((id, index) => {
       const state = projection.nodes?.[id];
-      let status = workflowNodeStatus(state);
+      let status = workflowNodeStatus(state, raw.display, id);
       const hasEffectiveAttempt = state && state.execution !== 'none' && state.validity !== 'stale';
       const statusNotes: string[] = [];
       if (status === 'pending' && !hasEffectiveAttempt) {
@@ -93,7 +93,7 @@ function projectionToGraph(raw: ProjectionEnvelope, t: TFunction): StateGraphDat
         step_index: index + 1,
         status,
         status_notes: statusNotes,
-        is_current: (projection.current ?? []).includes(id),
+        is_current: status === 'waiting_input' || (projection.current ?? []).includes(id),
         step_attempts: attempts.map(attempt => ({ ...attempt, status: workflowTaskDisplayStatus(attempt.status,
           attempt.validity !== 'stale' && attempt.attempt === latestAttempt && status === 'paused' ? 'paused' : undefined) })),
       };

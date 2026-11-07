@@ -27,7 +27,7 @@ export const requestAnkiPermission=async()=>{await axiosInstance.post(`${root}/p
 export const syncAnki=async()=>{await axiosInstance.post(`${root}/providers/anki:sync`,{})};
 export const listAnkiDecks=async()=>(await axiosInstance.get<Envelope<{items:AnkiDeck[]}>>(`${root}/providers/anki/decks`)).data.data.items||[];
 export const createAnkiDeck=async(name:string)=>{await axiosInstance.post(`${root}/providers/anki/decks`,{name})};
-export const addVocabularyWord=async(v:AddVocabularyWord)=>(await axiosInstance.post<Envelope<{queued:boolean;word:VocabularyWord}>>(`${root}/words`,v)).data.data;
+export const addVocabularyWord=async(v:AddVocabularyWord)=>(await axiosInstance.post<Envelope<{queued:boolean;cloud_queued?:boolean;word:VocabularyWord}>>(`${root}/words`,v)).data.data;
 export const listVocabulary=async(provider:string,params:Record<string,string>={})=>(await axiosInstance.get<Envelope<{items:VocabularyListItem[]}>>(`${root}/words`,{params:{provider,...params}})).data.data.items||[];
 export const getVocabularyWord=async(id:string)=>(await axiosInstance.get<Envelope<VocabularyListItem>>(`${root}/words/${id}`)).data.data;
 export const updateVocabularyWord=async(id:string,v:Record<string,unknown>)=>(await axiosInstance.patch<Envelope<VocabularyWord>>(`${root}/words/${id}`,v)).data.data;

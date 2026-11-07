@@ -14,6 +14,9 @@ def test_workflow_model_routing_uses_request_llm_and_isolates_users(monkeypatch)
     from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
 
     class Supplier:
+        def used_by(self, _):
+            return self
+
         def forward(self, prompt, **options):
             return json.dumps({
                 'model': options['model'], 'url': options['url'],
@@ -194,6 +197,82 @@ def test_temperature_is_only_sent_when_explicitly_configured(monkeypatch, config
         assert 'temperature' not in calls[0]
     else:
         assert calls[0]['temperature'] == configured['temperature']
+
+
+def test_json_validation_retry_shares_deadline_and_forwards_output_limit(monkeypatch):
+    import time
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(options)
+        return '{"checks":[]}' if len(calls) == 1 else '{"checks":[1]}'
+
+    def validate(output):
+        if output['checks'] != [1]:
+            raise ValueError('missing check')
+        return output
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    started = time.monotonic()
+    output, _, _ = llm_task._run_task(LLMTaskRequest(
+        response_format={'type': 'json_object'},
+        options={'wall_timeout_seconds': 2, 'output_limit': 16384, 'stream_output': False},
+    ), validate_output=validate)
+    assert output == {'checks': [1]} and len(calls) == 2
+    assert calls[0]['call_control'] is calls[1]['call_control']
+    assert started < calls[0]['call_control'].deadline <= time.monotonic() + 2
+    assert all(call['output_limit'] == 16384 and call['stream_output'] is False for call in calls)
+
+
+def test_deadline_is_a_technical_failure_without_json_retry(monkeypatch):
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(options)
+        raise llm_task._ModelCallDeadlineExceeded('deadline')
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    with pytest.raises(llm_task.LLMTaskCallError, match='task_timeout'):
+        llm_task._run_task(LLMTaskRequest(
+            response_format={'type': 'json_object'}, options={'wall_timeout_seconds': 1}))
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('code', ['usage_limit_exceeded', 'rate_limited', 'authentication_failed'])
+def test_provider_failure_is_preserved_without_json_repair_retry(monkeypatch, code):
+    from lazyllm.module.llms.onlinemodule.base.model_outcome import (
+        ModelCallError, ModelCallTerminal, ModelFailure, ModelFailureCode, ModelFailureOrigin,
+    )
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(prompt)
+        raise ModelCallError('provider failed', ModelCallTerminal(
+            model_call_id='failed-call', attempt_count=1, kind='failed', has_semantic_output=False,
+            failure=ModelFailure(origin=ModelFailureOrigin.HTTP, code=ModelFailureCode(code)),
+        ))
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    result = run_llm_task(LLMTaskRequest(response_format={'type': 'json_object'}))
+    assert result.status == 'failed' and result.error_code == code
+    assert result.usage['model_calls'] == 1 and len(calls) == 1
+
+
+def test_output_limit_is_reported_without_json_repair_retry(monkeypatch):
+    from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError, ModelCallTerminal, ModelFinish
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(prompt)
+        raise ModelCallError('incomplete answer', ModelCallTerminal(
+            model_call_id='limited-call', attempt_count=1, kind='finish',
+            has_semantic_output=True, finish=ModelFinish.LENGTH,
+        ))
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **kwargs: model)
+    result = run_llm_task(LLMTaskRequest(response_format={'type': 'json_object'}))
+    assert result.status == 'failed' and result.error_code == 'model_output_limit'
+    assert result.usage['model_calls'] == 1 and len(calls) == 1
 
 
 def test_workflow_task_loads_builtin_skill_and_returns_json(monkeypatch):

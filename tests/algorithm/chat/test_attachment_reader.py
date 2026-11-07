@@ -417,3 +417,39 @@ def test_unavailable_image_is_explained_instead_of_silently_skipped(monkeypatch,
     assert 'Image was NOT read' in prompt
     assert '请配置视觉模型后重试' in prompt
     assert 'Do not infer its contents' in prompt
+
+
+@pytest.mark.parametrize('cached', [False, True])
+def test_pptx_analyzer_reads_whole_template_in_one_call(monkeypatch, tmp_path, cached):
+    from pptx import Presentation
+    from lazymind.chat.engine.subagent import tools
+    from lazymind.chat.engine.tools.file_resources import pptx_template_fill as fill
+    source = tmp_path / 'all-pages.pptx'
+    prs = Presentation()
+    for title in ['封面', '主管：待填写', '实习时间：待填写']:
+        slide = prs.slides.add_slide(prs.slide_layouts[0])
+        slide.shapes.title.text = title
+    prs.save(source)
+    original = source.read_bytes()
+    monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
+    inspect = fill.inspect_template
+    monkeypatch.setattr(fill, 'inspect_template', lambda path, page, **kw: inspect(
+        path, page, cache_workspace=tmp_path / 'cache' if cached else None, **kw))
+    loads = []
+    load = fill._load
+    monkeypatch.setattr(fill, '_load', lambda path: (loads.append(path), load(path))[1])
+    result = tools.pptx_analyzer(source.name, all_pages=True)
+    assert result['all_pages'] is True
+    assert result['slide_count'] == 3 and result['next_page'] is None
+    assert [p['page'] for p in result['pages']] == [1, 2, 3]
+    assert all(p['shapes'] and p['slots'] for p in result['pages'])
+    assert any(s['text'] == '实习时间：待填写' for s in result['pages'][2]['slots'])
+    assert result['quality_contract'] and 'quality_contract' not in result['pages'][0]
+    assert len(loads) == 1
+    if cached:
+        again = tools.pptx_analyzer(source.name, all_pages=True)
+        assert again['cache_hit'] is True and again['pages'] == result['pages']
+        assert len(loads) == 1
+    with pytest.raises(tools.ToolExecutionError, match='all_pages requires page=1'):
+        tools.pptx_analyzer(source.name, page=2, all_pages=True)
+    assert source.read_bytes() == original

@@ -143,11 +143,12 @@ class RemoteExecutorClient:
         response.raise_for_status()
         return response
 
-    async def cancel(self, client: httpx.AsyncClient, attempt: str, lease: str) -> httpx.Response:
+    async def cancel(self, client: httpx.AsyncClient, attempt: str, lease: str,
+                     *, input_required: Dict[str, Any] | None = None) -> httpx.Response:
         payload = {
             'lease_token': lease,
-            'error_code': 'WORKFLOW_STOPPED',
-            'result': {},
+            'error_code': 'WORKFLOW_INPUT_REQUIRED' if input_required else 'WORKFLOW_STOPPED',
+            'result': {'input_required': input_required} if input_required else {},
         }
         response = await client.post(f'{self.base_url}/internal/workflow-attempts/{attempt}:cancel',
                                      headers=self.headers(lease), json=payload)

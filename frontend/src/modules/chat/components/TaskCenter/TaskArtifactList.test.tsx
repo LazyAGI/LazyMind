@@ -30,30 +30,19 @@ function PreviewHarness({ children, shared }: { children: ReactNode; shared: boo
 }
 
 describe("ordinary stage artifacts", () => {
-  it.each([false, true])("uses the producing Work task for actual citation import in a result preview (shared: %s)", async shared => {
+  it.each([false, true])("uses the producing Work task for source import in a result preview (shared: %s)", async shared => {
     const source = { source_type: "external" as const, citation_id: "1.1", title: "ReAct", url: "https://arxiv.org/abs/2210.03629" };
     vi.mocked(sourceAPI.inspectSources).mockResolvedValue([{ source_id: "1.1", title: "ReAct", url: source.url, eligible: true, paper_key: "arxiv:2210.03629" }]);
     vi.mocked(sourceAPI.listSourceImports).mockResolvedValue([]);
     render(<MemoryRouter><PreviewHarness shared={shared}><TaskArtifactList artifacts={[file({ inline_content: "ReAct [1](#source-1.1)" })]} sourceContexts={{ "task-1": { context: { task_id: "task-1" }, sources: [source] } }} /></PreviewHarness></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
     expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
-    const citation = await waitFor(() => { const element = document.querySelector("a.md-source-chip"); expect(element).toBeTruthy(); return element!; });
-    expect(citation).toBeTruthy();
-    fireEvent.focus(citation);
+    fireEvent.click(await screen.findByRole("button", { name: /^chat\.references/ }));
     await waitFor(() => expect(sourceAPI.inspectSources).toHaveBeenCalledWith({ task_id: "task-1" }));
+    const references = screen.getByRole("dialog", { name: "chat.references" });
+    fireEvent.click(within(references).getByRole("button", { name: /ReAct/ }));
     expect(await screen.findByRole("button", { name: /加入(?:知识库|资料库)/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
-  });
-  it.each([false, true])("passes durable operation receipts into the Work preview (shared: %s)", async shared => {
-    render(<MemoryRouter><PreviewHarness shared={shared}><TaskArtifactList artifacts={[file()]} sourceContexts={{ "task-1": {
-      context: { task_id: "task-1" }, sources: [], operations: [{ call_id: "operation", action: "knowledge.create", status: "success", items: [
-        { name: "Created library", resource_ref: { kind: "knowledge_base", knowledge_base_id: "created" }, resource_status: "created" },
-      ] }],
-    } }} /></PreviewHarness></MemoryRouter>);
-    fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Agent 执行结果" }));
-    expect(await screen.findByRole("link", { name: "Created library" })).toHaveAttribute("href", "/lib/knowledge/detail/created");
-    expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
   });
   it("passes the producing workflow step with the exact artifact revision", () => {
     const preview = { target: null, open: vi.fn(), close: vi.fn(), onVersions: undefined };
@@ -83,6 +72,28 @@ describe("ordinary stage artifacts", () => {
     fireEvent.click(screen.getByRole("button", { name: "taskCenter.download Report.md" }));
     await waitFor(() => expect(downloadArtifactFile).toHaveBeenCalledWith("/api/core/artifacts/report/download", "Report.md"));
     expect(preview.open).toHaveBeenCalledTimes(2);
+  });
+
+  it('downloads the current inline edit with its Chinese Markdown filename', async () => {
+    const create = vi.fn(() => 'blob:edited-document');
+    const revoke = vi.fn();
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = create;
+      static revokeObjectURL = revoke;
+    });
+    vi.useFakeTimers();
+    try {
+      render(<TaskArtifactList artifacts={[file({ name: '文献综述.md', inline_content: '# 已编辑 E2E-NAME-1015' })]} />);
+      fireEvent.click(screen.getByRole('button', { name: 'taskCenter.download 文献综述.md' }));
+      expect(downloadArtifactFile).toHaveBeenCalledWith('blob:edited-document', '文献综述.md');
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'text/markdown', size: new Blob(['# 已编辑 E2E-NAME-1015']).size,
+      }));
+      await vi.runAllTimersAsync();
+      expect(revoke).toHaveBeenCalledWith('blob:edited-document');
+    } finally {
+      vi.useRealTimers(); vi.unstubAllGlobals();
+    }
   });
 
   it("hides an empty collection and deduplicates repeated IDs", () => {

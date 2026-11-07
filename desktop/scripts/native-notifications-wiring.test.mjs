@@ -28,7 +28,7 @@ test("existing login and logout IPC synchronize the bridge after checking the se
   assert.ok(logout.indexOf("isTrustedNotificationSender(") < logout.indexOf(".clearSession()"));
   // Preserve the existing assistant credential synchronization; no frontend rewrite.
   assert.match(login, /"internal", "session", "set"/);
-  assert.match(logout, /"internal", "session", "clear"/);
+  assert.match(logout, /"internal", "session", "clear-if-current"/);
 });
 
 test("explicit app shutdown stops the bridge while ordinary background mode keeps it resident", () => {

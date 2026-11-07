@@ -93,12 +93,22 @@ describe("ArchiveConversationModal", () => {
     mocks.archiveConversation.mockResolvedValue(undefined);
   });
 
+  it("loads and creates task folders in the task namespace", async () => {
+    renderModal({ itemKind: "task" });
+    await waitFor(() => expect(mocks.listArchiveFolders).toHaveBeenCalledWith(expect.any(AbortSignal), "task"));
+    const dialog = screen.getByRole("dialog", { name: "归档到文件夹" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "新建文件夹" }));
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "知识库" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库", "task"));
+  });
+
   it("renders the shared folder picker and archives to a custom folder", async () => {
     const { onArchived } = renderModal();
     const dialog = await screen.findByRole("dialog", { name: "归档到文件夹" });
 
     expect(within(dialog).getByText("北京今天天气如何")).toBeInTheDocument();
-    expect(await within(dialog).findByRole("radio", { name: /未分类.*默认.*2 个会话/ })).toBeChecked();
+    expect(await within(dialog).findByRole("radio", { name: /未分类.*默认.*1 个会话/ })).toBeChecked();
     const product = within(dialog).getByRole("radio", { name: /产品设计.*3 个会话/ });
     fireEvent.click(product);
     fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
@@ -119,7 +129,7 @@ describe("ArchiveConversationModal", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
-    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库"));
+    await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库", "dialog"));
     expect(mocks.archiveConversation).not.toHaveBeenCalled();
     expect(await within(dialog).findByRole("radio", { name: /知识库.*0 个会话/ })).toBeChecked();
 
@@ -145,7 +155,7 @@ describe("ArchiveConversationModal", () => {
   it("sends null when the conversation stays unfiled", async () => {
     renderModal();
     const dialog = await screen.findByRole("dialog", { name: "归档到文件夹" });
-    await within(dialog).findByRole("radio", { name: /未分类.*默认.*2 个会话/ });
+    await within(dialog).findByRole("radio", { name: /未分类.*默认.*1 个会话/ });
     fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
 
     await waitFor(() => expect(mocks.archiveConversation).toHaveBeenCalledWith("conversation-1", null));
@@ -154,7 +164,7 @@ describe("ArchiveConversationModal", () => {
   it("does not enable archive without a conversation id", async () => {
     renderModal({ conversationId: undefined });
     const dialog = await screen.findByRole("dialog", { name: "归档到文件夹" });
-    await within(dialog).findByRole("radio", { name: /未分类.*默认.*2 个会话/ });
+    await within(dialog).findByRole("radio", { name: /未分类.*默认.*1 个会话/ });
 
     expect(within(dialog).getByRole("button", { name: "归档" })).toBeDisabled();
     expect(mocks.archiveConversation).not.toHaveBeenCalled();

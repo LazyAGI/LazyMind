@@ -146,11 +146,14 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                                  'call': {'en': 'Searching {brand} metadata for '
                                                 '{value}.',
                                           'zh': '正在检索 {brand} 元数据 {value}。'},
-                                 'success': {'en': '{brand} metadata search found '
-                                                   '{result.total_count} matching '
-                                                   'records.',
-                                             'zh': '已找到 {result.total_count} 条 '
-                                                   '{brand} 元数据结果。'},
+                                 'success': {'en': 'Retrieved {count} {brand} metadata records.',
+                                             'zh': '已获取 {count} 条 {brand} 元数据。'},
+                                 'with_total': {'en': 'Retrieved {count} {brand} metadata records. '
+                                                      'The API reports {result.total_count} total matches.',
+                                                'zh': '已获取 {count} 条 {brand} 元数据，'
+                                                      '接口报告总命中 {result.total_count} 条。'},
+                                 'empty': {'en': 'No {brand} metadata records returned for this request.',
+                                           'zh': '本次未返回 {brand} 元数据。'},
                                  'failure': {'en': '{brand} metadata results for '
                                                    '{value} could not be '
                                                    'retrieved.',

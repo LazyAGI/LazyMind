@@ -103,3 +103,17 @@ it('translates pending explanations and input lists in English', async () => {
     'The previous result is no longer applicable and needs to be regenerated.',
   ]);
 });
+
+it('shows the input checkpoint as waiting while keeping its successful attempt history', async () => {
+  vi.mocked(axiosInstance.get).mockResolvedValue({ data: {
+    display: { status: 'waiting_input', input_step_id: 'collect' },
+    projection: { nodes: { collect: { execution: 'succeeded', validity: 'effective', branch: 'active' } } },
+    graph: { static_order: ['collect'] },
+    attempt_history: { collect: [{ attempt: 1, status: 'succeeded', validity: 'effective' }] },
+  } });
+  render(<StateGraphModal open onClose={vi.fn()} sessionId='session' workflowId='workflow' />);
+  const graph: StateGraphData = JSON.parse((await screen.findByTestId('graph')).textContent!);
+  expect(graph.nodes.find(node => node.id === 'collect')).toMatchObject({
+    status: 'waiting_input', is_current: true, step_attempts: [{ attempt: 1, status: 'succeeded' }],
+  });
+});

@@ -24,7 +24,7 @@ func TestBeginLeavesStepAdmissionToCore(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input["step_id"] != "step" || input["expected_state_version"] != float64(7) {
+			if input["step_id"] != "step" || input["expected_state_version"] != float64(7) || input["retry_origin"] != "user" {
 				t.Errorf("wrong request: %v", input)
 			}
 			w.WriteHeader(http.StatusConflict)
@@ -41,7 +41,7 @@ func TestBeginLeavesStepAdmissionToCore(t *testing.T) {
 	}
 	api, _ := coreapi.New(store)
 	client := &Client{api: api}
-	_, err := client.Begin(context.Background(), BeginInput{SessionID: "run", StepID: "step", CommandID: "begin"})
+	_, err := client.Begin(context.Background(), BeginInput{SessionID: "run", StepID: "step", CommandID: "begin", RetryOrigin: "user"})
 	var rejected *coreapi.Error
 	if !submitted || !errors.As(err, &rejected) || rejected.StatusCode != http.StatusConflict || rejected.Code != "WORKFLOW_ADMISSION_DENIED" || rejected.Message != "Core rejected step" {
 		t.Fatalf("MCP must forward to Core and preserve rejection: submitted=%v err=%v", submitted, err)

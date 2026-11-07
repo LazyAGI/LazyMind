@@ -43,7 +43,7 @@ def runtime(monkeypatch, responses, events=None, allowed_tools=None):
     return host, requests
 
 
-@pytest.mark.parametrize('name', MANAGEMENT_TOOLS[:3])
+@pytest.mark.parametrize('name', (*MANAGEMENT_TOOLS[:3], 'knowledge.paper.sources'))
 def test_readonly_queries_skip_operation_state(monkeypatch, name):
     host, requests = runtime(monkeypatch, {})
     host._tools['identity'] = name
@@ -62,7 +62,6 @@ def test_server_factory_intersects_positive_whitelist_and_keeps_empty(monkeypatc
     assert set(host.server_config({})['allowed_tools']) == set(MANAGEMENT_TOOLS)
     assert 'knowledge.document.get' not in MANAGEMENT_TOOLS
     assert 'knowledge.options' not in MANAGEMENT_TOOLS
-    assert len(MANAGEMENT_TOOLS) == 10
     assert host.server_config({'allowed_tools': ['knowledge.options']})['allowed_tools'] == []
 
 
@@ -87,7 +86,7 @@ def test_direct_call_without_prepared_dispatch_cannot_get_metadata(monkeypatch):
     assert requests == []
 
 
-def test_pending_confirmation_emits_bound_card_then_claims_before_dispatch(monkeypatch):
+def test_pending_confirmation_claims_before_dispatch(monkeypatch):
     from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
     call = prepared()
     summary = {'operation_key': 'op', 'arguments_digest': digest(call.validated_arguments),
@@ -103,9 +102,7 @@ def test_pending_confirmation_emits_bound_card_then_claims_before_dispatch(monke
     assert requests[0][1]['execution'] == EXECUTION
     assert requests[0][1]['call_id'] == 'call-1'
     assert requests[-1][1]['snapshot'] == 'version-1'
-    assert events[0][0] == 'ask_pending'
-    assert events[0][1]['knowledge_management'] == {
-        'confirmation_id': 'confirm', 'arguments_digest': summary['arguments_digest'], 'snapshot': 'version-1'}
+    assert events == []
     with pytest.raises(ToolExecutionError):
         asyncio.run(host.request_metadata('knowledge.resource.delete', call.validated_arguments))
 
@@ -401,22 +398,46 @@ def test_private_http_error_survives_copy_and_pickle(body):
         assert str(restored) == str(error)
 
 
-def test_pending_confirmation_keeps_complete_preview_for_live_and_persisted_card(monkeypatch):
+def test_pending_confirmation_is_superseded_before_guidance_is_applied(monkeypatch):
+    from threading import Event
+    from concurrent.futures import ThreadPoolExecutor
+    from lazymind.chat.engine.agent_runtime.steering import SteeringInterruptedError, steering_registry
     from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
+
     call = prepared()
-    preview = {'title': 'Delete folder', 'description': 'Papers / Archive',
-               'resources': [{'kind': 'folder', 'knowledge_base_id': 'kb', 'directory_id': 'folder'}],
-               'document_count': 12, 'folder_count': 2, 'total_bytes': 8192,
-               'impact': ['Remove source documents and index entries'], 'counts': {'references': 3}}
     pending = {'operation_key': 'op', 'arguments_digest': digest(call.validated_arguments),
-               'snapshot': 'v', 'requires_confirmation': True, 'confirmation_id': 'c', 'status': 'pending',
-               'preview': preview}
-    events = []
-    host, _ = runtime(monkeypatch, {'prepare': pending, 'status': {**pending, 'status': 'rejected'}}, events)
-    with pytest.raises(ToolExecutionError):
-        with host.execution_context(call):
-            pytest.fail('rejected')
-    assert events[0][1]['knowledge_management_preview'] == preview
+               'snapshot': 'v', 'requires_confirmation': True, 'confirmation_id': 'c', 'status': 'pending'}
+    waiting = Event()
+    superseded = Event()
+
+    def status(_):
+        waiting.set()
+        assert superseded.wait(3)
+        return {**pending, 'status': 'superseded'}
+
+    def supersede(payload):
+        assert payload == {'execution': EXECUTION, 'confirmation_id': 'c'}
+        superseded.set()
+        return {'status': 'superseded'}
+
+    def dispatch():
+        with pytest.raises(SteeringInterruptedError):
+            with host.execution_context(call):
+                pytest.fail('superseded tool must not dispatch')
+
+    host, requests = runtime(monkeypatch, {'prepare': pending, 'status': status, 'supersede': supersede})
+    steering_registry.register(EXECUTION['run_id'], EXECUTION['conversation_id'], 'session')
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            result = pool.submit(dispatch)
+            assert waiting.wait(3)
+            assert steering_registry.accept(EXECUTION['run_id'], EXECUTION['conversation_id'],
+                                            'guide', 'Keep this resource') == (True, '')
+            result.result(timeout=3)
+        assert [path.split(':')[-1] for path, _, _ in requests] == ['prepare', 'status', 'supersede']
+        assert steering_registry.drain_or_close(EXECUTION['run_id'])[0].content == 'Keep this resource'
+    finally:
+        steering_registry.unregister(EXECUTION['run_id'])
 
 
 @pytest.mark.parametrize('fail_at', ['prepare', 'credential'])
@@ -496,3 +517,33 @@ def test_confirmation_polling_uses_one_second_interval(monkeypatch):
         pass
     assert sleeps == [1, 1]
     assert [path.split(':')[-1] for path, _, _ in requests] == ['prepare', 'status', 'status', 'status', 'claim']
+
+
+def test_paper_import_dispatch_binds_only_selected_current_search_evidence(monkeypatch):
+    from lazymind.chat.engine.agent_runtime.workspace_authorization import digest
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
+    from lazymind.chat.service.utils.citations import CITATION_REFS_KEY
+
+    wire = 'knowledge.paper.import'
+    args = {'knowledge_base_id': 'kb', 'source_ids': ['2.1']}
+    record = {'source_id': '2.1', 'title': 'Toolformer', 'doi': '10.48550/arxiv.2302.04761'}
+    context = ToolResolutionContext(citation_state={CITATION_REFS_KEY: {
+        '1.1': {'source_type': 'external', 'title': 'Not selected'},
+        '2.1': {**record, 'source_type': 'external', 'content': 'Unnecessary abstract'},
+    }})
+    host, requests = runtime(monkeypatch, {
+        'prepare': lambda payload: {'operation_key': 'op', 'arguments_digest': digest(payload['arguments']),
+                                    'snapshot': 'snapshot', 'requires_confirmation': False, 'status': 'allowed'},
+        'claim': {'status': 'allowed', 'metadata': {'operation_key': 'op'}},
+    })
+    host._tools['identity'] = wire
+    with tool_resolution_scope(context):
+        with host.execution_context(prepared(wire, args)):
+            assert asyncio.run(host.request_metadata(wire, {**args, 'current_sources': [record]}))
+        with pytest.raises(ToolExecutionError, match='Unknown current search source'):
+            with host.execution_context(prepared(wire, {**args, 'source_ids': ['fake']})):
+                pytest.fail('unregistered citation dispatched')
+        with pytest.raises(ToolExecutionError, match='reserved for the chat runtime'):
+            with host.execution_context(prepared(wire, {**args, 'current_sources': [record]})):
+                pytest.fail('model-supplied source dispatched')
+    assert [request[1]['arguments'] for request in requests] == [{**args, 'current_sources': [record]}] * 2

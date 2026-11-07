@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -12,6 +11,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/runstate"
 )
 
 // PauseNativeWorkflowHTTP pauses only the selected native session, never its
@@ -43,7 +43,8 @@ func PauseNativeWorkflowHTTP(w http.ResponseWriter, r *http.Request) {
 // worker calls it after its executor (including tools and cleanup) has exited.
 // The old lease token identifies that exact execution even after it was fenced.
 func ConfirmNativeStop(ctx context.Context, db *gorm.DB, attemptID, token string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var stoppedSessionID string
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var step orm.WorkflowSessionStep
 		if err := tx.Where("id = ?", attemptID).First(&step).Error; err != nil {
 			return err
@@ -72,14 +73,20 @@ func ConfirmNativeStop(ctx context.Context, db *gorm.DB, attemptID, token string
 		if pending > 0 || session.Status != "pausing" {
 			return nil
 		}
-		session.Status = SessionStatusWaiting
-		session.StateVersion++
-		session.UpdatedAt = time.Now().UTC()
-		if err := tx.Model(&session).Updates(map[string]any{"status": session.Status, "state_version": session.StateVersion, "updated_at": session.UpdatedAt}).Error; err != nil {
+		if err := runstate.Write(tx, &session, SessionStatusWaiting, map[string]any{"state_version": session.StateVersion + 1}); err != nil {
 			return err
 		}
-		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"waiting"}`))
+		session.StateVersion++
+		if err := appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"waiting"}`)); err != nil {
+			return err
+		}
+		stoppedSessionID = session.ID
+		return nil
 	})
+	if err == nil && stoppedSessionID != "" {
+		NotifyWorkflowRuntimeUpdated(ctx, db, stoppedSessionID, attemptID, "paused")
+	}
+	return err
 }
 
 func ConfirmNativeStopHTTP(w http.ResponseWriter, r *http.Request) {

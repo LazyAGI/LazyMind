@@ -34,7 +34,7 @@ func ValidProviderRequestConfig(raw string) bool {
 	if !errors.Is(decoder.Decode(&trailing), io.EOF) {
 		return false
 	}
-	if config.DefaultProtocol != "openai" && config.DefaultProtocol != "anthropic" {
+	if config.DefaultProtocol != "openai" && config.DefaultProtocol != "openai-responses" && config.DefaultProtocol != "anthropic" {
 		return false
 	}
 	if config.DefaultsVersion < 0 || config.DefaultsVersion > 1 {
@@ -48,7 +48,7 @@ func ValidProviderRequestConfig(raw string) bool {
 		defaults bool
 	}{{config.Endpoints, false}, {config.Defaults, true}} {
 		for key, value := range pair.values {
-			if key != "openai" && key != "anthropic" && !(pair.defaults && (key == "gemini" || key == "openai-responses")) {
+			if key != "openai" && key != "openai-responses" && key != "anthropic" && !(pair.defaults && key == "gemini") {
 				return false
 			}
 			if value == "" {

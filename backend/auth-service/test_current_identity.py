@@ -13,11 +13,14 @@ class CurrentIdentityTest(unittest.TestCase):
                 identity.current_identity('owner')
 
     def test_permissions_come_from_live_user_role_and_groups(self):
-        user = SimpleNamespace(id='owner', disabled=False, role=SimpleNamespace(name='user'), tenant_id='tenant')
+        user = SimpleNamespace(
+            id='owner', username='alice', disabled=False, role=SimpleNamespace(name='user'), tenant_id='tenant',
+        )
         with patch.object(identity, 'SessionLocal'), patch.object(
             identity.UserRepository, 'get_by_id', return_value=user
         ) as load, patch.object(identity, 'get_effective_permission_codes', return_value={'document.read', 'qa.read'}):
             result = identity.current_identity('owner')
         self.assertEqual(result['permissions'], ['document.read', 'qa.read'])
         self.assertEqual(result['tenant_id'], 'tenant')
+        self.assertEqual(result['username'], 'alice')
         self.assertTrue(load.call_args.kwargs['load_group_permission_groups'])

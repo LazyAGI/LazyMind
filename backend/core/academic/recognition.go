@@ -256,7 +256,7 @@ func UpdateDocumentIdentity(w http.ResponseWriter, r *http.Request) {
 				if e := tx.Where("id=?", entry.AcademicWorkID).Take(&currentWork).Error; e != nil {
 					return e
 				}
-				m, e := paperlibrary.EffectiveMetadata(entry, currentWork)
+				m, e := paperlibrary.EffectiveMetadata(tx, entry, currentWork)
 				if e != nil {
 					return e
 				}

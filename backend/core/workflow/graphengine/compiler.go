@@ -5,8 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+
+	"lazymind/core/common/askuser"
 
 	"gopkg.in/yaml.v3"
 )
@@ -214,6 +217,28 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			))
 		}
 	}
+	actionNames := map[string]bool{}
+	actionNamePattern := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	for i, action := range graph.Runtime.CompletedActions {
+		valid := actionNamePattern.MatchString(action.Name) && !actionNames[action.Name] &&
+			action.Name != "advance_step" && action.Name != "advance_step_and_hand_off" && action.Name != "get_ready_steps" &&
+			knownMaterials[action.RequiresSlot] && strings.TrimSpace(action.Description) != "" &&
+			strings.TrimSpace(action.AgentType) != "" && strings.TrimSpace(action.Title) != "" &&
+			strings.TrimSpace(action.Routing) != "" && len(action.Tools) > 0 && len(action.OutputSlots) > 0
+		for _, values := range [][]string{action.Tools, action.OutputSlots, action.SessionParams} {
+			for _, value := range values {
+				valid = valid && strings.TrimSpace(value) != ""
+			}
+		}
+		if !valid {
+			result.Diagnostics = append(result.Diagnostics, materialDiag(
+				"E_RUNTIME_COMPLETED_ACTION_INVALID", "error",
+				fmt.Sprintf("workflow.yaml.runtime.completed_actions[%d]", i), action.RequiresSlot,
+				"completed actions require a unique safe name, declared artifact slot and complete editor contract",
+			))
+		}
+		actionNames[action.Name] = true
+	}
 	if stepID := strings.TrimSpace(graph.Runtime.CompletedEditStep); stepID != "" {
 		graph.Runtime.CompletedEditStep = stepID
 		if _, ok := workflowSteps[stepID]; !ok {
@@ -230,6 +255,24 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, nodeDiag(
 				"E_RUNTIME_CONTINUE_STEP_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.runtime.completed_continue_steps[%d]", i),
 				stepID, "runtime completed continue step is not declared: "+stepID,
+			))
+		}
+	}
+	if checkpoint := graph.Runtime.InputCheckpoint; checkpoint != nil {
+		node, exists := graph.Nodes[checkpoint.AfterStep]
+		produced := false
+		for _, slot := range node.Outputs {
+			produced = produced || slot == checkpoint.Slot
+		}
+		valid := exists && produced && graph.MaterialTypes[checkpoint.Slot] == "json" && len(checkpoint.BeforeSteps) > 0
+		for _, step := range checkpoint.BeforeSteps {
+			_, exists := graph.Nodes[step]
+			valid = valid && exists && step != checkpoint.AfterStep
+		}
+		if !valid {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_INPUT_CHECKPOINT_INVALID", "error", "workflow.yaml.runtime.input_checkpoint",
+				"input checkpoint requires a JSON output from after_step and distinct declared before_steps",
 			))
 		}
 	}
@@ -289,6 +332,26 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			}
 		}
 	}
+	if followup := graph.Runtime.AttachmentClarification; followup != nil {
+		followup.QuestionIDPrefix = strings.TrimSpace(followup.QuestionIDPrefix)
+		followup.Instructions = strings.TrimSpace(followup.Instructions)
+		if followup.QuestionIDPrefix == "" || followup.Instructions == "" || len(followup.FilenameSuffixes) == 0 || len(followup.InspectionTools) == 0 || len(graph.Runtime.ClarificationFields) == 0 {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_ATTACHMENT_CLARIFICATION_INVALID", "error", "workflow.yaml.runtime.attachment_clarification",
+				"attachment clarification requires a question id prefix, instructions, filename suffixes, inspection tools and basic clarification fields",
+			))
+		}
+		for i, suffix := range followup.FilenameSuffixes {
+			suffix = strings.ToLower(strings.TrimSpace(suffix))
+			if len(suffix) < 2 || !strings.HasPrefix(suffix, ".") || strings.ContainsAny(suffix, "/\\") {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_ATTACHMENT_CLARIFICATION_SUFFIX_INVALID", "error", "workflow.yaml.runtime.attachment_clarification.filename_suffixes",
+					"attachment clarification suffixes must be file extensions beginning with a dot",
+				))
+			}
+			followup.FilenameSuffixes[i] = suffix
+		}
+	}
 	clarificationIDs := map[string]bool{}
 	for i := range graph.Runtime.ClarificationFields {
 		field := &graph.Runtime.ClarificationFields[i]
@@ -298,6 +361,37 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		field.Question = strings.TrimSpace(field.Question)
 		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
 		field.ChoicePolicy = strings.ToLower(strings.TrimSpace(field.ChoicePolicy))
+		if field.Resolution != "" && field.Resolution != "explicit" {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_RESOLUTION_INVALID", "error",
+				path+".resolution", "resolution must be empty or explicit"))
+		}
+		if field.Required && strings.TrimSpace(field.Reason) == "" {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_REASON_REQUIRED", "error",
+				path+".reason", "required clarification fields must explain why confirmation is needed"))
+		}
+		if err := askuser.ValidateRule(field.Validation); err != nil {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_VALIDATION_INVALID", "error",
+				path+".validation", err.Error()))
+		}
+		if field.BooleanLabels != nil && (field.Type != "boolean" || strings.TrimSpace(field.BooleanLabels.Yes) == "" ||
+			strings.TrimSpace(field.BooleanLabels.No) == "" ||
+			strings.TrimSpace(field.BooleanLabels.Yes) == strings.TrimSpace(field.BooleanLabels.No)) {
+			result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_LABELS_INVALID", "error",
+				path+".boolean_labels", "boolean labels must be two different non-empty labels"))
+		}
+		if condition := field.AppliesWhen; condition != nil {
+			if !clarificationIDs[condition.Field] || (condition.Equals == nil) == (condition.NotEquals == nil) {
+				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_CONDITION_INVALID", "error",
+					path+".applies_when", "condition must reference an earlier field and declare exactly one comparison"))
+			}
+		}
+		for _, pattern := range field.Patterns {
+			compiled, err := regexp.Compile(pattern)
+			if err != nil || compiled.NumSubexp() != 1 {
+				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_PATTERN_INVALID", "error",
+					path+".patterns", "extraction patterns must be valid regexes with exactly one capture group"))
+			}
+		}
 		if field.Type == "" {
 			field.Type = "text"
 		}
@@ -341,6 +435,12 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			}
 		}
 		field.Choices = choices
+		if field.Default != nil {
+			if err := validateClarificationValue(*field, canonicalClarification(*field, field.Default)); err != nil {
+				result.Diagnostics = append(result.Diagnostics, diag("E_RUNTIME_CLARIFICATION_DEFAULT_INVALID", "error",
+					path+".default", err.Error()))
+			}
+		}
 		if (field.Type == "single" || field.Type == "multiple") && len(field.Choices) == 0 {
 			result.Diagnostics = append(result.Diagnostics, diag(
 				"E_RUNTIME_CLARIFICATION_CHOICES_REQUIRED", "error", path+".choices",
@@ -555,14 +655,35 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			graph.SkipExpansions = append(graph.SkipExpansions, CompiledBypass{NodeID: id, From: reverse[id], To: adj[id]})
 		}
 	}
+	for step, bindings := range graph.Runtime.RecoveryInputs {
+		node, exists := graph.Nodes[step]
+		if !exists {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RECOVERY_STEP_UNKNOWN", "error", "workflow.yaml.runtime.recovery_inputs", step, "recovery target must be a declared step"))
+		}
+		inputs := map[string]bool{}
+		for _, material := range expressionMaterials(node.Input) {
+			inputs[material] = true
+		}
+		for _, ref := range node.OptionalInputs {
+			inputs[ref.Material] = true
+		}
+		for target, source := range bindings {
+			if !inputs[target] || graph.MaterialProducers[target].Kind != "external" ||
+				graph.MaterialProducers[source].Kind != "step" || (graph.MaterialTypes[target] != "json" && graph.MaterialTypes[target] != "text" && graph.MaterialTypes[target] != "file") ||
+				graph.MaterialTypes[source] != graph.MaterialTypes[target] || graph.MaterialCardinalities[target] != "single" ||
+				graph.MaterialCardinalities[source] != "single" {
+				result.Diagnostics = append(result.Diagnostics, materialNodeDiag("E_RECOVERY_INPUT_INVALID", "error", "workflow.yaml.runtime.recovery_inputs", step, target, "recovery inputs must bind a consumed external slot to a single step output of the same JSON/text/file type"))
+			}
+		}
+	}
 	for step, limit := range graph.Runtime.ExecutionLimits {
 		_, exists := graph.Nodes[step]
-		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 1 && limit.Timeout <= 3600
+		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 0 && limit.Timeout <= 3600
 		for name, count := range limit.ToolCalls {
 			valid = valid && strings.TrimSpace(name) != "" && count >= 1 && count <= 100
 		}
 		if !valid {
-			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step and bounded positive values"))
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step, bounded positive work limits and an optional timeout"))
 		}
 	}
 	if graph.Runtime.TriggerInputs != nil {
@@ -1091,11 +1212,13 @@ func validateUI(
 		))
 	}
 	for i, tab := range tabs {
-		if materialID := scalar(tab["hide_when_material"]); materialID != "" && !known[materialID] {
-			out = append(out, materialDiag(
-				"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].hide_when_material", i),
-				materialID, "tab visibility references an unknown material",
-			))
+		for _, key := range []string{"hide_when_material", "presentation_hide_when_material"} {
+			if materialID := scalar(tab[key]); materialID != "" && !known[materialID] {
+				out = append(out, materialDiag(
+					"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].%s", i, key),
+					materialID, "tab visibility references an unknown material",
+				))
+			}
 		}
 		refs := parseMaterialRefs(tab["slots"])
 		tabMaterials := map[string]bool{}

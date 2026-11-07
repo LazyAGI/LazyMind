@@ -55,10 +55,34 @@ func manualOpenAPISpec() map[string]any {
 	for path, operations := range conversationGroupPaths() {
 		paths[path] = operations
 	}
+	for name, schema := range vocabularyCloudSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range vocabularyCloudPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range learningOpenAPISchemas() {
 		schemas[name] = schema
 	}
 	for path, operations := range learningOpenAPIPaths() {
+		paths[path] = operations
+	}
+	for name, schema := range pdfIROpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range pdfIROpenAPIPaths() {
+		paths[path] = operations
+	}
+	for name, schema := range formulaExplanationOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range formulaExplanationOpenAPIPaths() {
+		paths[path] = operations
+	}
+	for name, schema := range paperReadingOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range paperReadingOpenAPIPaths() {
 		paths[path] = operations
 	}
 	conversation := schemas["ConversationItem"].(map[string]any)["properties"].(map[string]any)
@@ -615,7 +639,7 @@ func manualSchemas() map[string]any {
 		"ConversationSetHistoryRequest":    objReq([]string{"set_history_id", "deleted_history_id"}, prop("set_history_id", strSchema()), prop("deleted_history_id", strSchema())),
 		"ConversationBatchDeleteRequest":   objReq([]string{"conversation_ids"}, prop("conversation_ids", array(strSchema()))),
 		"ConversationBatchDeleteResponse":  obj(prop("deleted_count", intSchema()), prop("deleted_ids", array(strSchema()))),
-		"ConversationArchiveFolderRequest": objReq([]string{"name"}, prop("name", strSchema())),
+		"ConversationArchiveFolderRequest": objReq([]string{"name"}, prop("name", strSchema()), prop("kind", enumStringSchema("dialog", "task"))),
 		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema())), prop("only_if_active", boolSchema())),
 		"ConversationArchiveResponse": objReq([]string{"conversation_id", "newly_archived", "archived_at", "archived_ids"},
 			prop("conversation_id", strSchema()), prop("newly_archived", boolSchema()), prop("archived_at", dateTimeSchema()), prop("archived_ids", array(strSchema()))),
@@ -1118,7 +1142,7 @@ func manualPaths() map[string]any {
 			response(200, "Conversation navigation metadata ordered by seq ascending", refSchema("ConversationTrailListResponse")),
 		)},
 		"/conversation-archive-folders": map[string]any{
-			"get": op("List conversation archive folders", nil, nil, response(200, "Archive folders", refSchema("ConversationArchiveFolderListResponse"))),
+			"get": op("List conversation archive folders", queryParams(param("query", "kind", false, enumStringSchema("dialog", "task"))), nil, response(200, "Archive folders", refSchema("ConversationArchiveFolderListResponse"))),
 			"post": map[string]any{
 				"summary": "Create a conversation archive folder", "requestBody": jsonBody(refSchema("ConversationArchiveFolderRequest"), true),
 				"responses": map[string]any{"201": response(201, "Archive folder created", refSchema("ConversationArchiveFolderCreateResponse"))},

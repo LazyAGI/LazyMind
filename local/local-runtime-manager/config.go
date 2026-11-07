@@ -838,6 +838,15 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	cacheRoot := cleanOptionalPath(pathLayout.CacheRoot)
 	dataRoot := filepath.Join(runtimeRoot, "data")
 	depsRoot := filepath.Join(buildRoot, "deps")
+	pythonDepsRoot := filepath.Join(depsRoot, "python")
+	pythonRuntimeDir := filepath.Join(buildRoot, "runtimes", "python")
+	pythonStateDir := filepath.Join(runtimeRoot, "state", "python")
+	if profile == "local" {
+		platform := runtime.GOOS + "-" + runtime.GOARCH
+		pythonDepsRoot = filepath.Join(pythonDepsRoot, platform)
+		pythonRuntimeDir = filepath.Join(pythonRuntimeDir, platform)
+		pythonStateDir = filepath.Join(pythonStateDir, platform)
+	}
 	sqliteRoot := envText(localSQLiteDirEnvVar, filepath.Join(dataRoot, "stores", "sqlite"))
 	uploadRoot := filepath.Join(runtimeRoot, "data", "core", "uploads")
 	frontendNodeModules := filepath.Join(depsRoot, "node", "frontend")
@@ -866,15 +875,15 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		LocalProxyLog:            filepath.Join(logsRoot, localProxyLogFileName),
 		AuthServiceLog:           filepath.Join(logsRoot, authServiceLogFileName),
 		AuthServicePIDFile:       filepath.Join(runtimeRoot, "run", "auth-service.pid"),
-		AuthServiceVenvDir:       filepath.Join(depsRoot, "python", "auth-service"),
+		AuthServiceVenvDir:       filepath.Join(pythonDepsRoot, "auth-service"),
 		ChannelGatewayLog:        filepath.Join(logsRoot, channelGatewayLogFileName),
 		ChannelGatewayPIDFile:    filepath.Join(runtimeRoot, "run", channelGatewayProcessName+".pid"),
-		ChannelGatewayVenvDir:    filepath.Join(depsRoot, "python", channelGatewayProcessName),
+		ChannelGatewayVenvDir:    filepath.Join(pythonDepsRoot, channelGatewayProcessName),
 		ChannelGatewayDBPath:     filepath.Join(sqliteRoot, channelGatewayProcessName, "channel-gateway.db"),
 		ChannelGatewayKeyPath:    filepath.Join(dataRoot, channelGatewayProcessName, "master.key"),
-		PythonRuntimeDir:         filepath.Join(buildRoot, "runtimes", "python"),
+		PythonRuntimeDir:         pythonRuntimeDir,
 		NodeRuntimeDir:           filepath.Join(buildRoot, "runtimes", "node"),
-		PythonStateDir:           filepath.Join(runtimeRoot, "state", "python"),
+		PythonStateDir:           pythonStateDir,
 		UVCacheDir:               filepath.Join(defaultHostCacheDir(hostHomeDir()), "uv"),
 		PipCacheDir:              filepath.Join(defaultHostCacheDir(hostHomeDir()), "pip"),
 		XDGCacheDir:              filepath.Join(cacheRoot, "xdg"),
@@ -927,8 +936,8 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		GeneratedConfig:          filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
 		ServiceEndpointsJSON:     filepath.Join(runtimeRoot, "generated", serviceEndpointsJSONName),
 		ServiceEndpointsEnv:      filepath.Join(runtimeRoot, "generated", serviceEndpointsEnvName),
-		AlgorithmVenv:            filepath.Join(depsRoot, "python", "algorithm"),
-		AlgorithmPython:          venvExecutable(filepath.Join(depsRoot, "python", "algorithm"), "python"),
+		AlgorithmVenv:            filepath.Join(pythonDepsRoot, "algorithm"),
+		AlgorithmPython:          venvExecutable(filepath.Join(pythonDepsRoot, "algorithm"), "python"),
 		AlgorithmHome:            filepath.Join(dataRoot, "homes", "lazymind"),
 		FrontendNodeModules:      frontendNodeModules,
 		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
@@ -1315,14 +1324,12 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.MilvusLiteDBPath,
 	}
 	if !p.buildRootIsBundledResources() {
+		// Python directories are created by uv only after prepare validates them.
+		// Status and shutdown must remain usable with broken Python dependencies.
 		dirs = append(dirs,
 			p.BinDir,
 			p.DepsDir,
-			p.PythonRuntimeDir,
 			p.NodeRuntimeDir,
-			p.AuthServiceVenvDir,
-			p.ChannelGatewayVenvDir,
-			filepath.Dir(p.AlgorithmVenv),
 			p.FrontendNodeModules,
 		)
 	}

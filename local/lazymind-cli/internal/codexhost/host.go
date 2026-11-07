@@ -131,6 +131,16 @@ func DesktopReady(ctx context.Context, port int) (bool, error) {
 var prepareDesktopLaunch = launchDesktop
 
 func PrepareDesktop(ctx context.Context, home string) error {
+	return prepareDesktop(ctx, home, waitForConnection)
+}
+
+// Installation confirms a launched desktop, independently of optional native
+// session-control compatibility. Workflow execution still uses CheckConnection.
+func PrepareDesktopForInstallation(ctx context.Context, home string) error {
+	return prepareDesktop(ctx, home, waitForDesktopStartup)
+}
+
+func prepareDesktop(ctx context.Context, home string, wait func(context.Context, string) error) error {
 	if !integrationstate.Allowed(home, "codex") {
 		return connectionIssue("CODEX_INTEGRATION_DISABLED", "Codex connection is disabled", false)
 	}
@@ -159,14 +169,33 @@ func PrepareDesktop(ctx context.Context, home string) error {
 		}
 	}
 	reportRecovery(ctx, "connecting")
-	return waitForConnection(ctx, home)
+	return wait(ctx, home)
+}
+
+func waitForDesktopStartup(ctx context.Context, home string) error {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	for {
+		health := StartupHealth(ctx, home)
+		if health == "" {
+			return nil
+		}
+		if health == "startup_unavailable" {
+			return connectionIssue("CODEX_CONFIGURATION_UNAVAILABLE", "Codex installation or connection configuration is unavailable.", false)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("Codex startup did not become ready (%s): %w", health, ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // Startup can briefly invalidate a successful probe while windows are restored.
 // Retry only read-only checks; never restart or duplicate a recovery handoff.
 func waitForConnection(ctx context.Context, home string) error {
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
 	for {
 		connectionErr := CheckConnection(ctx, home)
 		if connectionErr == nil {
@@ -179,7 +208,7 @@ func waitForConnection(ctx context.Context, home string) error {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("Codex connection did not become ready: %w: %v", ctx.Err(), connectionErr)
-		case <-ticker.C:
+		case <-time.After(time.Second):
 		}
 	}
 }

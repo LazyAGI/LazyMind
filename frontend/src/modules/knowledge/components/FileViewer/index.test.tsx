@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import FileViewer from "./index";
@@ -11,8 +11,9 @@ vi.mock("@/components/auth", () => ({
 }));
 vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ normalizeProxyableUrl: (url: string) => url }));
+const pdfProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 vi.mock("@/components/ui", () => ({
-  RenderPdf: () => null,
+  RenderPdf: (props: Record<string,unknown>) => { pdfProps.current=props; return null; },
   exportPdfAsImagePdf: vi.fn(),
   isLearningActionCompatible: () => false,
 }));
@@ -128,4 +129,35 @@ describe("document preview selection questions", () => {
     fireEvent.mouseUp(paragraph);
     expect(screen.queryByRole("button", { name: "knowledge.askPdfSelection" })).not.toBeInTheDocument();
   });
+});
+
+
+it("forwards source outline callbacks and repeated navigation requests to the PDF reader",async()=>{
+ const onChange=vi.fn();const props={file:"https://example.test/source.pdf",fileName:"source.pdf",onPdfIRDocumentChange:onChange};
+ const {rerender}=render(<FileViewer {...props} pdfNavigateTo={{id:"source-block",requestId:1}}/>);
+ await waitFor(()=>expect(pdfProps.current).toMatchObject({onPdfIRDocumentChange:onChange,pdfNavigateTo:{id:"source-block",requestId:1}}));
+ rerender(<FileViewer {...props} pdfNavigateTo={{id:"source-block",requestId:2}}/>);
+ await waitFor(()=>expect(pdfProps.current.pdfNavigateTo).toEqual({id:"source-block",requestId:2}));
+});
+
+it('keeps the library action during PDF fetching and after fetch failure',async()=>{
+ let reject!:(reason:Error)=>void;
+ vi.stubGlobal('fetch',vi.fn(()=>new Promise((_resolve,fail)=>{reject=fail})));
+ const back=vi.fn();
+ render(<FileViewer file="https://example.test/missing.pdf" fileName="missing.pdf" pdfHeaderStart={<button onClick={back}>Library</button>}/>);
+ expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
+ reject(new Error('offline'));
+ await screen.findByText('2000509');
+ expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
+ fireEvent.click(screen.getByRole('button',{name:'Library'}));expect(back).toHaveBeenCalledOnce();
+});
+it('keeps the library action when PDF data is absent',()=>{
+ render(<FileViewer fileName="empty.pdf" pdfHeaderStart={<button>Library</button>}/>);
+ expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
+});
+it('renders a document-menu slot during PDF loading without passing a function as a child',()=>{
+ const menu=vi.fn(()=> <button>Document menu</button>);
+ render(<FileViewer fileName="empty.pdf" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={menu}/>);
+ expect(screen.getByRole('button',{name:'Document menu'})).toBeInTheDocument();
+ expect(menu).toHaveBeenCalledWith(null);
 });

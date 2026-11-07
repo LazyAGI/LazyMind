@@ -93,3 +93,12 @@ it('updates status and route hints when switching between Chinese and English', 
   }
   expect(screen.queryByText('已暂停')).not.toBeInTheDocument();
 });
+
+it('distinguishes waiting for input from approval in the graph and legend', () => {
+  render(<StateGraphView data={{ nodes: [node('approval', 'waiting'), node('input', 'waiting_input')], edges: [], initial: 'approval' }} />);
+  const legend = within(screen.getByLabelText('工作流图例'));
+  expect(legend.getByText('等待输入')).toBeInTheDocument();
+  const approval = legend.getByText('等待审批').querySelector('span')!;
+  const input = legend.getByText('等待输入').querySelector('span')!;
+  expect(input.style.background).not.toBe(approval.style.background);
+});

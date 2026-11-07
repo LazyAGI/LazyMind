@@ -20,15 +20,14 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/controlstore"
-	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
 type transitionCommandRequest struct {
-	HostedTaskID         string `json:"-"`
-	controlAuthorized    bool
+	ClarificationValues  map[string]any      `json:"clarification_values,omitempty"`
+	HostedTaskID         string              `json:"-"`
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
@@ -149,6 +148,29 @@ func selectLLMChoiceRoutes(ctx context.Context, tx *gorm.DB, sessionID string, g
 	var decisions []orm.WorkflowRouteDecision
 	if err := tx.WithContext(ctx).Where("session_id = ? AND validity = ?", sessionID, "effective").Find(&decisions).Error; err != nil {
 		return err
+	}
+	// Preparation-created sessions have no start attempt to freeze their entry choice.
+	hasStart := false
+	for _, decision := range decisions {
+		hasStart = hasStart || decision.FromStepID == "__start__"
+	}
+	if !hasStart && graph.StartRoute == "choice" {
+		snapshot, err := loadRuntimeSnapshot(ctx, tx, sessionID, graph)
+		if err != nil {
+			return err
+		}
+		var session orm.WorkflowSession
+		if err := tx.Select("state_version").First(&session, "id = ?", sessionID).Error; err != nil {
+			return err
+		}
+		start := graphengine.DecideRoute(graph, "__start__", snapshot.Materials)
+		if err := persistRouteDecision(ctx, tx, sessionID, "__start__", "", start.Activated, start.Pruned,
+			start.Bypassed, start.Witnesses, session.StateVersion); err != nil {
+			return err
+		}
+		if err := tx.Where("session_id = ? AND validity = ?", sessionID, "effective").Find(&decisions).Error; err != nil {
+			return err
+		}
 	}
 	for _, decision := range decisions {
 		route := graph.StartRoute
@@ -305,6 +327,32 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
 		writeTransitionResponse(w, response, http.StatusUnprocessableEntity)
 		return
+	}
+	clarification, clarificationErr := graphengine.ResolveClarifications(graph.Runtime.ClarificationFields, req.ClarificationValues)
+	if clarificationErr != nil || len(clarification.Missing) > 0 {
+		message := "Workflow requires clarification before starting"
+		if clarificationErr != nil {
+			message = clarificationErr.Error()
+		}
+		response := transitionCommandResponse{Accepted: false, CommandID: req.CommandID,
+			Error: &transitionError{Code: "WORKFLOW_CLARIFICATION_REQUIRED", Message: message,
+				Details: map[string]any{"missing_clarification_fields": clarification.Missing, "questions": clarification.Questions}}}
+		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
+		writeTransitionResponse(w, response, http.StatusConflict)
+		return
+	}
+	if len(clarification.Values) > 0 {
+		if req.ExternalMaterials == nil {
+			req.ExternalMaterials = map[string]any{}
+		}
+		for id, value := range clarification.Values {
+			if graph.MaterialProducers[id].Kind == "external" &&
+				(graph.MaterialTypes[id] == "text" || graph.MaterialTypes[id] == "json") {
+				req.ExternalMaterials[id] = value
+			}
+		}
+		canonical, _ := json.Marshal(clarification.Values)
+		req.UserInput += "\n\nConfirmed workflow parameters:\n" + string(canonical)
 	}
 	externalMaterials := externalMaterialFacts(graph, req.ExternalMaterials)
 	projection := projectWithApprovalPreferences(store.DB().WithContext(r.Context()), req.UserID, req.WorkflowID, graph, graphengine.RuntimeSnapshot{Materials: externalMaterials})
@@ -580,27 +628,14 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 		// The execution mode is a session creation decision. Never allow a later
 		// chat request or transition command to change it.
 		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
-		// Resolve the requested target before admission: a failed run may retry
-		// within its budget, but may not start another step or rewind autonomously.
+		// Resolve the target before shared admission so every controller uses
+		// the same execution, retry and rewind rules and per-step retry budget.
 		if req.Operation == "advance" {
 			resolved, resolveErr := resolveAdvanceOperation(ctx, tx, session.ID, targets[0].TargetStepID)
 			if resolveErr != nil {
 				return resolveErr
 			}
 			req.Operation = resolved
-		}
-		if controlstore.Controlled(session) && !req.controlAuthorized {
-			guard := controlstore.GuardBegin
-			if req.Operation == "retry" {
-				guard = controlstore.GuardRetryBegin
-			}
-			if err := guard(tx, session); err != nil {
-				var rejected *controlstore.Error
-				if errors.As(err, &rejected) {
-					return rejectTransition(req.CommandID, &session, graphengine.Projection{}, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
-				}
-				return err
-			}
 		}
 
 		graphErr := error(nil)
@@ -628,20 +663,12 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
-		if session.Status == "pausing" {
-			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_PAUSING", "wait for execution to stop before continuing", false, nil)
-		}
-		if !controlstore.Controlled(session) {
-			display, err := displaystate.Read(tx, session)
-			if err != nil {
-				return err
+		if err := guardRunAdvance(tx, session); err != nil {
+			var rejected *controlstore.Error
+			if errors.As(err, &rejected) {
+				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
 			}
-			if display.Status == "waiting" {
-				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing", false, nil)
-			}
-			if display.Status == "paused" {
-				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_PAUSED", "resume the workflow explicitly before starting another attempt", false, nil)
-			}
+			return err
 		}
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
@@ -651,9 +678,14 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				req.CommandID, session.ID, req.TargetStepID, req.Operation, req.GraphHash, graph.GraphHash, session.StateVersion)
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
 		}
-		if req.Operation == "retry" || req.Operation == "rewind" ||
-			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {
-			applyRecoveryIntent(session.IntentContext, &targets[0])
+		if req.Operation == "retry" && req.RetryOrigin == "automatic" {
+			before := targets[0].UserInput
+			if err := inheritAutomaticRetryIntent(ctx, tx, session.ID, &targets[0]); err != nil {
+				return err
+			}
+			if targets[0].UserInput != before {
+				currentInputs[targets[0].TaskID] = targets[0].UserInput
+			}
 		}
 		var postStepCheckpoint *executor.PostStepCheckpoint
 		if req.Operation == "retry" || req.Operation == "rewind" {
@@ -661,6 +693,22 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
 				targets[0].TargetStepID, "effective").Order("attempt DESC").First(&latest).Error; err != nil {
 				return err
+			}
+			// A bare retry repeats this failed attempt's confirmed request, not
+			// the workflow launch intent or a successful older attempt's request.
+			if req.Operation == "retry" && session.ControllerHost != "external-agent" && isBareRetryInput(currentInputs[targets[0].TaskID]) {
+				var previous orm.SubAgentTask
+				err := tx.Select("params").Where("id = ?", latest.TaskID).First(&previous).Error
+				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				var input struct {
+					CurrentUserInput string `json:"current_user_input"`
+				}
+				if err == nil && json.Unmarshal(previous.Params, &input) == nil && !isBareRetryInput(input.CurrentUserInput) {
+					targets[0].UserInput = input.CurrentUserInput
+					currentInputs[targets[0].TaskID] = input.CurrentUserInput
+				}
 			}
 			var failedResult struct {
 				Summary    string                       `json:"summary"`
@@ -688,6 +736,10 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 						"user_retry_available":   true})
 			}
 		}
+		if req.Operation == "retry" || req.Operation == "rewind" ||
+			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {
+			applyRecoveryIntent(session.IntentContext, &targets[0])
+		}
 		completedContinue := session.Status == SessionStatusCompleted && len(targets) == 1 &&
 			req.Operation == "execute" && declaredCompletedContinueStep(graph, targets[0].TargetStepID) &&
 			containsProjectionStep(projection.Continue, targets[0].TargetStepID)
@@ -695,6 +747,11 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
+			if req.Operation == "rewind" {
+				if err := snapshotRecoveryInputs(ctx, tx, &session, graph, req.CommandID, targets[0].TargetStepID); err != nil {
+					return err
+				}
+			}
 			if invalidErr := invalidateForOperation(ctx, tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
@@ -783,10 +840,9 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
-				if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Update("status", SessionStatusActive).Error; err != nil {
+				if err := acceptRunControl(ctx, tx, &session, "continue", nil, nil); err != nil {
 					return err
 				}
-				session.Status = SessionStatusActive
 				// Hosted retries bypass the native launcher's TaskCenter reset.
 				// Reopen only this owner's completed run; removed or canceled tasks stay closed.
 				if req.Operation == "retry" || req.Operation == "rewind" {
@@ -880,6 +936,52 @@ func sessionIntentText(value string) string {
 	return ""
 }
 
+// inheritAutomaticRetryIntent retains the failed native attempt's user amendment.
+// A model/provider failure notification is diagnostic context, not a replacement
+// for the request the failed attempt was executing. User-initiated retries and
+// rewinds keep their new input; hosted attempts without native params are unchanged.
+func inheritAutomaticRetryIntent(ctx context.Context, tx *gorm.DB, sessionID string, target *transitionTarget) error {
+	var previous orm.WorkflowSessionStep
+	if err := tx.WithContext(ctx).Where("session_id = ? AND step_id = ? AND validity = ?", sessionID,
+		target.TargetStepID, "effective").Order("attempt DESC").First(&previous).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if previous.ExecutorHost == "external-agent" {
+		return nil
+	}
+	var task orm.SubAgentTask
+	if err := tx.WithContext(ctx).Select("params").Where("id = ? AND conversation_id = (SELECT conversation_id FROM plugin_sessions WHERE id = ?)",
+		previous.TaskID, sessionID).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if len(task.Params) == 0 {
+		return nil
+	}
+	var params struct {
+		CurrentUserInput string `json:"current_user_input"`
+		RetryHint        string `json:"retry_hint"`
+	}
+	if err := json.Unmarshal(task.Params, &params); err != nil {
+		return fmt.Errorf("read automatic retry intent: %w", err)
+	}
+	if strings.TrimSpace(params.CurrentUserInput) == "" {
+		return nil
+	}
+	parts := []string{params.RetryHint, target.RuntimeInstruction}
+	if diagnostic := strings.TrimSpace(target.UserInput); diagnostic != "" && diagnostic != params.CurrentUserInput {
+		parts = append(parts, "Automatic retry diagnostic (not a new user request): "+diagnostic)
+	}
+	target.RuntimeInstruction = strings.TrimSpace(strings.Join(parts, "\n\n"))
+	target.UserInput = params.CurrentUserInput
+	return nil
+}
+
 // applyRecoveryIntent keeps the workflow launch request authoritative when a
 // user retries, rewinds, or re-executes a stale step. The recovery command is useful execution
 // context, but it must not replace {{user_input}} and silently change the task.
@@ -901,6 +1003,15 @@ func applyRecoveryIntent(intentContext string, target *transitionTarget) {
 		target.RuntimeInstruction = existing + "\n\n" + instruction
 	} else {
 		target.RuntimeInstruction = instruction
+	}
+}
+
+func isBareRetryInput(input string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.TrimRight(strings.TrimSpace(input), "。.!！"))) {
+	case "", "重试", "重新执行", "retry", "re-run", "rerun", "try again":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1085,74 +1196,10 @@ func invalidateNativeForOperation(ctx context.Context, tx *gorm.DB, session *orm
 	if operation == "rewind" && attempt.Status != "succeeded" {
 		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_REWIND", "only succeeded attempts can be rewound", false, nil)
 	}
-	queue := []orm.WorkflowSessionStep{attempt}
-	seen := map[string]bool{}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if seen[current.ID] {
-			continue
-		}
-		seen[current.ID] = true
-		if err := tx.Model(&orm.WorkflowSessionStep{}).Where("id = ?", current.ID).Update("validity", "stale").Error; err != nil {
-			return err
-		}
-		var outputs []orm.WorkflowSlotRevision
-		if err := tx.Where("session_id = ? AND ((producer_attempt_id = ? AND producer_attempt_id != '') OR (step_id = ? AND attempt = ?))", session.ID, current.ID, current.StepID, current.Attempt).Find(&outputs).Error; err != nil {
-			return err
-		}
-		for _, output := range outputs {
-			if err := tx.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", output.ID).Updates(map[string]any{"validity": "stale", "selected": false}).Error; err != nil {
-				return err
-			}
-			var bindings []orm.WorkflowAttemptInputBinding
-			if err := tx.Where("material_revision_id = ?", output.ID).Find(&bindings).Error; err != nil {
-				return err
-			}
-			for _, binding := range bindings {
-				var consumer orm.WorkflowSessionStep
-				if tx.Where("id = ? AND validity = ?", binding.AttemptID, "effective").First(&consumer).Error == nil {
-					queue = append(queue, consumer)
-				}
-			}
-			var decisions []orm.WorkflowRouteDecision
-			if err := tx.Where("session_id = ? AND validity = ?", session.ID, "effective").Find(&decisions).Error; err != nil {
-				return err
-			}
-			for _, decision := range decisions {
-				var witnesses []graphengine.Witness
-				_ = json.Unmarshal(decision.WitnessJSON, &witnesses)
-				usesRevision := false
-				for _, witness := range witnesses {
-					if witness.RevisionID == output.ID {
-						usesRevision = true
-						break
-					}
-				}
-				if usesRevision {
-					if err := enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue); err != nil {
-						return err
-					}
-					if err := tx.Model(&orm.WorkflowRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error; err != nil {
-						return err
-					}
-				}
-			}
-		}
-		var sourceDecisions []orm.WorkflowRouteDecision
-		if err := tx.Where("session_id = ? AND source_attempt_id IN ? AND validity = ?", session.ID, []string{current.ID, current.TaskID}, "effective").Find(&sourceDecisions).Error; err != nil {
-			return err
-		}
-		for _, decision := range sourceDecisions {
-			if err := enqueueExclusiveRouteAttempts(tx, session.ID, decision, &queue); err != nil {
-				return err
-			}
-			if err := tx.Model(&orm.WorkflowRouteDecision{}).Where("id = ?", decision.ID).Update("validity", "stale").Error; err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	// Native executions use the same lease fencing as hosted executions. Merely
+	// marking their dependency closure stale leaves workers running: heartbeat
+	// and publication must also lose their authority when an upstream step rewinds.
+	return controlstore.InvalidateAttempts(tx, session, []orm.WorkflowSessionStep{attempt})
 }
 
 func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {

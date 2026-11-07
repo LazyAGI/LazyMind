@@ -82,9 +82,9 @@ class TemplateFillTests(unittest.TestCase):
 
     def test_overflow_warning_and_page_bounds(self):
         self.edits[0].update(action='replace', text='Long content ' * 30)
-        with self.assertRaisesRegex(ValueError, 'does not fit'):
-            self.fill()
-        self.assertFalse(self.output.exists())
+        result = self.fill()
+        self.assertTrue(self.output.exists())
+        self.assertEqual(result['layout_validation'], 'not_performed')
         with self.assertRaises(ValueError):
             module.inspect_template(self.source, 0)
 
@@ -93,11 +93,10 @@ class TemplateFillTests(unittest.TestCase):
         self.assertTrue(any(r['status'] != 'unknown' and r['width_pt'] > 0
                             for r in self.pages[0]['layout_checks']))
 
-    def test_blank_lines_count_towards_capacity(self):
+    def test_blank_lines_do_not_block_publication(self):
         self.edits[0].update(action='replace', text='Short' + '\n' * 30)
-        with self.assertRaisesRegex(ValueError, 'does not fit'):
-            self.fill()
-        self.assertFalse(self.output.exists())
+        self.fill()
+        self.assertTrue(self.output.exists())
 
     def test_whole_paragraph_newlines_create_paragraphs_with_style(self):
         target = next(e for e in self.edits if e['expected_text'] == 'Sample achievement')
@@ -160,7 +159,7 @@ class TemplateFillTests(unittest.TestCase):
         self.assertEqual(result['unavailable_locally'], ['Missing Template Font'])
         self.assertFalse(result['substitution_applied'])
 
-    def test_table_cell_capacity_rejected_before_writing(self):
+    def test_table_cell_text_is_written_without_capacity_gate(self):
         from pptx.util import Inches
         prs = Presentation(self.source)
         table = prs.slides[0].shapes.add_table(1, 1, Inches(1), Inches(2), Inches(2), Inches(.4)).table
@@ -169,9 +168,9 @@ class TemplateFillTests(unittest.TestCase):
         pages = [module.inspect_template(self.source, p) for p in (1, 2)]
         edits = [{'id': s['id'], 'expected_text': s['text'], 'action': 'replace' if s['text'] == 'Label' else 'keep',
                   'text': 'Too much text ' * 100} for p in pages for s in p['slots']]
-        with self.assertRaisesRegex(ValueError, 'table:1:1:1'):
-            module.fill_template(self.source, self.output, pages[0]['sha256'], edits)
-        self.assertFalse(self.output.exists())
+        module.fill_template(self.source, self.output, pages[0]['sha256'], edits)
+        result_table = next(s.table for s in Presentation(self.output).slides[0].shapes if s.has_table)
+        self.assertEqual(result_table.cell(0, 0).text, 'Too much text ' * 100)
 
     def test_shared_cache_reuses_all_pages_and_binds_one_template(self):
         from unittest.mock import patch

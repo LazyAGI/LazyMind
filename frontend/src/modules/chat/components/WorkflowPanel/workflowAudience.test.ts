@@ -55,3 +55,13 @@ describe('workflow audience visibility', () => {
     expect(workflowTabsForAudience(ui, { ...session, projection: { past: [] } }, true).map(tab => tab.id)).toEqual(['analysis', 'prompts', 'preview']);
   });
 });
+
+it('shares opt-in visibility while retaining completed, current and material-backed steps', () => {
+  const ui = hydrateWorkflowUI({ ui: { hide_skipped_steps: true, hide_unstarted_steps: true,
+    tabs: ['done', 'running', 'skipped', 'future', 'material'].map(id => ({ id, slots: [{ id }] })) } });
+  const session = { workflow_mode: 'dynamic', slots: [{ slot: 'material', selected: true }],
+    projection: { past: ['done'], current: ['running'], pruned: ['skipped'] } } as Parameters<typeof workflowTabsForAudience>[1];
+  expect(workflowTabsForAudience(ui, session, true).map(tab => tab.id)).toEqual(['done', 'running', 'material']);
+  expect(workflowTabsForAudience(ui, { ...session, workflow_mode: 'auto' }, true).map(tab => tab.id)).toEqual(['done', 'running', 'future', 'material']);
+  expect(workflowTabsForAudience({ ...ui, hide_skipped_steps: false, hide_unstarted_steps: false }, session, true)).toHaveLength(5);
+});

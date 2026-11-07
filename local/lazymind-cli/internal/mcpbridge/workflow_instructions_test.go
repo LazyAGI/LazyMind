@@ -6,7 +6,7 @@ import (
 )
 
 func TestSharedWorkflowInstructions(t *testing.T) {
-	for _, part := range []string{"workflow.start", "idempotency_key", "16–256", "workflow.state", "awaiting_user", "END this turn", "The host displays the Workflow panel automatically", "Native conversation identity belongs to the host connector"} {
+	for _, part := range []string{"workflow.start", "clarification_values", "needs_input", "exact IDs", "revision_id", "new idempotency_key", "unchanged-payload", "start.inputs", "absolute regular-file paths", "imports and binds every supplied file", "do not retry without that source", "idempotency_key", "16–256", "workflow.state", "awaiting_user", "END this turn", "The host displays the Workflow panel automatically", "Native conversation identity belongs to the host connector"} {
 		if !strings.Contains(workflowInstructions, part) {
 			t.Fatalf("missing shared guidance %q", part)
 		}

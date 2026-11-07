@@ -1,4 +1,4 @@
-.directory-page { height: 100%; overflow: auto; background: var(--directory-bg); padding: 28px 32px; }
+.directory-page { height: 100%; overflow: auto; padding: 28px 32px; }
 .directory-page-inner { max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 .directory-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .directory-heading { min-width: 0; max-width: 860px; }

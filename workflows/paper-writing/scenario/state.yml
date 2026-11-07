@@ -1,0 +1,474 @@
+initial: __start__
+start_route: choice
+transitions:
+  __start__:
+    - {to: research_topic, when: "The user explicitly selects research topic development"}
+    - {to: literature_review, when: "The user explicitly selects literature review"}
+    - {to: experiment, when: "The user selects experimental research or analysis requiring data preparation"}
+    - {to: write_outline, when: "The user requests a new manuscript or an outline before drafting"}
+    - {to: write_document, when: "The user continues drafting from the confirmed outline"}
+    - {to: revise_document, when: "The user requests direct edits to an existing manuscript without peer review"}
+    - {to: peer_review, when: "The user explicitly selects peer review"}
+    - {to: reading_reflection, when: "The user explicitly selects reading reflection"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  research_topic:
+    - {to: literature_review, when: "The user explicitly selects literature review"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  literature_review:
+    - {to: refine_topic, when: "The user explicitly selects topic refinement"}
+    - {to: experiment, when: "The user explicitly selects experimental research"}
+    - {to: write_outline, when: "The user requests a new manuscript or an outline before drafting"}
+    - {to: write_document, when: "The user continues drafting from the confirmed outline"}
+    - {to: revise_document, when: "The user requests direct edits to an existing manuscript without peer review"}
+    - {to: reading_reflection, when: "The user explicitly selects reading reflection"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  refine_topic:
+    - {to: experiment, when: "The user explicitly selects experimental research after refining the topic"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  experiment:
+    - {to: data_analysis, when: "The user explicitly selects data analysis"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  data_analysis:
+    - {to: write_outline, when: "The user requests a new manuscript or an outline before drafting"}
+    - {to: write_document, when: "The user continues drafting from the confirmed outline"}
+    - {to: revise_document, when: "The user requests direct edits to an existing manuscript without peer review"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  write_outline:
+    - {to: write_document, when: "Continue drafting from the confirmed outline"}
+  write_document:
+    - {to: revise_document, when: "The user requests direct edits to the manuscript"}
+    - {to: peer_review, when: "The user explicitly selects peer review"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  peer_review:
+    - {to: revise_document, when: "The user requests revision according to the current review, or explicitly requests direct edits without using the review"}
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  revise_document:
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  reading_reflection:
+    - {to: finish, when: "The user explicitly chooses to finish this workflow"}
+  finish:
+    - {to: __end__, when: "Finish"}
+steps:
+  research_topic:
+    label: "研究选题"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+    outputs:
+      - {material: research_topic_pool, required: true}
+      - {material: research_topic_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  literature_review:
+    label: "文献综述"
+    mode: human
+    route: choice
+    capabilities: [kb, academic_search]
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: recovery_research_pool, required: false, transport: path}
+      - {material: recovery_research_document, required: false, transport: path}
+      - {material: recovery_literature_pool, required: false, transport: path}
+      - {material: recovery_literature_document, required: false, transport: path}
+    outputs:
+      - {material: literature_review_pool, required: true}
+      - {material: literature_review_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  refine_topic:
+    label: "调整选题"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+      When the user requests further literature research, use native rewind to literature_review; do not reinitialize materials.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+    outputs:
+      - {material: refine_topic_pool, required: true}
+      - {material: refine_topic_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  experiment:
+    label: "实验研究"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+      - {material: experiment_execution, required: false, transport: path}
+      - {material: experiment_question, required: false, transport: path}
+      - {material: refine_topic_pool, required: false, transport: path}
+      - {material: refine_topic_document, required: false, transport: path}
+      - {material: recovery_experiment_pool, required: false, transport: path}
+      - {material: recovery_experiment_document, required: false, transport: path}
+      - {material: recovery_data_analysis_pool, required: false, transport: path}
+      - {material: recovery_data_analysis_document, required: false, transport: path}
+    outputs:
+      - {material: experiment_pool, required: true}
+      - {material: experiment_document, required: true}
+      - {material: experiment_code, required: true}
+      - {material: experiment_results, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  data_analysis:
+    label: "数据分析"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+      For new data or updated preparation, use native rewind to experiment.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+      - {material: experiment_pool, required: false, transport: path}
+      - {material: experiment_document, required: false, transport: path}
+      - {material: recovery_data_analysis_pool, required: false, transport: path}
+      - {material: recovery_data_analysis_document, required: false, transport: path}
+      - {material: recovery_write_outline_pool, required: false, transport: path}
+      - {material: recovery_write_outline_document, required: false, transport: path}
+      - {material: recovery_write_document_pool, required: false, transport: path}
+      - {material: recovery_write_document_document, required: false, transport: path}
+      - {material: recovery_peer_review_pool, required: false, transport: path}
+      - {material: recovery_peer_review_document, required: false, transport: path}
+      - {material: recovery_revise_document_pool, required: false, transport: path}
+      - {material: recovery_revise_document_document, required: false, transport: path}
+    outputs:
+      - {material: data_analysis_pool, required: true}
+      - {material: data_analysis_document, required: true}
+      - {material: analysis_chart, required: false}
+      - {material: redrawn_manuscript_document, required: false}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  write_outline:
+    label: "论文大纲"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+      - {material: experiment_pool, required: false, transport: path}
+      - {material: experiment_document, required: false, transport: path}
+      - {material: data_analysis_pool, required: false, transport: path}
+      - {material: data_analysis_document, required: false, transport: path}
+    outputs:
+      - {material: write_outline_pool, required: true}
+      - {material: write_outline_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  write_document:
+    label: "论文写作"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - material: seed_pool
+        required: true
+        transport: path
+        alternatives:
+          - {material: paper_input}
+          - {material: manuscript_file}
+          - {material: manuscript_text}
+          - {material: research_topic_pool}
+          - {material: research_topic_document}
+          - {material: literature_review_pool}
+          - {material: literature_review_document}
+          - {material: experiment_pool}
+          - {material: experiment_document}
+          - {material: data_analysis_pool}
+          - {material: data_analysis_document}
+          - {material: write_outline_pool}
+          - {material: write_outline_document}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+      - {material: experiment_pool, required: false, transport: path}
+      - {material: experiment_document, required: false, transport: path}
+      - {material: data_analysis_pool, required: false, transport: path}
+      - {material: data_analysis_document, required: false, transport: path}
+      - {material: write_outline_pool, required: false, transport: path}
+      - {material: write_outline_document, required: false, transport: path}
+    outputs:
+      - {material: write_document_pool, required: true}
+      - {material: write_document_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  peer_review:
+    label: "模拟审稿"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+      - {material: experiment_pool, required: false, transport: path}
+      - {material: experiment_document, required: false, transport: path}
+      - {material: data_analysis_pool, required: false, transport: path}
+      - {material: data_analysis_document, required: false, transport: path}
+      - {material: write_document_pool, required: false, transport: path}
+      - {material: write_document_document, required: false, transport: path}
+      - {material: recovery_review_pool, required: false, transport: path}
+      - {material: recovery_review_document, required: false, transport: path}
+    outputs:
+      - {material: peer_review_pool, required: true}
+      - {material: peer_review_document, required: true}
+      - {material: peer_review_data, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  revise_document:
+    label: "论文修订"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+      When the user requests another review, use native rewind to peer_review; finishing is also available.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+      - {material: experiment_pool, required: false, transport: path}
+      - {material: experiment_document, required: false, transport: path}
+      - {material: data_analysis_pool, required: false, transport: path}
+      - {material: data_analysis_document, required: false, transport: path}
+      - {material: write_document_pool, required: false, transport: path}
+      - {material: write_document_document, required: false, transport: path}
+      - {material: peer_review_pool, required: false, transport: path}
+      - {material: peer_review_document, required: false, transport: path}
+      - {material: recovery_revise_document_pool, required: false, transport: path}
+      - {material: recovery_revise_document_document, required: false, transport: path}
+    outputs:
+      - {material: revise_document_pool, required: true}
+      - {material: revise_document_document, required: true}
+      - {material: revision_fact_check_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  reading_reflection:
+    label: "阅读心得"
+    mode: human
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    inputs:
+      - {material: seed_pool, required: false, transport: path}
+      - {material: paper_input, required: false, transport: path}
+      - {material: manuscript_file, required: false, transport: path}
+      - {material: manuscript_text, required: false, transport: path}
+      - {material: paper_topic, required: false, transport: path}
+      - {material: review_request, required: false, transport: path}
+      - {material: research_topic_pool, required: false, transport: path}
+      - {material: research_topic_document, required: false, transport: path}
+      - {material: literature_review_pool, required: false, transport: path}
+      - {material: literature_review_document, required: false, transport: path}
+    outputs:
+      - {material: reading_reflection_pool, required: true}
+      - {material: reading_reflection_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.
+  finish:
+    label: "结束"
+    mode: auto
+    route: choice
+    tools_only: true
+    terminal_tools_only: true
+    prompt: |
+      This is an already scheduled algorithm execution, not a planning or clarification task.
+      Immediately call run_paper_step exactly once with no arguments and wait for its result.
+      Do not substitute chat text for the tool call.
+      The tool reads the actual node, bound materials, current request, and retry flag from Runtime.
+      The currently viewed tab is not the execution node. Do not choose nodes, materials, or content
+      based on the viewed tab or an old launch request.
+      Independent modules implement the algorithms. The tool must save all artifacts; do not invent materials or results.
+      On tool failure, report the error and stop. Do not retry, fabricate, or save materials on your own.
+      On success, end this node and wait for user confirmation or selection; do not run other branches.
+    tools: [run_paper_step]
+    terminal_tools: [run_paper_step]
+    outputs:
+      - {material: finish_document, required: true}
+    acceptance_criteria: Tool validation succeeds and all declared artifacts are saved; never present demonstration outputs as real research findings.

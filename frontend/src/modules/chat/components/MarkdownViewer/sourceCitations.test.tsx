@@ -22,6 +22,16 @@ function renderMarkdown(markdown: string) {
 }
 
 describe("MarkdownViewer source citation AST transform", () => {
+  it("links saved citation IDs in Agent prose and leaves other markers alone", () => {
+    const { container } = renderMarkdown("论文 [1.1]，未知 [9.9]，代码 `[2.1]`，已有[链接 [2.1]](https://example.org)。");
+
+    expect(container.querySelectorAll("a.md-source-chip")).toHaveLength(1);
+    expect(container.querySelector("a.md-source-chip")).toHaveAttribute("href", sources[0].url);
+    expect(container.querySelector("p")).toHaveTextContent("[9.9]");
+    expect(container.querySelector("code")).toHaveTextContent("[2.1]");
+    expect(container.querySelector('a[href="https://example.org"]')).toHaveTextContent("[2.1]");
+  });
+
   it("keeps a heading citation in the heading without requiring a blank line", () => {
     const { container } = renderMarkdown(
       "## 结论 [1](#source-1.1)\n这里是解释",

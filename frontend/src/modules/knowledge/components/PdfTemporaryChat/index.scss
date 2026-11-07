@@ -72,3 +72,224 @@
 .pdf-temporary-chat__parse-status {
   margin: 8px 12px 0;
 }
+
+.pdf-temporary-chat .paper-chat-composer .input-bottom-actions-left{flex:1;min-width:0;}
+.pdf-temporary-chat .paper-chat-composer .input-bottom-actions-right{flex:none;}
+.pdf-temporary-chat .paper-chat-composer .input-bottom-actions{justify-content:space-between;}
+.pdf-temporary-chat .paper-chat-composer .chat-add-resource-trigger{display:none;}
+
+// The paper assistant is a narrow panel even on a wide desktop viewport.
+.pdf-temporary-chat--paper .chat-chat-container .chat-box {
+  .chat-main-column,
+  .message-container,
+  .chat-item {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .chat-item {
+    --chat-gap: 8px;
+    gap: 12px;
+  }
+
+  .user-message-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .chat-time {
+    margin: 0;
+    padding: 0;
+    align-self: flex-end;
+  }
+
+  .user-wrap,
+  .chat-user-bubble-row {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .chat-item .user-wrap .chat-user {
+    max-width: calc(100% - 36px);
+    padding: 8px 10px;
+  }
+
+  .chat-assistant-msg-single-answer-wrap,
+  .chat-assistant-msg-multi-answer-wrap {
+    min-width: 0;
+    gap: 8px;
+
+    > .chat-avatar {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+    }
+
+    .chat-bot-box-single,
+    .chat-bot-box-multi {
+      flex: 1 1 0;
+      min-width: 0;
+      padding-right: 0;
+    }
+
+    .chat-bot {
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+      padding: 10px;
+    }
+  }
+
+  .chat-user-mention-text,
+  .rag-markdown,
+  .ant-alert-message,
+  .ant-alert-description {
+    min-width: 0;
+    max-width: 100%;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .writer-markdown-editor--chat .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+    // Retain the block-control gutter without the full document's double inset.
+    padding: 12px 12px 12px 44px;
+  }
+
+  .writer-markdown-editor--chat .writer-markdown-editor__content {
+    padding: 0;
+  }
+
+  .chat-bot .ant-alert {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+    column-gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    box-sizing: border-box;
+
+    > .ant-alert-icon {
+      grid-column: 1;
+      margin: 2px 0 0;
+      font-size: 18px;
+    }
+
+    > .ant-alert-content {
+      grid-column: 2;
+      display: block;
+      min-width: 0;
+    }
+
+    > .ant-alert-action {
+      grid-column: 2;
+      min-width: 0;
+      max-width: 100%;
+      margin: 8px 0 0;
+    }
+
+    .chat-run-status-card__actions {
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      max-width: 100%;
+    }
+  }
+}
+
+.pdf-temporary-chat--paper {
+  color: #262626;
+  background: #fff;
+
+  .pdf-temporary-chat__header {
+    align-items: center;
+    padding: 16px 14px;
+    border-color: #e5e5e3;
+    gap: 2px;
+
+    > div:first-child { flex: 1; gap: 4px 8px; }
+    > div:first-child > .anticon { color: var(--color-primary, #006ae6); }
+    strong { font-size: 15px; font-weight: 600; }
+    > div:first-child > span:last-child { color: #737373; font-size: 12px; }
+    > .ant-btn { flex: none; color: #737373; }
+  }
+
+  .pdf-temporary-chat__body { display: flex; flex-direction: column; }
+  .chat-chat-container { flex: 1; min-height: 0; }
+  .paper-chat-composer { box-shadow: none; }
+  .chat-chat-container .chat-box .input-wrapper { padding: 12px 14px 16px; }
+  .ant-btn:focus-visible, button:focus-visible { outline: 2px solid var(--color-primary, #006ae6); outline-offset: 3px; }
+}
+
+.paper-assistant-ready {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  color: #737373;
+  font-size: 12px;
+  border-bottom: 1px solid #f1f1ef;
+
+  > span:first-child { width: 5px; height: 5px; border-radius: 50%; background: #738975; }
+  &__scope { margin-left: auto; }
+}
+
+.paper-assistant-welcome {
+  padding: 16px 10px 12px;
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  box-sizing: border-box;
+
+  &__eyebrow { color: var(--color-primary, #006ae6); font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+  h2 { margin: 0 0 8px; color: #262626; font-family: inherit; font-size: clamp(22px, 2vw, 27px); line-height: 1.2; font-weight: 400; letter-spacing: -.025em; }
+  > p { color: #737373; font-size: 14px; line-height: 1.65; margin: 0 0 16px; }
+}
+
+.paper-assistant-prompts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  > button {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #e5e5e3;
+    border-radius: 7px;
+    background: #fff;
+    color: #262626;
+    cursor: pointer;
+    font: inherit;
+    transition: border-color .15s, background .15s;
+
+    &:hover { border-color: #c5a2aa; background: #fcf9fa; }
+    > strong { gap: 4px; width: 100%; font-size: 14px; font-weight: 500; display: flex; justify-content: space-between; }
+    > strong span { color: var(--color-primary, #006ae6); }
+    > span { font-size: 13px; color: #737373; line-height: 1.5; }
+  }
+}
+
+.paper-assistant-quote {
+  margin: 12px 14px 0;
+  padding: 8px 10px;
+  background: #f7f7f6;
+  border: 1px solid #e5e5e3;
+  border-left: 2px solid var(--color-primary, #006ae6);
+  border-radius: 5px;
+
+  &__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  &__heading > button:first-child { border: 0; padding: 0; background: transparent; color: var(--color-primary, #006ae6); font: inherit; font-size: 12px; cursor: pointer; }
+  &__heading > button:disabled { cursor: default; }
+  blockquote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 4px 0; color: #737373; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+}
+
+@media (prefers-reduced-motion: reduce) { .paper-assistant-prompts > button { transition: none; } }
+
+.pdf-temporary-chat:has(.paper-assistant-quote) .paper-assistant-welcome { display: none; }
+.paper-assistant-prompts > button:hover { border-color: var(--color-primary-border, #a8bfff); background: var(--color-primary-bg, #e8f3fd); }

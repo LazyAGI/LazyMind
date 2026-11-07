@@ -555,6 +555,8 @@ func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTa
 				status := display.Status
 				if status == "completed" {
 					status = "succeeded"
+				} else if status == "waiting_input" {
+					status = "waiting_inputs"
 				}
 				if status != "" {
 					t.Status = status

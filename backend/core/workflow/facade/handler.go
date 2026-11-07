@@ -2,6 +2,7 @@ package facade
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +19,8 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common"
+	"lazymind/core/common/askuser"
+	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
@@ -191,6 +195,8 @@ func identityAndVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 type prepareRequest struct {
+	ClarificationValues map[string]any `json:"clarification_values,omitempty"`
+	RevisionID          string         `json:"revision_id,omitempty"`
 	ControlProtocol     string         `json:"control_protocol,omitempty"`
 	HostBindingRequired bool           `json:"host_binding_required,omitempty"`
 	HostProvider        string         `json:"host_provider,omitempty"`
@@ -208,7 +214,8 @@ type prepareRequest struct {
 }
 
 type preparationGraph struct {
-	Nodes map[string]struct {
+	Runtime graphengine.RuntimePolicy `json:"runtime"`
+	Nodes   map[string]struct {
 		Capabilities []string `json:"capabilities"`
 		LegacyTools  []string `json:"legacy_tools"`
 	} `json:"nodes"`
@@ -227,11 +234,7 @@ func collectRequiredInputMaterials(expression graphengine.Expression, materials 
 	for _, nested := range expression.All {
 		collectRequiredInputMaterials(nested, materials)
 	}
-	for _, nested := range expression.Any {
-		// Keep the existing conservative preparation contract for alternatives:
-		// every candidate branch input must be available before the Session starts.
-		collectRequiredInputMaterials(nested, materials)
-	}
+	// Alternative sources are checked by the node input expression when that node runs.
 }
 
 func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
@@ -582,7 +585,8 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
 		return
 	}
-	state, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped, workflowcore.IsWorkflowUserControlRequest(r))
+	sessionID := mux.Vars(r)["session_id"]
+	state, err := h.setSessionStopped(r.Context(), owner, sessionID, commandID, stopped)
 	if errors.Is(err, workflowstore.ErrNotFound) {
 		fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
 		return
@@ -594,9 +598,6 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 	var controlError *controlstore.Error
 	if errors.As(err, &controlError) {
 		status := http.StatusConflict
-		if controlError.Code == "USER_CONTROL_REQUIRED" {
-			status = http.StatusForbidden
-		}
 		fail(w, status, controlError.Code, controlError.Message, false)
 		return
 	}
@@ -605,6 +606,38 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: state})
+}
+
+// The legacy lifecycle URL and the panel use the same control operation for
+// bound runs, including recovery scheduling and review barriers.
+func (h Handler) setSessionStopped(ctx context.Context, owner, sessionID, commandID string, stopped bool) (workflowstore.SessionLifecycleState, error) {
+	var state workflowstore.SessionLifecycleState
+	if err := h.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return state, err
+	}
+	var session orm.WorkflowSession
+	if err := h.Store.Database().WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
+		return state, err
+	}
+	if !controlstore.Controlled(session) {
+		return h.Store.SetSessionStopped(ctx, owner, sessionID, commandID, stopped)
+	}
+	// Commands accepted before this URL used the shared control service retain
+	// their original receipt and request fingerprint across upgrades.
+	if saved, err := h.Store.CommandByID(ctx, owner, commandID); err == nil {
+		if saved.ContractVersion == ContractVersion {
+			return h.Store.SetSessionStopped(ctx, owner, sessionID, commandID, stopped)
+		}
+	} else if !errors.Is(err, workflowstore.ErrNotFound) {
+		return state, err
+	}
+	result, err := (workflowcore.WorkflowControlService{DB: h.Store.Database()}).ExecuteLifecycle(ctx, owner, sessionID, commandID, stopped)
+	if err != nil {
+		return state, err
+	}
+	return workflowstore.SessionLifecycleState{SessionID: sessionID, Status: result.SessionStatus,
+		StateVersion: result.Control.StateVersion, CommandID: commandID,
+		ExecutionID: result.Receipt.ExecutionID, ActionID: result.Receipt.ActionID, ResumeReason: result.Receipt.ResumeReason}, nil
 }
 
 func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }
@@ -744,7 +777,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan := json.RawMessage(`{"status":"ready"}`)
-	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, ""); packageErr == nil {
+	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, req.RevisionID); packageErr == nil {
 		if _, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare"); err != nil {
 			fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
 			return
@@ -759,6 +792,11 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		var graph preparationGraph
 		if err := json.Unmarshal(workflow.CompiledGraph, &graph); err != nil {
 			fail(w, http.StatusUnprocessableEntity, "INVALID_WORKFLOW_GRAPH", err.Error(), false)
+			return
+		}
+		clarification, err := graphengine.ResolveClarifications(graph.Runtime.ClarificationFields, req.ClarificationValues)
+		if err != nil {
+			fail(w, http.StatusUnprocessableEntity, "WORKFLOW_CLARIFICATION_INVALID", err.Error(), false)
 			return
 		}
 		for material, raw := range req.InputBindings {
@@ -788,11 +826,26 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if missingInputs := missingExternalInputs(graph, req.InputBindings); len(missingInputs) > 0 {
+		if missingInputs := missingExternalInputs(graph, req.InputBindings); len(missingInputs) > 0 || len(clarification.Missing) > 0 {
+			for _, field := range graph.Runtime.ClarificationFields {
+				attachment := field.Attachment
+				if attachment == nil || attachment.MaterialID != field.ID || !slices.Contains(missingInputs, field.ID) ||
+					len(clarification.Questions) >= 3 {
+					continue
+				}
+				clarification.Questions = append(clarification.Questions, askuser.Question{
+					ID: field.ID, Text: field.Question, Reason: field.Reason, Type: field.Type,
+					Choices: field.Choices, ChoicePolicy: field.ChoicePolicy, AllowOther: field.AllowOther, Required: true,
+					Attachment: &askuser.Attachment{WhenChoice: attachment.WhenChoice, MaterialID: attachment.MaterialID,
+						Accept: attachment.Accept, MaxFiles: attachment.MaxFiles, Required: true},
+				})
+			}
 			plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
 				"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
 				"revision_no": workflow.RevisionNo, "tree_hash": workflow.TreeHash,
-				"missing_inputs": missingInputs, "controller_host": controllerHost})
+				"missing_inputs": missingInputs, "controller_host": controllerHost,
+				"missing_clarification_fields": clarification.Missing, "questions": clarification.Questions,
+				"clarification_values": clarification.Values})
 			goto prepared
 		}
 		plan, _ = json.Marshal(map[string]any{
@@ -800,7 +853,8 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			"workflow_revision": workflow.RevisionID, "revision_no": workflow.RevisionNo,
 			"tree_hash": workflow.TreeHash, "warnings": []string{}, "missing_inputs": []string{},
 			"origin_host": req.OriginHost, "origin_ref": req.OriginRef,
-			"controller_host": controllerHost,
+			"clarification_values": clarification.Values,
+			"controller_host":      controllerHost,
 		})
 	} else {
 		fail(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", "workflow package was not found", false)
@@ -836,6 +890,10 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prepared, _, err := h.Store.Consume(r.Context(), id, owner, req.SessionID)
+	if errors.Is(err, workflowstore.ErrPreparationNotReady) {
+		fail(w, http.StatusConflict, "PREPARATION_NOT_READY", "preparation requires additional input", false)
+		return
+	}
 	if errors.Is(err, workflowstore.ErrNotFound) {
 		fail(w, 404, "PREPARATION_NOT_FOUND", "preparation not found", false)
 		return
@@ -878,6 +936,14 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		intentContext := ""
 		if strings.TrimSpace(original.RequestContext) != "" {
 			intentJSON, _ := json.Marshal(map[string]string{"text": original.RequestContext})
+			intentContext = string(intentJSON)
+		}
+		if values, ok := preparedResult["clarification_values"].(map[string]any); ok && len(values) > 0 {
+			canonical, _ := json.Marshal(values)
+			intentJSON, _ := json.Marshal(map[string]any{
+				"text":                 original.RequestContext + "\n\nConfirmed workflow parameters:\n" + string(canonical),
+				"clarification_values": values,
+			})
 			intentContext = string(intentJSON)
 		}
 		bindings, bindingErr := h.Store.ResolveInputBindings(r.Context(), owner, original.InputBindings, "prepare:"+prepared.ID)

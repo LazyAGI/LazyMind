@@ -53,9 +53,21 @@ func TestRuntimeContractsSurviveCopyAndEmptyInputAllowlist(t *testing.T) {
 		}
 	}
 }
+func TestWorkLimitsDoNotRequireATimeBudget(t *testing.T) {
+	result := Compile(strings.Replace(declaredWorkflow, ", timeout: 120", "", 1), declaredState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("work-only limits rejected: %#v", result.Diagnostics)
+	}
+	limit := result.Graph.Runtime.ExecutionLimits["assemble"]
+	if limit.Rounds != 5 || limit.ToolCalls["save"] != 1 || limit.Timeout != 0 {
+		t.Fatalf("work-only limits changed: %+v", limit)
+	}
+}
+
 func TestInvalidRuntimeContractsAreRejected(t *testing.T) {
 	for _, tc := range []struct{ name, old, replacement, code string }{
 		{"unknown step", "assemble: {rounds:", "missing: {rounds:", "E_RUNTIME_EXECUTION_LIMIT_INVALID"},
+		{"negative timeout", "timeout: 120", "timeout: -1", "E_RUNTIME_EXECUTION_LIMIT_INVALID"},
 		{"unbounded rounds", "rounds: 5", "rounds: 65", "E_RUNTIME_EXECUTION_LIMIT_INVALID"},
 		{"internal input", "trigger_inputs: []", "trigger_inputs: [result]", "E_RUNTIME_TRIGGER_INPUT_INVALID"},
 		{"non atomic", "transactional_outputs: true", "transactional_outputs: false", "E_RUNTIME_PUBLICATION_INVALID"},

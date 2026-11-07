@@ -89,15 +89,15 @@ func init() {
 		{2005128, http.StatusInternalServerError, "Failed to read the imported document task metadata", []string{"read imported task metadata"}},
 		{2005137, 409, "The paper content or cache is unavailable or changed; retry the read", []string{"cache identity mismatch", "legacy fulltext job requires a new expansion-context read", "original pdf changed before caching", "paper source context required", "pdf version changed", "pdf yielded no full text", "verified versioned pdf source required"}},
 		{2005136, 409, "The paper identifiers conflict", []string{"conflicting paper identifiers", "work identity conflict", "paper identifiers conflict"}},
-		{2005133, 409, "The selected paper source is unavailable or changed; start a new task", []string{"expansion paper is not a saved seed or verified external candidate", "handoff paper identity is missing", "paper has no frozen source in this handoff", "paper is not in this handoff", "paper must be a saved seed or an externally discovered candidate of this expansion", "selected document identity changed; start a new task", "selected pdf changed"}},
+		{2005133, 409, "The selected paper source is unavailable or changed; start a new task", []string{"expansion paper is not a saved seed or verified external candidate", "handoff paper identity is missing", "paper has no frozen source in this handoff", "paper is not in this handoff", "paper must be a saved seed or an externally discovered candidate of this expansion", "selected document identity changed; start a new task", "selected pdf changed", "frozen paper full text changed", "frozen paper source changed", "selected paper full text is not ready", "selected paper full text has no readable pages", "selected paper pdf changed"}},
 		{2005131, 409, "The import preview expired or changed; refresh and retry", []string{"参考文献与导入预览不一致，请重新确认", "导入预览已过期或不属于当前用户和论文集，请刷新预览", "导入预览已过期，请刷新预览后重试", "论文或版本与导入预览不一致，请重新确认"}},
 		{2005134, 409, "The paper workflow input is not ready or changed; refresh and retry", []string{"academic knowledge base is not accessible", "chat launch returned http %d", "expansion requires selected directions", "paper_id is required", "request was deleted; start a new request", "request_key belongs to a different expansion version or paper selection", "selected direction is not a candidate", "unsupported expansion discovery mode", "user instruction missing", "心得与已保存的上一步产物不一致", "所选拓展版本不可用", "所选拓展版本尚未完成", "所选论文不属于当前扩展成果，请重新选择", "所选论文全文暂不可用，请刷新后重试", "拓展尚未完成", "至少两篇不同论文全文解析成功后才能生成综述", "请至少选择两篇全文可用论文", "阅读心得尚未完成"}},
 		{2005135, 400, "The selected paper does not match the import request", []string{"doi 服务未返回匹配的有效题录", "doi 查询失败（http %d）", "downloadable papers must use the import queue", "import request does not match its original papers", "import request key is already in use", "imported paper is missing from the saved library", "linked paper does not match the import preview", "请输入 doi 或 arxiv 编号、链接"}},
 		{2005119, 500, "Some paper imports failed; inspect their errors before retrying", []string{"one or more paper imports failed", "verified arxiv metadata required"}},
-		{2005132, 400, "The paper upload request is invalid or conflicts with an existing request", []string{"paper upload only supports pdf", "paper upload request does not match its original context", "paper upload request key is already in use", "paper upload requires a paper library", "paper upload requires an uploaded pdf", "record paper upload"}},
+		{2005132, 400, "The paper upload request is invalid or conflicts with an existing request", []string{"paper task has no selected papers", "paper original is outside upload storage", "paper original is not a regular file", "paper original is not a supported pdf", "paper upload only supports pdf", "paper upload request does not match its original context", "paper upload request key is already in use", "paper upload requires a paper library", "paper upload requires an uploaded pdf", "record paper upload"}},
 		{2005130, 400, "Paper libraries require document parsing", []string{"academic paper libraries require at least parsed processing", "enable document parsing before using an academic paper library"}},
 		{2005138, http.StatusConflict, "The paper library changed; refresh and retry", []string{"论文已在其他窗口更新，请保留草稿并加载最新内容后重试", "题录已移除或合并，停止后台补全", "题录已变更，请重试补全", "题录已保存；匹配到库中已有文献，请核对重复项后合并"}},
-		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity"}},
+		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity", "prepare selected paper %s", "decode note %s source"}},
 		{2005140, http.StatusConflict, "Processing submission is unconfirmed; verify the existing task before retrying", []string{
 			"imported task metadata is unavailable; submission outcome requires verification",
 			"previous processing submission outcome requires verification",
@@ -123,6 +123,118 @@ func init() {
 		{2005152, http.StatusBadGateway, "Crossref bibliography matching failed", []string{"crossref 题录匹配失败（http %d）"}},
 		{2005148, http.StatusConflict, "Save the document before queuing processing", []string{"document must be saved before processing is queued"}},
 		{2005146, http.StatusConflict, "A paper folder with this name already exists", []string{"folder name already exists"}},
+		{2005122, 502, "OpenAlex metadata lookup failed", []string{
+			"openalex 暂时不可用",
+		}},
+		{2005136, 409, "The paper identifiers conflict", []string{
+			"verified paper identity conflict",
+		}},
+		{2005137, 409, "The paper content or cache is unavailable or changed; retry the read", []string{
+			"conversation pdf content changed",
+			"verified paper source version conflict",
+			"paper content changed after research analysis; report publication requires renewed analysis",
+		}},
+		{2005131, 409, "The import preview expired or changed; refresh and retry", []string{
+			"verified pdf content changed; refresh import preview",
+		}},
+		{2005147, 502, "Unable to find an available paper PDF source", []string{
+			"开放全文探测失败",
+			"arxiv 预印本不能替代正式发表版",
+			"出版社 pdf 地址转向了其他来源",
+			"论文页面未声明目标 doi",
+			"paper source did not return a pdf original",
+		}},
+		{2005135, 400, "The selected paper does not match the import request", []string{
+			"doi metadata is missing",
+		}},
+		{2005134, 409, "The paper workflow input is not ready or changed; refresh and retry", []string{
+			"所选扩展版本尚未完成",
+			"准备内容已更新，请刷新后重试",
+			"准备内容已更新，请重新确认",
+			"任务正在执行，请等待当前阶段结束",
+			"research scope changed during search",
+			"preparation attempt is no longer current",
+			"search cursor does not match supplied search conditions",
+			"search cursor no longer belongs to a saved result",
+			"paper list mode does not match the confirmed depth",
+		}},
+		{2005153, 400, "OpenAlex hosted full text requires a valid API key", []string{
+			"openalex 托管全文需要有效的 api key",
+		}},
+		{2005154, 404, "OpenAlex has no record of this paper", []string{
+			"openalex 未收录该论文",
+		}},
+		{2005155, 422, "The paper has no identifier available for citation lookup", []string{
+			"该论文尚无可用的引用索引身份",
+		}},
+		{2005156, 429, "The full-text acquisition budget for this paper is exhausted", []string{
+			"单篇取文预算已用尽",
+		}},
+		{2005157, 502, "The PDF parser service version is incompatible; update the parser service", []string{
+			"pdf 解析服务版本不一致，请同步更新解析服务",
+		}},
+		{2005158, 502, "The PDF was downloaded but could not be parsed", []string{
+			"pdf 已获取，但解析失败：%w",
+		}},
+		{2005159, 502, "Failed to download the paper PDF", []string{
+			"pdf 下载失败：%w",
+		}},
+		{2005160, 422, "Research preparation is incomplete or invalid; supplement the scope and retry", []string{
+			"调研摘要为空，请重试",
+			"调研问题无效",
+			"研究方向最多 %d 个，请合并重复方向后重试",
+			"原文研究线索须提供真实摘录及正文位置或参考文献编号",
+			"研究线索最多关联5个正文块",
+			"研究线索正文位置须为非负且不重复的块序号",
+			"研究线索的原文论文尚未登记于本次调研",
+			"研究线索来源版本与本次调研绑定的原文不一致",
+			"尚未得到有依据的研究方向，请补充范围后重试",
+			"研究方向缺少名称、依据或代表论文",
+			"代表论文尚未登记于本次调研",
+			"预选方向不在调研范围内",
+			"研究问题缺少有效方向、唯一标识或前序/后续/同层类别",
+			"原文研究线索缺少名称、作用或关联问题",
+			"研究线索对应论文尚未登记于本次调研",
+			"研究线索关联了不存在的研究问题",
+		}},
+		{2005161, 409, "Complete the pending research questions and confirm the directions first", []string{
+			"请先完成初步调研和待补充问题",
+			"请先回答待补充问题",
+			"请在拓展记录中确认方向后开始正式拓展",
+			"研究范围尚未确认",
+		}},
+		{2005162, 400, "The research preparation operation is invalid for the current state", []string{
+			"快速扩展直接执行，无需初步调研",
+			"仅初步调研阶段支持调整研究范围；正式执行后如需改变主题或方向，请新建任务",
+			"请先回答当前待补充问题",
+			"仅初步调研失败后支持重试",
+			"当前没有待回答问题",
+			"请回答当前待补充问题",
+			"请填写新的研究要求",
+			"请选择已调研的方向；新方向需先补充调研",
+		}},
+		{2005163, 409, "There are no failed import items to retry", []string{
+			"没有可重试的失败项",
+		}},
+		{2005164, 409, "This import is still being processed", []string{
+			"本次导入正在处理中",
+		}},
+		{2005165, 409, "The report must preserve the research analysis and its actual research outcome", []string{
+			"research analysis requires its research completion outcome",
+			"research analysis requires research_complete",
+			"research analysis requires its coverage gaps",
+			"complete research must have a scope-covered outcome without unresolved coverage gaps",
+			"incomplete research requires its actual stopping reason",
+			"expansion report does not match the effective relation analysis version",
+			"expansion report must preserve the research analysis",
+		}},
+		{2000103, 400, "Invalid request", []string{
+			"new reviews support only quick or standard expansion",
+			"unsupported_source",
+			"unknown paper research step",
+			"无法唯一核对论文身份或指定版本",
+			"论文候选需要确认（%s）：%w",
+		}},
 	} {
 		for _, source := range group.sources {
 			if strings.Contains(source, "%") {

@@ -15,6 +15,7 @@ vi.mock("@/components/request", () => ({
 }));
 
 import { TaskServiceApi } from "./request";
+import { getImportErrorMessage } from "./importError";
 
 const failedResult = {
   data: {
@@ -28,6 +29,19 @@ const failedResult = {
 
 describe("import request failures", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("shows the concrete name conflict nested in a Core error response", () => {
+    const error = Object.assign(new Error("Request failed with status code 400"), {
+      response: { data: { code: 2000203, message: "Invalid request", data: { detail: "target already contains this name" } } },
+    });
+    expect(getImportErrorMessage(error)).toContain("同名");
+    expect(getImportErrorMessage(error)).not.toContain("Invalid request");
+  });
+
+  it("preserves other nested Core error details", () => {
+    const error = { response: { data: { message: "Invalid request", data: { detail: "source document changed during preparation" } } } };
+    expect(getImportErrorMessage(error)).toContain("source document changed during preparation");
+  });
 
   it("rejects HTTP-success task batches with failed items and preserves the failure reason", async () => {
     api.start.mockResolvedValue(failedResult);

@@ -9,6 +9,7 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.authPending": "待授权",
   "modelProvider.cloudDocuments.manageAccount": "管理账号",
   "modelProvider.cloudDocuments.notionConnectAction": "新增 Notion 账号",
+  "modelProvider.cloudDocuments.notionSingleConnectionHint": "目前仅支持一个 Notion 连接，已有连接请管理或重新授权。",
   "modelProvider.cloudDocuments.obsidianTitle": "Obsidian",
   "modelProvider.cloudDocuments.obsidianSetupGuideAction": "查看 Obsidian 接入教程",
   "modelProvider.cloudDocuments.obsidianDeploymentStatus": "按部署配置",
@@ -55,6 +56,10 @@ function createVm(overrides: Record<string, unknown> = {}) {
 }
 
 describe("CloudDocumentProviderPanel", () => {
+  it.each([false,true])("keeps extra provider entries in the same grid while loading=%s",(loading)=>{
+    render(<CloudDocumentProviderPanel vm={createVm({loading})} additionalCards={<button>Vocabulary provider</button>}/>);
+    expect(screen.getByRole("button",{name:"Vocabulary provider"}).parentElement).toHaveClass("model-provider-cloud-doc-grid");
+  });
   it("does not show the local document directory count", () => {
     render(
       <CloudDocumentProviderPanel
@@ -140,6 +145,21 @@ describe("CloudDocumentProviderPanel", () => {
 
     expect(handleOpenNotionSetup).toHaveBeenCalledOnce();
     expect(handleManageNotionAuth).not.toHaveBeenCalled();
+  });
+
+  it("keeps an expired Notion connection manageable without offering another connection", () => {
+    const handleManageNotionAuth = vi.fn();
+    const handleOpenNotionSetup = vi.fn();
+    render(<CloudDocumentProviderPanel vm={createVm({
+      notionOauthConnection: { connectionId: "expired-notion", status: "expired" },
+      handleManageNotionAuth,
+      handleOpenNotionSetup,
+    })} />);
+    expect(screen.getByText("目前仅支持一个 Notion 连接，已有连接请管理或重新授权。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /新增 Notion 账号/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /管理账号/ }));
+    expect(handleManageNotionAuth).toHaveBeenCalledOnce();
+    expect(handleOpenNotionSetup).not.toHaveBeenCalled();
   });
 
   it("keeps the setup guide visible alongside Desktop directory controls", async () => {

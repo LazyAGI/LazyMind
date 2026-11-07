@@ -19,6 +19,9 @@ type LocalProcessRecord struct {
 	Command     []string `json:"command,omitempty"`
 	StartedAt   string   `json:"startedAt"`
 	StartID     uint64   `json:"startId,omitempty"`
+	Executable  string   `json:"executable,omitempty"`
+	ParentPID   int      `json:"-"`
+	OwnerRoot   string   `json:"-"`
 }
 
 type localProcessRegistry struct {
@@ -80,6 +83,34 @@ func unregisterLocalProcess(paths RuntimePaths, service string, pid int) {
 		registry.Processes = kept
 		if len(registry.Processes) == 0 {
 			return os.Remove(paths.ProcessRegistryFile)
+		}
+		return writeLocalProcessRegistry(paths, registry)
+	})
+}
+
+// Save descendant identities before an ordered shutdown can reparent them.
+// Keep multiple unnamed workers; service-name deduplication would lose them.
+func rememberLocalProcessRecords(paths RuntimePaths, records []LocalProcessRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	return withFileLock(paths.ProcessRegistryFile+".lock", func() error {
+		registry, _ := readLocalProcessRegistry(paths)
+		registry.Version, registry.RepoRoot = 1, paths.RepoRoot
+		for _, record := range records {
+			if record.StartID == 0 {
+				continue
+			}
+			replaced := false
+			for i := range registry.Processes {
+				if registry.Processes[i].PID == record.PID {
+					registry.Processes[i], replaced = record, true
+					break
+				}
+			}
+			if !replaced {
+				registry.Processes = append(registry.Processes, record)
+			}
 		}
 		return writeLocalProcessRegistry(paths, registry)
 	})
@@ -164,7 +195,8 @@ func pidFileRecords(paths RuntimePaths, cfg RuntimeConfig) []LocalProcessRecord 
 			RepoRoot:    paths.RepoRoot,
 			RuntimeRoot: paths.RuntimeRoot,
 			Ports:       compactPorts(file.ports),
-			StartID:     processStartIdentity(pid),
+			// A bare pidfile has no saved identity; ownership selection must
+			// verify its service instead of blessing whichever PID is here now.
 		})
 	}
 	return records

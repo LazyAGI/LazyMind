@@ -31,6 +31,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('definition-based task step progress', () => {
+  it('carries the input checkpoint display through to the shared detail steps', async () => {
+    const { projection, session } = mockWorkflow();
+    session.steps[0].status = 'succeeded';
+    Object.assign(projection, { display: { status: 'waiting_input', reason: 'user_input_required', approval_step_id: '', input_step_id: 'analysis' } });
+    const view = renderHook(() => useTaskSteps({ ...task, status: 'waiting_inputs' }));
+    await waitFor(() => expect(view.result.current.steps[0]?.status).toBe('waiting_input'));
+    expect(view.result.current.steps).toHaveLength(5);
+    expect(view.result.current.steps[1].status).toBe('pending');
+  });
+
   it('shares one definition across 20 rows and does not refetch unchanged polling snapshots', async () => {
     const { session } = mockWorkflow();
     const values = Array.from({ length: 20 }, (_, i) => ({ ...task, id: `task-${i}`, workflow_session_id: `session-${i}` }));

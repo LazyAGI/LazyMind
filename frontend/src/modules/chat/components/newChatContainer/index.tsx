@@ -146,6 +146,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       allowMentions = true,
       allowLocalWorkspace = true,
       embeddingReady,
+      vlmReady,
       multimodalEmbeddingReady,
       rerankReady,
       disabledReason,
@@ -160,6 +161,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
+      composerVariant = "default",
+      modelSelectionDraft = false,
       fixedThinkingDepth,
       concurrentStream = false,
       thinkingDepth,
@@ -558,8 +561,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         citeMessage,
         citeMessages: nextCiteMessages,
         appendCitations = false,
+        appendText = false,
       }) => {
-        conversation.setContent(text);
+        if (text !== undefined) {
+          conversation.setContent(current => appendText && current.trim() ? `${current}\n\n${text}` : text);
+        }
         if (!appendCitations) {
           clearCiteMessages();
         }
@@ -613,6 +619,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         <div className="chat-box">
           <div className="chat-main-column">
             <MessageList
+              vlmReady={vlmReady}
               onFork={props.onFork}
               forkPending={props.forkPending}
               messageList={conversation.messageList}
@@ -720,6 +727,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               allowMentions={allowMentions}
               allowLocalWorkspace={allowLocalWorkspace}
               embeddingReady={embeddingReady}
+              vlmReady={vlmReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
               sessionId={sessionId}
@@ -749,6 +757,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}
               showModelSelector={showModelSelector}
+              placeholder={composerVariant === "paper" ? t("paperShell.askPlaceholder") : undefined}
+              composerVariant={composerVariant}
+              modelSelectionDraft={modelSelectionDraft}
               modelSelectorBusy={conversation.runtimeWaiting}
               onModelSelectionSavingChange={handleModelSelectionSavingChange}
               onWorkspacePermissionSavingChange={handleWorkspacePermissionSavingChange}

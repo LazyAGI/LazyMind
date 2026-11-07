@@ -104,6 +104,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
   onRetained,
   canChat = true,
   embeddingReady,
+  vlmReady,
   multimodalEmbeddingReady,
   rerankReady,
   returnFocusRef,
@@ -668,6 +669,7 @@ const SideChatPanel = forwardRef<SideChatPanelRef, SideChatPanelProps>(function 
                 onStreamingChange={handleStreamingChange}
                 onRequestPendingChange={handleRequestPendingChange}
                 embeddingReady={embeddingReady}
+                vlmReady={vlmReady}
                 multimodalEmbeddingReady={multimodalEmbeddingReady}
                 rerankReady={rerankReady}
                 disabledReason={t("chat.sideChat.unavailable")}

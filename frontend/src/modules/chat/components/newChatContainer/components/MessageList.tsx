@@ -138,6 +138,7 @@ interface MessageListProps {
   onScroll?: () => void;
   chatContentRef?: React.RefObject<HTMLDivElement>;
   sessionId?: string;
+  vlmReady?: boolean | null;
   onPreferenceSelect?: (preference: PreferenceType, sessionId?: string) => void;
   editingUserMessageIndex?: number | null;
   editingUserMessageText?: string;
@@ -321,6 +322,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onScroll,
   chatContentRef,
   sessionId = "",
+  vlmReady,
   onPreferenceSelect,
   editingUserMessageIndex = null,
   editingUserMessageText = "",
@@ -598,7 +600,7 @@ const MessageList: React.FC<MessageListProps> = ({
           if (item.role === RoleTypes.ASSISTANT && next?.steering_pending
             && next.history_id === item.history_id
             && !String(item.display_delta || item.delta || "").trim()
-            && !item.ask_pending && !item.answers?.length && !item.images?.length && !item.files?.length) return null;
+            && !item.ask_pending && !item.knowledge_confirmations?.length && !item.answers?.length && !item.images?.length && !item.files?.length) return null;
           const historyId = item.history_id || item.id;
           const pending = item.ask_pending;
           const hasMailDraft = Boolean(
@@ -638,6 +640,7 @@ const MessageList: React.FC<MessageListProps> = ({
                     updateAssistantMessage(msg, msg.id || msg.history_id, index)
                   }
                   sessionId={sessionId}
+                  vlmReady={vlmReady}
                   conversationFiles={conversationFiles}
                   supersededAskPending={(latestOrdinaryAsks.get(pending?.ask_id) ?? index) > index}
                   supersededMailDraftIds={mailDraftsFromAskPending(pending)

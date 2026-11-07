@@ -13,7 +13,7 @@ steps:
     - academic_read_paper
     prompt: '{{runtime_instruction}}
 
-      先调用 academic_handoff_context 读取完整原始交接，以此为准保留论文清单、用户要求和已有笔记。下游心得生成能力开发中；仅为输入串联保存简短占位正文，明确“阅读心得生成能力待对接”，不声称核验全文或生成正式心得。将正文保存为 reflection_markdown。'
+      task_context 仅包含任务定位信息。先调用 academic_handoff_context 读取完整原始交接，以此为准保留论文清单、用户要求和已有笔记。下游心得生成能力开发中；仅为输入串联保存简短占位正文，明确“阅读心得生成能力待对接”，不声称核验全文或生成正式心得。将正文保存为 reflection_markdown。'
     outputs:
     - material: reflection_markdown
     inputs:

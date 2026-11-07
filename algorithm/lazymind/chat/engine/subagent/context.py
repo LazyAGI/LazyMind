@@ -65,6 +65,7 @@ class SubAgentContext:
     db: Any
     emit: Callable[[Dict[str, Any]], None]
     # artifact seq counters and local cache (Go persists to DB; this serves intra-task reads).
+    tool_call_budget: Dict[str, Dict[str, int]] = field(default_factory=dict)
     _artifact_counts: Dict[str, int] = field(default_factory=dict)
     _local_artifacts: List[Dict[str, Any]] = field(default_factory=list)
 

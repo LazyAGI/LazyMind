@@ -34,7 +34,9 @@ def _large_transition_result():
             'workflow_state': {
                 'status': 'active',
                 'graph': {'nodes': {'generate_image': {'prompt': 'y' * 20_000}}},
-                'attempt_history': {'analyze_subject': ['z' * 10_000]},
+                'attempt_history': {'analyze_subject': [{
+                    'attempt': 1, 'status': 'succeeded', 'validity': 'effective', 'preview': 'z' * 10_000,
+                }]},
             },
         },
     }

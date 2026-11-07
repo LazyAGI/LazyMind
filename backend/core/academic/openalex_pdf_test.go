@@ -1,13 +1,67 @@
 package academic
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestPDFDiscoveryKeepsCompletedProviderOnDeadline(t *testing.T) {
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.unpaywall.org" {
+			return 200, `{"best_oa_location":{"url_for_pdf":"https://repo.example/paper.pdf"}}`
+		}
+		<-r.Context().Done()
+		return 503, "unavailable"
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	candidates, result := discoverDOIPDFs(ctx, client, "10.1234/test", "")
+	if len(candidates) != 1 || candidates[0].URL != "https://repo.example/paper.pdf" || result.Err == nil || !result.Retryable {
+		t.Fatalf("completed provider lost: candidates=%+v result=%+v", candidates, result)
+	}
+}
+
+func TestOpenDOIPDFCancellationStopsRetries(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	ctx, cancel := context.WithTimeout(context.WithValue(t.Context(), paperPDFClientKey{}, client), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	result := lookupOpenDOIPDF(ctx, "10.1234/test")
+	if result.Candidate != nil || result.Err == nil || calls.Load() != 2 || time.Since(started) > time.Second {
+		t.Fatalf("cancellation ignored: calls=%d result=%+v", calls.Load(), result)
+	}
+}
+
+func TestOpenDOIPDFProbesCompletedProviderAfterDiscoveryDeadline(t *testing.T) {
+	var metadataCalls atomic.Int32
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		switch r.URL.Host {
+		case "api.unpaywall.org":
+			metadataCalls.Add(1)
+			return 200, `{"best_oa_location":{"url_for_pdf":"https://repo.example/paper.pdf"}}`
+		case "api.openalex.org":
+			<-r.Context().Done()
+			return 503, "unavailable"
+		default:
+			return 206, "%PDF-1.7 test"
+		}
+	})
+	result := lookupOpenDOIPDF(context.WithValue(t.Context(), paperPDFClientKey{}, client), "10.1234/test")
+	if result.Candidate == nil || result.Candidate.URL != "https://repo.example/paper.pdf" || metadataCalls.Load() != 1 {
+		t.Fatalf("discovery consumed probe budget: calls=%d result=%+v", metadataCalls.Load(), result)
+	}
+}
 
 func TestDOIPDFUsesExactOpenAlexLocationWhenUnpaywallUnavailable(t *testing.T) {
 	var looked atomic.Bool

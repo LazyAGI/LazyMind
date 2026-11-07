@@ -127,9 +127,11 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'auto')
         self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'auto')
         self.assertEqual(state['steps']['generate_ppt']['mode'], 'auto')
-        self.assertEqual(state['steps']['analyze_academic_sources']['mode'], 'auto')
-        self.assertEqual(state['steps']['analyze_academic_sources']['skip_if'],
-                         {'material': 'skip_academic_sources'})
+        self.assertNotIn('analyze_academic_sources', state['steps'])
+        self.assertNotIn('prepare_paper_reflection', state['steps'])
+        self.assertIn('detailed per-paper analysis', state['steps']['collect_materials']['prompt'])
+        self.assertIn('material_summary', {item['material'] for item in state['steps']['collect_materials']['outputs']})
+        self.assertNotIn('academic_brief', {item['material'] for item in state['steps']['collect_materials']['outputs']})
         collection_inputs = {item['material']: item for item in state['steps']['collect_materials']['inputs']}
         self.assertTrue(collection_inputs['presentation_scenario']['required'])
 
@@ -156,19 +158,18 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertNotIn('style', {tab['id'] for tab in workflow['ui']['tabs']})
         materials = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
         self.assertEqual(materials['hide_when_material'], 'skip_material_collection')
-        self.assertEqual(materials['status_step_ids'], ['collect_materials', 'analyze_academic_sources'])
+        self.assertEqual(materials['status_step_ids'],
+                         ['collect_materials'])
         self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary'])
         self.assertNotIn('choose_style', {step['id'] for step in workflow['steps']})
         self.assertEqual(slots['background_prompts']['cardinality'], 'list')
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['collect_materials']],
-            ['analyze_academic_sources', 'plan_background_prompts', 'build_outline'],
-        )
-        self.assertEqual(
-            [edge['to'] for edge in state['transitions']['analyze_academic_sources']],
             ['plan_background_prompts', 'build_outline'],
         )
+        self.assertNotIn('analyze_academic_sources', state['transitions'])
+        self.assertNotIn('prepare_paper_reflection', state['transitions'])
         self.assertEqual(state['steps']['analyze_requirements']['route'], 'choice')
         self.assertEqual(state['steps']['collect_materials']['route'], 'choice')
         self.assertNotIn('skip_if', state['steps']['collect_materials'])
@@ -180,9 +181,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             state['transitions']['generate_backgrounds'],
             [{'to': 'build_outline'}],
         )
-        self.assertEqual([edge['to'] for edge in state['transitions']['build_outline']],
-                         ['generate_ppt', 'plan_page_prompts'])
-        self.assertIn('quick', state['transitions']['build_outline'][0]['when'])
+        self.assertEqual(state['transitions']['build_outline'], [{'to': 'plan_page_prompts'}])
         generate_inputs = {i['material']: i for i in state['steps']['generate_ppt']['inputs']}
         self.assertFalse(generate_inputs['slide_outline']['required'])
         self.assertIn('deck_outline', generate_inputs)
@@ -362,11 +361,20 @@ class PagePromptModeTest(unittest.TestCase):
                  patch.object(run_stage, '_build_brief_page_query') as rewrite, \
                  patch.object(run_stage, '_load_deck_style') as style:
                 self.assertEqual(run_stage.cmd_page_html_from_brief(deck, 1, prompt), 0)
-            self.assertEqual(model.call_args.args[1], prompt)
+            sent_query = model.call_args.args[1]
+            self.assertEqual(sent_query.split('\nNAMED PRESENTATION ASSETS', 1)[0], prompt)
+            self.assertIn('NAMED PRESENTATION ASSETS', sent_query)
+            # Both workflow modes now use this complete-prompt boundary. The
+            # common system contract retains charts, formulas and icons even
+            # when the user-authored prompt is passed through verbatim.
+            system = model.call_args.args[0]
+            self.assertIn('pie/doughnut', system)
+            self.assertIn('data-ppt-kind="formula"', system)
+            self.assertIn('data-ppt-kind="icon"', system)
             self.assertEqual(model.call_count, 1)
             rewrite.assert_not_called()
             style.assert_not_called()
-            self.assertEqual((deck / 'pages/page_001.query.txt').read_text(), prompt)
+            self.assertEqual((deck / 'pages/page_001.query.txt').read_text(), sent_query)
 
     def test_editable_brief_retains_internal_page_design_without_restoring_old_copy(self) -> None:
         html = ("<!DOCTYPE html><html><body><div class='wrapper'><div id='bg'></div>"
@@ -428,9 +436,11 @@ class PagePromptModeTest(unittest.TestCase):
                 calls.append(user)
                 return '<html><head></head><body><div id="ct" style="color:#556B2F">Old</div></body></html>'
             self.assertEqual(run_stage.cmd_page_html_from_brief(
-                deck, 1, '旧蓝色风格', llm_call=model, edit_instruction='改为橄榄绿'), 0)
-            self.assertIn('改为橄榄绿', calls[0])
+                deck, 1, '旧蓝色风格', llm_call=model, edit_instruction='换成白底黑字，保留图表颜色'), 0)
+            self.assertIn('换成白底黑字，保留图表颜色', calls[0])
             self.assertIn('current_html', calls[0])
+            self.assertIn('chart axes/legends', calls[0])
+            self.assertIn('Preserve source image pixels', calls[0])
 
     def test_explicit_palette_survives_catalog_repair(self):
         style = {'design_style': {'id': 1}, 'color_tone': {'id': 1},
@@ -708,6 +718,17 @@ class CombinedStyleOutlineTest(unittest.TestCase):
 
 
 class OutputNormalizationTest(unittest.TestCase):
+    def test_old_stringified_response_html_is_restored_once(self):
+        html = '<!doctype html>\n<html>\n<head>\n<style>\n.wrapper{width:1600px}\n</style></head>\n<body><script>const x="\\n";</script><p>中文</p></body></html>'
+        broken = repr({'content': html})
+        recovered = run_stage._sanitize_page_html(broken)
+        self.assertEqual(recovered, html)
+        self.assertEqual(run_stage._sanitize_page_html(recovered), html)
+
+    def test_normal_html_string_literals_are_not_unescaped(self):
+        html = '<html>\n<head><style>p::before{content:"\\n"}</style></head><body><script>const x="\\n";</script></body></html>'
+        self.assertEqual(run_stage._sanitize_page_html(html), html)
+
     def test_json_wrapper_and_trailing_commas_preserve_literal_text(self):
         raw = '<think>example {not json}</think>说明： {"pages":[{"title":"literal ,} and ]",},],} 完成'
         self.assertEqual(run_stage._parse_json_loose(raw), {'pages': [{'title': 'literal ,} and ]'}]})
@@ -716,6 +737,18 @@ class OutputNormalizationTest(unittest.TestCase):
     def test_truncated_json_is_not_fabricated(self):
         with self.assertRaises(json.JSONDecodeError):
             run_stage._parse_json_loose('{"pages":[{"title":"unfinished')
+
+    def test_python_literal_style_preserves_strings_and_nested_values(self):
+        style = {'design_style': {'name': "Speaker's style"},
+                 'palette': {'colors': ['#ffffff', '#000000']},
+                 'typography': {'font': '微软雅黑'}, 'optional': None, 'enabled': True}
+        self.assertEqual(run_stage._parse_json_loose(repr(style)), style)
+
+    def test_python_literal_compatibility_rejects_code_and_non_json_values(self):
+        for raw in ("{'x': __import__('os').getcwd()}", "{'x': {1, 2}}",
+                    "{1: 'value'}", "{'x': (1, 2)}", "{'x': 1e999}"):
+            with self.subTest(raw=raw), self.assertRaises(json.JSONDecodeError):
+                run_stage._parse_json_loose(raw)
 
     def test_outline_representation_is_normalized_without_mutating_input(self):
         source = [{'title': '封面', 'page_no': 0, 'narrative': None, 'bullets': ['短句', {'head': '清单', 'detail': None}]}]

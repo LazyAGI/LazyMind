@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -117,4 +118,65 @@ func persistPublicDisplay(tx *gorm.DB, row orm.WorkflowSessionStep, display *Pub
 		return false, ErrInvalidPublicDisplay
 	}
 	return false, appendEvent(tx, row, "", "attempt.public_display", encoded, now)
+}
+
+// Final publication and public progress settle in the same attempt transaction.
+func finishPublicProgress(tx *gorm.DB, row orm.WorkflowSessionStep, status string, now time.Time) error {
+	progress := map[string]json.RawMessage{}
+	_ = json.Unmarshal([]byte(row.ProgressJSON), &progress)
+	if progress == nil {
+		progress = map[string]json.RawMessage{}
+	}
+	if status == "succeeded" {
+		progress["progress"] = json.RawMessage(`100`)
+		progress["phase"] = json.RawMessage(`"执行完成"`)
+	}
+	// Progress updates are incremental and may omit public_display altogether.
+	var events []orm.WorkflowEvent
+	if err := tx.Where("session_id = ? AND entity_id = ? AND event_type = ?", row.SessionID, row.ID, "attempt.public_display").Order("id ASC").Find(&events).Error; err != nil {
+		return err
+	}
+	stages := map[string]taskdisplay.PublicProcessStep{}
+	for _, event := range events {
+		var display PublicDisplay
+		if err := json.Unmarshal(event.PayloadJSON, &display); err != nil {
+			return err
+		}
+		for _, step := range display.ProcessSteps {
+			stages[step.StepID] = step
+		}
+	}
+	if len(stages) > 0 {
+		changed := make([]taskdisplay.PublicProcessStep, 0)
+		for _, step := range stages {
+			if taskdisplay.Terminal(step.Status) {
+				continue
+			}
+			step.Status = status
+			if status == "cancelled" {
+				step.Status = "canceled"
+			}
+			step.Revision++
+			step.FinishedAt = &now
+			if step.StartedAt != nil {
+				elapsed := max(int64(0), now.Sub(*step.StartedAt).Milliseconds())
+				step.ElapsedMS = &elapsed
+			}
+			changed = append(changed, step)
+		}
+		if len(changed) > 0 {
+			sort.Slice(changed, func(i, j int) bool { return changed[i].StepID < changed[j].StepID })
+			display := PublicDisplay{SchemaVersion: taskdisplay.SchemaVersion,
+				EventKey: "terminal:" + row.ID + ":" + status, ProcessSteps: changed}
+			if _, err := persistPublicDisplay(tx, row, &display, now); err != nil {
+				return err
+			}
+			progress["public_display"], _ = json.Marshal(display)
+		}
+	}
+	encoded, err := json.Marshal(progress)
+	if err != nil {
+		return err
+	}
+	return tx.Model(&row).Update("progress_json", string(encoded)).Error
 }

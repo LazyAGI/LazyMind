@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Modal } from "antd";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DefaultModelConfigPanel from "./DefaultModelConfigPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   services: vi.fn(),
   models: vi.fn(),
   saveModel: vi.fn(),
+  previewEmbeddingSwitch: vi.fn(),
   saveService: vi.fn(),
   ready: vi.fn(),
   verified: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock("@/runtime/cloud/session", () => ({
   isCloudBusinessAvailable: () => mocks.cloudAvailable,
 }));
 vi.mock("../api", () => ({
+  previewEmbeddingSwitch: mocks.previewEmbeddingSwitch,
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.providers,
     apiCoreModelProvidersSelectedModelsGet: mocks.selections,
@@ -66,6 +69,13 @@ const availableModel = {
 };
 const selectedParsing = {
   category: "ocr", group_id: "parsing", group_name: "Parser", provider_name: "MinerU", share: false,
+};
+const selectedEmbedding = {
+  ...selectedLlm, model_key: "embed_main", model_id: "old-embedding",
+  name: "Old embedding", share: false,
+};
+const candidateEmbedding = {
+  ...availableModel, id: "new-embedding", name: "New embedding", model_type: "embed_main",
 };
 
 function renderPanel(
@@ -120,8 +130,15 @@ const readyToSelect = async (name: string) => {
   return select;
 };
 const configure = (name: string) => fireEvent.click(within(group(name)).getByRole("button", { name: "modelProvider.configureCapability" }));
+const chooseCandidateEmbedding = async () => {
+  await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+  const select = await readyToSelect("modelProvider.module.embeddingTitle");
+  fireEvent.mouseDown(select);
+  fireEvent.click(await screen.findByText("New embedding", { selector: "strong" }));
+};
 
 describe("default capability configuration groups", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.role = "system-admin";
@@ -132,11 +149,128 @@ describe("default capability configuration groups", () => {
     mocks.services.mockResolvedValue({ data: { selections: [selectedParsing] } });
     mocks.models.mockResolvedValue({ data: { models: [availableModel] } });
     mocks.saveModel.mockResolvedValue({ data: { selections: [selectedLlm] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "empty", can_switch: true, indexed_knowledge_bases: 0,
+      active_model_name: "", candidate_model_name: "New embedding",
+      signature_status: "none", generation: 1,
+    });
     mocks.saveService.mockResolvedValue({ data: { selections: [] } });
     mocks.ready.mockResolvedValue({ data: { ready: false } });
     mocks.verified.mockResolvedValue({ data: { ready: false } });
     mocks.groups.mockResolvedValue({ data: { groups: [] } });
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("checks the embedding signature and asks for confirmation before a compatible switch", async () => {
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "same", can_switch: true, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledWith({
+      model_id: "new-embedding", source: "own",
+    }));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureMatched",
+      okText: "modelProvider.confirmSwitch",
+    })));
+    await act(async () => { (confirm.mock.calls[0][0].onOk as () => void)(); });
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
+  });
+
+  it("does not switch to an incompatible embedding while index cleanup is unavailable", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "clear_required", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingIndexResetRequired",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    expect(group("modelProvider.module.embeddingTitle")).toHaveTextContent("Old embedding");
+  });
+
+  it("keeps the old embedding when the candidate signature cannot be checked", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "probe_failed", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "unknown", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureCheckFailed",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("honors a server refusal even when the preview reports a matching signature", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockResolvedValue({
+      outcome: "same", can_switch: false, indexed_knowledge_bases: 2,
+      active_model_name: "Old embedding", candidate_model_name: "New embedding",
+      signature_status: "verified", generation: 2,
+    });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureCheckFailed",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("checks the candidate before selecting an embedding when no index exists", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(mocks.previewEmbeddingSwitch).toHaveBeenCalledWith({
+      model_id: "new-embedding", source: "own",
+    }));
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalledOnce());
+  });
+
+  it("fails closed when the embedding switch preview request fails", async () => {
+    const warning = vi.spyOn(Modal, "warning").mockImplementation(() => ({ destroy: vi.fn(), update: vi.fn() }));
+    mocks.selections.mockResolvedValue({ data: { selections: [selectedEmbedding] } });
+    mocks.models.mockResolvedValue({ data: { models: [candidateEmbedding] } });
+    mocks.previewEmbeddingSwitch.mockRejectedValue(new Error("probe unavailable"));
+    renderPanel();
+
+    await chooseCandidateEmbedding();
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.objectContaining({
+      content: "modelProvider.embeddingSignatureCheckFailed",
+    })));
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(group("modelProvider.module.embeddingTitle")).getByRole("combobox")).toBeEnabled());
   });
 
   it("shows the four tool services in the requested order and opens their configuration", async () => {
@@ -209,6 +343,34 @@ describe("default capability configuration groups", () => {
     expect(mocks.saveModel.mock.calls[0][0].setSelectedModelsOpenAPIRequest.selections).toEqual(expect.arrayContaining([
       expect.objectContaining({ model_key: "llm", model_id: "other-model" }),
     ]));
+  });
+
+  it("loads a configured model list on first open and reuses it when reopened", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    const llmRequests = () => mocks.models.mock.calls.filter(([params]) => params.modelType === "llm");
+    expect(llmRequests()).toHaveLength(0);
+
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(llmRequests()).toHaveLength(1));
+    await screen.findByText("Demo model", { selector: "strong" });
+    fireEvent.mouseDown(document.body);
+    await waitFor(() => expect(select).toHaveAttribute("aria-expanded", "false"));
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(select).toHaveAttribute("aria-expanded", "true"));
+    expect(llmRequests()).toHaveLength(1);
+  });
+
+  it("does not refetch a model list that was loaded before opening the selector", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.ttsTitle");
+    const ttsRequests = () => mocks.models.mock.calls.filter(([params]) => params.modelType === "tts");
+    await waitFor(() => expect(ttsRequests()).toHaveLength(1));
+
+    fireEvent.mouseDown(select);
+    expect(ttsRequests()).toHaveLength(1);
   });
 
   it("reveals collapsed supplier models when searching", async () => {

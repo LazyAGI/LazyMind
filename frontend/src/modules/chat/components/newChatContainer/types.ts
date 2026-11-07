@@ -18,8 +18,9 @@ export interface ChatImperativeProps {
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => Promise<boolean>;
   prepareMessage: (
-    params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
+    params: Partial<Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">> & {
       appendCitations?: boolean;
+      appendText?: boolean;
     },
   ) => void;
   disconnectConversationStream?: (conversationId: string) => void;
@@ -74,6 +75,7 @@ export interface ChatContainerProps {
   /** Disable workspace binding and approvals for document-only conversations. */
   allowLocalWorkspace?: boolean;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabledReason?: string;
@@ -90,6 +92,8 @@ export interface ChatContainerProps {
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
   showModelSelector?: boolean;
+  composerVariant?: "default" | "paper";
+  modelSelectionDraft?: boolean;
   fixedThinkingDepth?: ThinkingDepth;
   /** Isolates this container's SSE lifecycle from the main conversation. */
   concurrentStream?: boolean;
@@ -201,16 +205,12 @@ export interface ChatMessage {
     intent_context: Record<string, unknown>;
     steering_segment_id?: string;
   };
-  knowledge_operations?: import("../../utils/knowledgeOperations").KnowledgeOperation[];
+  knowledge_confirmations?: import("@/modules/chat/types/knowledgeConfirmation").KnowledgeConfirmation[];
   ask_pending?: {
     env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;
-    questions: Array<{
-      text: string;
-      type: "boolean" | "single" | "multiple" | "text";
-      choices?: string[];
-      allow_other?: boolean;
-    }>;
+    questions: import("../AskCard").AskQuestion[];
+    workflow?: import("../AskCard").AskPending["workflow"];
     title?: string;
     title_i18n_key?: string;
     description?: string;

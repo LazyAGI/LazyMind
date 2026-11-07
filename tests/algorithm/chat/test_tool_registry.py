@@ -677,15 +677,15 @@ def test_all_real_project_factories_remain_admitted_with_known_dependencies(tmp_
         assert all(item.host_file_access is not HostFileAccess.UNDECLARED for item in metadata.values())
 
 
-@pytest.mark.parametrize('callback_position', ['initialize_session', 'user_input', 'handoff_session', 'handoff_user_input'])
+@pytest.mark.parametrize('callback_position', ['session', 'user_input', 'handoff_session', 'handoff_user_input'])
 def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.workflow import workflow_manager as workflows
     toolkit = workflows.HostWorkflowToolkit(workflows._client)
     def unreviewed():
         pytest.fail('an unreviewed callback must not execute')
-    if callback_position == 'initialize_session':
-        tool = workflows._safe_session_tools(toolkit, '', initialize_session=unreviewed)[0]
+    if callback_position == 'session':
+        tool = workflows._safe_session_tools(toolkit, unreviewed)[0]
     elif callback_position == 'user_input':
         tool = workflows._safe_session_tools(toolkit, 'session', user_input=unreviewed)[2]
     elif callback_position == 'handoff_session':
@@ -722,3 +722,15 @@ def test_management_group_is_separate_from_native_read_kb_and_requires_core_scop
     assert group['provider_id'] == 'lazymind-knowledge'
     lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
     assert _tool_group('knowledge_management')['active'] is False
+
+
+def test_vocabulary_queries_use_the_system_tool_controls():
+    assert _tool_group('vocabulary')['active'] is False
+    lazyllm.globals['agentic_config'] = {'system_mcp_config': [
+        {'id': 'lazymind-vocabulary', 'allowed_tools': ['vocabulary.wordbook.list', 'vocabulary.word.list']}]}
+    group = _tool_group('vocabulary')
+    assert group['active'] is True
+    assert group['can_disable'] is True
+    assert [method['name'] for method in group['methods']] == ['vocabulary.wordbook.list', 'vocabulary.word.list']
+    lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
+    assert _tool_group('vocabulary')['active'] is False

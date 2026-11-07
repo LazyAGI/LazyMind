@@ -74,6 +74,31 @@ it('uses remembered choices, but requires confirmation even for a menu-selected 
   expect(beforePublish).not.toHaveBeenCalled();
 });
 
+it.each(['menu', 'preference'])('initializes the %s selection without waiting for unrelated Obsidian checks', async source => {
+  availability.states.obsidian = 'checking';
+  state.preferred_providers = source === 'preference' ? ['notion'] : [];
+  render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: source === 'menu' ? 'notion' : undefined }));
+  expect(await screen.findByRole('checkbox', { name: 'Notion' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Obsidian' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Publish to Notion' })).toBeEnabled();
+  expect(beforePublish).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});
+
+it('keeps a manual choice when a preferred platform finishes checking later', async () => {
+  availability.states.obsidian = 'checking';
+  state.preferred_providers = ['obsidian'];
+  const options = { providers: [...providers, { id: 'obsidian' }] };
+  const { rerender } = render(view(options));
+  expect(await screen.findByRole('checkbox', { name: 'Obsidian' })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Notion' }));
+  availability.states.obsidian = 'ready';
+  rerender(view(options));
+  expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Obsidian' })).not.toBeChecked();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});
+
 it('flushes before one atomic multi-platform confirmation and blocks double clicks', async () => {
   let finish!: (value: { id: string; revision: number; draft: number }) => void;
   beforePublish.mockImplementation(() => new Promise(resolve => { finish = resolve; }));

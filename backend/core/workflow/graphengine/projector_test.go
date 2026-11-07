@@ -235,3 +235,32 @@ func TestSelectRouteTarget_NonChoiceRoute(t *testing.T) {
 		t.Fatalf("expected decision unchanged, got %v", result)
 	}
 }
+
+func TestPrunedEntryKeepsFutureStepVisibleUntilItsRouteIsDecided(t *testing.T) {
+	graph := &CompiledStateGraph{
+		StartRoute: "choice",
+		Nodes: map[string]CompiledNode{
+			"review": {ID: "review", Route: "choice"},
+			"revise": {ID: "revise"},
+		},
+		ControlEdges: []CompiledEdge{
+			{From: "__start__", To: "review", When: "review"},
+			{From: "__start__", To: "revise", When: "revise directly"},
+			{From: "review", To: "revise", When: "revise after review"},
+			{From: "review", To: "__end__", When: "finish"},
+		},
+	}
+	snapshot := RuntimeSnapshot{
+		Routes:   []RouteFact{{From: "__start__", Activated: []string{"review"}, Pruned: []string{"revise"}, Validity: "effective"}},
+		Attempts: []AttemptFact{{StepID: "review", Status: "running", Validity: "effective"}},
+	}
+	node := Project(graph, snapshot).Nodes["revise"]
+	if node.Branch != "active" || node.Reachability != "unreachable" || node.Readiness != "not_applicable" {
+		t.Fatalf("future revision must remain visible without becoming executable: %+v", node)
+	}
+	snapshot.Attempts[0].Status = "succeeded"
+	snapshot.Routes = append(snapshot.Routes, RouteFact{From: "review", Activated: []string{"__end__"}, Pruned: []string{"revise"}, Validity: "effective"})
+	if node := Project(graph, snapshot).Nodes["revise"]; node.Branch != "pruned" {
+		t.Fatalf("finished branch must not retain revision: %+v", node)
+	}
+}

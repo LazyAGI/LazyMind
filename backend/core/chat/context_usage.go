@@ -291,7 +291,7 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		common.ReplyErr(w, "load chat runtime config failed", http.StatusInternalServerError)
 		return
 	}
-	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	if err := applyUserEnvironmentRuntimeConfig(r.Context(), db, userID, reqBody); err != nil {
 		replyUserEnvError(w, err)
 		return

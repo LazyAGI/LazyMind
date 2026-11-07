@@ -1,3 +1,9 @@
+-- +migrate Dialect postgres,sqlite
+DROP INDEX IF EXISTS idx_reading_job_source;
+DROP INDEX IF EXISTS idx_reading_job_enrollment;
+DROP INDEX IF EXISTS idx_reading_job_daily;
+DROP INDEX IF EXISTS idx_reading_document_candidates;
+
 ALTER TABLE user_model_provider_group_models DROP COLUMN enabled;
 ALTER TABLE user_model_provider_group_models DROP COLUMN model_settings;
 ALTER TABLE default_models DROP COLUMN model_settings;
@@ -951,3 +957,14 @@ DROP TABLE IF EXISTS document_observations;
 DROP TABLE IF EXISTS document_directory_entries;
 DROP TABLE IF EXISTS document_directory_groups;
 DROP TABLE IF EXISTS document_directories;
+
+-- Personal AI reading preparation policy.
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS user_reading_policies;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS vocabulary_cloud_operations;
+DROP TABLE IF EXISTS vocabulary_cloud_connections;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS embedding_index_states;

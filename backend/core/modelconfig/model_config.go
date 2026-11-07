@@ -234,6 +234,7 @@ type SelectedRuntimeModel struct {
 	Vision             bool
 	ModelSettings      string                                  `gorm:"column:model_settings"`
 	RequestAdvanced    credentialvault.ProviderRequestAdvanced `gorm:"-" json:"-"`
+	RequestProtocol    string                                  `gorm:"-" json:"-"`
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
@@ -311,7 +312,14 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 // loadLLMConfigWithOptions keeps the legacy role loading behavior while allowing
 // chat runtime preparation to omit the chat role and reuse credential results.
 func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, omitEvolution, omitChat bool, credentials runtimeCredentials) (map[string]any, error) {
+	globalEmbedding, globalEmbeddingRow, err := loadGlobalEmbeddingRuntime(ctx, db, credentials)
+	if err != nil {
+		return nil, err
+	}
 	selectionScope := func(query *gorm.DB) *gorm.DB {
+		if globalEmbedding {
+			query = query.Where("LOWER(TRIM(usm.model_type)) <> ?", "embed_main")
+		}
 		if omitEvolution {
 			query = query.Where("usm.model_type <> ?", "evo_llm")
 		}
@@ -322,7 +330,7 @@ func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, o
 	}
 	// Step 1: load the user's own selections.
 	var ownRows []SelectedRuntimeModel
-	err := db.WithContext(ctx).
+	err = db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Scopes(selectionScope).
 		Select(
@@ -384,6 +392,9 @@ func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, o
 	unresolvedCloudTypes := make(map[string]struct{}, len(cloudSelections))
 	resolvedCloudRows := make([]SelectedRuntimeModel, 0, len(cloudSelections))
 	for _, selection := range cloudSelections {
+		if globalEmbedding && strings.EqualFold(strings.TrimSpace(selection.ModelType), "embed_main") {
+			continue
+		}
 		if omitChat && strings.EqualFold(strings.TrimSpace(selection.ModelType), "llm") {
 			continue
 		}
@@ -493,6 +504,18 @@ func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, o
 		}
 		rows = filtered
 	}
+	if globalEmbedding {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !strings.EqualFold(strings.TrimSpace(row.ModelType), "embed_main") {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+		if globalEmbeddingRow != nil {
+			rows = append(rows, *globalEmbeddingRow)
+		}
+	}
 	return BuildLLMConfig(rows), nil
 }
 
@@ -568,7 +591,7 @@ func LoadAcademicSearchToolConfig(ctx context.Context, db *gorm.DB, userID strin
 	if err != nil {
 		return nil, err
 	}
-	if row == nil {
+	if row == nil || normalizeSearchToolName(row.ProviderName) != "sciverse" {
 		row, err = loadConfiguredSciverseDatasource(ctx, db, userID)
 		if err != nil {
 			return nil, err
@@ -1078,11 +1101,13 @@ func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []Sele
 		if credentials != nil && groupID != "" {
 			key := runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}
 			if cached, ok := credentials[key]; ok &&
-				(cached.err != nil || strings.TrimSpace(cached.key) != "" || strings.TrimSpace(cached.baseURL) != "") {
+				(cached.err != nil || cached.protocol != "") {
 				if cached.err != nil {
 					return cached.err
 				}
 				rows[i].APIKey = cached.key
+				rows[i].RequestAdvanced = cached.advanced
+				rows[i].RequestProtocol = cached.protocol
 				if strings.TrimSpace(cached.baseURL) != "" {
 					rows[i].BaseURL = cached.baseURL
 				}
@@ -1095,9 +1120,10 @@ func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []Sele
 		if runtimeErr == nil {
 			rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
 			rows[i].RequestAdvanced = runtimeConfig.Advanced
+			rows[i].RequestProtocol = runtimeConfig.Protocol
 			rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
 			if groupID != "" && credentials != nil {
-				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL}
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL, advanced: runtimeConfig.Advanced, protocol: runtimeConfig.Protocol, runtimeChecked: true}
 			}
 			continue
 		}
@@ -1155,6 +1181,9 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"model":    row.ModelName,
 			"base_url": baseURL,
 			"api_key":  row.APIKey,
+		}
+		if row.RequestProtocol == "openai-responses" && (role == "llm" || role == "vlm" || role == "evo_llm") {
+			cfg["source"] = "openai_responses"
 		}
 		if row.SkipAuth && strings.TrimSpace(row.APIKey) == "" {
 			cfg["skip_auth"] = true
@@ -1318,4 +1347,25 @@ func APIKeyState(value any) string {
 func isChatTechnicalType(technical string) bool {
 	technical = strings.ToLower(strings.TrimSpace(technical))
 	return technical == "llm" || technical == "vlm"
+}
+
+// LoadOpenAlexAPIKey uses the same verified provider groups and shared selection
+// as other datasource tools. The key never leaves the server-side adapter.
+func LoadOpenAlexAPIKey(ctx context.Context, db *gorm.DB, userID string) (string, error) {
+	var row selectedProviderConfig
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").Select("p.name AS provider_name,g.base_url,g.api_key,g.api_key_ciphertext").Joins("JOIN user_model_providers p ON p.id=g.user_model_provider_id AND p.create_user_id=g.create_user_id AND p.deleted_at IS NULL").Where("g.create_user_id=? AND g.deleted_at IS NULL AND g.is_verified=? AND p.category='datasource' AND p.name='OpenAlex'", userID, true).Order("g.updated_at DESC").Limit(1).Scan(&row).Error
+	if err != nil {
+		return "", err
+	}
+	if row.ProviderName == "" {
+		shared, e := loadSelectedProviderConfig(ctx, db, "", "datasource", true)
+		if e != nil {
+			return "", e
+		}
+		if shared == nil || shared.ProviderName != "OpenAlex" {
+			return "", nil
+		}
+		row = *shared
+	}
+	return modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
 }

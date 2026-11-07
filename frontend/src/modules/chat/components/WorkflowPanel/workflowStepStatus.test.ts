@@ -36,3 +36,15 @@ describe('shared workflow step status', () => {
     expect(workflowTabStatus({ id: 'materials', status_step_ids: ['collect', 'research'] }, session)).toBe('running');
   });
 });
+
+it('marks only the authoritative input checkpoint and retains completed execution history', () => {
+  const display = { status: 'waiting_input' as const, reason: 'user_input_required', approval_step_id: '', input_step_id: 'collect' };
+  const base = { validity: 'effective', requires_approval: false, reachability: 'unreachable', readiness: 'not_applicable', branch: 'active' };
+  const session: Parameters<typeof workflowTabStatus>[1] = { current_step_id: 'collect', projection: { display, nodes: {
+    collect: { ...base, execution: 'succeeded' }, outline: { ...base, execution: 'none' },
+  } } };
+  expect(workflowTabStatus({ id: 'collect' }, session)).toBe('waiting_input');
+  expect(workflowNodeStatus(session.projection!.nodes!.collect, display, 'collect')).toBe('waiting_input');
+  expect(workflowTabStatus({ id: 'outline' }, session)).toBe('pending');
+  expect(workflowTabStatus({ id: 'collect' }, { ...session, projection: { ...session.projection, display: { ...display, status: 'running' } } })).toBe('succeeded');
+});

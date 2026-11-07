@@ -8,3 +8,9 @@ $paused-badge-text: #59410d;
 // Skipped steps share a light brown palette across workflow surfaces.
 $skipped-text: #8c7053;
 $skipped-accent: #b89b7a;
+
+// Waiting for user input uses terracotta orange, distinct from approval amber.
+$input-text: #b74616;
+$input-accent: #e66a3c;
+$input-soft: #fff0e9;
+$input-border: #f4b9a2;

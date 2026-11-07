@@ -108,7 +108,6 @@ interface Props {
     isCurrent: () => boolean,
   ) => Promise<void>;
   cloudContent: ReactNode;
-  verificationEvent?: { providerId: string; account: string | null; sequence: number };
 }
 
 function Logo({ provider }: { provider: ProviderOption }) {
@@ -126,9 +125,14 @@ function Logo({ provider }: { provider: ProviderOption }) {
   );
 }
 
+function hasVerifiedConnection(group: ProviderConnectionGroup): boolean {
+  return group.verified === true && (!group.keys.length || group.keys.some((key) => key.enabled));
+}
+
 function hasProviderConfiguration(provider: AddedProvider): boolean {
   return provider.groups.some(
-    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 || group.models.length > 0,
+    (group) => group.apiKeyConfigured || group.keys.length > 0 || (group.modelCount || 0) > 0 ||
+      group.models.length > 0 || hasVerifiedConnection(group),
   );
 }
 
@@ -211,16 +215,7 @@ export function ProviderWorkspace(props: Props) {
     [props.providers, props.configuredProviders],
   );
   const projectedNavigation = useMemo(() => projectSupplierNavigation(mergedProviders), [mergedProviders]);
-  const { providers: navigation, reorder: reorderSuppliers, promote, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
-  const lastVerification = useRef<Props["verificationEvent"]>();
-  useEffect(() => {
-    const event = props.verificationEvent;
-    if (!event || event === lastVerification.current) return;
-    lastVerification.current = event;
-    if (event.account !== localStorage.getItem("lazymind:user")) return;
-    const node = navigation.find(item => item.children.some(child => child.id === event.providerId));
-    if (node) promote(node.id);
-  }, [props.verificationEvent, navigation, promote]);
+  const { providers: navigation, reorder: reorderSuppliers, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
   const providers = useMemo(() => navigation.flatMap((node) => node.children), [navigation]);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
@@ -241,7 +236,7 @@ export function ProviderWorkspace(props: Props) {
   const hasSavedKeys = Boolean(group?.keys.length || group?.apiKeyConfigured);
   const hasEnabledKey = group?.keys.length ? group.keys.some((key) => key.enabled) : Boolean(group?.apiKeyConfigured);
   const keylessCustom = provider ? canDiscoverWithoutApiKey(provider, group) : false;
-  const verifiedSelection = (hasEnabledKey || keylessCustom) && group?.verified === true;
+  const verifiedSelection = group ? hasVerifiedConnection(group) : false;
   const supplierStatus = verifiedSelection ? "connected" : keylessCustom ? "notConnected" : !hasSavedKeys ? "notConfigured" : !hasEnabledKey ? "disabled" : "notConnected";
   const modelsError = groupKey ? props.modelsError?.[groupKey] : undefined;
   const endpointBaseline = savedEndpoint && savedEndpoint.providerId === provider?.id ? savedEndpoint.baseUrl : provider?.baseUrl || "";
@@ -383,13 +378,14 @@ export function ProviderWorkspace(props: Props) {
             api_key: apiKey.trim(),
             verify: false,
           },
-        }, { timeout: 180000 });
+        }, withModelProviderJsonOptions({ timeout: 180000, silentError: true }));
       } else if (group) {
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
           { modelProviderId: provider.id, groupId: group.id },
           withModelProviderJsonOptions({
             data: { api_key: apiKey.trim() },
             timeout: 180000,
+            silentError: true,
           }),
         );
       } else {
@@ -402,7 +398,7 @@ export function ProviderWorkspace(props: Props) {
               verify: false,
             },
           },
-          { timeout: 180000 },
+          withModelProviderJsonOptions({ timeout: 180000, silentError: true }),
         );
         const created = unwrapModelProviderData<{ id: string; is_verified?: boolean }>(response.data);
         savedGroupId = created.id;
@@ -531,7 +527,9 @@ export function ProviderWorkspace(props: Props) {
       }
       message.success(label("supplierSaved"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      if ((error as { response?: { data?: { code?: number } } })?.response?.data?.code === 2005082) {
+        providerForm.setFields([{ name: "name", errors: [label("supplierNameDuplicate")] }]);
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       providerSavePending.current = false;
       setProviderSaving(false);
@@ -550,9 +548,9 @@ export function ProviderWorkspace(props: Props) {
       if (target.isCustom) setSelectedId("");
       message.success(label(target.isCustom ? "supplierDeleted" : "supplierReset"));
     } catch (error) {
-      const response = (error as { response?: { status?: number; data?: { detail?: string; message?: string } } })?.response;
+      const response = (error as { response?: { status?: number; data?: { code?: number; detail?: string; message?: string } } })?.response;
       const detail = String(response?.data?.detail || response?.data?.message || "");
-      if (response?.status === 409 && (detail.includes("embedding model is in use") || detail.includes("requires confirmation to downgrade"))) {
+      if (response?.status === 409 && ([2005039, 2005081, 2005089].includes(response.data?.code ?? -1) || detail.includes("embedding model is in use") || detail.includes("requires confirmation to downgrade"))) {
         message.warning(t("modelProvider.embeddingInUse"));
       } else message.error(getLocalizedErrorMessage(error));
     } finally {
@@ -631,9 +629,9 @@ export function ProviderWorkspace(props: Props) {
       }
     }
   });
-  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0)) ? (
-    <i className={items.some((item) => item.groups.some((candidate) => candidate.verified &&
-      (candidate.keys.some((key) => key.enabled) || (!candidate.keys.length && candidate.apiKeyConfigured) || canDiscoverWithoutApiKey(item, candidate)))) ? "is-ready" : ""}
+  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) =>
+    candidate.apiKeyConfigured || candidate.keys.length > 0 || hasVerifiedConnection(candidate))) ? (
+    <i className={items.some((item) => item.groups.some(hasVerifiedConnection)) ? "is-ready" : ""}
       aria-label={label("configured")} />
   ) : null;
   const leafButton = (item: AddedProvider, nested = false) => (
@@ -1181,6 +1179,15 @@ export function ProviderWorkspace(props: Props) {
                   new TextEncoder().encode(value?.trim() || "").length <= 255
                     ? Promise.resolve()
                     : Promise.reject(new Error(label("supplierNameBytes"))),
+              },
+              {
+                validator: (_, value?: string) => {
+                  const name = value?.trim().toLocaleLowerCase();
+                  return !name || !providers.some(item => item.id !== providerModalTarget.current?.id &&
+                    item.name.trim().toLocaleLowerCase() === name)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(label("supplierNameDuplicate")));
+                },
               },
             ]}
           >

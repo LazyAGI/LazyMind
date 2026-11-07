@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 _CONTROL = re.compile(
-    r'^(?:继续(?:执行|生成|下一步)?|下一步|确认|同意|批准|重试|再试一次|'
+    r'^(?:继续(?:执行|生成|下一步)?|下一步|确认|同意|批准|重试|重新执行|再试一次|'
     r'continue|next|next step|ok|yes|approve|approved|retry|try again)[\s。.!！]*$', re.I,
 )
 

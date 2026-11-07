@@ -24,6 +24,7 @@ import (
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/document"
+	"lazymind/core/workflow/runstate"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -31,10 +32,10 @@ import (
 // a failed attempt is reflected at session level so the UI does not present it as an
 // approval checkpoint.
 const (
-	SessionStatusActive    = "active"
-	SessionStatusCompleted = "completed"
-	SessionStatusFailed    = "failed"
-	SessionStatusWaiting   = "waiting"
+	SessionStatusActive    = runstate.Active
+	SessionStatusCompleted = runstate.Completed
+	SessionStatusFailed    = runstate.Failed
+	SessionStatusWaiting   = runstate.Waiting
 )
 
 func normalizeSessionWorkflowMode(value string) string {
@@ -214,60 +215,55 @@ func RestoreSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 	})
 }
 
-// healStaleActiveSession repairs a session that is stuck in "active" state after a crash.
-// A step is considered orphaned (and safe to mark interrupted) only when its backing
-// sub_agent_task is already in a terminal state (succeeded/failed/interrupted/canceled) while
-// the workflow_session_step still shows "running". This avoids incorrectly interrupting steps
-// that are genuinely still executing.
-//
-// If all orphaned running steps are resolved and no real running steps remain, the session
-// is flipped from "active" to "waiting".
-//
-// A grace period (staleThreshold) is applied to the session's updated_at to avoid touching
-// sessions that just started.
+// healStaleActiveSession reconciles orphaned native attempts through the same
+// terminal projection as live completion. An idle handoff alone is not evidence
+// of failure. Controlled attempts recover through their lease/receipt protocol.
 func healStaleActiveSession(ctx context.Context, db *gorm.DB, s *orm.WorkflowSession) {
 	const staleThreshold = 2 * time.Minute
-	if time.Since(s.UpdatedAt) < staleThreshold {
+	if controlstore.Controlled(*s) || time.Since(s.UpdatedAt) < staleThreshold {
 		return
 	}
-
-	now := time.Now().UTC()
-
-	// Fix orphaned running steps: workflow_session_step is "running" but the backing
-	// sub_agent_task has already reached a terminal state. Sync the step status to
-	// match the task status exactly (succeeded/failed/interrupted/canceled).
-	result := db.WithContext(ctx).Exec(`
-		UPDATE plugin_session_steps pss
-		SET status = sat.status, updated_at = ?
-		FROM sub_agent_tasks sat
-		WHERE pss.session_id = ?
-		  AND pss.task_id = sat.id
-		  AND pss.status = 'running'
-		  AND sat.status IN ('succeeded', 'failed', 'interrupted', 'canceled')
-		`, now, s.ID)
-	orphansFixed := result.RowsAffected
-
-	// Count genuinely running steps remaining after the fix.
-	var realRunning int64
-	db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-		Where("session_id = ? AND status = ?", s.ID, StepStatusRunning).
-		Count(&realRunning)
-
-	if realRunning > 0 {
-		// Some steps are still backed by a genuinely running task — don't touch the session.
-		if orphansFixed > 0 {
-			fmt.Printf("[plugin] healStaleActiveSession: session %s fixed %d orphan step(s), %d still running\n",
-				s.ID, orphansFixed, realRunning)
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		session, err := artifactgraph.LockSession(tx, s.ID)
+		if err != nil {
+			return err
 		}
-		return
+		if controlstore.Controlled(*session) || session.Status != SessionStatusActive {
+			return nil
+		}
+		var orphans []struct {
+			orm.WorkflowSessionStep
+			TaskStatus string
+		}
+		if err := tx.Table("plugin_session_steps AS pss").Select("pss.*, sat.status AS task_status").
+			Joins("JOIN sub_agent_tasks sat ON sat.id = pss.task_id").
+			Where("pss.session_id = ? AND pss.status = 'running' AND pss.validity <> 'stale' AND sat.status IN ?", s.ID,
+				[]string{"succeeded", "failed", "interrupted", "canceled"}).Scan(&orphans).Error; err != nil {
+			return err
+		}
+		for _, orphan := range orphans {
+			if err := UpdateStepStatus(ctx, tx, orphan.TaskID, orphan.TaskStatus); err != nil {
+				return err
+			}
+			if session.WorkflowRevisionID != "" {
+				if err := FinalizeHostAttempt(ctx, tx, session.ID, orphan.StepID, orphan.ID, orphan.TaskStatus); err != nil {
+					return err
+				}
+			} else {
+				status := SessionStatusWaiting
+				if orphan.TaskStatus == "failed" {
+					status = SessionStatusFailed
+				}
+				if err := UpdateSessionStatus(ctx, tx, session.ID, status); err != nil {
+					return err
+				}
+			}
+		}
+		return tx.First(s, "id = ?", s.ID).Error
+	})
+	if err != nil {
+		fmt.Printf("[plugin] reconcile orphaned attempts session=%s: %v\n", s.ID, err)
 	}
-
-	// No genuinely running steps → flip session to waiting.
-	db.WithContext(ctx).Model(s).
-		Updates(map[string]any{"status": SessionStatusWaiting, "updated_at": now})
-	s.Status = SessionStatusWaiting
-	fmt.Printf("[plugin] healStaleActiveSession: session %s repaired active→waiting (orphans=%d)\n",
-		s.ID, orphansFixed)
 }
 
 // GetSession loads a session by ID.
@@ -313,20 +309,23 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", sessionID).First(&session).Error; err != nil {
 			return err
 		}
+		if controlstore.Controlled(session) {
+			return nil
+		}
 		view, err := displaystate.Read(tx, session)
 		if err != nil {
 			return err
 		}
-		if view.Status == "paused" || view.Status == "waiting" || session.Status == "pausing" || session.Status == SessionStatusCompleted {
+		// Dynamic hand-off can continue, but edited inputs still require an explicit user command.
+		inputsChanged := view.Status == "waiting" && view.Reason == "inputs_changed"
+		if view.Status == "paused" || view.ApprovalRequired() || inputsChanged || session.Status == "pausing" || session.Status == SessionStatusCompleted {
 			return nil
 		}
 		if session.Status != SessionStatusActive {
-			session.Status = SessionStatusActive
-			session.StateVersion++
-			session.UpdatedAt = time.Now().UTC()
-			if err := tx.Model(&session).Updates(map[string]any{"status": session.Status, "state_version": session.StateVersion, "updated_at": session.UpdatedAt}).Error; err != nil {
+			if err := acceptRunControl(ctx, tx, &session, "continue", map[string]any{"state_version": session.StateVersion + 1}, &session.StateVersion); err != nil {
 				return err
 			}
+			session.StateVersion++
 			if err := appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"active"}`)); err != nil {
 				return err
 			}
@@ -341,19 +340,25 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 // and a newer dispatch. A failed controller must never manufacture an approval.
 func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where("session_id = ? AND validity <> ? AND status IN ?", sessionID, "stale", []string{"pending", "queued", "claimed", "running"})
-		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status = ?", sessionID, SessionStatusActive).
-			Where("NOT EXISTS (?)", busy).Updates(map[string]any{"status": SessionStatusFailed, "updated_at": time.Now().UTC(), "state_version": gorm.Expr("state_version + 1")})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil
-		}
 		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
 			return err
 		}
+		if session.Status != SessionStatusActive {
+			return nil
+		}
+		var busy int64
+		if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND validity <> ? AND status IN ?",
+			sessionID, "stale", []string{"pending", "queued", "claimed", "running"}).Count(&busy).Error; err != nil {
+			return err
+		}
+		if busy != 0 {
+			return nil
+		}
+		if err := runstate.Write(tx, &session, SessionStatusFailed, map[string]any{"state_version": session.StateVersion + 1}); err != nil {
+			return err
+		}
+		session.StateVersion++
 		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"failed"}`))
 	})
 	if err == nil && OnAcademicRuntimeChanged != nil {
@@ -365,30 +370,45 @@ func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ? AND status <> ?", sessionID, status, "pausing")
-		if status == SessionStatusWaiting {
-			// Delayed pause callbacks cannot overwrite a terminal session or a
-			// newly dispatched attempt (which may still be queued/claimed).
-			busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where(
-				"session_id = ? AND validity = ? AND status IN ?", sessionID, "effective",
-				[]string{"pending", "queued", "claimed", "running"})
-			query = query.Where("status NOT IN ?", []string{"completed", "failed", "stopped"}).Where("NOT EXISTS (?)", busy)
+		var session orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
+			return err
 		}
-		updates := map[string]any{"status": status, "updated_at": time.Now().UTC()}
-		// Dispatch reserves one version for the entire batch before launching.
-		if status != SessionStatusActive {
-			updates["state_version"] = gorm.Expr("state_version + 1")
-		}
-		updated := query.Updates(updates)
-		if updated.Error != nil {
-			return updated.Error
-		}
-		if updated.RowsAffected == 0 {
+		if session.Status == status || session.Status == "pausing" {
 			return nil
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+		// A dispatch may have created a queued attempt. Read those durable facts
+		// instead of trusting a status requested by a legacy adapter.
+		if controlstore.Controlled(session) {
+			return reconcileRunStatus(ctx, tx, &session)
+		}
+		if status == SessionStatusWaiting {
+			if session.Status == SessionStatusCompleted || session.Status == SessionStatusFailed || session.Status == "stopped" {
+				return nil
+			}
+			var busy int64
+			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND validity = ? AND status IN ?",
+				sessionID, "effective", []string{"pending", "queued", "claimed", "running"}).Count(&busy).Error; err != nil {
+				return err
+			}
+			if busy != 0 {
+				return nil
+			}
+			if session.WorkflowRevisionID != "" {
+				// Yielding execution is not a user pause. Use the same graph facts
+				// as protocol completion to retain preparation and review barriers.
+				return reconcileRunStatus(ctx, tx, &session)
+			}
+		}
+		fields := map[string]any{}
+		if status != SessionStatusActive {
+			fields["state_version"] = session.StateVersion + 1
+		}
+		if err := runstate.Write(tx, &session, status, fields); err != nil {
 			return err
+		}
+		if status != SessionStatusActive {
+			session.StateVersion++
 		}
 		payload, _ := json.Marshal(map[string]any{"status": status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
@@ -433,18 +453,26 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 // Terminal states are first-writer-wins: once a step has been interrupted by the
 // user, delayed start/done/error frames from the SubAgent stream cannot revive it.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var rows []orm.WorkflowSessionStep
 		if err := tx.Where("task_id = ?", taskID).Find(&rows).Error; err != nil {
 			return err
 		}
 		for _, row := range rows {
-			if row.Status == status {
+			if row.Status == status || row.Validity == "stale" || row.Status == "succeeded" || row.Status == "failed" ||
+				row.Status == "interrupted" || row.Status == "cancelled" || row.Status == "canceled" {
+				continue
+			}
+			var session orm.WorkflowSession
+			if err := tx.Where("id = ?", row.SessionID).First(&session).Error; err != nil {
+				return err
+			}
+			if controlstore.Controlled(session) {
 				continue
 			}
 			q := tx.Model(&orm.WorkflowSessionStep{}).Where("id = ? AND status <> ?", row.ID, status).
 				Where("NOT (status = ? AND terminal_code = ?)", StepStatusInterrupted, "WORKFLOW_STOPPED")
-			terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted}
+			terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted, "cancelled", "canceled"}
 			if status == StepStatusRunning || status == StepStatusSucceeded || status == StepStatusFailed || status == StepStatusInterrupted {
 				q = q.Where("status NOT IN ?", terminal)
 			}
@@ -455,10 +483,6 @@ func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) e
 			}
 			if updated.RowsAffected == 0 {
 				continue
-			}
-			var session orm.WorkflowSession
-			if err := tx.Where("id = ?", row.SessionID).First(&session).Error; err != nil {
-				return err
 			}
 			payload, _ := json.Marshal(map[string]any{"attempt_id": row.ID, "status": status})
 			if err := tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: session.CreateUserID, ContractVersion: "workflow.v1", EventType: "attempt.patch", EntityID: row.ID, StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now}); err != nil {
@@ -1336,6 +1360,16 @@ func UpdateSelectedHumanArtifactValue(
 	contentType string, value json.RawMessage, caption *string,
 	expectedRevision *int, expectedDraftVersion *int64,
 ) (*orm.WorkflowSlotRevision, int64, bool, error) {
+	return updateSelectedHumanArtifactValue(ctx, db, sessionID, slotID, listIndex, contentType, value, caption, expectedRevision, expectedDraftVersion, false, false)
+}
+
+func updateSelectedHumanArtifactValue(
+	ctx context.Context, db *gorm.DB,
+	sessionID, slotID string, listIndex *int,
+	contentType string, value json.RawMessage, caption *string,
+	expectedRevision *int, expectedDraftVersion *int64,
+	outlineScope, numberingOnly bool,
+) (*orm.WorkflowSlotRevision, int64, bool, error) {
 	value = common.CanonicalizeTextArtifactValue(contentType, value)
 	var selected orm.WorkflowSlotRevision
 	var draftVersion int64
@@ -1408,7 +1442,16 @@ func UpdateSelectedHumanArtifactValue(
 			}
 			return nil
 		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, sessionID, selected.ID); err != nil {
+		revisionIDs, err := outlineSaveRevisionIDs(tx, sessionID, outlineScope, selected.ID)
+		if err != nil {
+			return err
+		}
+		if numberingOnly {
+			err = artifactgraph.CheckConsumers(ctx, tx, sessionID, revisionIDs...)
+		} else {
+			err = artifactgraph.InvalidateConsumers(ctx, tx, sessionID, revisionIDs...)
+		}
+		if err != nil {
 			return err
 		}
 
@@ -1473,7 +1516,10 @@ func writeSlotRevisionWithHumanArtifact(
 	expectedRevision *int, expectedDraftVersion *int64,
 	preserveConsumers bool,
 	preservedProducer *orm.WorkflowSlotRevision,
+	outlineSave ...bool,
 ) (*orm.WorkflowSlotRevision, error) {
+	outlineScope := len(outlineSave) > 0 && outlineSave[0]
+	numberingOnly := len(outlineSave) > 1 && outlineSave[1]
 
 	if changeSource == "" {
 		changeSource = "human"
@@ -1560,7 +1606,11 @@ func writeSlotRevisionWithHumanArtifact(
 		if err != nil {
 			return err
 		}
-		if preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
+		replacedRevisionIDs, err = outlineSaveRevisionIDs(tx, sessionID, outlineScope, replacedRevisionIDs...)
+		if err != nil {
+			return err
+		}
+		if numberingOnly || preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
 			err = artifactgraph.CheckConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
 		} else if preservedProducer == nil {
 			err = artifactgraph.InvalidateConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
@@ -1706,6 +1756,52 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
 	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft bool,
 ) (*orm.WorkflowSlotRevision, int64, bool, error) {
+	return saveHumanArtifactValue(ctx, db, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, baseRevision, baseDraft, draft, false, false)
+}
+
+func outlineSaveRevisionIDs(tx *gorm.DB, sessionID string, outlineScope bool, currentIDs ...string) ([]string, error) {
+	ids := append([]string(nil), currentIDs...)
+	if !outlineScope {
+		return ids, nil
+	}
+	var draft orm.WorkflowSlotRevision
+	err := tx.Select("producer_attempt_id", "step_id", "attempt").
+		Where("session_id = ? AND slot_id = ? AND selected = ? AND validity = ?", sessionID, "draft_document", true, "effective").
+		Take(&draft).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ids, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	attemptID := draft.ProducerAttemptID
+	if attemptID == "" {
+		var attempt orm.WorkflowSessionStep
+		err = tx.Select("id").Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, draft.StepID, draft.Attempt).Take(&attempt).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ids, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		attemptID = attempt.ID
+	}
+	var bindings []orm.WorkflowAttemptInputBinding
+	if err := tx.Select("material_revision_id").Where("session_id = ? AND attempt_id = ? AND material_id = ?", sessionID, attemptID, "outline_document").Find(&bindings).Error; err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if binding.MaterialRevisionID != "" {
+			ids = append(ids, binding.MaterialRevisionID)
+		}
+	}
+	return ids, nil
+}
+
+func saveHumanArtifactValue(ctx context.Context, db *gorm.DB,
+	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
+	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft, outlineScope, numberingOnly bool,
+) (*orm.WorkflowSlotRevision, int64, bool, error) {
 	frozen, directory, err := publication.SnapshotEdit(db.WithContext(ctx), sessionID, contentType, value)
 	if err != nil {
 		return nil, 0, false, err
@@ -1725,13 +1821,13 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 		inPlace = false
 		if draft {
 			var err error
-			revision, version, inPlace, err = UpdateSelectedHumanArtifactValue(ctx, tx, sessionID, slotID, listIndex, contentType, value, caption, baseRevision, baseDraft)
+			revision, version, inPlace, err = updateSelectedHumanArtifactValue(ctx, tx, sessionID, slotID, listIndex, contentType, value, caption, baseRevision, baseDraft, outlineScope, numberingOnly)
 			if err != nil || inPlace {
 				return err
 			}
 		}
 		var err error
-		revision, err = WriteSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft)
+		revision, err = writeSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft, false, nil, outlineScope, numberingOnly)
 		if err == nil {
 			version = 1
 		}
@@ -1743,7 +1839,37 @@ func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
 	return revision, version, inPlace, nil
 }
 
+func markdownUnchangedBeforeNumbering(ctx context.Context, baseArtifact, editedArtifact json.RawMessage) (bool, error) {
+	base, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{
+		Reference: "builtin:document.render_document.v1", Phase: "preview", Artifact: baseArtifact,
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		return false, documentUpstreamFailure(status, err)
+	}
+	edited, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{
+		Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact,
+		Arguments: map[string]any{"base_artifact": json.RawMessage(baseArtifact)},
+	})
+	if err != nil {
+		return false, documentUpstreamFailure(status, err)
+	}
+	var baseline struct {
+		Document json.RawMessage `json:"document"`
+	}
+	var normalized struct {
+		Source json.RawMessage `json:"source_document"`
+	}
+	var before, after string
+	if json.Unmarshal(base.Result, &baseline) != nil || json.Unmarshal(edited.Result, &normalized) != nil ||
+		json.Unmarshal(baseline.Document, &before) != nil || json.Unmarshal(normalized.Source, &after) != nil {
+		return false, documentFailure("DOCUMENT_ACTION_RESULT_INVALID", 502)
+	}
+	return strings.TrimRight(before, "\r\n") == strings.TrimRight(after, "\r\n"), nil
+}
+
 func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id string, baseRevision int, baseDraft *int64, contentType string, value json.RawMessage, caption *string, draft bool, numbering ...json.RawMessage) (*orm.WorkflowSlotRevision, error) {
+	numberingOnly := false
 	if len(numbering) > 0 && len(numbering[0]) > 0 {
 		request := documentActionRequest{baseRevision: &baseRevision, baseDraftVersion: baseDraft}
 		target, err := prepareDocumentAction(ctx, owner, id, request, true)
@@ -1755,7 +1881,14 @@ func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id strin
 			return nil, documentFailure("DOCUMENT_ACTION_INVALID", 400)
 		}
 		editedArtifact, _ := json.Marshal(map[string]any{"data": edited.Value})
-		reply, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact, Arguments: map[string]any{"base_artifact": map[string]any{"data": target.content.Value}, "numbering_update": numbering[0]}})
+		baseArtifact, _ := json.Marshal(map[string]any{"data": target.content.Value})
+		if target.session.WorkflowID == "writer-workflow" && target.revision.SlotID == "outline_document" && target.content.Representation == "markdown" {
+			numberingOnly, err = markdownUnchangedBeforeNumbering(ctx, baseArtifact, editedArtifact)
+			if err != nil {
+				return nil, err
+			}
+		}
+		reply, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact, Arguments: map[string]any{"base_artifact": json.RawMessage(baseArtifact), "numbering_update": numbering[0]}})
 		if err != nil {
 			return nil, documentUpstreamFailure(status, err)
 		}
@@ -1799,7 +1932,8 @@ func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id strin
 		if current.ListIndex != nil {
 			cardinality = "list"
 		}
-		result, _, _, err = SaveHumanArtifactValue(ctx, tx, current.SessionID, current.SlotID, current.Slot, current.StepID, current.Attempt, cardinality, current.ListIndex, contentType, value, caption, &baseRevision, baseDraft, draft)
+		outlineScope := session.WorkflowID == "writer-workflow" && current.SlotID == "outline_document" && contentType == "text/markdown"
+		result, _, _, err = saveHumanArtifactValue(ctx, tx, current.SessionID, current.SlotID, current.Slot, current.StepID, current.Attempt, cardinality, current.ListIndex, contentType, value, caption, &baseRevision, baseDraft, draft, outlineScope, numberingOnly && outlineScope)
 		return err
 	})
 	if err != nil {

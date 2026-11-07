@@ -56,6 +56,30 @@ func TestWorkflowStepParamsPreserveRequestIdentity(t *testing.T) {
 	}
 }
 
+func TestWorkflowStepParamsPreserveCurrentRevisionRequest(t *testing.T) {
+	for _, current := range []string{"只修改第3、7、9条，实验保留待补", ""} {
+		params := WorkflowStepParams{
+			UserInput:        "请对我上传的论文做审稿。",
+			LaunchUserInput:  "请对我上传的论文做审稿。",
+			CurrentUserInput: current,
+		}
+		payload, err := json.Marshal(params.asMap())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatal(err)
+		}
+		if value, exists := got["current_user_input"]; !exists || value != current {
+			t.Fatalf("current request lost or replaced by launch intent: %s", payload)
+		}
+		if got["launch_user_input"] != params.LaunchUserInput {
+			t.Fatalf("launch intent lost: %s", payload)
+		}
+	}
+}
+
 // TestLoadWorkflowChatContextFromDB_WrongAgentType returns nil.
 func TestLoadWorkflowChatContextFromDB_WrongAgentType(t *testing.T) {
 	db := newTestDB(t)

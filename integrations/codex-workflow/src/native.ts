@@ -3,16 +3,54 @@ import { workflowTurnEvidence } from './ownership'
 import { sessionExpression } from './presentation'
 export { selectCodexTarget } from './windows'
 export interface NativeTurn { id: string; status: string; startedAt?: number; items: any[] }
-export interface NativeThread { id: string; turns: NativeTurn[]; active: boolean; owner?: boolean; ready?: boolean }
+export interface NativeThread { id: string; turns: NativeTurn[]; active: boolean; owner?: boolean; ready?: boolean; ownerScope?: 'host' | 'window' }
 
 /** Runs inside the existing desktop renderer, never in a new App Server. */
 export async function codexOperation(input: any, readEvidence = workflowTurnEvidence): Promise<any> {
   const host = globalThis as any
+  // Discovery must not invoke arbitrary accessors or derived signal reads in
+  // the application's renderer. Those reads can subscribe, compute and grow
+  // the very Maps being traversed.
+  const data = (value: any, key: string): any => {
+    for (let depth = 0; value && depth < 6; depth++, value = Object.getPrototypeOf(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (descriptor) return 'value' in descriptor ? descriptor.value : undefined
+    }
+  }
   const capable = (value: any) => { try { return value && typeof value === 'object'
-    && ['getHostId', 'getConversation', 'startTurn', 'interruptConversation'].every(key => typeof value[key] === 'function')
-    && value.getHostId() === 'local' } catch { return false } }
+    && ['getHostId', 'getConversation', 'startTurn', 'interruptConversation'].every(key => typeof data(value, key) === 'function')
+    && data(value, 'getHostId').call(value) === 'local' } catch { return false } }
+  // Recent desktops keep the manager outside the renderer. The existing host
+  // connection holds its RPC client; the separate config-only RPC is not a
+  // conversation manager and must not be admitted by its hostId alone.
+  const rpcManager = (state: any) => {
+    const client = data(state, 'client'), rpc = data(client, 'rpc')
+    if (typeof data(state, 'status') !== 'string' || data(client, 'hostId') !== 'local' || typeof rpc !== 'function') return null
+    return {
+      __lazymindRpc: rpc,
+      getHostId: () => 'local',
+      getConversation: (id: string) => rpc.getConversation(id),
+      getStreamRole: (id: string) => rpc.getStreamRole(id),
+      startTurn: (id: string, request: any) => rpc.startTurn(id, request),
+      interruptConversation: (id: string, reason: string, turn: string) => rpc.interruptConversation(id, reason, turn),
+    }
+  }
+  const dispose = (value: any) => { if (typeof value?.[Symbol.dispose] === 'function') value[Symbol.dispose]() }
   let manager = host.__lazymindCodexManager
   if (!capable(manager)) {
+    manager = null
+    const now = performance.now()
+    const previous = host.__lazymindCodexDiscovery
+    if (previous?.version === 3 && now < previous.retryAt) {
+      if (input.kind === 'probe') return { ready: false }
+      throw new Error('Codex native conversation interface is unavailable')
+    }
+    host.__lazymindCodexDiscovery = { version: 3, retryAt: now + 5000 }
+    // A short renderer budget is independent of the CDP/Node timeout: closing
+    // a timed-out socket cannot interrupt JavaScript already running here.
+    const deadline = now + 12
+    let remaining = 4000
+    const available = () => remaining-- > 0 && performance.now() < deadline
     const roots: any[] = []
     if (host.__codexRoot?._internalRoot?.current) roots.push(host.__codexRoot._internalRoot.current)
     for (const element of Array.from(document.querySelectorAll('#root, #app, body > div'))) {
@@ -23,31 +61,50 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
     const fibers = new Set<any>(), values = new Set<any>()
     const find = (value: any, depth: number): any => {
       try {
-        if (!value || typeof value !== 'object' || values.has(value) || values.size > 20000) return null
+        if (!value || typeof value !== 'object' || values.has(value) || !available()) return null
         values.add(value)
         if (capable(value)) return value
         // Current desktop stores managers in existing signal cells, behind the
         // React hook's client ref. WeakMap internals are not enumerable.
-        const bindings = value.node?.familyBindings
+        const bindings = data(data(value, 'node'), 'familyBindings')
         if (bindings instanceof Map) {
-          for (const family of bindings.values()) {
+          let count = 0
+          const size = Math.min(bindings.size, 256)
+          for (const [definition, family] of bindings) {
+            if (count++ >= size || !available()) break
+            if (data(definition, 'kind') !== 'signal-family') continue
             if (!(family instanceof Map)) continue
-            for (const binding of family.values()) {
-              const cell = binding?.value
-              if (cell?.atom && cell.store && typeof cell.get === 'function') {
-                try { const current = cell.get(); if (capable(current)) return current } catch {}
-              }
-            }
+            // The native manager registry is a primitive signal keyed by host.
+            // Read only its existing local slot, never every computed cell.
+            const cell = data(family.get('local'), 'value')
+            const atom = data(cell, 'atom'), store = data(cell, 'store')
+            if (!atom || !Object.hasOwn(atom, 'init') || typeof data(cell, 'set') !== 'function'
+              || typeof data(store, 'get') !== 'function') continue
+            const current = data(store, 'get').call(store, atom)
+            if (capable(current)) return current
+            const remote = rpcManager(current)
+            if (remote) return remote
           }
           return null
         }
-        if (!depth || value instanceof Node || value.$$typeof || ('tag' in value && 'memoizedState' in value)) return null
-        const entries = value instanceof Map ? Array.from(value.values()) : Object.values(Object.getOwnPropertyDescriptors(value)).flatMap(d => 'value' in d ? [d.value] : [])
-        for (const entry of entries) { const found = find(entry, depth - 1); if (found) return found }
+        if (!depth || value instanceof Node || data(value, '$$typeof') || ('tag' in value && 'memoizedState' in value)) return null
+        let count = 0
+        if (value instanceof Map) {
+          const size = Math.min(value.size, 256)
+          for (const entry of value.values()) {
+            if (count++ >= size || !available()) break
+            const found = find(entry, depth - 1); if (found) return found
+          }
+        } else for (const key in value) {
+          if (count++ >= 256 || !available()) break
+          const descriptor = Object.getOwnPropertyDescriptor(value, key)
+          if (!descriptor || !('value' in descriptor)) continue
+          const found = find(descriptor.value, depth - 1); if (found) return found
+        }
       } catch { /* Ignore inaccessible browser objects; inspect other hooks. */ }
       return null
     }
-    while (roots.length && fibers.size < 30000 && !manager) {
+    while (roots.length && !manager && available()) {
       const fiber = roots.pop()
       if (!fiber || fibers.has(fiber)) continue
       fibers.add(fiber)
@@ -59,46 +116,83 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
       let dependency = fiber.dependencies?.firstContext
       for (let i = 0; dependency && i < 30 && !manager; i++, dependency = dependency.next) manager = find(dependency.memoizedValue, 2)
     }
-    if (!capable(manager)) throw new Error('Codex native conversation interface is unavailable')
+    if (!capable(manager)) {
+      if (input.kind === 'probe') return { ready: false }
+      throw new Error('Codex native conversation interface is unavailable')
+    }
     host.__lazymindCodexManager = manager
   }
+  const rpc = data(manager, '__lazymindRpc')
+  if (rpc) {
+    try {
+      if (await rpc.getHostId() !== 'local') throw new Error('Unexpected Codex RPC host')
+    } catch {
+      delete host.__lazymindCodexManager
+      if (input.kind === 'probe') return { ready: false }
+      throw new Error('Codex native conversation connection is unavailable')
+    }
+  }
   if (input.kind === 'probe') return { ready: true }
-  const raw = manager.getConversation(input.threadId)
-  if (!raw || raw.id !== input.threadId) return { missing: true }
-  const snapshot = () => {
-    const state = manager.getConversation(input.threadId)
+  // The RPC only fences interruption by turn ID. Steering can change Workflow
+  // ownership within that same turn after any asynchronous snapshot. Until the
+  // host offers conditional interruption, never send Stop using stale evidence.
+  if (rpc && input.kind === 'interrupt') return {
+    rejected: 'This Codex version cannot safely interrupt a Workflow turn. Stop the current response in Codex.',
+  }
+  const capture = (state: any, stream: any, streaming: boolean) => {
+    if (!state || state.id !== input.threadId) return { missing: true as const }
     const history = state?.turnHistory
     const records = history?.kind === 'canonical'
       ? history.history.islands.flatMap((island: any) => island.entries.map((entry: any) => history.history.entitiesByKey[entry.value])).filter(Boolean)
       : state?.turns ?? []
     const turns = records.map((turn: any) => ({ id: turn.turnId ?? turn.id, status: turn.status,
       startedAt: turn.turnStartedAtMs ?? turn.startedAtMs, items: turn.items ?? [] }))
-    const role = manager.getStreamRole?.(input.threadId)?.role
-    const ready = state.resumeState === 'resumed' && ['owner','follower'].includes(role) && manager.isConversationStreaming?.(input.threadId) === true
-    return { id: state.id, turns, ready, owner: role === 'owner', active: state.threadRuntimeStatus?.type === 'active' || turns.some((turn: any) => turn.status === 'inProgress') }
+    const role = stream?.role
+    const ready = state.resumeState === 'resumed' && ['owner','follower'].includes(role) && streaming
+    return { id: state.id, turns, ready, owner: role === 'owner', ownerScope: rpc ? 'host' as const : 'window' as const,
+      active: state.threadRuntimeStatus?.type === 'active' || turns.some((turn: any) => turn.status === 'inProgress') }
   }
-  if (input.kind === 'read') return snapshot()
+  const localSnapshot = () => capture(manager.getConversation(input.threadId), manager.getStreamRole?.(input.threadId), manager.isConversationStreaming?.(input.threadId) === true)
+  const snapshot = async () => {
+    if (!rpc) return localSnapshot()
+    const state = await manager.getConversation(input.threadId)
+    let stream: any
+    try {
+      stream = await manager.getStreamRole(input.threadId)
+      // The RPC exposes getStreamRole, not isConversationStreaming. Both native
+      // methods use the same streamRoles map, so a live role proves membership.
+      return capture(state, stream, stream != null)
+    } finally { dispose(stream); dispose(state) }
+  }
+  const current = await snapshot()
+  if (current.missing) return current
+  if (input.kind === 'read') return current
   if (input.kind === 'start') {
-    if (!snapshot().ready) return { rejected: 'Codex conversation is still restoring; no message was sent', retryable: true }
-    if (snapshot().active) return { rejected: 'Codex chat is busy; no message was sent' }
+    if (!current.ready) return { rejected: 'Codex conversation is still restoring; no message was sent', retryable: true }
+    if (current.active) return { rejected: 'Codex chat is busy; no message was sent' }
     const result = await manager.startTurn(input.threadId, {
       request: { threadId: input.threadId, clientUserMessageId: input.clientId,
         input: [{ type: 'text', text: input.message, text_elements: [] }] },
       context: { inheritThreadSettings: true, useUserMessageAdmission: false, attachments: [], commentAttachments: [] },
     })
-    const turn = result?.turn ?? result?.result?.turn ?? result?.result?.result?.turn
-    if (turn?.id || result?.turnId) return { accepted: true, turnId: turn?.id ?? result.turnId }
-    const after = snapshot()
+    try {
+      const turn = result?.turn ?? result?.result?.turn ?? result?.result?.result?.turn
+      if (turn?.id || result?.turnId) return { accepted: true, turnId: turn?.id ?? result.turnId }
+    } finally { if (rpc) dispose(result) }
+    const after = await snapshot()
+    if (after.missing) throw new Error('Native turn receipt is uncertain')
     const matches = after.turns.filter((turn: any) => turn.items.some((item: any) => item.type === 'userMessage' && item.clientId === input.clientId))
     if (matches.length !== 1) throw new Error('Native turn receipt is uncertain')
     return { accepted: true, turnId: matches[0].id }
   }
   if (input.kind === 'interrupt') {
-    const target = snapshot().turns.find((turn: any) => turn.id === input.turnId)
+    const latest = localSnapshot()
+    if (latest.missing) return { interruptedTurnId: null }
+    const target = latest.turns.find((turn: any) => turn.id === input.turnId)
     if (!target || target.status !== 'inProgress') return { interruptedTurnId: null }
-    // Recheck on the owner immediately before admission, after all Bridge/disk/CDP
-    // awaits. A follower's cached history cannot fence new input in another window.
-    if (manager.getStreamRole?.(input.threadId)?.role !== 'owner'
+    // Only the direct interface can recheck live ownership and invoke the
+    // manager in the same renderer task, with no intervening RPC round trip.
+    if (!latest.owner
       || JSON.stringify(readEvidence(target)) !== input.expectedOwnership) {
       return { rejected: 'Codex execution ownership changed; no interruption was sent' }
     }
@@ -127,8 +221,11 @@ export class CodexNative {
     const results=await Promise.allSettled(windows.map(async window=>({id:window.id,state:await this.evaluate(window.id,{kind:'read',threadId},signal) as NativeThread&{missing?:boolean}})))
     const matches=results.flatMap(result=>result.status==='fulfilled'&&!result.value.state?.missing&&result.value.state?.id===threadId?[result.value]:[])
     const owners=matches.filter(match=>match.state.owner)
-    if(owners.length>1)throw Error('Codex reports conflicting owners for this chat')
-    const selected=owners[0]??matches.sort((a,b)=>a.id.localeCompare(b.id))[0]
+    // RPC clients in main/detached windows observe the same local host manager.
+    // Their repeated owner reports are not independent window owners. Preserve
+    // the conflict check for legacy managers and mixed interface generations.
+    if(owners.length>1&&!owners.every(match=>match.state.ownerScope==='host'))throw Error('Codex reports conflicting owners for this chat')
+    const selected=(owners.length?owners:matches).sort((a,b)=>a.id.localeCompare(b.id))[0]
     if(!selected)throw Error('Open the original Codex chat before continuing')
     return selected
   }

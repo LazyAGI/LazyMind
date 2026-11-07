@@ -108,7 +108,8 @@ def test_code_level_capability_gate_and_zero_image_failure_contract_are_required
         'arguments': {'workflow_routing': 'workflow_routing'},
     }]
     assert 'capability_report' not in slots
-    assert slots['generated_base_image']['exposed'] is False
+    assert slots['generated_base_image']['exposed'] is True
+    assert slots['generated_base_image']['user_visible'] is True
     assert {'material': 'generated_base_image', 'required': True} in generate['outputs']
 
 
@@ -160,13 +161,12 @@ def test_generate_exposes_only_present_seedance_frame_and_reference_materials():
     assert all('tabs' not in child for child in enhance_tab['composite_layout']['children'])
     assert enhance_tab['composite_behavior']['repeat_single_slots'] == [
         'generated_first_frame',
-        'generated_base_image',
         'generated_last_frame',
         'material_images',
     ]
     assert enhance_tab['composite_behavior']['mutually_exclusive'][0]['prefer'][:2] == [
         'generated_first_frame',
-        'generated_base_image',
+        'material_images',
     ]
     assert enhance_tab['composite_behavior']['mutually_exclusive'][1]['prefer'][:2] == [
         'gif_output',

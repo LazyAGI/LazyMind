@@ -233,6 +233,8 @@ export const draftStore = {
 };
 
 export interface SlotRevision {
+  producer_attempt_id?: string;
+  attempt?: number;
   artifact_id?: string;
   document?: Descriptor;
   document_error?: { code: string; retryable: boolean };
@@ -493,6 +495,8 @@ export interface TabDef {
   composite_behavior?: CompositeBehavior;
   /** Hide this tab once the named material has a selected revision. */
   hide_when_material?: string;
+  /** Hide an unexecuted dependent tab when its prerequisite branch was skipped. */
+  hide_when_step_skipped?: string;
   /** Explicitly enable or disable artifact downloads for this tab. */
   allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
@@ -522,13 +526,46 @@ export function filterWorkflowTabs(
   tabs: TabDef[] = [],
   slots: SlotRevision[] = [],
   readyMaterial?: string,
-  runtime?: Pick<WorkflowSession, 'steps' | 'projection'>,
+  runtimeState?: Pick<WorkflowSession, 'steps' | 'projection'> | WorkflowRuntimeProjection,
+  hideSkippedSteps = false,
+  hideUnstartedSteps = false,
 ): TabDef[] {
   const present = new Set(
     slots.filter((slot) => slot.selected).map((slot) => slot.slot),
   );
   const visibilityReady = !readyMaterial || present.has(readyMaterial);
+  const runtime = runtimeState && ('projection' in runtimeState || 'steps' in runtimeState
+    ? runtimeState as Pick<WorkflowSession, 'steps' | 'projection'>
+    : { projection: runtimeState as WorkflowRuntimeProjection });
+  const projection = runtime?.projection;
+  const skipped = new Set([...(projection?.pruned ?? []), ...(projection?.bypassed ?? [])]);
+  const retained = new Set([...(projection?.past ?? []), ...(projection?.current ?? [])]);
+  const wasExecuted = (id: string) => {
+    const node = projection?.nodes?.[id];
+    return retained.has(id) || (node?.validity !== 'stale' && !!node?.execution && node.execution !== 'none');
+  };
+  const wasSkipped = (id: string) => {
+    const node = projection?.nodes?.[id];
+    return node ? ['pruned', 'bypassed'].includes(node.branch) : skipped.has(id);
+  };
+  const executionStarted = retained.size > 0 || Object.keys(projection?.nodes ?? {}).some(wasExecuted);
   return tabs.filter((tab) => {
+    const steps = tab.status_step_ids?.length ? tab.status_step_ids : [tab.step_id || tab.id];
+    if (hideUnstartedSteps && executionStarted && !steps.some(wasExecuted)
+        && !tab.slots.some((slot) => present.has(slot.id))) return false;
+    if (hideSkippedSteps) {
+      if (projection?.completed && !steps.some(wasExecuted)
+          && !tab.slots.some((slot) => present.has(slot.id))) return false;
+      if (tab.hide_when_step_skipped && wasSkipped(tab.hide_when_step_skipped)
+          && !steps.some(wasExecuted)) return false;
+      const allSkipped = steps.every((id) => {
+        // Never hide effective results, in-flight work or errors merely because
+        // another branch was pruned. Missing/blocked/future is not skipped.
+        if (wasExecuted(id)) return false;
+        return wasSkipped(id);
+      });
+      if (allSkipped) return false;
+    }
     if (!tab.hide_when_material) return true;
     const stepIds = new Set([tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])]);
     const effective = (id: string) => runtime?.projection?.nodes?.[id]?.validity !== 'stale'
@@ -536,6 +573,9 @@ export function filterWorkflowTabs(
     if (runtime?.steps?.some(step => step.validity !== 'stale' && effective(step.step_id) && stepIds.has(step.step_id))
       || [...(runtime?.projection?.current ?? []), ...(runtime?.projection?.past ?? [])]
         .some(id => effective(id) && stepIds.has(id))) return true;
+    // The runtime evaluates the complete skip expression, including alternate
+    // completion materials that a tab's single visibility marker cannot express.
+    if ([...stepIds].every(id => runtime?.projection?.bypassed?.includes(id))) return false;
     if (!visibilityReady) return false;
     return !present.has(tab.hide_when_material);
   });
@@ -575,6 +615,10 @@ export interface WorkflowUI {
   tabs?: TabDef[];
   /** Defer tabs with hide_when_material until this planning material exists. */
   tab_visibility_ready_material?: string;
+  /** Opt in to hiding tabs whose runtime steps were explicitly skipped. */
+  hide_skipped_steps?: boolean;
+  /** In dynamic sessions, show started steps and existing results once execution begins. */
+  hide_unstarted_steps?: boolean;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
 }
@@ -873,6 +917,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         // Steps are attempt history only; they never define Past/Ready locally.
         if (session?.session_id) {
           try {
+            const loadedVersion = session.state_version ?? 0;
             const projectionRes = await WorkflowSessionApi().getProjection(
               session.session_id, { silentError: true } as never,
             );
@@ -883,6 +928,12 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
             session.steps = workflowSnapshotSteps(session.session_id, snapshot.attempt_history) ?? [];
             session.current_step_id = snapshot.current_step_id ?? session.current_step_id;
             session.status = reconcileWorkflowSessionStatus(snapshot.status ?? session.status, session.projection);
+            // Publication may commit between the session and projection reads.
+            // Fetch slots after that commit instead of pairing new success with old content.
+            if ((snapshot.state_version ?? 0) > loadedVersion) {
+              const result = await WorkflowSessionApi().getSlots(session.session_id);
+              session.slots = result?.data?.data?.slots ?? session.slots;
+            }
           } catch (error) {
             const cached = get().sessionByConversation[conversationId];
             session.steps = cached?.session_id === session.session_id ? cached.steps : [];
@@ -930,11 +981,17 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
 
   refreshSlots: async (conversationId, sessionId) => {
     try {
+      const version = get().sessionByConversation[conversationId]?.state_version ?? 0;
       const res = await WorkflowSessionApi().getSlots(sessionId);
       const slots: SlotRevision[] = res?.data?.data?.slots ?? [];
+      const current = get().sessionByConversation[conversationId];
+      if (current?.session_id === sessionId && (current.state_version ?? 0) > version) {
+        await get().loadActiveSession(conversationId, { silentError: true });
+        return;
+      }
       set((state) => {
         const session = state.sessionByConversation[conversationId];
-        if (!session) return state;
+        if (!session || session.session_id !== sessionId) return state;
         return {
           sessionByConversation: {
             ...state.sessionByConversation,
@@ -1124,11 +1181,9 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.
       workflowStreams.get(sessionId)?.subscription.resync();
     }
-    if (event.type === 'attempt.patch' || event.type === 'step.patch' || event.type === 'workflow.patch') {
+    if (['attempt.patch', 'step.patch', 'workflow.patch', 'workflow.snapshot', 'workflow.waiting',
+      'workflow.completed', 'artifact.upsert', 'artifact.stale'].includes(event.type)) {
       void get().loadActiveSession(conversationId, { silentError: true });
-    }
-    if (event.type === 'artifact.upsert') {
-      void get().refreshSlots(conversationId, sessionId);
     }
     void get().refreshOrdinarySession(conversationId, sessionId);
   },

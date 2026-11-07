@@ -123,7 +123,7 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 		return refreshProviderSelectionBackup(tx, parent, now)
 	})
 	if err != nil {
-		if errors.Is(err, errConnectionChanged) {
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "update enabled api key failed", http.StatusInternalServerError)
@@ -143,6 +143,15 @@ func keyMatchingID(groupID, keyID, pool string) string {
 }
 
 func saveActiveProviderKey(tx *gorm.DB, parent *orm.UserModelProvider, groupID, keyID string, verified bool, now time.Time) error {
+	return saveActiveProviderKeyWithGuard(tx, parent, groupID, keyID, verified, now, true)
+}
+
+func saveActiveProviderKeyWithGuard(tx *gorm.DB, parent *orm.UserModelProvider, groupID, keyID string, verified bool, now time.Time, guard bool) error {
+	if guard && (parent.ActiveKeyGroupID != groupID || parent.ActiveKeyID != keyID) {
+		if err := guardEmbeddingRuntimeMutation(tx, parent.CreateUserID, parent.ID, "", ""); err != nil {
+			return err
+		}
+	}
 	nextRevision := parent.ActiveKeyRevision + 1
 	if err := tx.Model(parent).Updates(map[string]any{"active_key_group_id": groupID, "active_key_id": keyID, "active_key_initialized": true, "active_key_revision": nextRevision, "updated_at": now}).Error; err != nil {
 		return err
@@ -214,7 +223,11 @@ func initializeProviderActiveKey(tx *gorm.DB, parent *orm.UserModelProvider) err
 			return err
 		}
 		if keys := splitAPIKeys(pool); len(keys) > 0 {
-			return saveActiveProviderKey(tx, parent, groups[i].ID, groupKeyID(groups[i].ID, keys[0]), groups[i].IsVerified, time.Now())
+			// An uninitialized legacy supplier already used the first saved key
+			// through this resolver. Persisting that implicit choice does not
+			// change the embedding runtime. User-initiated key additions and
+			// rotations still go through the guarded save path.
+			return saveActiveProviderKeyWithGuard(tx, parent, groups[i].ID, groupKeyID(groups[i].ID, keys[0]), groups[i].IsVerified, time.Now(), false)
 		}
 	}
 	return nil
@@ -296,6 +309,7 @@ type RuntimeProviderConfiguration struct {
 	BaseURL  string
 	APIKey   string
 	Advanced credentialvault.ProviderRequestAdvanced
+	Protocol string
 }
 
 // ResolveProviderRuntimeConfiguration reads credentials and private request
@@ -306,6 +320,7 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 	}
 	var baseURL, key string
 	var advanced credentialvault.ProviderRequestAdvanced
+	var protocol string
 	var unavailable error
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var requested orm.UserModelProviderGroup
@@ -316,6 +331,7 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 		if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", requested.UserModelProviderID, requested.CreateUserID).Take(&parent).Error; err != nil {
 			return err
 		}
+		protocol = savedRequestConfig(tx, parent).DefaultProtocol
 		baseURL = connectionBaseURL(parent, requested.BaseURL)
 		if !hasSharedProviderEndpoint(parent) {
 			pool, err := apiKeyForGroup(tx, &requested)
@@ -387,7 +403,7 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 	if unavailable != nil {
 		return RuntimeProviderConfiguration{}, unavailable
 	}
-	return RuntimeProviderConfiguration{BaseURL: baseURL, APIKey: key, Advanced: advanced}, nil
+	return RuntimeProviderConfiguration{BaseURL: baseURL, APIKey: key, Advanced: advanced, Protocol: protocol}, nil
 }
 
 func ResolveProviderAPIKey(ctx context.Context, db *gorm.DB, groupID string) (string, error) {

@@ -187,6 +187,12 @@ config.add(
     'WORKFLOWS_DIR',
     description='Directory containing workflow packages. Each sub-directory is one workflow.',
 )
+config.add('paper_review_min_paper_count', int, 12, 'PAPER_REVIEW_MIN_PAPER_COUNT',
+           description='Default lower bound for F2 papers; explicit user counts take precedence.',
+           post_action=_require_positive_config_value('LAZYMIND_PAPER_REVIEW_MIN_PAPER_COUNT'))
+config.add('paper_review_max_paper_count', int, 20, 'PAPER_REVIEW_MAX_PAPER_COUNT',
+           description='Default upper bound for F2 papers, not a count to fill.',
+           post_action=_require_positive_config_value('LAZYMIND_PAPER_REVIEW_MAX_PAPER_COUNT'))
 config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={
@@ -333,7 +339,7 @@ config.add('context_compression_trigger_ratio', float, 0.9, 'CONTEXT_COMPRESSION
            description='Compress when estimated tokens reach this fraction of the effective input budget.')
 config.add('context_compression_target_ratio', float, 0.45, 'CONTEXT_COMPRESSION_TARGET_RATIO',
            description='Target fraction of the effective input budget after compression.')
-config.add('context_compression_reserved_output_tokens', int, 8192,
+config.add('context_compression_reserved_output_tokens', int, 32768,
            'CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS',
            description='Tokens reserved when computing the effective input budget; not a model output limit.')
 config.add(

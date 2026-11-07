@@ -557,7 +557,7 @@ func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 		if ev.CurrentPhase != "" {
 			fields["current_phase"] = ev.CurrentPhase
 		}
-		if ev.Type == "done" {
+		if ev.Type == "done" && !(status == StatusInterrupted && ev.CurrentPhase == "awaiting_input") {
 			fields["progress"] = 100
 		}
 		_ = WriteStatus(ctx, stateStore, ev.TaskID, fields)

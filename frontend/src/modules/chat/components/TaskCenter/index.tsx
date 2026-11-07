@@ -1,6 +1,5 @@
-import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
-import { SourceImportProvider, ExecutionResults } from "../SourceImports";
+import { SourceImportProvider } from "../SourceImports";
 import MarkdownViewer from '../MarkdownViewer';
 import { mergeRun } from "../../utils/ordinaryTaskState";
 import i18n from "i18next";
@@ -486,8 +485,8 @@ function ArtifactGrid({ artifacts, sources }: { artifacts: TaskArtifact[]; sourc
   );
 }
 
-function ReferenceSources({ sources, operations }: { sources: ChatSource[]; operations?: KnowledgeOperation[] }) {
-  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /><ExecutionResults operations={operations} /></div>;
+function ReferenceSources({ sources }: { sources: ChatSource[] }) {
+  return <div className="chat-assistant-msg-tool-actions"><ReferenceSourcesButton sources={sources} /></div>;
 }
 
 function StatusBadge({ status: rawStatus, workflowPaused }: { status: TaskStatus; workflowPaused: boolean }) {
@@ -573,7 +572,9 @@ function TaskCard({ task, workflowPaused }: { task: SubAgentTask; workflowPaused
           </span>
         </Tooltip>
         <span className="task-card-tag">{t("taskCenter.panelTitle")}</span>
-        <StatusBadge status={task.status} workflowPaused={workflowPaused} />
+        {task.status === 'interrupted' && task.current_phase === 'awaiting_input'
+          ? <span className="task-status">{t('chat.workflowInputRequired', '等待确认')}</span>
+          : <StatusBadge status={task.status} workflowPaused={workflowPaused} />}
       </div>
       {!collapsed && (
         <>
@@ -663,16 +664,11 @@ function publicTaskTitle(item: OrdinaryTaskItem, t: TFunction): string {
     ? title : t("taskCenter.ordinaryTaskLabel", { index: item.ordinal });
 }
 
-function OrdinaryReferenceSources({ sources, operations }: { sources: ChatSource[]; operations?: KnowledgeOperation[] }) {
-  return <ReferenceSources sources={sources} operations={operations} />;
-}
-
 function artifactSourceContext(item: OrdinaryTaskItem): ArtifactSourceContext {
   const view = item.ordinary;
   return {
     context: view?.session_id ? { workflow_session_id: view.session_id, work_display_key: view.display_key } : { task_id: view?.task_id ?? item.task?.task_id },
     sources: view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? [],
-    operations: view?.knowledge_operations,
   };
 }
 
@@ -711,6 +707,7 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
         })}`}>{t("chat.checkModelSettings")}</a>
       </div>
     )}
+    {view?.input_required && <div role="status">{view.input_required}</div>}
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
       state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
@@ -718,13 +715,12 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
       <span className="ordinary-thinking-marker" aria-hidden="true"><StateMarker state={item.state} /></span>
       <span className="ordinary-thinking-terminal-copy">
         <strong>{t("taskCenter.ordinaryThinkingDuration", { duration: formatDuration(ordinaryTaskDurationSeconds(item)) })}</strong>
-        <span>{stateLabel(item.state, t)}</span>
+        <span>{view?.input_required ? t('chat.workflowInputRequired') : stateLabel(item.state, t)}</span>
         {view?.timing.thinking_elapsed_ms != null && <span>{t("taskCenter.ordinaryMeasuredThinkingDuration", { duration: formatDuration(Math.round(view.timing.thinking_elapsed_ms / 1000)) })}</span>}
       </span>
     </div>
-    <OrdinaryReferenceSources operations={view?.knowledge_operations} sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
+    <ReferenceSources sources={sources} />
     {more("sources")}
-    {more("knowledge_operations")}
     <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()}
       workflow={view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || item.step?.step_id || '' } : undefined} />
     {more("stage_artifacts")}
@@ -783,7 +779,7 @@ function OrdinaryTaskCard({
               </span>
             )}
             <span className="ordinary-task-status">
-              {stateLabel(item.state, t)}
+              {item.ordinary?.input_required ? t('chat.workflowInputRequired') : stateLabel(item.state, t)}
             </span>
           </span>
         </span>
@@ -917,6 +913,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
 
 function defaultOrdinaryExpandedId(items: OrdinaryTaskItem[]): string | null {
   return items.find((item) => item.state === "running")?.id
+    ?? items.find((item) => item.ordinary?.input_required)?.id
     ?? items.find((item) => item.state === "failed")?.id
     ?? [...items].reverse().find(
       (item) => item.state !== "waiting",
@@ -1236,7 +1233,7 @@ const TaskCenter = (props: Props) => {
         hiddenSteps={taskPresentation?.hidden_steps}
         hideGroupedArtifacts={taskPresentation?.hide_final_artifacts}
         groupedStatus={taskPresentation?.grouped && workflowSession
-          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status))
+          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status, workflowSession.projection?.display?.reason))
           : undefined}
         onClose={onClose}
         showHeader={showHeader}

@@ -20,6 +20,8 @@ import {
 } from './exportHtmlToPptx';
 import { htmlWithInlinedEcharts } from './echartsInline';
 import { resolveSlideAssets } from './slideAssets';
+import { DEFAULT_SLIDE_CANVAS as DEFAULT_CANVAS, measureSlideCanvas } from './slideCanvas';
+export { measureSlideCanvas, type SlideCanvasSize } from './slideCanvas';
 
 /** Compatibility shape used by the current composite preview pager. */
 export interface SlideNavigation {
@@ -63,15 +65,15 @@ interface FittedFrame {
   top: number;
 }
 
-/** Fit the fixed 1600×900 slide into any composite material frame. */
-export function fitSlideFrame(containerW: number, containerH: number): FittedFrame {
+/** Fit the slide's own canvas into the material frame without adding body margins. */
+export function fitSlideFrame(containerW: number, containerH: number, canvas = DEFAULT_CANVAS): FittedFrame {
   if (!containerW || containerW < 1) return { scale: 0.5, left: 0, top: 0 };
-  const availableH = containerH > 0 ? containerH : containerW * 9 / 16;
-  const scale = Math.max(0.02, Math.min(containerW / 1600, availableH / 900, 1));
+  const availableH = containerH > 0 ? containerH : containerW * canvas.height / canvas.width;
+  const scale = Math.max(0.02, Math.min(containerW / canvas.width, availableH / canvas.height, 1));
   return {
     scale,
-    left: Math.max(0, (containerW - 1600 * scale) / 2),
-    top: Math.max(0, (availableH - 900 * scale) / 2),
+    left: Math.max(0, (containerW - canvas.width * scale) / 2),
+    top: Math.max(0, (availableH - canvas.height * scale) / 2),
   };
 }
 
@@ -99,11 +101,11 @@ export function pptClickedText(target: HTMLElement, clicked: HTMLElement): strin
   return (source.innerText || source.textContent || target.innerText || target.textContent || '').trim();
 }
 
-function scaleFromViewport(): number {
+function scaleFromViewport(canvas = DEFAULT_CANVAS): number {
   if (typeof window === 'undefined') return 0.8;
   return Math.max(0.25, Math.min(
-    (window.innerWidth - 64) / 1600,
-    (window.innerHeight - 104) / 900,
+    (window.innerWidth - 64) / canvas.width,
+    (window.innerHeight - 104) / canvas.height,
     1,
   ));
 }
@@ -498,9 +500,10 @@ export function SlotHtmlSlide({
   const [sourceHtml, setSourceHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fittedFrame, setFittedFrame] = useState<FittedFrame | null>(null);
+  const [canvasSize, setCanvasSize] = useState(DEFAULT_CANVAS);
   const [internalExpanded, setInternalExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const [expandedScale, setExpandedScale] = useState(scaleFromViewport);
+  const [expandedScale, setExpandedScale] = useState(() => scaleFromViewport());
   const [selection, setSelection] = useState<ArtifactRewriteSelection | null>(null);
   const [editPreview, setEditPreview] = useState<RewriteSelectionPreview | null>(null);
   const [applying, setApplying] = useState(false);
@@ -511,6 +514,10 @@ export function SlotHtmlSlide({
   const page = slot.sort_order ?? ((slot.list_index ?? 0) + 1);
   const listIndex = slot.list_index ?? -1;
   const actionSlotId = slotId || slot.slot_id || slot.slot;
+  const slideIdentity = `${sessionId}:${actionSlotId}:${listIndex}`;
+  const artifactSnapshot = JSON.stringify(slot.artifact_value ?? null);
+  const appliedBaseline = useRef<{ identity: string; revision: number; draftVersion: number } | null>(null);
+  const loadGeneration = useRef(0);
   const editable = Boolean(sessionId && actionSlotId && !readOnly && !compact && page > 0);
   const displayHtml = editPreview?.candidate_html || html;
   const pagedNavigation = navigation && 'index' in navigation ? navigation : undefined;
@@ -554,14 +561,10 @@ export function SlotHtmlSlide({
     editPreviewRef.current = editPreview;
   }, [editPreview]);
 
-  useEffect(() => {
-    setLocalRevision(slot.revision);
-    setLocalDraftVersion(slot.draft_version);
-  }, [slot.draft_version, slot.revision]);
 
   useEffect(() => {
     if (!expanded) return undefined;
-    const update = () => setExpandedScale(scaleFromViewport());
+    const update = () => setExpandedScale(scaleFromViewport(canvasSize));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeExpanded();
     };
@@ -572,7 +575,7 @@ export function SlotHtmlSlide({
       window.removeEventListener('resize', update);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [closeExpanded, expanded]);
+  }, [closeExpanded, expanded, canvasSize]);
 
   useEffect(() => () => {
     frameCleanupRef.current.forEach((cleanup) => cleanup());
@@ -581,6 +584,16 @@ export function SlotHtmlSlide({
   }, [clearSelectedNode]);
 
   useEffect(() => {
+    const saved = appliedBaseline.current;
+    if (saved?.identity === slideIdentity && (
+      slot.revision < saved.revision
+      || (slot.revision === saved.revision && (slot.draft_version ?? 0) < saved.draftVersion)
+    )) return;
+    if (saved?.identity !== slideIdentity) appliedBaseline.current = null;
+    setLocalRevision(slot.revision);
+    setLocalDraftVersion(slot.draft_version);
+    const generation = ++loadGeneration.current;
+    const artifactValue = JSON.parse(artifactSnapshot);
     let cancelled = false;
     setError(null);
     setEditPreview(null);
@@ -588,40 +601,40 @@ export function SlotHtmlSlide({
     setApplyError(undefined);
     clearSelection();
     (async () => {
-      const text = await loadArtifactText(slot.artifact_value);
-      if (cancelled) return;
-      const extracted = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(slot.artifact_value);
+      const text = await loadArtifactText(artifactValue);
+      if (cancelled || generation !== loadGeneration.current) return;
+      const extracted = extractHtmlFromArtifact(text) || extractHtmlFromArtifact(artifactValue);
       if (!extracted) {
         setError('Not a valid HTML slide');
         setHtml(null);
         return;
       }
       const withCharts = await htmlWithInlinedEcharts(extracted);
-      if (!cancelled) {
+      if (!cancelled && generation === loadGeneration.current) {
         setHtml(withCharts);
         setSourceHtml(extracted);
       }
     })().catch(() => {
-      if (!cancelled) {
+      if (!cancelled && generation === loadGeneration.current) {
         setError('Failed to load HTML slide');
         setHtml(null);
       }
     });
     return () => { cancelled = true; };
-  }, [clearSelection, slot.artifact_value, slot.revision, slot.slot_id]);
+  }, [artifactSnapshot, clearSelection, slideIdentity, slot.draft_version, slot.revision]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return undefined;
     const update = () => {
       const rect = viewport.getBoundingClientRect();
-      setFittedFrame(fitSlideFrame(Math.max(0, rect.width), Math.max(0, rect.height)));
+      setFittedFrame(fitSlideFrame(Math.max(0, rect.width), Math.max(0, rect.height), canvasSize));
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [compact]);
+  }, [compact, canvasSize]);
 
   const selectElements = useCallback((
     frame: HTMLIFrameElement,
@@ -732,6 +745,8 @@ export function SlotHtmlSlide({
     frameCleanupRef.current.get(frame)?.();
     const doc = frame.contentDocument;
     if (!doc) return;
+    const measured = measureSlideCanvas(doc);
+    setCanvasSize(current => current.width === measured.width && current.height === measured.height ? current : measured);
     applyHtmlPreviewCompatibilityFallbacks(doc);
     const style = doc.createElement('style');
     style.dataset.lazymindPptEditor = 'true';
@@ -849,6 +864,10 @@ export function SlotHtmlSlide({
       if (typeof result.revision !== 'number' || typeof result.draft_version !== 'number') {
         throw new Error('invalid apply baseline');
       }
+      appliedBaseline.current = {
+        identity: slideIdentity, revision: result.revision, draftVersion: result.draft_version,
+      };
+      ++loadGeneration.current;
       setLocalRevision(result.revision);
       setLocalDraftVersion(result.draft_version);
       if (preview.candidate_html) {
@@ -866,7 +885,7 @@ export function SlotHtmlSlide({
     } finally {
       setApplying(false);
     }
-  }, [actionSlotId, clearSelection, listIndex, onRefresh, sessionId]);
+  }, [actionSlotId, clearSelection, listIndex, onRefresh, sessionId, slideIdentity]);
 
   const retryPersistPreview = useCallback(() => {
     if (editPreview && !applying) void persistPreview(editPreview);
@@ -895,8 +914,8 @@ export function SlotHtmlSlide({
         position: 'absolute',
         left: zoomed ? 0 : (fittedFrame?.left ?? 0),
         top: zoomed ? 0 : (fittedFrame?.top ?? 0),
-        width: 1600,
-        height: 900,
+        width: canvasSize.width,
+        height: canvasSize.height,
         transform: `scale(${zoomed ? expandedScale : (fittedFrame?.scale ?? 0.5)})`,
         transformOrigin: 'top left',
       }}
@@ -1013,7 +1032,7 @@ export function SlotHtmlSlide({
           )}
           <div
             className='slot-html-slide__zoom-stage'
-            style={{ width: 1600 * expandedScale, height: 900 * expandedScale }}
+            style={{ width: canvasSize.width * expandedScale, height: canvasSize.height * expandedScale }}
           >
             {error ? <div className='slot-html-slide--error'>{error}</div>
               : srcDoc ? renderFrame(true) : <div className='slot-html-slide--loading'>正在加载幻灯片…</div>}

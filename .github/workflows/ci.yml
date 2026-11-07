@@ -16,6 +16,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-ppt-export:
+    needs: [lint, doc_check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: workflows/ppt-workflow/runtime/scripts/export_pptx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workflows/ppt-workflow/runtime/scripts/export_pptx/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install "fonttools>=4,<5"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+
   verify-skill-lock:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -59,10 +83,12 @@ jobs:
               # Rebuild and hash-check local packages using the existing frozen
               # catalog path; unchanged remote packages need no download.
               verify_args=(--catalog-only --frozen-lockfile)
-            else
+            elif ! git -C ../.. diff --quiet "$base_sha" HEAD -- skills/builtin-skills.lock.json; then
               git show "$base_sha:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
               verify_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
             fi
+            # With an unchanged lock, full verification must use pinned versions
+            # instead of regenerating entries from the latest remote packages.
           fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \
@@ -328,9 +354,9 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             # Keep PowerShell lifecycle deadlines independent of concurrent
             # filesystem scans and archive extraction on the shared runner.
-            node --test --test-concurrency=1 desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js
+            node --test --test-concurrency=1 desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           else
-            node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js
+            node --test desktop/scripts/*.test.mjs desktop/electron/tests/agent-recovery.test.js desktop/electron/tests/agent-discovery-refresh.test.js
           fi
 
   test-auth-service:
@@ -410,7 +436,11 @@ jobs:
         run: bash scripts/test_migration_upgrade.sh
 
       - name: Test backend core (SQLite) with coverage
-        run: cd backend/core && go test ./... -v -timeout 40m -coverprofile=coverage-core.out
+        working-directory: backend/core
+        run: |
+          # Workflow files outside the Go module do not invalidate cached test results.
+          go clean -testcache
+          go test ./... -v -timeout 40m -coverprofile=coverage-core.out
 
       - name: Test backend core (PostgreSQL)
         env:
@@ -608,6 +638,7 @@ jobs:
         shell: python
         env:
           LAZYLLM_INIT_DOC: "1"
+          PYTHONUTF8: "1"
         run: |
           import subprocess
           import sys

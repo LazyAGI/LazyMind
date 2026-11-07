@@ -48,18 +48,23 @@ type AcquireOriginalRequest struct {
 	Reader                                         io.Reader
 }
 type AcquireRemoteOriginalRequest struct {
+	// PrivateQuery is injected only by trusted adapters; credentials are never persisted.
+	PrivateQuery                   map[string]string `json:"-"`
 	URL, DisplayName, ExpectedMIME string
 	// MaxBytes is an internal caller limit; zero uses the common upload maximum.
 	MaxBytes int64
 }
 type OriginalServiceDeps struct {
-	DB               *gorm.DB
+	DB *gorm.DB
+	// Trusted transport injection; production defaults to the guarded public-network transport.
+	HTTPTransport    http.RoundTripper
 	SubmitProcessing func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
 }
 type OriginalService struct {
-	db     *gorm.DB
-	submit func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
-	now    func() time.Time
+	db            *gorm.DB
+	httpTransport http.RoundTripper
+	submit        func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
+	now           func() time.Time
 }
 type originalMetadata struct {
 	uploadedFileExt
@@ -109,7 +114,7 @@ func NewOriginalService(deps OriginalServiceDeps) (*OriginalService, error) {
 	if deps.DB == nil {
 		return nil, errors.New("original service requires database")
 	}
-	return &OriginalService{db: deps.DB, submit: deps.SubmitProcessing, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &OriginalService{db: deps.DB, httpTransport: deps.HTTPTransport, submit: deps.SubmitProcessing, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 func originalError(code DatasetServiceErrorCode, message string) error {
 	return &DatasetServiceError{Code: code, Message: message}
@@ -269,7 +274,7 @@ func (s *OriginalService) prepare(ctx context.Context, caller DatasetCatalogCall
 	if err != nil {
 		return nil, err
 	}
-	if req.ConflictPolicy != "" && req.ConflictPolicy != "ask" && req.ConflictPolicy != "skip_same_content" {
+	if req.ConflictPolicy != "" && req.ConflictPolicy != "ask" && req.ConflictPolicy != "skip_same_content" && req.ConflictPolicy != "rename" {
 		return nil, originalError(DatasetServiceInvalidArgument, "invalid conflict policy")
 	}
 	name, err := originalFilename(firstNonEmpty(req.DisplayName, meta.OriginalFilename))
@@ -368,7 +373,14 @@ func (s *OriginalService) BindOriginalTx(ctx context.Context, tx *gorm.DB, calle
 				}
 			}
 		}
-		return OriginalImportResult{}, originalError("CONFLICT", "target already contains this name")
+		if req.ConflictPolicy == "rename" {
+			req.DisplayName, err = availableOriginalDisplayName(tx, req.DatasetID, req.ParentID, req.DisplayName)
+			if err != nil {
+				return OriginalImportResult{}, err
+			}
+		} else {
+			return OriginalImportResult{}, originalError("CONFLICT", "target already contains this name")
+		}
 	}
 	now := s.now()
 	docID, taskID := firstNonEmpty(req.DocumentID, newDocID()), firstNonEmpty(req.TaskID, newTaskID())
@@ -397,6 +409,31 @@ func (s *OriginalService) BindOriginalTx(ctx context.Context, tx *gorm.DB, calle
 		}
 	}
 	return OriginalImportResult{Document: d, Task: task, ContentSHA256: p.hash, SubmissionStatus: "pending"}, nil
+}
+
+func availableOriginalDisplayName(tx *gorm.DB, datasetID, parentID, name string) (string, error) {
+	ext := filepath.Ext(name)
+	stem := []rune(strings.TrimSuffix(name, ext))
+	for number := 1; number <= 9999; number++ {
+		suffix := fmt.Sprintf(" (%d)", number)
+		maxStem := 512 - utf8.RuneCountInString(ext) - utf8.RuneCountInString(suffix)
+		if maxStem < 1 {
+			break
+		}
+		part := stem
+		if len(part) > maxStem {
+			part = part[:maxStem]
+		}
+		candidate := string(part) + suffix + ext
+		var count int64
+		if err := tx.Model(&orm.Document{}).Where("dataset_id = ? AND p_id = ? AND display_name = ? AND deleted_at IS NULL", datasetID, parentID, candidate).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return candidate, nil
+		}
+	}
+	return "", originalError("CONFLICT", "target has too many documents with this name")
 }
 func (s *OriginalService) ImportOriginal(ctx context.Context, caller DatasetCatalogCaller, req ImportOriginalRequest) (OriginalImportResult, error) {
 	p, err := s.PrepareOriginalBinding(ctx, caller, req)
