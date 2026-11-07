@@ -18,7 +18,6 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/connectorconfig"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workflowpresentation"
 )
 
@@ -63,7 +62,7 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 		}
 		definition, _ := json.Marshal(connection)
 		current := config.Node + "|" + config.PairingFile + "|" + strconv.Itoa(config.CDPPort) + "|" + scope + "|" + pair.Token + "|" + string(definition)
-		if scopeErr != nil || configErr != nil || !pair.Enabled || !integrationstate.Allowed(home, "workbuddy") {
+		if scopeErr != nil || configErr != nil || !pair.Enabled || !registered(home) {
 			if worker != nil {
 				cleanup()
 			}
@@ -96,8 +95,8 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 						_ = os.MkdirAll(logDir, 0700)
 						log, err := os.OpenFile(filepath.Join(logDir, "workbuddy-workflow.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 						if err == nil {
-							var lifetime context.Context
-							lifetime, stop = context.WithCancel(ctx)
+							lifetime, cancelWorker := context.WithCancel(ctx)
+							stop = cancelWorker
 							cmd := backgroundCommand(lifetime, config.Node, script, "--pairing-file", config.PairingFile,
 								"--bridge-url", bridgeURL, "--cdp-port", strconv.Itoa(config.CDPPort), "--parent-pid", strconv.Itoa(os.Getpid()))
 							cmd.Stdout, cmd.Stderr = log, log
@@ -115,7 +114,7 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 								ch := done
 								go func() { ch <- cmd.Wait(); log.Close() }()
 							} else {
-								stop()
+								cancelWorker()
 								stop = nil
 								log.Close()
 							}

@@ -2428,6 +2428,15 @@ const enUS = {
     },
     waitingForApplication: "Waiting for app",
     waitingForApplicationDescription: "Integration is enabled. Waiting for {{agent}} to start before checking the connection.",
+    setupFeedback: {
+      environmentMismatch: "An existing connection points to another LazyMind environment. Turn this switch off and on to switch.",
+      readFailed: "Unable to read connection settings. Check again.",
+      enableFailed: "Could not enable the connection. Try again.",
+      disableFailed: "Could not disable the connection. Try again.",
+      connectionUnavailable: "Configuration is saved. The connection is currently unavailable.",
+      unknown: "Status unknown",
+      copyDiagnostics: "Copy diagnostics",
+    },
     connectionErrors: {
       capability_unavailable: "LazyMind Workflow is installed and enabled, but Codex session-control interfaces have not been recognized. Automatic Workflow continuation is unavailable.",
       startup_unavailable: "Startup configuration is missing or has changed. Turn this switch off and on again.",

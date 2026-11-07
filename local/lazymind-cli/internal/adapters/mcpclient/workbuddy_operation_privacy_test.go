@@ -14,8 +14,8 @@ import (
 
 func TestWorkBuddyOperationLogOnlyRecordsSafeCorrelationFields(t *testing.T) {
 	home := t.TempDir()
-	op := newWorkBuddyOperation(home)
-	op.enter("login")
+	op := agentintegration.NewOperation(home, "workbuddy", "connect", "")
+	op.Enter("login")
 	status := agentintegration.Status{
 		State:   agentintegration.Failed,
 		Message: "fixture-secret-token fixture-private-account fixture-private-path",
@@ -23,7 +23,7 @@ func TestWorkBuddyOperationLogOnlyRecordsSafeCorrelationFields(t *testing.T) {
 		Login:   &agentintegration.LoginStatus{State: "failed", Message: "fixture-secret-token"},
 		Issue:   &agentintegration.Issue{Code: "workbuddy_auth_unreadable"},
 	}
-	op.finish(&status)
+	op.Finish(&status)
 	body, err := os.ReadFile(filepath.Join(home, "logs", "agent-setup.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestWorkBuddyOperationLogOnlyRecordsSafeCorrelationFields(t *testing.T) {
 	if strings.Contains(string(body), "fixture-") {
 		t.Fatalf("log included private status fields: %s", body)
 	}
-	allowed := map[string]bool{"time": true, "agent": true, "operation_id": true, "stage": true, "state": true, "code": true, "elapsed_ms": true}
+	allowed := map[string]bool{"time": true, "agent": true, "operation_id": true, "stage": true, "state": true, "code": true, "elapsed_ms": true, "action": true, "current_cli": true, "configured": true, "before": true, "after": true, "reason": true, "connection": true, "app_version": true}
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	rows := 0
 	for scanner.Scan() {

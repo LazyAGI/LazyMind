@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -137,11 +136,7 @@ func Verify(home, id, token, accountScope string) (Pairing, error) {
 	if json.Unmarshal(body, &pair) != nil || !normalizeProvider(&pair) || pair.ConnectorID != id || len(pair.Token) != 64 {
 		return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
 	}
-	enabled, err := integrationstate.Read(home, pair.Provider)
-	if err != nil {
-		return Pairing{}, &PairingError{Code: "HOST_PAIRING_UNREADABLE"}
-	}
-	if !pair.Enabled || enabled != nil && !*enabled {
+	if !pair.Enabled {
 		return Pairing{}, &PairingError{Code: "HOST_PAIRING_DISABLED"}
 	}
 	if accountScope == "" || pair.AccountScope != accountScope {
@@ -164,7 +159,7 @@ func Configured(home, id, accountScope string) bool {
 		return false
 	}
 	var pair Pairing
-	return json.Unmarshal(body, &pair) == nil && normalizeProvider(&pair) && pair.ConnectorID == id && pair.Enabled && pair.AccountScope == accountScope && integrationstate.Allowed(home, pair.Provider) && len(pair.Token) == 64
+	return json.Unmarshal(body, &pair) == nil && normalizeProvider(&pair) && pair.ConnectorID == id && pair.Enabled && pair.AccountScope == accountScope && len(pair.Token) == 64
 }
 
 // Only pre-existing dsh identities may omit provider. Never infer a new host's

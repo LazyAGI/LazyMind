@@ -17,7 +17,7 @@ import (
 	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
+	"lazymind/agentconnector/internal/localfile"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -90,8 +90,10 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 
 var startupHealth = codexhost.StartupHealth
 
-func (a *Adapter) Status(ctx context.Context) agentintegration.Status {
-	status := agentintegration.ApplyPreference(a.home, "codex", a.status(ctx))
+func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
+	status = a.status(ctx)
+	details := a.inspectConfiguration(&status)
+	defer func() { agentintegration.RecordInspection(a.home, a.self, details, &status) }()
 	if status.Enabled != nil && *status.Enabled && status.State == agentintegration.Enabled {
 		agentintegration.SetRuntimeIssue(&status, startupHealth(ctx, a.home))
 	}
@@ -113,7 +115,7 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 	}
 	config, exists, err := a.getConfig()
 	if err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	}
 	switch {
 	case exists && !a.isOwned(config):
@@ -158,17 +160,46 @@ func (a *Adapter) status(context.Context) agentintegration.Status {
 }
 
 func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) {
-	defer func() { result = agentintegration.ApplyPreference(a.home, "codex", result) }()
+	operation := agentintegration.NewOperation(a.home, "codex", "connect", a.self)
+	operation.Enter("configuration")
+	defer func() {
+		if result.State == agentintegration.Failed {
+			result.RetryAction = "connect"
+		}
+		operation.After = a.inspectConfiguration(&result)
+		if result.State == agentintegration.Failed {
+			result.RetryAction = "connect"
+			if result.Issue == nil {
+				result.Issue = &agentintegration.Issue{Code: "configuration_failed"}
+			}
+		}
+		operation.Finish(&result)
+	}()
+	profile, err := codexHome()
+	if err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
+	if err = os.MkdirAll(profile, 0700); err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
+	bounded, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	unlock, err := localfile.LockContext(bounded, filepath.Join(profile, ".lazymind-integration.lock"))
+	cancel()
+	if err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
+	defer unlock()
+
 	if err := CleanupLegacyControl(); err != nil {
 		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
 	}
 	status := a.Status(ctx)
-	if status.State != agentintegration.Ready && status.State != agentintegration.Enabled && !(status.Enabled != nil && *status.Enabled && status.State != agentintegration.Conflict && !agentintegration.MissingRequirement(status.Requirements)) {
+	operation.Before = a.inspectConfiguration(&status)
+	if status.Enabled == nil || agentintegration.MissingRequirement(status.Requirements) {
 		return status
 	}
-	if err := integrationstate.Set(a.home, "codex", true); err != nil {
-		return agentintegration.Fail(status, err.Error())
-	}
+	status.Issue = nil
+
 	if status.State == agentintegration.Enabled {
 		if record, e := codexplugin.Read(); e == nil && record.BuildID == codexplugin.BuildID() {
 			if e = codexhost.Configure(a.home, record.Node, record.PairingFile); e != nil {
@@ -183,27 +214,22 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	// Installation is local and uses the saved account scope. A temporarily
 	// offline Core must not prevent installing the plugin; MCP checks service
 	// connectivity and authentication when Codex loads it.
-	profile, err := codexHome()
-	if err != nil {
-		return agentintegration.Fail(status, err.Error())
-	}
 	if err := a.prepareRuntime(ctx); err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	}
 	record, err := codexplugin.Install(ctx, a.home, a.self, a.binary, profile, a.hostID)
 	if err != nil {
 		return agentintegration.Fail(status, "install LazyMind Workflow plugin: "+err.Error())
 	}
 	if err := codexhost.Configure(a.home, record.Node, record.PairingFile); err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	}
 	if err := prepareCodexDesktop(ctx, a.home); err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	}
-	// Migrate only after successful plugin installation. An unrelated MCP entry
-	// was already rejected by Status and is never overwritten.
+	// Remove the product's old named entry after the replacement plugin is installed.
 	if _, exists, err := a.getConfig(); err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	} else if exists {
 		if _, err := a.run(ctx, "mcp", "remove", serverName); err != nil {
 			_, _ = a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json")
@@ -214,30 +240,68 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 }
 
 func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Status) {
-	defer func() { result = agentintegration.ApplyPreference(a.home, "codex", result) }()
-	if err := integrationstate.Set(a.home, "codex", false); err != nil {
-		return agentintegration.Fail(a.Status(ctx), err.Error())
+	operation := agentintegration.NewOperation(a.home, "codex", "disconnect", a.self)
+	operation.Enter("disconnect")
+	defer func() {
+		if result.State == agentintegration.Failed {
+			result.RetryAction = "disconnect"
+		}
+		operation.After = a.inspectConfiguration(&result)
+		if result.State == agentintegration.Failed {
+			result.RetryAction = "disconnect"
+			if result.Issue == nil {
+				result.Issue = &agentintegration.Issue{Code: "configuration_failed"}
+			}
+		}
+		operation.Finish(&result)
+	}()
+	profile, err := codexHome()
+	if err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
 	}
+	if err = os.MkdirAll(profile, 0700); err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
+	bounded, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	unlock, err := localfile.LockContext(bounded, filepath.Join(profile, ".lazymind-integration.lock"))
+	cancel()
+	if err != nil {
+		return agentintegration.FailError(agentintegration.Status{Agent: "codex", DisplayName: "Codex"}, err)
+	}
+	defer unlock()
+
 	if err := CleanupLegacyControl(); err != nil {
 		return agentintegration.Fail(a.Status(ctx), "clean up legacy Codex control configuration: "+err.Error())
 	}
 	status := a.Status(ctx)
-	if status.State == agentintegration.Conflict || status.State == agentintegration.Failed && !status.CanDisconnect {
+	operation.Before = a.inspectConfiguration(&status)
+	if status.Enabled == nil {
 		return status
 	}
-	if record, err := codexplugin.Read(); err == nil && record.Home == a.home {
-		if err := workflowhost.Disable(a.home, record.ConnectorID); err != nil {
-			return agentintegration.Fail(status, err.Error())
+	status.Issue = nil
+	status.State = agentintegration.Ready
+	if record, err := codexplugin.Read(); err == nil {
+		enabled, err := codexplugin.Enabled(profile, record.Marketplace)
+		if err != nil {
+			return agentintegration.FailError(status, err)
 		}
-		if _, err := a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json"); err != nil {
-			return agentintegration.Fail(status, "remove Codex Workflow plugin: "+err.Error())
-		}
-		if err := codexhost.CleanupPresentation(a.home); err != nil {
-			return agentintegration.Fail(status, "remove Codex Workflow panel: "+err.Error())
+		if enabled {
+			if record.Home == a.home {
+				if err := workflowhost.Disable(a.home, record.ConnectorID); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return agentintegration.FailError(status, err)
+				}
+			}
+			if _, err := a.run(ctx, "plugin", "remove", codexplugin.Name+"@"+record.Marketplace, "--json"); err != nil {
+				return agentintegration.Fail(status, "remove Codex Workflow plugin: "+err.Error())
+			}
+			if err := codexhost.CleanupPresentation(a.home); err != nil {
+				return agentintegration.Fail(status, "remove Codex Workflow panel: "+err.Error())
+			}
 		}
 	}
+
 	if _, exists, err := a.getConfig(); err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	} else if exists {
 		if _, err := a.run(ctx, "mcp", "remove", serverName); err != nil {
 			return agentintegration.Fail(status, "remove Codex MCP configuration: "+err.Error())
@@ -249,7 +313,7 @@ func (a *Adapter) Disconnect(ctx context.Context) (result agentintegration.Statu
 func (a *Adapter) Login(ctx context.Context) agentintegration.Status {
 	status := a.Status(ctx)
 	if err := a.prepareRuntime(ctx); err != nil {
-		return agentintegration.Fail(status, err.Error())
+		return agentintegration.FailError(status, err)
 	}
 	loginCtx, cancel := context.WithTimeout(ctx, interactiveTimeout)
 	defer cancel()
@@ -321,6 +385,12 @@ func (a *Adapter) run(ctx context.Context, arguments ...string) (string, error) 
 }
 
 func (a *Adapter) isOwned(config mcpConfig) bool {
+	if reference := config.Transport.Env[connectorconfig.EnvironmentKey]; reference != "" {
+		record, err := connectorconfig.Load(reference)
+		if err != nil || record.Home != a.home || record.HostID != a.hostID || record.Provider != "codex" {
+			return false
+		}
+	}
 	return agentexec.SameExecutable(config.Transport.Command, a.self) &&
 		len(config.Transport.Args) == 2 &&
 		config.Transport.Args[0] == "mcp" && config.Transport.Args[1] == "proxy"
@@ -350,10 +420,5 @@ func (a *Adapter) pluginEnabled() bool {
 	if err != nil || !enabled {
 		return false
 	}
-	store, err := credentials.NewStore(a.home, "")
-	if err != nil {
-		return false
-	}
-	account, err := store.AccountScope()
-	return err == nil && workflowhost.Configured(a.home, record.ConnectorID, account)
+	return true
 }

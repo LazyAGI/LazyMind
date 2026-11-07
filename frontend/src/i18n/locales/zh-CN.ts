@@ -2396,6 +2396,15 @@ const zhCN = {
     },
     waitingForApplication: "等待应用启动",
     waitingForApplicationDescription: "接入已开启，等待 {{agent}} 启动后检查连接。",
+    setupFeedback: {
+      environmentMismatch: "已有其他 LazyMind 的接入配置，请关闭后重新开启以切换。",
+      readFailed: "无法读取接入配置，请重新检测。",
+      enableFailed: "开启失败，请重试。",
+      disableFailed: "关闭失败，请重试。",
+      connectionUnavailable: "配置已完成，连接暂不可用。",
+      unknown: "状态未知",
+      copyDiagnostics: "复制诊断信息",
+    },
     connectionErrors: {
       capability_unavailable: "LazyMind Workflow 已安装并开启，当前尚未识别 Codex 会话控制接口，工作流自动接续暂不可用。",
       startup_unavailable: "启动配置缺失或已变更。请关闭此开关后重新开启。",

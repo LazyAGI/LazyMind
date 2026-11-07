@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/codexplugin"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -141,9 +140,6 @@ func PrepareDesktopForInstallation(ctx context.Context, home string) error {
 }
 
 func prepareDesktop(ctx context.Context, home string, wait func(context.Context, string) error) error {
-	if !integrationstate.Allowed(home, "codex") {
-		return connectionIssue("CODEX_INTEGRATION_DISABLED", "Codex connection is disabled", false)
-	}
 	c, err := readConfig(home)
 	if err != nil {
 		return err
@@ -234,7 +230,7 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 		scope, scopeErr := account()
 		c, p, err := Load(home, scope)
 		next := c.Node + "|" + c.PairingFile + "|" + strconv.Itoa(c.Port) + "|" + scope + "|" + p.Token
-		if scopeErr != nil || err != nil || !p.Enabled || !integrationstate.Allowed(home, "codex") {
+		if scopeErr != nil || err != nil || !p.Enabled || !codexplugin.Registered(home) {
 			if current != nil {
 				stop()
 			}

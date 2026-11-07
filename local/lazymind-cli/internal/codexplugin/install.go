@@ -124,8 +124,8 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	}
 	defer unlock()
 	if _, err := os.Stat(root); err == nil {
-		previous, err := Read()
-		if err != nil || previous.Home != home || previous.Profile != profile {
+		_, err := Read()
+		if err != nil {
 			return Installation{}, errors.New("a different plugin already owns ~/plugins/lazymind-workflow")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -292,4 +292,18 @@ func BuildID() string {
 		return nil
 	})
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// Registered identifies the actual Agent-side installation used by this host.
+func Registered(home string) bool {
+	record, err := Read()
+	if err != nil || record.Home != home {
+		return false
+	}
+	self, err := os.Executable()
+	if err != nil || !agentexec.SameExecutable(self, record.Self) {
+		return false
+	}
+	enabled, err := Enabled(record.Profile, record.Marketplace)
+	return err == nil && enabled
 }

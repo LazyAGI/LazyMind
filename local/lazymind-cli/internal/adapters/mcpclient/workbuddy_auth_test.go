@@ -14,7 +14,6 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
-	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workbuddyhost"
 )
@@ -83,9 +82,7 @@ func TestWorkBuddyConnectChecksAuthenticationBeforeConfigurationOrRestart(t *tes
 			if err != nil || string(body) != original {
 				t.Fatalf("auth precheck changed MCP config: %s, %v", body, err)
 			}
-			if enabled, err := integrationstate.Read(home, "workbuddy"); err != nil || enabled != nil {
-				t.Fatalf("auth precheck changed enable preference: %v, %v", enabled, err)
-			}
+
 			for _, path := range []string{workbuddyhost.ConfigPath(home), filepath.Join(home, "workflow-hosts")} {
 				if _, err := os.Stat(path); !os.IsNotExist(err) {
 					t.Fatalf("auth precheck created pairing/configuration %q: %v", path, err)

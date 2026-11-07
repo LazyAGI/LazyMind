@@ -135,49 +135,13 @@ func (a *Adapter) checkDSHOwnership() error {
 	for _, row := range yamlSequence(doc).Content {
 		if dshEntryID(row) == "mcp-lazymind" {
 			mcpCount++
-			if reference := decodeDSHStdio(row).Env[connectorconfig.EnvironmentKey]; reference != "" {
-				c, err := connectorconfig.Load(reference)
-				if err != nil {
-					return err
-				}
-				if c.Profile != filepath.Dir(path) {
-					return fmt.Errorf("MCP connection does not belong to %s", path)
-				}
-			}
-			if !stateForStdio(decodeDSHStdio(row), a.self, a.home, a.hostID, DeepSeekHarness).owned {
-				return fmt.Errorf("unmanaged LazyMind MCP entry in %s", path)
-			}
 		} else if scalarValue(row, "id") == dshWorkflowRow {
 			workflowCount++
-			file := scalarValue(mappingValue(row, "config"), "pairingFile")
-			if reference := scalarValue(mappingValue(row, "config"), "connectorConfig"); reference != "" {
-				connection, err := connectorconfig.Load(reference)
-				if err != nil {
-					return err
-				}
-				if connection.Home != a.home || connection.Provider != string(DeepSeekHarness) || connection.Profile != filepath.Dir(a.dshConfigPath()) {
-					return errors.New("DSH connection ownership mismatch")
-				}
-				file = connection.PairingFile
-			}
-			// A disabled row with no config is the tombstone left by disconnect.
-			if file == "" && scalarValue(row, "disabled") == "true" {
-				continue
-			}
-			if file == "" || filepath.Dir(filepath.Clean(file)) != filepath.Join(a.home, "workflow-hosts") {
-				return fmt.Errorf("unmanaged Workflow entry in %s", path)
-			}
-			body, err := os.ReadFile(file)
-			var pair struct {
-				Profile string `json:"profile"`
-			}
-			if err != nil || json.Unmarshal(body, &pair) != nil || pair.Profile != filepath.Dir(path) {
-				return fmt.Errorf("Workflow pairing does not belong to %s", path)
-			}
 		} else if hasLazyMindEntry(row) {
-			return fmt.Errorf("hand-written LazyMind entry in %s; reconcile it before connecting", path)
+			return fmt.Errorf("unsupported LazyMind entry in %s", path)
 		}
 	}
+
 	if mcpCount > 1 || workflowCount > 1 {
 		return fmt.Errorf("duplicate LazyMind entries in %s", path)
 	}
@@ -252,10 +216,13 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 				p.State, p.Message = agentintegration.Failed, err.Error()
 				failed = true
 			} else {
-				managed := state.configured && state.owned
+				managed := state.configured
 				_, recorded := record.Profiles[name]
 				s.CanDisconnect = s.CanDisconnect || managed || recorded
 				partial = partial || managed
+				if managed && !state.owned {
+					p.State = agentintegration.Conflict
+				}
 				if managed && state.current && target.dshWorkflowConfigured() {
 					p.State = agentintegration.Enabled
 					complete++
@@ -417,15 +384,16 @@ func (a *Adapter) changeDSHProfile(ctx context.Context, connect bool) (err error
 			}
 			file := scalarValue(mappingValue(row, "config"), "pairingFile")
 			if reference := scalarValue(mappingValue(row, "config"), "connectorConfig"); reference != "" {
-				connection, err := connectorconfig.Load(reference)
-				if err != nil {
-					return err
+				connection, loadErr := connectorconfig.Load(reference)
+				file = ""
+				if loadErr == nil && connection.Home == a.home && connection.Provider == string(DeepSeekHarness) && connection.Profile == filepath.Dir(a.dshConfigPath()) {
+					file = connection.PairingFile
 				}
-				if connection.Home != a.home || connection.Provider != string(DeepSeekHarness) || connection.Profile != filepath.Dir(a.dshConfigPath()) {
-					return errors.New("DSH connection ownership mismatch")
-				}
-				file = connection.PairingFile
 			}
+			if file != "" && filepath.Dir(filepath.Clean(file)) != filepath.Join(a.home, "workflow-hosts") {
+				file = ""
+			}
+
 			if file != "" {
 				pair, e := snapshotDSHFile(file)
 				if e != nil {
@@ -470,6 +438,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	defer cancel()
 	runtime := a.inspectDSHDesktop(ctx)
 	s := a.dshDesktopStatusWithRuntime(runtime)
+	a.inspectConfiguration(&s)
 	if connect && (!s.CanConnect || s.State == agentintegration.Enabled) {
 		return s
 	}
@@ -492,6 +461,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		runtime = a.inspectDSHDesktop(ctx)
 	}
 	s = a.dshDesktopStatusWithRuntime(runtime)
+	a.inspectConfiguration(&s)
 	if connect && (!s.CanConnect || s.State == agentintegration.Enabled) {
 		return s
 	}
@@ -519,6 +489,24 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		return dshFailure(s, fmt.Errorf("check running Desktop: %w", err))
 	} else if running {
 		return dshFailure(s, errors.New("fully quit DSH Desktop before changing the connection"))
+	}
+	if !connect {
+		globalPath := filepath.Join(dshHome(), "cordis.patch.yml")
+		global, readErr := readYAMLDocument(globalPath)
+		if readErr != nil {
+			return dshFailure(s, readErr)
+		}
+		if findDSHEntry(global) != nil {
+			unlock, lockErr := lockDSHPatch(ctx, globalPath)
+			if lockErr != nil {
+				return dshFailure(s, lockErr)
+			}
+			removeErr := removeDSHConfig(globalPath)
+			unlock()
+			if removeErr != nil {
+				return dshFailure(s, removeErr)
+			}
+		}
 	}
 	if connect {
 		if _, err := a.bridge.Probe(ctx); err != nil {

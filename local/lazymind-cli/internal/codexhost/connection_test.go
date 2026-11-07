@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"lazymind/agentconnector/internal/integrationstate"
 )
 
 // These tests observe only simulated OS state. They never launch, quit or
@@ -53,7 +51,7 @@ func TestCurrentConnectionNeedsNoManagedStartupEntry(t *testing.T) {
 }
 
 func TestConnectionChecksCurrentProcessEndpointOwnerAndNativeCapability(t *testing.T) {
-	for _, scenario := range []string{"closed", "no-cdp", "foreign", "bad-endpoint", "not-ready", "probe-failed", "changed-owner", "disabled", "missing-config", "uninspectable"} {
+	for _, scenario := range []string{"closed", "no-cdp", "foreign", "bad-endpoint", "not-ready", "probe-failed", "changed-owner", "missing-config", "uninspectable"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := connectionFixture(t)
 			want := "CODEX_CONNECTION_REQUIRED"
@@ -80,11 +78,6 @@ func TestConnectionChecksCurrentProcessEndpointOwnerAndNativeCapability(t *testi
 					startupListenerMatches = func(context.Context, string, int) bool { return false }
 					return true, nil
 				}
-			case "disabled":
-				if err := integrationstate.Set(home, "codex", false); err != nil {
-					t.Fatal(err)
-				}
-				want = "CODEX_INTEGRATION_DISABLED"
 			case "missing-config":
 				if err := os.Remove(configPath(home)); err != nil {
 					t.Fatal(err)

@@ -127,4 +127,26 @@ exit 1
 	if !strings.Contains(string(config), "other-server") {
 		t.Fatal("disconnect removed unrelated server")
 	}
+	// Reuse the same product registration from a different LazyMind environment.
+	secondHome := filepath.Join(root, "second-state")
+	secondStore, err := credentials.NewStore(secondHome, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondStore.Save(credentials.Credentials{ServerURL: "http://127.0.0.1:1", AccessToken: "test", RefreshToken: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	second := *adapter
+	second.home = secondHome
+	second.hostID = "host-second"
+	if status := second.Connect(context.Background()); status.State != agentintegration.Enabled || status.Enabled == nil || !*status.Enabled {
+		t.Fatalf("second environment install: %+v", status)
+	}
+	if status := adapter.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled || !status.CanDisconnect {
+		t.Fatalf("first environment did not detect replacement: %+v", status)
+	}
+	if status := adapter.Disconnect(context.Background()); status.State == agentintegration.Failed || status.Enabled == nil || *status.Enabled {
+		t.Fatalf("cross-environment disconnect: %+v", status)
+	}
+
 }

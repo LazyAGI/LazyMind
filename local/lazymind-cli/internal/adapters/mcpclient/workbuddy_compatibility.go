@@ -90,7 +90,7 @@ func workBuddyFailure(status agentintegration.Status, err error) agentintegratio
 	if code != "" {
 		status.Issue = &agentintegration.Issue{Code: code}
 	}
-	return agentintegration.Fail(status, err.Error())
+	return agentintegration.FailError(status, err)
 }
 
 func workBuddyPairingIssue(err error) string {
