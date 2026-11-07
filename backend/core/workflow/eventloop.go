@@ -717,6 +717,9 @@ func launchWorkflowAttempt(
 		"step_id":     stepID,
 		"session_id":  sessionID,
 	}
+	if params.RetryHint != "" {
+		runParams["retry_hint"] = params.RetryHint
+	}
 	if params.TraceID != "" && params.ParentSpanID != "" {
 		runParams["trace_id"] = params.TraceID
 		runParams["parent_span_id"] = params.ParentSpanID
