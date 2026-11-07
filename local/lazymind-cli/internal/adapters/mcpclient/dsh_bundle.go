@@ -353,16 +353,13 @@ func (a *Adapter) disconnectDSHWorkflow() error {
 		file := scalarValue(config, "pairingFile") // Migration of the previous generated format.
 		if entry := scalarValue(config, "connectorConfig"); entry != "" {
 			c, err := connectorconfig.Load(entry)
-			if err != nil {
-				return err
+			file = ""
+			if err == nil && c.Home == a.home && c.Provider == string(DeepSeekHarness) {
+				file = c.PairingFile
 			}
-			if c.Home != a.home {
-				return errors.New("DSH connection belongs to another installation")
-			}
-			file = c.PairingFile
 		}
 		id := strings.TrimSuffix(filepath.Base(file), ".json")
-		if file != "" {
+		if file != "" && filepath.Dir(filepath.Clean(file)) == filepath.Join(a.home, "workflow-hosts") {
 			if err := workflowhost.Disable(a.home, id); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}

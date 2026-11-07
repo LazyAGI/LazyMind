@@ -387,6 +387,7 @@ type localPortAllocator struct {
 	err            error
 	errContext     bool
 	available      func(address string, port int) bool
+	ephemeral      func(address string) (int, error)
 	skipPortChecks bool
 }
 
@@ -394,6 +395,7 @@ func newLocalPortAllocator() *localPortAllocator {
 	return &localPortAllocator{
 		used:      map[int]struct{}{},
 		available: localPortAvailableOn,
+		ephemeral: localEphemeralPortOn,
 	}
 }
 
@@ -489,11 +491,23 @@ func (a *localPortAllocator) availableFromOn(start int, attempts int, address st
 			return a.reserve(port)
 		}
 	}
+	// Windows can reserve an entire preferred range without any listening
+	// process. Let the OS choose outside that range rather than failing startup.
+	for attempt := 0; attempt < 10; attempt++ {
+		port, err := a.ephemeral(address)
+		if err != nil {
+			a.err = fmt.Errorf("allocate OS-assigned local port on %s: %w", address, err)
+			return 0
+		}
+		if a.portAvailableOn(address, port) {
+			return a.reserve(port)
+		}
+	}
 	end := start + attempts - 1
 	if end > 65535 {
 		end = 65535
 	}
-	a.err = fmt.Errorf("no available local port in range %d-%d on %s", start, end, address)
+	a.err = fmt.Errorf("no available local port in range %d-%d or OS-assigned ports on %s", start, end, address)
 	return 0
 }
 
@@ -557,6 +571,15 @@ func (a *localPortAllocator) resolvedPortOn(name string, envNames []string, fall
 
 func localPortAvailable(port int) bool {
 	return localPortAvailableOn("127.0.0.1", port)
+}
+
+func localEphemeralPortOn(address string) (int, error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort(address, "0"))
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
 func localPortAvailableOn(address string, port int) bool {

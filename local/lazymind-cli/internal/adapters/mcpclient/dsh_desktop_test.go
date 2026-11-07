@@ -609,3 +609,50 @@ func TestInstalledDSHInspectionIsReadOnly(t *testing.T) {
 		t.Fatal("inspection changed old environment")
 	}
 }
+
+func TestDesktopConnectionCanMoveBetweenLazyMindEnvironments(t *testing.T) {
+	first := desktopAdapterFixture(t)
+	first.dshRunner = func(_ context.Context, name string, _ ...string) error { installDSHFixture(t, name); return nil }
+	if status := first.Connect(context.Background()); status.State != agentintegration.Enabled {
+		t.Fatalf("first connect: %+v", status)
+	}
+	second := *first
+	second.home = filepath.Join(t.TempDir(), "second-state")
+	second.hostID = "host-second"
+	firstStore, err := credentials.NewStore(first.home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverURL, err := firstStore.ServerURL(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStore, err := credentials.NewStore(second.home, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondStore.Save(credentials.Credentials{ServerURL: serverURL, Username: "fixture", AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 3600, SavedAt: float64(time.Now().Unix())}); err != nil {
+		t.Fatal(err)
+	}
+	if status := second.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled || !status.CanDisconnect {
+		t.Fatalf("second status: %+v", status)
+	}
+	if status := second.Disconnect(context.Background()); status.State == agentintegration.Failed || status.Enabled == nil || *status.Enabled {
+		t.Fatalf("second disconnect: %+v", status)
+	}
+	if status := second.Connect(context.Background()); status.State != agentintegration.Enabled {
+		t.Fatalf("second connect: %+v", status)
+	}
+	if status := first.Status(context.Background()); status.State != agentintegration.Conflict || status.Enabled == nil || !*status.Enabled {
+		t.Fatalf("first status: %+v", status)
+	}
+}
+
+func TestDesktopMalformedPatchReportsUnknownConfiguration(t *testing.T) {
+	adapter := desktopAdapterFixture(t)
+	writeTestFile(t, adapter.forDSHProfile("web", "").dshConfigPath(), "[broken")
+	status := adapter.Status(context.Background())
+	if status.Enabled != nil || status.Issue == nil || status.Issue.Code != "configuration_unreadable" {
+		t.Fatalf("unreadable patch: %+v", status)
+	}
+}

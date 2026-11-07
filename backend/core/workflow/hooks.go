@@ -267,7 +267,11 @@ func stopWorkflowSession(
 	// runner and therefore do not need a cancellation signal.
 	changed := false
 	var cancelledSteps []orm.WorkflowSessionStep
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		// A rolled-back attempt must not leak cancellation notifications into
+		// the next attempt. Send them only after the final transaction commits.
+		changed = false
+		cancelledSteps = nil
 		var current orm.WorkflowSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", session.ID).First(&current).Error; err != nil {
 			return err

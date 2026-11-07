@@ -35,6 +35,7 @@ func TestLocalPortAllocatorMovesOccupiedPreferredPort(t *testing.T) {
 func TestLocalPortAllocatorFailsWhenSearchRangeIsExhausted(t *testing.T) {
 	allocator := newLocalPortAllocator()
 	allocator.available = func(string, int) bool { return false }
+	allocator.ephemeral = func(string) (int, error) { return 54000, nil }
 
 	if port := allocator.resolvedPort("frontend", nil, 32000); port != 0 {
 		t.Fatalf("resolved port = %d, want 0", port)
@@ -44,6 +45,43 @@ func TestLocalPortAllocatorFailsWhenSearchRangeIsExhausted(t *testing.T) {
 	}
 	if !strings.Contains(allocator.Err().Error(), "32000-32499") {
 		t.Fatalf("allocation error = %q, want searched range", allocator.Err())
+	}
+}
+
+func TestLocalPortAllocatorFallsBackWhenPreferredRangeIsReserved(t *testing.T) {
+	allocator := newLocalPortAllocator()
+	allocator.available = func(address string, port int) bool {
+		if address != "127.0.0.1" {
+			t.Fatalf("probe address = %q", address)
+		}
+		return port < 8090 || port > 8589
+	}
+	candidates := []int{54000, 54000, 54001}
+	allocator.ephemeral = func(address string) (int, error) {
+		if address != "127.0.0.1" || len(candidates) == 0 {
+			t.Fatalf("unexpected OS port request: %q, candidates=%v", address, candidates)
+		}
+		port := candidates[0]
+		candidates = candidates[1:]
+		return port, nil
+	}
+	for _, want := range []int{54000, 54001} {
+		if got := allocator.resolvedPort("frontend", nil, 8090); got != want {
+			t.Fatalf("resolved port = %d, want %d; error=%v", got, want, allocator.Err())
+		}
+	}
+	if len(allocator.resolutions) != 2 || allocator.resolutions[0].ResolvedPort != 54000 {
+		t.Fatalf("fallback resolution not recorded: %+v", allocator.resolutions)
+	}
+}
+
+func TestLocalPortAllocatorReportsOSPortAllocationFailure(t *testing.T) {
+	allocator := newLocalPortAllocator()
+	allocator.available = func(string, int) bool { return false }
+	want := errors.New("socket allocation failed")
+	allocator.ephemeral = func(string) (int, error) { return 0, want }
+	if port := allocator.resolvedPort("frontend", nil, 8090); port != 0 || !errors.Is(allocator.Err(), want) {
+		t.Fatalf("port=%d, error=%v; want OS allocation error", port, allocator.Err())
 	}
 }
 
