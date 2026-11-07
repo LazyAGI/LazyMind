@@ -53,6 +53,32 @@ describe("manual agent shutdown", () => {
   });
 });
 
+describe("installation status recovery", () => {
+  it.each(["workbuddy", "codex"] as const)("clears a stale installation failure for %s after a healthy inspection", async (agent) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const labels = agent === "codex" ? zhCN.agentIntegration.codexInstallGuide : copy;
+    const pending: DesktopAgentIntegrationStatus = { ...installed, agent, state: "error",
+      issue: { code: "capability_unavailable", operation_id: "startup-test" },
+      connection: { ...installed.connection, mcp_trusted: true, mcp_enabled: true, control_ready: false } };
+    const connect = vi.fn().mockResolvedValue(pending);
+    const update = vi.fn();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: pending } });
+    render(<WorkBuddyInstallationGuide agent={agent} onConnect={connect} onStatus={update} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: labels.saveAndContinue }));
+    await screen.findByText(labels.installFailedTitle);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(screen.getByText(labels.installFailedTitle)).toBeInTheDocument();
+    const healthy: DesktopAgentIntegrationStatus = { ...pending, state: "enabled", issue: undefined,
+      connection: { ...pending.connection, control_ready: true } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { [agent]: healthy } });
+    fireEvent(window, new Event("focus"));
+    await screen.findByText(labels.successTitle);
+    expect(update).toHaveBeenCalledWith(healthy);
+    expect(screen.queryByText(labels.installFailedTitle)).not.toBeInTheDocument();
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("WorkBuddy native sign-in setup", () => {
   it("opens native sign-in and resumes installation only after login succeeds", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

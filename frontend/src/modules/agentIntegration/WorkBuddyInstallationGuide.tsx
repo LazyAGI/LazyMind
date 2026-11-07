@@ -115,10 +115,10 @@ export default function WorkBuddyInstallationGuide({ status, onConnect, onLogin,
       if (mounted.current && !automatic) { setError(text("checkFailedDescription")); setStage("notReady"); }
     } finally { busy.current = false; }
   };
-  // Returning from native trust/enable settings should complete the flow
-  // without requiring another install or restart. These checks are read-only.
+  // A late startup heartbeat or a return from trust/enable settings can finish
+  // setup after the install request failed. These checks never install/restart.
   useEffect(() => {
-    if (!["entry", "trust", "enable", "verify", "notReady"].includes(stage)) return;
+    if (!["installFailed", "entry", "trust", "enable", "verify", "notReady"].includes(stage)) return;
     const recheck = () => { if (document.visibilityState === "visible") void check(true); };
     const timer = window.setInterval(recheck, 3000);
     window.addEventListener("focus", recheck);

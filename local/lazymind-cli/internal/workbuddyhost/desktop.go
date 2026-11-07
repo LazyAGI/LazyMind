@@ -112,10 +112,13 @@ func WaitReady(ctx context.Context, home, account string, since time.Time) error
 			return err
 		}
 		if status, err := ReadStatus(config, pair.ConnectorID); err == nil && status.CheckedAt >= since.UnixMilli() {
-			// Transport/startup failures may recover; authorization, pairing and
-			// compatibility failures need an explicit repair before setup can succeed.
+			// The renderer can appear before its Workflow interfaces initialize.
+			// Wait for a fresh healthy heartbeat within the startup deadline;
+			// account, pairing and version failures still require explicit repair.
 			issue := StatusIssue(status)
-			if issue != "" && issue != "host_unavailable" && issue != "lazymind_unavailable" {
+			switch issue {
+			case "", "host_unavailable", "lazymind_unavailable", "capability_unavailable":
+			default:
 				return &CompatibilityError{Code: issue}
 			}
 			lastIssue = issue

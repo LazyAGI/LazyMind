@@ -83,7 +83,8 @@ func TestWaitReadyRequiresAHeartbeatAfterInstallationWithCancellation(t *testing
 	}
 }
 
-func TestWaitReadyReportsExplicitCapabilityFailureWithoutTimingOut(t *testing.T) {
+func waitReadyFixture(t *testing.T) (string, Config, workflowhost.Pairing) {
+	t.Helper()
 	home := t.TempDir()
 	pair, err := workflowhost.EnsureForProvider(home, "workbuddy", filepath.Join(home, "profile"), "account")
 	if err != nil {
@@ -94,15 +95,73 @@ func TestWaitReadyReportsExplicitCapabilityFailureWithoutTimingOut(t *testing.T)
 	if err = writeAtomic(ConfigPath(home), body); err != nil {
 		t.Fatal(err)
 	}
-	body, _ = json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: "capability_unavailable", CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
-	if err = writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
+	return home, config, pair
+}
+
+func TestWaitReadyAllowsCapabilitiesToBecomeReadyDuringStartup(t *testing.T) {
+	home, config, pair := waitReadyFixture(t)
+	since := time.Now().Add(-time.Second)
+	status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: "capability_unavailable",
+		CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+	body, _ := json.Marshal(status)
+	if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	updated := make(chan error, 1)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		status.Issue, status.Ready, status.Cancellation = "", true, "session"
+		status.CheckedAt = time.Now().UnixMilli()
+		body, _ := json.Marshal(status)
+		updated <- writeAtomic(config.PairingFile+".workbuddy-status.json", body)
+	}()
+	defer func() {
+		if err := <-updated; err != nil {
+			t.Error(err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err = WaitReady(ctx, home, "account", time.Now().Add(-time.Second))
-	var compatibility *CompatibilityError
-	if !errors.As(err, &compatibility) || compatibility.Code != "capability_unavailable" || ctx.Err() != nil {
-		t.Fatalf("error=%v context=%v", err, ctx.Err())
+	if err := WaitReady(ctx, home, "account", since); err != nil {
+		t.Fatalf("startup recovered, but installation failed: %v", err)
+	}
+}
+
+func TestWaitReadyDistinguishesStartupFromTerminalFailures(t *testing.T) {
+	for _, sample := range []struct {
+		issue string
+		wait  bool
+	}{
+		{"capability_unavailable", true},
+		{"host_unavailable", true},
+		{"lazymind_unavailable", true},
+		{"unsupported_version", false},
+		{"version_unreadable", false},
+		{"lazymind_auth_required", false},
+		{"pairing_disabled", false},
+		{"pairing_account_mismatch", false},
+	} {
+		t.Run(sample.issue, func(t *testing.T) {
+			home, config, pair := waitReadyFixture(t)
+			body, _ := json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: sample.issue,
+				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
+			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
+				t.Fatal(err)
+			}
+			timeout := 2 * time.Second
+			if sample.wait {
+				timeout = 50 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			err := WaitReady(ctx, home, "account", time.Now().Add(-time.Second))
+			var compatibility *CompatibilityError
+			if !errors.As(err, &compatibility) || compatibility.Code != sample.issue {
+				t.Fatalf("error=%v, want issue=%s", err, sample.issue)
+			}
+			if waited := errors.Is(ctx.Err(), context.DeadlineExceeded); waited != sample.wait {
+				t.Fatalf("waited until deadline=%v, want=%v", waited, sample.wait)
+			}
+		})
 	}
 }
