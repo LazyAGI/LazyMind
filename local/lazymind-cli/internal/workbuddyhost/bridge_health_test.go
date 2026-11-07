@@ -37,7 +37,7 @@ func TestWaitReadyNeverAcceptsBridgeFailureWithHealthyDesktop(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Code != code {
 				t.Fatalf("want %s, got %v", code, err)
 			}
-			if (ctx.Err() != nil) != (code == "lazymind_unavailable") {
+			if (ctx.Err() != nil) != (code == "lazymind_unavailable" || code == "pairing_disabled") {
 				t.Fatalf("unexpected retry behavior: %v", ctx.Err())
 			}
 		})

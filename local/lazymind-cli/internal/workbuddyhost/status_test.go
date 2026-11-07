@@ -98,32 +98,36 @@ func waitReadyFixture(t *testing.T) (string, Config, workflowhost.Pairing) {
 	return home, config, pair
 }
 
-func TestWaitReadyAllowsCapabilitiesToBecomeReadyDuringStartup(t *testing.T) {
-	home, config, pair := waitReadyFixture(t)
-	since := time.Now().Add(-time.Second)
-	status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: "capability_unavailable",
-		CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
-	body, _ := json.Marshal(status)
-	if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
-		t.Fatal(err)
-	}
-	updated := make(chan error, 1)
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		status.Issue, status.Ready, status.Cancellation = "", true, "session"
-		status.CheckedAt = time.Now().UnixMilli()
-		body, _ := json.Marshal(status)
-		updated <- writeAtomic(config.PairingFile+".workbuddy-status.json", body)
-	}()
-	defer func() {
-		if err := <-updated; err != nil {
-			t.Error(err)
-		}
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := WaitReady(ctx, home, "account", since); err != nil {
-		t.Fatalf("startup recovered, but installation failed: %v", err)
+func TestWaitReadyAllowsTransientStartupStatusToRecover(t *testing.T) {
+	for _, issue := range []string{"capability_unavailable", "pairing_disabled"} {
+		t.Run(issue, func(t *testing.T) {
+			home, config, pair := waitReadyFixture(t)
+			since := time.Now().Add(-time.Second)
+			status := Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Issue: issue,
+				CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"}
+			body, _ := json.Marshal(status)
+			if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
+				t.Fatal(err)
+			}
+			updated := make(chan error, 1)
+			go func() {
+				time.Sleep(30 * time.Millisecond)
+				status.Issue, status.Ready, status.Cancellation = "", true, "session"
+				status.CheckedAt = time.Now().UnixMilli()
+				body, _ := json.Marshal(status)
+				updated <- writeAtomic(config.PairingFile+".workbuddy-status.json", body)
+			}()
+			defer func() {
+				if err := <-updated; err != nil {
+					t.Error(err)
+				}
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := WaitReady(ctx, home, "account", since); err != nil {
+				t.Fatalf("startup recovered, but installation failed: %v", err)
+			}
+		})
 	}
 }
 
@@ -138,7 +142,7 @@ func TestWaitReadyDistinguishesStartupFromTerminalFailures(t *testing.T) {
 		{"unsupported_version", false},
 		{"version_unreadable", false},
 		{"lazymind_auth_required", false},
-		{"pairing_disabled", false},
+		{"pairing_disabled", true},
 		{"pairing_account_mismatch", false},
 	} {
 		t.Run(sample.issue, func(t *testing.T) {
@@ -163,5 +167,24 @@ func TestWaitReadyDistinguishesStartupFromTerminalFailures(t *testing.T) {
 				t.Fatalf("waited until deadline=%v, want=%v", waited, sample.wait)
 			}
 		})
+	}
+}
+
+func TestWaitReadyRejectsDisabledPairingDespiteHealthyHeartbeat(t *testing.T) {
+	home, config, pair := waitReadyFixture(t)
+	body, _ := json.Marshal(Status{ConnectorID: pair.ConnectorID, Version: "6.0.0", Ready: true,
+		Cancellation: "session", CheckedAt: time.Now().UnixMilli(), BridgeURL: "http://127.0.0.1:19091"})
+	if err := writeAtomic(config.PairingFile+".workbuddy-status.json", body); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflowhost.Disable(home, pair.ConnectorID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := WaitReady(ctx, home, "account", time.Now().Add(-time.Second))
+	var failure *workflowhost.PairingError
+	if !errors.As(err, &failure) || failure.Code != "HOST_PAIRING_DISABLED" || ctx.Err() != nil {
+		t.Fatalf("disabled pairing must be rejected immediately: %v", err)
 	}
 }

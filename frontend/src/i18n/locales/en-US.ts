@@ -2349,7 +2349,7 @@ const enUS = {
       workbuddy_login_required: "Sign in to WorkBuddy to continue setup.",
       workbuddy_auth_unreadable: "WorkBuddy sign-in status could not be read. Check file access and retry.",
       quit_required: "WorkBuddy has not fully exited. Save your work, quit from its application or tray menu, then retry.",
-      process_inspection_failed: "Cannot inspect WorkBuddy. Run both apps as the same user with the same permissions, quit WorkBuddy, then retry.",
+      process_inspection_failed: "Connection failed. Please retry. If it persists, report the diagnostic ID.",
       control_port_conflict: "The WorkBuddy control port is occupied by another service. Resolve the conflict, then retry.",
       control_window_unavailable: "Cannot identify a single WorkBuddy main window. Open its main window and check again.",
       launch_failed: "WorkBuddy could not start. Check that the app opens normally, then reconnect.",

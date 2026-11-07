@@ -114,10 +114,12 @@ func WaitReady(ctx context.Context, home, account string, since time.Time) error
 		if status, err := ReadStatus(config, pair.ConnectorID); err == nil && status.CheckedAt >= since.UnixMilli() {
 			// The renderer can appear before its Workflow interfaces initialize.
 			// Wait for a fresh healthy heartbeat within the startup deadline;
-			// account, pairing and version failures still require explicit repair.
+			// Load above verifies current pairing authorization on every poll.
+			// A worker can retain the disabled heartbeat from a rapid off/on
+			// cycle until its authorization retry completes; wait for it to clear.
 			issue := StatusIssue(status)
 			switch issue {
-			case "", "host_unavailable", "lazymind_unavailable", "capability_unavailable":
+			case "", "host_unavailable", "lazymind_unavailable", "capability_unavailable", "pairing_disabled":
 			default:
 				return &CompatibilityError{Code: issue}
 			}

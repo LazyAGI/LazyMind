@@ -26,7 +26,7 @@ func workBuddyIssueMessage(code string) string {
 	case "quit_required":
 		return "WorkBuddy has not fully exited. Save your work, quit it from its application or tray menu, then continue installation."
 	case "process_inspection_failed":
-		return "Unable to inspect WorkBuddy. Run both apps as the same user, quit WorkBuddy normally, then retry."
+		return "Connection failed. Please retry. If it persists, report the diagnostic ID."
 	case "control_port_conflict":
 		return "The WorkBuddy control port is occupied by another service. Resolve the port conflict, then retry."
 	case "control_window_unavailable":

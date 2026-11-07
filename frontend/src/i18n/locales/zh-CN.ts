@@ -2317,7 +2317,7 @@ const zhCN = {
       workbuddy_login_required: "请先在 WorkBuddy 中完成登录，登录后将继续配置。",
       workbuddy_auth_unreadable: "无法读取 WorkBuddy 登录状态，请检查文件访问权限后重试。",
       quit_required: "WorkBuddy 尚未完全退出。请保存工作，从应用菜单或系统托盘退出后，点击重试继续安装。",
-      process_inspection_failed: "无法检查 WorkBuddy 进程。请用同一用户和相同权限运行两款应用，完全退出 WorkBuddy 后重试。",
+      process_inspection_failed: "连接失败，请重试。若仍失败，请反馈诊断编号。",
       control_port_conflict: "WorkBuddy 控制端口被其他服务占用。请处理端口冲突后重试。",
       control_window_unavailable: "无法识别唯一的 WorkBuddy 主窗口。请打开主窗口后重新检查连接。",
       launch_failed: "WorkBuddy 启动失败。请确认应用可以正常打开，然后重新连接。",
