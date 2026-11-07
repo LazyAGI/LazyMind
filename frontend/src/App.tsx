@@ -4,8 +4,9 @@ import { BASENAME } from './globalState';
 import { useEffect } from 'react';
 import { startManagedBrowserSync } from './runtime/managedBrowser';
 import { startBrowserNotifications } from './modules/notifications/browser';
+import { GlobalErrorFallback } from './components/GlobalErrorBoundary';
 
-const router = createBrowserRouter([{ path: '*', element: <AppRouter /> }], {
+const router = createBrowserRouter([{ path: '*', element: <AppRouter />, errorElement: <GlobalErrorFallback /> }], {
   basename: BASENAME || undefined,
   future: { v7_relativeSplatPath: true },
 });

@@ -132,6 +132,39 @@ describe("Settings overview", () => {
     expect(routeParams().get("return_to")).toBe("/agent/chat/home/test-conversation");
   });
 
+  it("shows the short desktop application version in the sidebar footer", async () => {
+    mocks.mode = "desktop";
+    vi.stubEnv("VITE_APP_VERSION", "0.4");
+    vi.stubGlobal("lazymindDesktop", { appVersion: async () => "0.5.1-alpha.0" });
+    try {
+      await renderOverview();
+      const version = await screen.findByLabelText("应用版本 0.5");
+      expect(version).toHaveTextContent(/^v0.5$/);
+      expect(version.closest(".settings-reference-sidebar-foot")).not.toBeNull();
+      expect(screen.queryByText(/alpha/)).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("shows the configured web version in the sidebar footer across settings pages", async () => {
+    vi.stubEnv("VITE_APP_VERSION", "v0.5");
+    vi.stubGlobal("lazymindDesktop", undefined);
+    try {
+      const t = await renderOverview();
+      expect(await screen.findByLabelText("应用版本 0.5")).toHaveTextContent(/^v0.5$/);
+      fireEvent.click(card(t("settingsPage.sections.memory")).getByRole("button", {
+        name: t("settingsPage.goToDetailAria", { title: t("settingsPage.sections.memory") }),
+      }));
+      await screen.findByRole("heading", { name: "Memory configuration" });
+      expect(screen.getByLabelText("应用版本 0.5")).toBeVisible();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([
     ["local", "admin", "zh-CN"],
     ["desktop", "user", "en-US"],
