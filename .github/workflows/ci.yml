@@ -5,7 +5,7 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, master, 'dev/*']
+    branches: [main, master, 'dev/*', fix-1106]
     paths-ignore:
       - "**.md"
       - ".git*"

@@ -513,7 +513,10 @@ func advanceExternalStep(ctx context.Context, db *gorm.DB, task orm.ExternalAgen
 		WorkflowRevisionID: session.WorkflowRevisionID, WorkflowRevisionNo: session.WorkflowRevisionNo,
 		WorkflowTreeHash: session.WorkflowTreeHash, WorkflowRemoteRoot: session.WorkflowRemoteRoot,
 		ConversationID: session.ConversationID, UserID: session.CreateUserID, WorkflowMode: session.WorkflowMode,
-		Targets: []transitionTarget{{TargetStepID: stepID, Objective: externalWorkflowRuntimeObjective(task.TaskDescription), UserInput: task.TaskDescription}},
+		// Derive the objective from the pinned step, just as standard Retry does.
+		// The complete request remains context; downstream deliverables are not
+		// additional completion requirements for every intermediate attempt.
+		Targets: []transitionTarget{{TargetStepID: stepID, UserInput: task.TaskDescription}},
 	}
 	response, _ := transitionWorkflowSession(ctx, db, session.ID, payload)
 	if !response.Accepted {
@@ -538,14 +541,6 @@ func latestLinkedWorkflowForSkill(ctx context.Context, db *gorm.DB, userID strin
 		}
 	}
 	return orm.WorkflowResource{}, false
-}
-
-func externalWorkflowRuntimeObjective(userInput string) string {
-	userInput = strings.TrimSpace(userInput)
-	if userInput == "" {
-		return ""
-	}
-	return "Complete this external Agent task exactly. Treat the runtime user input as the source of truth for the concrete request, search keywords, filters, output requirements, and final answer. Runtime task:\n" + userInput
 }
 
 func externalWorkflowReusableForTask(ctx context.Context, db *gorm.DB, workflow orm.WorkflowResource, task orm.ExternalAgentWorkflowTask) bool {
@@ -587,10 +582,18 @@ func externalWorkflowAcceptsInputs(ctx context.Context, db *gorm.DB, workflow or
 }
 
 func completeExternalTask(ctx context.Context, db *gorm.DB, task orm.ExternalAgentWorkflowTask) orm.ExternalAgentWorkflowTask {
+	updates, err := externalTaskResultUpdates(ctx, db, task)
+	if err != nil {
+		return failExternalTask(db, task, "RESULT_READ_FAILED", err.Error(), "请进入 LazyMind 查看完整执行记录。")
+	}
+	return persistExternalTask(db, task, updates)
+}
+
+func externalTaskResultUpdates(ctx context.Context, db *gorm.DB, task orm.ExternalAgentWorkflowTask) (map[string]any, error) {
 	repo := workflowstore.New(db)
 	artifacts, err := repo.ListArtifacts(ctx, task.OwnerUserID, task.SessionID)
 	if err != nil {
-		return failExternalTask(db, task, "RESULT_READ_FAILED", err.Error(), "请进入 LazyMind 查看完整执行记录。")
+		return nil, err
 	}
 	outputs := make([]workflowstore.Artifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
@@ -603,7 +606,7 @@ func completeExternalTask(ctx context.Context, db *gorm.DB, task orm.ExternalAge
 	summaryJSON, _ := json.Marshal(summary)
 	now := time.Now().UTC()
 	updates := map[string]any{"status": externalTaskStatusSucceeded, "stage": "collect_result", "error_code": "", "error_message": "", "suggestion": "", "result_summary_json": summaryJSON, "result_artifacts_json": artifactsJSON, "completed_at": &now, "updated_at": now}
-	return persistExternalTask(db, task, updates)
+	return updates, nil
 }
 
 func inputBindingsFromExternalRequest(ctx context.Context, db *gorm.DB, owner string, values map[string]any, files []any) ([]workflowstore.InputBinding, error) {
@@ -665,7 +668,7 @@ func failExternalTask(db *gorm.DB, task orm.ExternalAgentWorkflowTask, code, mes
 }
 
 func persistExternalTask(db *gorm.DB, task orm.ExternalAgentWorkflowTask, updates map[string]any) orm.ExternalAgentWorkflowTask {
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(db.Statement.Context, db, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, "id=?", task.ID).Error; err != nil {
 			return err
 		}

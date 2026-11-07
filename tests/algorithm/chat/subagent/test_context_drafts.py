@@ -81,3 +81,22 @@ def test_saved_keys_use_recorded_artifacts_and_resume_snapshot(tmp_path):
     ctx.record_local_artifact('current', 'text', {'text': 'Saved now'}, 1)
 
     assert set(ctx.saved_keys()) == {'previous', 'current'}
+
+
+def test_artifact_locator_routes_to_scoped_reader(tmp_path, monkeypatch):
+    import lazyllm
+    from lazymind.chat.engine.subagent import tools
+
+    monkeypatch.setitem(lazyllm.globals, 'agentic_config', {})
+    ctx = _context(str(tmp_path))
+    ctx.record_local_artifact('result', 'text', {'text': 'first\nsecond\nthird'}, 1)
+    monkeypatch.setattr(tools, 'require_context', lambda: ctx)
+    locator = tools.get_artifact('result')
+
+    assert locator['path'].endswith('.draft')
+    assert 'get_artifact' in locator['message']
+    assert 'read_file(path)' not in locator['message']
+    window = tools.get_artifact('result', start_line=2, end_line=2)
+    assert window['content'] == 'second\n'
+    assert window['total_lines'] == 3
+    assert ctx.list_pending_drafts() == []
