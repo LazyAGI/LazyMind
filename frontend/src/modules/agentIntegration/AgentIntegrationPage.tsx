@@ -345,12 +345,15 @@ export default function AgentIntegrationPage() {
     if (pendingAgentActions.current.has(agent)) return;
     pendingAgentActions.current.add(agent);
     const key = `${agent}:${nextAction}`;
+    const failureMessage = nextAction === "login"
+      ? t("agentIntegration.loginStates.failed")
+      : t(`agentIntegration.setupFeedback.${nextAction === "disconnect" ? "disableFailed" : "enableFailed"}`);
     try {
       invalidateRefresh();
       setAction(key);
       const result = await agentIntegrationAction(agent, nextAction);
       if (!result.ok) {
-        const detail = t(`agentIntegration.setupFeedback.${nextAction === "disconnect" ? "disableFailed" : "enableFailed"}`);
+        const detail = failureMessage;
         const checked = await agentIntegrationStatuses();
         if (checked.ok) setStatuses(checked.data);
         if (["codex", "workbuddy"].includes(agent) && restartConfirmed) throw new Error(detail);
@@ -376,7 +379,7 @@ export default function AgentIntegrationPage() {
       }
       return result.data;
     } catch (cause) {
-      setError(t(`agentIntegration.setupFeedback.${nextAction === "disconnect" ? "disableFailed" : "enableFailed"}`));
+      setError(failureMessage);
       const checked = await agentIntegrationStatuses();
       if (checked.ok) setStatuses(checked.data);
       if (["codex", "workbuddy"].includes(agent) && restartConfirmed) throw cause;

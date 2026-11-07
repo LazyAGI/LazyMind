@@ -1453,6 +1453,19 @@ describe("AgentIntegrationPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("reports login request failures using the existing login feedback", async () => {
+    mocks.executorPolicies.mockResolvedValue({ ok: true, data: { codex: {
+      provider: "codex", enabled: false, installed: true, ready: false, unavailable_reason: "Codex CLI is not signed in",
+    } } });
+    mocks.action.mockResolvedValue({ ok: false, reason: "operation_failed", error: "private login error" });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("codex");
+    fireEvent.click(await within(card).findByRole("button", { name: /登录/ }));
+    await screen.findByText(zhCN.agentIntegration.loginStates.failed);
+    expect(screen.queryByText("private login error")).not.toBeInTheDocument();
+    expect(screen.queryByText(zhCN.agentIntegration.setupFeedback.enableFailed)).not.toBeInTheDocument();
+  });
+
   it("keeps configuration status unknown when it cannot be read", async () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { raccoon: {
       agent: "raccoon", display_name: "Raccoon", state: "error", message: "private raw failure",
