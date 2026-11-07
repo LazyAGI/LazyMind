@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
 import { CHANNEL_ACCOUNTS_CHANGED_EVENT, archiveChannelAccount, channelAccountConnectionStatus, channelAccountStatusKey, channelProviderStatusKey, channelStatusLabelKey, channelStatusHintKey, isChannelAccountAvailable, isChannelAccountPendingActivation, cancelConnectionSession, createConnectionSession, listChannelAccounts, refreshConnectionSession, submitConnectionChallenge, channelAccountLabel, type ChannelAccount } from './api';
 
 const http = vi.hoisted(() => ({ request: vi.fn(), post: vi.fn(), defaults: {} }));
@@ -28,6 +29,18 @@ describe('channelAccountLabel', () => {
   it('preserves a user-defined account name', () => {
     expect(channelAccountLabel(feishu('研究协作助手', 'Alice'))).toBe('研究协作助手');
     expect(channelAccountLabel(feishu('飞书 · 项目组', 'Alice'))).toBe('飞书 · 项目组');
+  });
+
+  it('localizes generated Feishu names and preserves custom remarks in English', async () => {
+    const language = i18n.language;
+    try {
+      await i18n.changeLanguage('en-US');
+      expect(channelAccountLabel(feishu('飞书 · ou_internal'))).toBe('Feishu account');
+      expect(channelAccountLabel(feishu('飞书用户ABC123 的 LazyMind 助手'))).toBe('LazyMind assistant for Feishu user ABC123');
+      expect(channelAccountLabel(feishu('研究协作助手'))).toBe('研究协作助手');
+    } finally {
+      await i18n.changeLanguage(language);
+    }
   });
 });
 

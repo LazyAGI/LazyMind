@@ -164,7 +164,6 @@ export default function GalleryPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("");
-  const [entryType, setEntryType] = useState<ShowcaseEntryType | "">("");
   const [technologyType, setTechnologyType] = useState<ShowcaseTechnologyType | "">("");
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -195,15 +194,15 @@ export default function GalleryPage() {
     return () => controller.abort();
   }, [locale]);
 
+  const entryItems = useMemo(() => items.filter((item) =>
+    matchesShowcaseEntryType(item.type, originEntryType)), [items, originEntryType]);
+  const availableCategories = useMemo(() => categories.filter((name) =>
+    entryItems.some((item) => item.category === name)), [categories, entryItems]);
+  const activeCategory = availableCategories.includes(category) ? category : "";
   const categoryOptions = useMemo<Array<FilterOption<string>>>(() => [
     { label: t("showcase.filters.all"), value: "" },
-    ...categories.map((item) => ({ label: item, value: item })),
-  ], [categories, t]);
-  const entryTypeOptions = useMemo<Array<FilterOption<ShowcaseEntryType>>>(() => [
-    { label: t("showcase.filters.all"), value: "" },
-    { label: t("showcase.filters.capability.chat"), value: "chat" },
-    { label: t("showcase.filters.capability.work"), value: "work" },
-  ], [t]);
+    ...availableCategories.map((item) => ({ label: item, value: item })),
+  ], [availableCategories, t]);
   const technologyTypeOptions = useMemo<Array<FilterOption<ShowcaseTechnologyType>>>(() => [
     { label: t("showcase.filters.all"), value: "" },
     { label: t("showcase.filters.technology.skill"), value: "skill" },
@@ -212,9 +211,8 @@ export default function GalleryPage() {
   ], [t]);
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
-    return items.filter((item) => {
-      const matchesCategory = category === "" || item.category === category;
-      const matchesEntryType = entryType === "" || matchesShowcaseEntryType(item.type, entryType);
+    return entryItems.filter((item) => {
+      const matchesCategory = activeCategory === "" || item.category === activeCategory;
       const matchesTechnologyType = technologyType === ""
         || showcaseTechnologyType(item.type) === technologyType;
       const searchable = [
@@ -230,11 +228,10 @@ export default function GalleryPage() {
         .join(" ")
         .toLowerCase();
       return matchesCategory
-        && matchesEntryType
         && matchesTechnologyType
         && (!normalizedKeyword || searchable.includes(normalizedKeyword));
     }).sort((left, right) => left.featured_order - right.featured_order);
-  }, [category, entryType, items, keyword, technologyType]);
+  }, [activeCategory, entryItems, keyword, technologyType]);
 
   return (
     <main className="showcase-page showcase-gallery-page">
@@ -262,14 +259,8 @@ export default function GalleryPage() {
             label={t("showcase.filters.taskType")}
             moreLabel={t("showcase.filters.more")}
             options={categoryOptions}
-            value={category}
+            value={activeCategory}
             onChange={setCategory}
-          />
-          <ShowcaseSelectFilter
-            label={t("showcase.filters.capabilityType")}
-            options={entryTypeOptions}
-            value={entryType}
-            onChange={setEntryType}
           />
           <ShowcaseSelectFilter
             label={t("showcase.filters.technologyType")}

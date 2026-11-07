@@ -1,7 +1,10 @@
 .knowledge-create-modal {
   .ant-modal-body {
     max-height: calc(100vh - 180px);
+    margin-inline-end: -16px;
+    padding-inline-end: 16px;
     overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 }
 

@@ -39,6 +39,8 @@ export default {
   "authorizedPerson": "Authorized by",
   "authorizedId": "Feishu user ID (scoped to this app)",
   "feishuAppId": "Feishu app ID",
+  feishuDefaultAccountName: "Feishu account",
+  feishuGeneratedAssistantName: "LazyMind assistant for Feishu user {{suffix}}",
   "identityMissing": "Information unavailable",
   "editAccountLabel": "Edit remark",
   "accountRemark": "Account remark",
