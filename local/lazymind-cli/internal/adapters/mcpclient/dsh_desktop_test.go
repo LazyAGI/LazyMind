@@ -647,3 +647,12 @@ func TestDesktopConnectionCanMoveBetweenLazyMindEnvironments(t *testing.T) {
 		t.Fatalf("first status: %+v", status)
 	}
 }
+
+func TestDesktopMalformedPatchReportsUnknownConfiguration(t *testing.T) {
+	adapter := desktopAdapterFixture(t)
+	writeTestFile(t, adapter.forDSHProfile("web", "").dshConfigPath(), "[broken")
+	status := adapter.Status(context.Background())
+	if status.Enabled != nil || status.Issue == nil || status.Issue.Code != "configuration_unreadable" {
+		t.Fatalf("unreadable patch: %+v", status)
+	}
+}

@@ -53,9 +53,7 @@ func (a *Adapter) inspectConfiguration(status *agentintegration.Status) []agenti
 	}
 	if unreadable {
 		status.State = agentintegration.Failed
-		if status.Issue == nil {
-			status.Issue = &agentintegration.Issue{Code: "configuration_unreadable"}
-		}
+		status.Issue = &agentintegration.Issue{Code: "configuration_unreadable"}
 		status.Message = "Unable to read integration configuration."
 	} else if mismatch && (status.State != agentintegration.Failed || status.RetryAction == "") && status.State != agentintegration.ActionRequired {
 		status.State = agentintegration.Conflict
