@@ -122,10 +122,16 @@ type openaiModelListResponse struct {
 	Models []openaiModelListEntry `json:"models"`
 }
 
+type remoteModelArchitecture struct {
+	Input  []string `json:"input_modalities"`
+	Output []string `json:"output_modalities"`
+}
+
 type openaiModelListEntry struct {
 	FeatureSupport      *modelsettings.FeatureFlags `json:"feature_support"`
 	ToolCall            *bool                       `json:"tool_call"`
 	Reasoning           *bool                       `json:"reasoning"`
+	SupportsReasoning   *bool                       `json:"supports_reasoning"`
 	SupportedParameters json.RawMessage             `json:"supported_parameters"`
 	ID                  string                      `json:"id"`
 	Name                string                      `json:"name"`
@@ -141,11 +147,74 @@ type openaiModelListEntry struct {
 	OutputModalities    []string                    `json:"output_modalities"`
 	// DiscoverySubTypes is supplied by trusted category-specific requests, never
 	// accepted from an arbitrary compatible endpoint's response body.
-	DiscoverySubTypes []string `json:"-"`
-	Architecture      struct {
-		Input  []string `json:"input_modalities"`
-		Output []string `json:"output_modalities"`
-	} `json:"architecture"`
+	DiscoverySubTypes []string                `json:"-"`
+	Architecture      remoteModelArchitecture `json:"architecture"`
+}
+
+// A model ID is essential to discovery; provider-specific metadata is not.
+// Decode optional fields independently so one unfamiliar field cannot discard
+// an otherwise valid model list.
+func (entry *openaiModelListEntry) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	if fields == nil {
+		return errors.New("model entry must be an object")
+	}
+	*entry = openaiModelListEntry{}
+	decodeOptionalModelField(fields["id"], &entry.ID)
+	decodeOptionalModelField(fields["name"], &entry.Name)
+	decodeOptionalModelField(fields["model"], &entry.Model)
+	entry.FeatureSupport = decodeOptionalFeatureSupport(fields["feature_support"])
+	decodeOptionalModelField(fields["tool_call"], &entry.ToolCall)
+	decodeOptionalModelField(fields["reasoning"], &entry.Reasoning)
+	decodeOptionalModelField(fields["supports_reasoning"], &entry.SupportsReasoning)
+	decodeOptionalModelField(fields["supported_parameters"], &entry.SupportedParameters)
+	decodeOptionalModelField(fields["root"], &entry.Root)
+	decodeOptionalModelField(fields["model_type"], &entry.ModelType)
+	decodeOptionalModelField(fields["task_type"], &entry.TaskType)
+	decodeOptionalModelField(fields["task"], &entry.Task)
+	decodeOptionalModelField(fields["type"], &entry.Type)
+	decodeOptionalModelField(fields["context_length"], &entry.ContextLength)
+	decodeOptionalModelField(fields["max_model_len"], &entry.MaxModelLen)
+	decodeOptionalModelField(fields["input_modalities"], &entry.InputModalities)
+	decodeOptionalModelField(fields["output_modalities"], &entry.OutputModalities)
+	entry.Architecture = decodeOptionalModelArchitecture(fields["architecture"])
+	return nil
+}
+
+func decodeOptionalModelField[T any](raw json.RawMessage, target *T) {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return
+	}
+	var value T
+	if json.Unmarshal(raw, &value) == nil {
+		*target = value
+	}
+}
+
+func decodeOptionalFeatureSupport(raw json.RawMessage) *modelsettings.FeatureFlags {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil
+	}
+	flags := &modelsettings.FeatureFlags{}
+	decodeOptionalModelField(fields["vision"], &flags.Vision)
+	decodeOptionalModelField(fields["tool_calling"], &flags.ToolCalling)
+	decodeOptionalModelField(fields["reasoning"], &flags.Reasoning)
+	return flags
+}
+
+func decodeOptionalModelArchitecture(raw json.RawMessage) remoteModelArchitecture {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return remoteModelArchitecture{}
+	}
+	var architecture remoteModelArchitecture
+	decodeOptionalModelField(fields["input_modalities"], &architecture.Input)
+	decodeOptionalModelField(fields["output_modalities"], &architecture.Output)
+	return architecture
 }
 
 func remoteModelID(entry openaiModelListEntry) string {
@@ -158,11 +227,11 @@ func remoteModelID(entry openaiModelListEntry) string {
 }
 
 func parseRemoteModelEntries(raw []byte) []openaiModelListEntry {
-	var parsed openaiModelListResponse
-	_ = json.Unmarshal(raw, &parsed)
-	entries := parsed.Data
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &fields)
+	entries := decodeRemoteModelList(fields["data"])
 	if len(entries) == 0 {
-		entries = parsed.Models
+		entries = decodeRemoteModelList(fields["models"])
 	}
 	if len(entries) == 0 {
 		for _, id := range parseRemoteModelIDs(raw) {
@@ -183,6 +252,21 @@ func parseRemoteModelEntries(raw []byte) []openaiModelListEntry {
 	}
 	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].ID) < strings.ToLower(result[j].ID) })
 	return result
+}
+
+func decodeRemoteModelList(raw json.RawMessage) []openaiModelListEntry {
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil {
+		return nil
+	}
+	entries := make([]openaiModelListEntry, 0, len(items))
+	for _, item := range items {
+		var entry openaiModelListEntry
+		if json.Unmarshal(item, &entry) == nil && remoteModelID(entry) != "" {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
 }
 
 func modelsListURL(providerName, baseURL string) (string, error) {
@@ -580,6 +664,11 @@ func remoteModelFeatureSupport(entry openaiModelListEntry, providerName string, 
 	}
 	if entry.Reasoning != nil {
 		flags.Reasoning = entry.Reasoning
+	}
+	// This explicit capability remains valid when a supplier uses a different
+	// runtime protocol adapter (for example, Kimi through OpenAI).
+	if entry.SupportsReasoning != nil {
+		flags.Reasoning = entry.SupportsReasoning
 	}
 	if entry.FeatureSupport != nil {
 		if entry.FeatureSupport.Vision != nil {

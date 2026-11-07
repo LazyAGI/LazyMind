@@ -29,6 +29,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/readingpolicy"
 	"lazymind/core/settings"
 	"lazymind/core/store"
@@ -1628,6 +1629,9 @@ func startParseTasksAtLevel(ctx context.Context, userID, datasetID string, taskI
 		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
 	llmConfig, err := modelconfig.LoadLLMConfig(ctx, store.DB(), userID)
+	if validationErr := validateParsingLLMConfig(ctx, store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
+		return nil, validationErr
+	}
 	if err != nil {
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
@@ -2937,6 +2941,9 @@ func startReparseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs
 		Strs("task_ids", taskIDs).
 		Msg("starting reparse tasks")
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	if validationErr := validateParsingLLMConfig(r.Context(), store.DB(), userID, processingLevel, llmConfig, err); validationErr != nil {
+		return nil, validationErr
+	}
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
@@ -3123,6 +3130,38 @@ func resolveReparseStrategy(processingLevel, reparseMode string) (string, error)
 		return "rebuild", nil
 	}
 	return mode, nil
+}
+
+func validateParsingLLMConfig(ctx context.Context, db *gorm.DB, userID, processingLevel string, cfg map[string]any, loadErr error) error {
+	if effectiveProcessingLevel(processingLevel) != ProcessingLevelIndexed {
+		return nil
+	}
+	if loadErr != nil {
+		return fmt.Errorf("cannot load model configuration for indexed processing: %w", loadErr)
+	}
+	role, ok := cfg["embed_main"].(map[string]any)
+	source, sourceOK := role["source"].(string)
+	model, modelOK := role["model"].(string)
+	if ok && sourceOK && modelOK && strings.TrimSpace(source) != "" && strings.TrimSpace(model) != "" {
+		return nil
+	}
+	// Static deployments have a built-in embedding role and no database choice.
+	// Once a global choice or state exists, an absent runtime config is a hard
+	// failure; a static fallback could encode vectors with a different model.
+	_, present, err := modelprovider.ResolveGlobalEmbeddingChoice(ctx, db)
+	if err != nil {
+		return fmt.Errorf("cannot resolve global embedding model: %w", err)
+	}
+	if !present {
+		ready, err := modelprovider.IsModelReady(ctx, db, userID, "embed_main")
+		if err != nil {
+			return fmt.Errorf("cannot check embedding model for indexed processing: %w", err)
+		}
+		if ready {
+			return nil
+		}
+	}
+	return fmt.Errorf("text embedding model is required for indexed processing")
 }
 
 func normalizeParsingLLMConfig(cfg map[string]any) map[string]any {

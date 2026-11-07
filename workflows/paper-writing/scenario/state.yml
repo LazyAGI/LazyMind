@@ -411,6 +411,8 @@ steps:
       - {material: write_document_document, required: false, transport: path}
       - {material: peer_review_pool, required: false, transport: path}
       - {material: peer_review_document, required: false, transport: path}
+      - {material: recovery_revise_document_pool, required: false, transport: path}
+      - {material: recovery_revise_document_document, required: false, transport: path}
     outputs:
       - {material: revise_document_pool, required: true}
       - {material: revise_document_document, required: true}

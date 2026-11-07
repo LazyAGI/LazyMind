@@ -417,7 +417,17 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 			if err := validateModelEditReferences(r.Context(), tx, parent, before, next, connectionBaseURL(parent, group.BaseURL)); err != nil {
 				return err
 			}
+			if isTextEmbeddingModelType(before.ModelType) && !isTextEmbeddingModelType(next.ModelType) {
+				if err := clearEmbeddingStateAfterRemoval(tx, before.ID); err != nil {
+					return err
+				}
+			}
 			if err := ensureEditedModelNameAvailable(tx, before, next.Name); err != nil {
+				return err
+			}
+		}
+		if enabledChanged && !next.Enabled && isTextEmbeddingModelType(before.ModelType) && !embeddingModelIdentityChanged(before, next) {
+			if err := guardEmbeddingRuntimeMutation(tx, userID, parent.ID, group.ID, before.ID); err != nil {
 				return err
 			}
 		}
@@ -447,6 +457,13 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		if result.RowsAffected != 1 {
 			return errConnectionChanged
+		}
+		if metadataChanged && next.Name != before.Name && isTextEmbeddingModelType(next.ModelType) && tx.Migrator().HasTable(&orm.EmbeddingIndexState{}) {
+			if err := tx.Model(&orm.EmbeddingIndexState{}).
+				Where("scope = ? AND active_model_id = ?", globalEmbeddingScope, before.ID).
+				Updates(map[string]any{"active_model_name": next.Name, "updated_at": now}).Error; err != nil {
+				return err
+			}
 		}
 		if err := retainRenamedCatalogTombstone(tx, parent, before, next, now); err != nil {
 			return err
@@ -539,13 +556,17 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var rows []orm.UserModelProviderGroupModel
-	if err := db.WithContext(r.Context()).
+	query := db.WithContext(r.Context()).
 		Where(
 			"user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL",
 			group.ID, userID,
-		).
-		Order("name ASC").
-		Find(&rows).Error; err != nil {
+		)
+	if parent.IsCustom && !group.IsVerified {
+		// Older custom groups may retain catalog defaults from before discovery
+		// was gated on verification. Keep their manually added models visible.
+		query = query.Where("is_default = ?", false)
+	}
+	if err := query.Order("name ASC").Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list models failed", http.StatusInternalServerError)
 		return
 	}
@@ -608,7 +629,8 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	q := db.WithContext(r.Context()).
 		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.create_user_id = user_model_provider_group_models.create_user_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
 		Joins("JOIN user_model_provider_groups ON user_model_provider_groups.id = user_model_provider_group_models.user_model_provider_group_id AND user_model_provider_groups.user_model_provider_id = user_model_provider_group_models.user_model_provider_id AND user_model_provider_groups.create_user_id = user_model_provider_group_models.create_user_id AND user_model_provider_groups.deleted_at IS NULL").
-		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL", userID)
+		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL", userID).
+		Where("user_model_providers.is_custom = ? OR user_model_provider_groups.is_verified = ? OR user_model_provider_group_models.is_default = ?", false, true, false)
 	if modelType != "" {
 		// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
 		// technical type (e.g. "llm") stored in user_model_provider_group_models.
@@ -851,7 +873,7 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		clearMultimodalSelection = isMultimodalEmbeddingModelType(row.ModelType)
 		removeTextEmbedding := isTextEmbeddingModelType(row.ModelType)
 		if removeTextEmbedding {
-			if err := guardEmbeddingRemoval(tx, userID); err != nil {
+			if err := guardEmbeddingRemoval(tx, userID, row.ID); err != nil {
 				return err
 			}
 		}
@@ -872,6 +894,9 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("user_model_provider_group_model_id = ?", row.ID).
 			Delete(&orm.UserSelectedModel{}).Error; err != nil {
 			return err
+		}
+		if removeTextEmbedding {
+			return clearEmbeddingStateAfterRemoval(tx, row.ID)
 		}
 		return nil
 	}); err != nil {

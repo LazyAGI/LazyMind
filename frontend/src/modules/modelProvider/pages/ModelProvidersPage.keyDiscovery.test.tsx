@@ -40,6 +40,8 @@ vi.mock("../components/ProviderWorkspace", () => ({ ProviderWorkspace: (props: {
   modelsLoading: Record<string, boolean>;
   onKeySaved?: (provider: AddedProvider, groupId: string, isCurrent: () => boolean) => Promise<void>;
   onSyncModels: (provider: AddedProvider, group: AddedProvider["groups"][number]) => void;
+  onLoadModels: (provider: AddedProvider, group: AddedProvider["groups"][number]) => void;
+  onCheck: (provider: AddedProvider, group: AddedProvider["groups"][number]) => void;
 }) => {
   const option = props.providers[0];
   const provider = props.configuredProviders[0] || (option ? { ...option, groups: [] } : undefined);
@@ -51,7 +53,14 @@ vi.mock("../components/ProviderWorkspace", () => ({ ProviderWorkspace: (props: {
     <button disabled={!provider || !group || props.loading} onClick={() => {
       if (provider && group) props.onSyncModels(provider, group);
     }}>Sync models</button>
+    <button disabled={!provider || !group || props.loading} onClick={() => {
+      if (provider && group) props.onLoadModels(provider, group);
+    }}>Load models</button>
+    <button disabled={!provider || !group || props.loading} onClick={() => {
+      if (provider && group) props.onCheck(provider, group);
+    }}>Check connection</button>
     <output data-testid="group-models">{JSON.stringify(group?.models || [])}</output>
+    <output data-testid="group-model-count">{group?.modelCount ?? group?.models.length ?? 0}</output>
     <output data-testid="discovery-state">{provider && group && props.modelsLoading[provider.id + ":" + group.id] ? "loading" : "ready"}</output>
   </>;
 } }));
@@ -290,6 +299,67 @@ describe("model discovery after verified key save", () => {
     expect(mocks.remove).not.toHaveBeenCalled();
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
+  });
+
+  it("does not suggest catalog models for a custom supplier whose model list is unavailable", async () => {
+    mocks.remote.mockRejectedValue(Object.assign(new Error("model list unavailable"), {
+      response: { status: 502, data: { data: { reason: "model_list_unavailable" } } },
+    }));
+
+    await discoverAfterKeySave();
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
+    expect(screen.queryByText("gpt-4")).not.toBeInTheDocument();
+  });
+
+  it("hides cached catalog defaults after a custom supplier fails verification", async () => {
+    mocks.models.mockResolvedValue({ data: { models: [
+      { id: "catalog-default", name: "catalog-default", model_type: "llm", is_default: true },
+      { id: "manual-model", name: "manual-model", model_type: "llm", is_default: false },
+    ] } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    const load = await screen.findByRole("button", { name: "Load models" });
+    fireEvent.click(load);
+    await waitFor(() => expect(screen.getByTestId("group-models")).toHaveTextContent("catalog-default"));
+    expect(screen.getByTestId("group-model-count")).toHaveTextContent("2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+
+    await waitFor(() => expect(mocks.check).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("group-models")).not.toHaveTextContent("catalog-default"));
+    expect(screen.getByTestId("group-models")).toHaveTextContent("manual-model");
+    expect(screen.getByTestId("group-model-count")).toHaveTextContent("1");
+  });
+
+  it("does not suggest catalog models for an official supplier after authentication failure", async () => {
+    const official = { ...supplier, name: "Doubao", protocol_name: "Doubao", is_custom: false };
+    mocks.providers.mockResolvedValue({ data: { providers: [official] } });
+    mocks.withGroups.mockResolvedValue({ data: { providers: [official] } });
+    mocks.remote.mockRejectedValue(Object.assign(new Error("authentication failed"), {
+      response: { status: 502, data: { data: { reason: "authentication_failed" } } },
+    }));
+
+    await discoverAfterKeySave();
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
+  });
+
+  it("does not assume an official supplier has no model directory after one 404", async () => {
+    const official = { ...supplier, name: "Doubao", protocol_name: "Doubao", is_custom: false };
+    mocks.providers.mockResolvedValue({ data: { providers: [official] } });
+    mocks.withGroups.mockResolvedValue({ data: { providers: [official] } });
+    mocks.remote.mockRejectedValue(Object.assign(new Error("model list unavailable"), {
+      response: { status: 502, data: { data: { reason: "model_list_unavailable" } } },
+    }));
+
+    await discoverAfterKeySave();
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
+    expect(screen.queryByText("doubao-seed-1-6-251015")).not.toBeInTheDocument();
   });
 
   it("leaves an empty remote catalog empty without creating placeholder models", async () => {

@@ -16,6 +16,38 @@ import JSZip from 'jszip';
 import { readFile, writeFile } from 'node:fs/promises';
 
 /**
+ * pptxgenjs 3.x emits pPr before every rich-text run. DrawingML permits one
+ * pPr, at the start of a paragraph. Office can render the malformed paragraph
+ * differently before and after entering text editing (notably mixed CJK/math).
+ * Keep the first paragraph style and preserve all runs and explicit breaks.
+ * This operates only on the known DrawingML emitted by our exporter.
+ */
+export function normalizeTextParagraphs(xml) {
+  return xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (paragraph, body) => {
+    let first = '';
+    const content = body.replace(/<a:pPr\b[^>]*\/>|<a:pPr\b[^>]*>[\s\S]*?<\/a:pPr>/g, properties => {
+      if (!first) first = properties;
+      return '';
+    });
+    return `<a:p>${first}${content}</a:p>`;
+  });
+}
+
+/**
+ * pptxgenjs assigns ANSI/GB2312/Hangul charset hints to every font, including
+ * Unicode fonts such as PingFang SC and Latin-only formula faces. PowerPoint
+ * for Mac can use these hints to select missing glyphs on initial layout,
+ * then recover only when the text box is selected. Let Office resolve Unicode
+ * glyphs from the named face instead. Preserve symbol/custom charset metadata
+ * and embedded-font records, which are not DrawingML text font declarations.
+ */
+export function normalizeTextFontCharsets(xml) {
+  return xml.replace(/<a:(?:latin|ea|cs)\b[^>]*>/g, font => (
+    font.replace(/\s+charset="(?:0|-122|-120)"/g, '')
+  ));
+}
+
+/**
  * Apply a list of handlers to a built .pptx file in-place.
  *
  * Each handler is an object with:
@@ -24,24 +56,27 @@ import { readFile, writeFile } from 'node:fs/promises';
  *     every slide (handlers must be idempotent and safe on slides that
  *     don't contain their tokens).
  *
- * Only files under `ppt/slides/` are passed through handlers.
+ * Text font hints are normalized across PPT XML parts (including charts and
+ * themes); only slide XML is passed through paragraph and custom handlers.
  *
  * @param {string} pptxPath
  * @param {Array<{apply: (xml: string, name: string) => string}>} handlers
  */
-export async function postprocessPptx(pptxPath, handlers) {
-  if (!handlers || handlers.length === 0) return;
+export async function postprocessPptx(pptxPath, handlers = []) {
   const buf = await readFile(pptxPath);
   const zip = await JSZip.loadAsync(buf);
 
   let modifiedAny = false;
   for (const name of Object.keys(zip.files)) {
     if (zip.files[name].dir) continue;
-    if (!/^ppt\/slides\/slide\d+\.xml$/.test(name)) continue;
+    if (!/^ppt\/.*\.xml$/.test(name)) continue;
     const xml = await zip.files[name].async('string');
-    let cur = xml;
-    for (const h of handlers) {
-      cur = h.apply(cur, name);
+    let cur = normalizeTextFontCharsets(xml);
+    if (/^ppt\/slides\/slide\d+\.xml$/.test(name)) {
+      cur = normalizeTextParagraphs(cur);
+      for (const h of handlers) {
+        cur = h.apply(cur, name);
+      }
     }
     if (cur !== xml) {
       zip.file(name, cur);

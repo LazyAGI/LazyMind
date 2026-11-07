@@ -14,12 +14,13 @@ LIB = ROOT / 'workflows/ppt-workflow/runtime/lib'
 
 
 @pytest.fixture
-def runtime():
+def runtime(monkeypatch):
     sys.path.insert(0, str(LIB))
     spec = importlib.util.spec_from_file_location(
         'ppt_material_binding_runtime', ROOT / 'workflows/ppt-workflow/runtime/scripts/run_stage.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'prompt_catalog', lambda _: '')
     yield module
     sys.path.remove(str(LIB))
 

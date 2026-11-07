@@ -227,6 +227,7 @@ func TestProcessingCoverageBatchesOwnedTasks(t *testing.T) {
 func TestIndexedSubmissionRecordsLevelRevisionAndReturnsAllObservedStages(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Now().UTC()
+	seedSelectedEmbeddingForDocTest(t, db, "user-1")
 	seedDocumentServiceDatasetWithKBAndAlgo(t, db, "indexed", "kb", "general_algo", "user-1", now)
 	db.Model(&orm.Dataset{}).Where("id = ?", "indexed").Updates(map[string]any{"processing_level": "indexed", "processing_revision": int64(7)})
 	path := filepath.Join(t.TempDir(), "note.txt")

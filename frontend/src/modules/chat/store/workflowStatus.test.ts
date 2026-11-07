@@ -74,3 +74,12 @@ describe('reconcileWorkflowSessionStatus', () => {
     })).toBe('active');
   });
 });
+
+describe('input checkpoint display', () => {
+  it('labels user input separately from approval and execution', async () => {
+    const { workflowDisplayLabel } = await import('./workflowStatus');
+    expect(workflowDisplayLabel('waiting_input')).toBe('chat.workflowStatusWaitingInput');
+    expect(workflowDisplayLabel('waiting')).toBe('chat.workflowStatusWaiting');
+    expect(workflowDisplayLabel('running')).toBe('chat.workflowStatusRunning');
+  });
+});

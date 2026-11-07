@@ -19,12 +19,15 @@ def test_concurrent_requests_isolate_config_usage_and_restore_session(monkeypatc
     import lazyllm
 
     barrier = threading.Barrier(2)
+    trace_ids = {'first': '1' * 32, 'second-model': '2' * 32}
 
     def model(prompt, **options):
         selected = lazyllm.globals['config']['dynamic_model_configs']['llm']['chat']
         name = selected['model']
         barrier.wait(timeout=5)
         assert lazyllm.globals['config']['dynamic_model_configs']['llm']['chat']['model'] == name
+        trace = lazyllm.get_trace_context()
+        assert trace.trace_id == trace.session_id == trace_ids[name]
         lazyllm.globals['usage'].update({'prompt_tokens': len(name)})
         return json.dumps({'title': name, 'initial_intent_summary': name,
                            'intent_status': 'ready', 'missing_context': []})
@@ -36,7 +39,8 @@ def test_concurrent_requests_isolate_config_usage_and_restore_session(monkeypatc
     def call(name):
         before = (lazyllm.globals._sid, lazyllm.locals._sid)
         lazyllm.globals['usage'].update({'prompt_tokens': 999})
-        request = TitleRequest(llm_config={'llm': {'source': 'openai', 'model': name}})
+        request = TitleRequest(llm_config={'llm': {'source': 'openai', 'model': name}},
+                               options={'trace_id': trace_ids[name]})
         result = generate_title(request)
         assert (lazyllm.globals._sid, lazyllm.locals._sid) == before
         assert lazyllm.globals['usage']['prompt_tokens'] == 999

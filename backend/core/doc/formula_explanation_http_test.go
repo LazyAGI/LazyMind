@@ -384,4 +384,12 @@ func TestFormulaExplanationLoadsOnlySelectedChatModel(t *testing.T) {
 	if _, _, _, err := loadFormulaExplanationModel(t.Context(), "stranger"); err == nil {
 		t.Fatal("private model used by another user")
 	}
+	if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", "provider").Updates(map[string]any{
+		"active_key_initialized": true, "active_key_group_id": "", "active_key_id": "",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := loadFormulaExplanationModel(t.Context(), "owner"); err == nil {
+		t.Fatal("disabled supplier key was used for formula explanation")
+	}
 }

@@ -3,6 +3,8 @@ import re
 import string
 
 from lazyllm.thirdparty import mistune
+from lazyllm.tools.writer.utils import locate_markdown_paragraph
+from lazyllm.tools.writer.utils.serialization import MarkdownSelectionError
 
 
 def _format_view(text):
@@ -48,7 +50,7 @@ def _source_match(source, locator):
 
 
 def resolve_locator(source, locator, target_scope):
-    """Return an exact locator and scope; a list item becomes one bounded fragment.
+    """Return an exact locator and scope; list items and tables use bounded fragments.
 
     Only whitespace, escapes, emphasis delimiters and citation brackets may differ.
     Words, numbers, signs and citation destinations must still match. This function
@@ -57,6 +59,11 @@ def resolve_locator(source, locator, target_scope):
     start, end = _source_match(source, locator)
     if target_scope == 'fragment':
         return source[start:end], target_scope
+    try:
+        locate_markdown_paragraph(source, source[start:end])
+        return source[start:end], 'paragraph'
+    except MarkdownSelectionError:
+        pass
     parser = mistune.create_markdown(renderer='ast', plugins=['table'])
     for match in re.finditer(r'\S[^\n]*(?:\n(?![ \t]*\n)[^\n]*)*', source):
         if not match.start() <= start < end <= match.end():
@@ -65,6 +72,8 @@ def resolve_locator(source, locator, target_scope):
         tokens = [token for token in parser(block) if token['type'] != 'blank_line']
         if len(tokens) == 1 and tokens[0]['type'] == 'paragraph':
             return source[start:end], 'paragraph'
+        if len(tokens) == 1 and tokens[0]['type'] == 'table':
+            return source[start:end], 'fragment'
         if len(tokens) == 1 and tokens[0]['type'] == 'list':
             items = list(re.finditer(r'(?m)^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+', block))
             for index, item in enumerate(items):
@@ -72,4 +81,4 @@ def resolve_locator(source, locator, target_scope):
                 if item.start() <= start - match.start() < end - match.start() <= item_end:
                     return block[item.start():item_end].rstrip('\r\n'), 'fragment'
         break
-    raise ValueError('Paper locator must select one paragraph or one list item.')
+    raise ValueError('Paper locator must select one paragraph, one list item or a table fragment.')

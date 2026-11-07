@@ -8120,6 +8120,36 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingIndexStatusResponse:
+            properties:
+                affected_knowledge_bases:
+                    format: int64
+                    type: integer
+                indexed_knowledge_bases:
+                    format: int64
+                    type: integer
+                model_name:
+                    type: string
+                pending_knowledge_bases:
+                    format: int64
+                    type: integer
+                provider_name:
+                    type: string
+                status:
+                    enum:
+                        - empty
+                        - indexed
+                        - rebuilding
+                        - clearing
+                        - cleared
+                        - unknown
+                    type: string
+            required:
+                - affected_knowledge_bases
+                - indexed_knowledge_bases
+                - pending_knowledge_bases
+                - status
+            type: object
         EmbeddingOptions:
             properties:
                 batch_size:
@@ -8129,6 +8159,65 @@ components:
                     type: string
                 query_prefix:
                     type: string
+            type: object
+        EmbeddingSignatureResponse:
+            properties:
+                code:
+                    type: string
+                dimensions:
+                    type: integer
+                model_type:
+                    type: string
+                passage_signature:
+                    type: string
+                query_signature:
+                    type: string
+                status:
+                    type: string
+            required:
+                - code
+                - model_type
+                - status
+            type: object
+        EmbeddingSwitchPreviewRequest:
+            properties:
+                model_id:
+                    type: string
+                source:
+                    type: string
+            required:
+                - model_id
+                - source
+            type: object
+        EmbeddingSwitchPreviewResponse:
+            properties:
+                active_model_name:
+                    type: string
+                can_switch:
+                    type: boolean
+                candidate_model_name:
+                    type: string
+                generation:
+                    format: int64
+                    type: integer
+                indexed_knowledge_bases:
+                    format: int64
+                    type: integer
+                outcome:
+                    enum:
+                        - unchanged
+                        - empty
+                        - same
+                        - clear_required
+                        - probe_failed
+                    type: string
+                signature_status:
+                    type: string
+            required:
+                - can_switch
+                - generation
+                - indexed_knowledge_bases
+                - outcome
             type: object
         EmptyObject:
             properties: {}
@@ -20630,6 +20719,12 @@ paths:
             summary: Add a note idempotently by stable note ID
             tags:
                 - AcademicWorkflows
+    /api/core/academic/library/papers:delete:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/library/papers:delete
     /api/core/academic/library/papers:move:
         post:
             parameters:
@@ -32461,6 +32556,35 @@ paths:
             summary: Update a connection group model
             tags:
                 - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:embedding-signature:
+        post:
+            description: Computes SHA-256 digests for fixed passage and query samples through the saved model's actual embedding runtime, including its configured prefixes. Returns only digests and dimension, never vectors, credentials or upstream text. A ready result can be compared with a previously recorded signature; unsupported and failed results cannot establish compatibility. The request body must be empty and no model settings are changed.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingSignatureResponse'
+                    description: Candidate embedding signatures or an unverified result
+            summary: Fingerprint one saved text embedding model
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
         post:
             description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
@@ -32659,6 +32783,38 @@ paths:
                                 $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
                     description: Reset supplier
             summary: Reset a built-in model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/index-state:
+        get:
+            description: Reports the persisted text embedding model identity and how many knowledge bases have indexed or pending document vectors. A legacy index without a recorded signature is reported as unknown, never inferred from the current model selection.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingIndexStatusResponse'
+                    description: Text-vector index state
+            summary: Get shared text-vector index state
+            tags:
+                - model_providers
+    /api/core/model_providers/embedding/switch-preview:
+        post:
+            description: Probes the saved candidate through the document embedding runtime and compares its passage and query signatures with the recorded deployment-wide text-vector identity. Legacy indexes without a recorded signature are unverified and require vector cleanup before a change. Preview never changes selections or knowledge bases; a later save rechecks the current state.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/EmbeddingSwitchPreviewRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmbeddingSwitchPreviewResponse'
+                    description: Embedding switch assessment
+            summary: Check whether a text embedding model can replace the active model
             tags:
                 - model_providers
     /api/core/model_providers/features:

@@ -409,6 +409,15 @@ function resolveVisibleSlotIds(
 
   const scope = behavior.empty_column_scope === 'tab' ? 'tab' : 'selected';
   const present = getPresentSlotIds(tab, session, scope);
+  // Scoped composites retain historical rows after an upstream edit. Use the
+  // same revisions for column visibility, otherwise only the filmstrip survives.
+  if (session.workflow_id === 'ppt-workflow' && tab.layout === 'composite' && resolveWorkflowTabStepId(tab, session.steps)) {
+    for (const slot of session.slots ?? []) {
+      if (!slot.selected && workflowSlotMatchesTabScope(tab, session.steps, slot)) {
+        present.add(slot.slot);
+      }
+    }
+  }
   const allowed = new Set(tab.slots.map((s) => s.id));
 
   for (const group of behavior.mutually_exclusive ?? []) {
@@ -605,7 +614,8 @@ function InnerTabsCell({
                 <SlotRenderer
                   slot={rev}
                   workflowSession={session}
-                  widget={def?.widget}
+                  widget={session.workflow_id === 'ppt-workflow' && slotId === 'slide_outline'
+                  ? { ...def?.widget, widgetType: 'ppt-prompt' } : def?.widget}
                   expectedType={def?.type}
                   sessionId={session.session_id}
                   slotId={slotId}
@@ -965,7 +975,8 @@ function CompositeSlotGrid({
             <SlotRenderer
               slot={rev}
               workflowSession={session}
-              widget={def?.widget}
+              widget={session.workflow_id === 'ppt-workflow' && slotId === 'slide_outline'
+                  ? { ...def?.widget, widgetType: 'ppt-prompt' } : def?.widget}
               slideNavigation={paged ? {
                 index: rows.indexOf(activePage),
                 total: rows.length,
@@ -1152,6 +1163,12 @@ function CompositeSlotGrid({
         {(pageBarPosition === 'top' || pageBarPosition === 'left') && rail}
         <div className='composite-main'>
           <WorkflowTabActions actions={tab.actions} tab={tab} session={session} rows={rows} />
+          {session.workflow_id === 'ppt-workflow' && tab.slots.some(def => {
+            const revision = findSlotRevision(session, tab, def.id, activePage);
+            return revision && !revision.selected;
+          }) && (
+            <div role='status'>{t('chat.workflowStalePreview')}</div>
+          )}
           {reorderError && <span className='composite-toolbar__error'>{reorderError}</span>}
           <div className='composite-grid composite-grid--paged'>{renderRow(activePage)}</div>
         </div>

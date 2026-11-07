@@ -1,5 +1,6 @@
 # Add your algorithm dependencies here. lazyllm[rag] is provided by the base image.
 httpx>=0.24.0
+filelock>=3.13
 python-multipart
 opensearch-py
 setuptools>=69.0.0,<80.0.0

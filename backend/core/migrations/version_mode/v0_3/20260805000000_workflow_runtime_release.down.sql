@@ -965,3 +965,6 @@ DROP TABLE IF EXISTS user_reading_policies;
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS vocabulary_cloud_operations;
 DROP TABLE IF EXISTS vocabulary_cloud_connections;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS embedding_index_states;

@@ -61,8 +61,6 @@ LOG = logging.getLogger(__name__)
 
 
 _CHART_OWNERS = re.compile(r'<!-- paper-charts:\s*(\[[^\n]*?\])\s*-->')
-HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
-WORD = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 
 
 def _safe(function, *args, **kwargs):
@@ -359,7 +357,8 @@ def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
              source.get('writing_materials'))
     material('charts', 'Chart reference catalog', chart_directory)
     material('outline', 'Existing outline', source['outline'])
-    material('manuscript', 'Current complete manuscript', source['manuscript'])
+    material('manuscript', 'Current manuscript body',
+             split_references(source['manuscript'])[0] if source['manuscript'] else source['manuscript'])
     material('review', 'Current review issues for this revision', review)
     resources = json.loads(toolkit.build_resources(input_resources_json=_json(resources)))
     profiles = [{
@@ -367,11 +366,20 @@ def prepare_writer_inputs(inputs: dict, *, toolkit=None) -> dict:
         'raw_content': resource['inline_text'], 'key_facts': [resource['inline_text']],
         'meta': copy.deepcopy(resource['meta']),
     } for resource in resources]
+    material_identifiers = {resource['resource_id'] for resource in resources}
+    material_identifiers.update(paper['id'] for paper in source['papers'] if paper['id'].startswith('upload-'))
+    for paper in source['papers']:
+        if paper.get('review_role') == 'background' and not paper.get('citation'):
+            material_identifiers.add('[文献:' + paper['id'] + ']')
+    material_identifiers.update(item['id'] for item in (source['analysis'] or {}).get('data_sources', []))
     return {
         'writing_task': task, 'resources': resources, 'resource_profiles': profiles,
         'outline': source['outline'], 'manuscript': source['manuscript'],
         'charts': charts, 'chart_directory': chart_directory, 'selected_issues': selected_issues,
         'reference_candidates': candidates,
+        'material_source_ids': [paper['id'] for paper in source['papers']
+                                if paper.get('attachment_key') and not paper.get('citation')],
+        'material_identifiers': sorted(material_identifiers, key=len, reverse=True),
     }
 
 
@@ -468,7 +476,7 @@ def _prepare_sections(plan, outline, constraints):
             assigned = cumulative
             meta.update(word_target=budget, count_unit=unit)
             item['required_points'].append(
-                SECTION_BUDGET_INSTRUCTIONS.format(budget=budget, unit=unit, target=target)
+                SECTION_BUDGET_INSTRUCTIONS.format(budget=budget, unit=unit, target=constraints['word_target'])
             )
             if unit == 'chinese_characters' and budget > 0:
                 meta.update(target_chars=budget, max_chars=int(budget * 1.1))
@@ -478,19 +486,17 @@ def _prepare_sections(plan, outline, constraints):
     return plan
 
 
-def count_academic_units(text: str, count_unit: str) -> int:
-    """Count Chinese characters or English words using the declared paper language."""
-    value = str(text or '')
-    if count_unit == 'words':
-        return len(WORD.findall(value))
-    return len(HAN.findall(value)) + len(re.findall(r'\b[A-Za-z][A-Za-z0-9_-]*\b', value))
+def _matches_outline(actual, signature):
+    planned = [heading for heading in actual if heading in signature]
+    additions = [heading for heading in actual if heading not in signature]
+    return planned == signature and all(level > 2 for level, _ in additions)
 
 
 def _validate_manuscript_structure(body, *, signature=None, charts=None,
                                    candidates=None, original=None):
     """Shared mechanical checks for generation and the API result boundary."""
     actual = _heading_signature(body)
-    if signature is not None and actual != signature:
+    if signature is not None and not _matches_outline(actual, signature):
         raise ValueError('Writer manuscript headings do not match the outline.')
     if charts is not None:
         _validate_chart_references(body, charts)
@@ -500,17 +506,11 @@ def _validate_manuscript_structure(body, *, signature=None, charts=None,
 
 
 def _validate_manuscript(body, signature, charts, constraints, toolkit, context_json, *,
-                         candidates, original=None, check_quality=True, check_length=True):
+                         candidates, original=None, check_quality=True):
     """Validate generated Markdown before the optional model quality check."""
     report_progress(87, '正在校验稿件结构与引用')
     _trace_call('validate_structure', _validate_manuscript_structure, body,
                 signature=signature, charts=charts, candidates=candidates, original=original)
-    target = constraints['word_target']
-    if check_length and target is not None:
-        unit = 'words' if constraints['paper_language'] == 'en' else 'chinese_characters'
-        actual = count_academic_units(split_references(body)[0], unit)
-        if not target * 0.9 <= actual <= target * 1.1:
-            raise ValueError(f'Manuscript length {actual} {unit} is outside target {target} ±10%.')
     if not check_quality:
         return
     report_progress(90, '正在检查全文一致性')
@@ -547,12 +547,13 @@ def validate_result(value, inputs):
     for key in ('outline', 'manuscript'):
         if value.get(key) is not None and len(value[key]) > 2_000_000:
             raise ValueError(f'{key} 超过长度限制')
-    signature = _validate_manuscript_structure(value['manuscript'],
-                                               charts=figure_catalog(inputs['charts'], inputs.get(
-                                                   'media_assets')) if inputs else None,
-                                               candidates=_reference_candidates(inputs['papers']) if inputs else None,
-                                               original=inputs['manuscript'] if inputs else None)
+    signature = _validate_manuscript_structure(
+        value['manuscript'],
+        charts=figure_catalog(inputs['charts'], inputs.get('media_assets')) if inputs else None,
+        candidates=_reference_candidates(inputs['papers']) if inputs else None,
+        original=inputs['manuscript'] if inputs else None,
+    )
     if inputs and inputs['mode'] == 'revise':
         return
-    if inputs and (not inputs['outline'] or _heading_signature(inputs['outline']) != signature):
+    if inputs and (not inputs['outline'] or not _matches_outline(signature, _heading_signature(inputs['outline']))):
         raise ValueError('确认的大纲与稿件不一致')

@@ -19,16 +19,18 @@ class FigureDraft(Object):
     category: str | None = Field(default=None, description=(
         'Existing coordinate or descriptive result field; null uses result labels. Lines require numeric coordinates.'))
     series: str | None = Field(
-        default=None, description='Existing coordinate or descriptive result field identifying repeated series.')
+        default=None, description='Field key from result coordinates or metadata whose values distinguish series.')
     facet: str | None = Field(
         default=None, description=(
             'Existing coordinate or descriptive result field defining panels; metric/unit panels are automatic.'))
     value_format: Literal['auto', 'number', 'percent'] = 'auto'
+    normalize: bool = Field(
+        default=False, description='For additive stacked bars, show each composition as percentages.')
     annotation: Literal['auto', 'value', 'fraction', 'none'] = 'auto'
     numerator: str | None = Field(default=None, description='Actual numerator coordinate for fraction labels.')
     denominator: str | None = Field(default=None, description='Actual denominator coordinate for fraction labels.')
     caption: str = Field(
-        default='', max_length=300, description='Concise interpretation in the paper language; no source inventory.')
+        default='', max_length=1200, description='Concise interpretation in the paper language; no source inventory.')
     sort: Literal['source', 'value_ascending', 'value_descending'] = 'source'
     data_status: Literal['supplied', 'simulated'] = Field(
         default='supplied', description='Use simulated when explicit. Supplied does not claim real-world measurement.')
@@ -38,6 +40,8 @@ class FigureDraft(Object):
 
 class FigureArrangement(Object):
     figures: Annotated[list[FigureDraft], Field(max_length=20)]
+    all_existing_figures: bool = Field(default=False, description=(
+        'Redraw scope: true when the current request selects every existing figure; honor exclusions and limits.'))
     terminology: dict[str, str] = Field(default_factory=dict, description=(
         'One FLAT object: actual source values/metric names -> short string labels in the paper language. '
         'Never nest maps under coordinate keys; never rename data keys.'))
@@ -82,7 +86,7 @@ def _flat_terminology(value, rows):
 def bind_figures(value, analysis):
     """Keep the proposal inspectable; sources, counts and intervals come from executed rows."""
     from ..plotting.skills import PlotSkills
-    from ..plotting.standard import STANDARD_STYLES, check_encoding, coordinate
+    from ..plotting.standard import STANDARD_STYLES, check_encoding, panel_key
     from .results import result_rows
     rows = result_rows(analysis)
     arrangement = parse(FigureArrangement, _flat_terminology(value, rows), 'analysis.figures', extra='ignore')
@@ -106,7 +110,7 @@ def bind_figures(value, analysis):
         if len(identifiers) != len(set(identifiers)) or any(key not in positions for key in identifiers):
             raise ValueError(f'Figure {index}: finding_ids must be unique exact executed result IDs')
         if any(position < 0 or position >= len(findings) for position in indices):
-            raise ValueError(f'Figure {index}: result_indices must refer to positions 0..{len(findings)-1}')
+            raise ValueError(f'Figure {index}: result_indices must refer to positions 0..{len(findings) - 1}')
         if identifiers and indices and identifiers != [rows[position]['id'] for position in indices]:
             raise ValueError(f'Figure {index}: finding_ids and legacy result_indices select different results or order')
         indices = [positions[key] for key in identifiers] if identifiers else list(dict.fromkeys(indices))
@@ -121,7 +125,7 @@ def bind_figures(value, analysis):
             # Capacity is a layout choice. Split intact evidence instead of failing the whole analysis.
             panels = {}
             for row in selected_rows:
-                key = (row['metric'], row['unit'], row['kind'], coordinate(row, draft.get('facet')))
+                key = panel_key(row, draft)
                 panels.setdefault(key, []).append(row)
             groups, batch, panel_count = [], [], 0
             limit = None if draft['style'].startswith('line_') else 32
@@ -155,4 +159,5 @@ def bind_figures(value, analysis):
     # Ordering is a presentation hint; unknown labels never become data identities
     # or remove observed groups. Each panel selects its own coordinate from results.
     order = list(dict.fromkeys([key for key in arrangement['series_order'] if key in observed] + observed))
-    return dict(figures=figures, terminology=arrangement['terminology'], series_order=order)
+    return dict(figures=figures, terminology=arrangement['terminology'], series_order=order,
+                all_existing_figures=arrangement['all_existing_figures'])

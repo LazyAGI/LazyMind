@@ -132,3 +132,57 @@ func TestRemoteModelFeatureSupportPrefersLiveDeclarationsAndKeepsMissingUnknown(
 		}
 	}
 }
+
+func TestRemoteModelFeatureSupportReadsKnownReasoningSignalsWithoutGuessingFromObjects(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, body string
+		known, value         bool
+	}{
+		{"kimi supports reasoning", "Kimi", `{"id":"kimi-k3.1-pro","supports_reasoning":true,"reasoning":{"type":"only","effort":{"valid":["low","high","max"]}}}`, true, true},
+		{"moonshot alias supports reasoning", "Moonshot", `{"id":"kimi-k3.1-pro","supports_reasoning":true}`, true, true},
+		{"openai protocol keeps explicit reasoning support", "OpenAI", `{"id":"kimi-k3.1-pro","supports_reasoning":true}`, true, true},
+		{"kimi does not support reasoning", "Kimi", `{"id":"kimi-basic","supports_reasoning":false,"reasoning":{"type":"none"}}`, true, false},
+		{"unknown object stays unknown", "Kimi", `{"id":"kimi-unknown","reasoning":{"new_shape":true}}`, false, false},
+		{"openrouter uses supported parameters", "OpenRouter", `{"id":"vendor/model","reasoning":{"mandatory":false,"supported_efforts":["high","none"]},"supported_parameters":["reasoning"]}`, true, true},
+		{"boolean false stays false", "OpenAI", `{"id":"legacy","reasoning":false}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var entry openaiModelListEntry
+			if err := json.Unmarshal([]byte(tc.body), &entry); err != nil {
+				t.Fatalf("model metadata should not prevent identity parsing: %v", err)
+			}
+			flags := remoteModelFeatureSupport(entry, tc.provider, nil)
+			if !tc.known {
+				if flags != nil && flags.Reasoning != nil {
+					t.Fatalf("unknown reasoning became a declaration: %+v", flags)
+				}
+				return
+			}
+			if flags == nil || flags.Reasoning == nil || *flags.Reasoning != tc.value {
+				t.Fatalf("reasoning support = %+v, want %t", flags, tc.value)
+			}
+		})
+	}
+}
+
+func TestRemoteModelFeatureSupportKeepsValidSiblingOfUnknownCapability(t *testing.T) {
+	var entry openaiModelListEntry
+	if err := json.Unmarshal([]byte(`{"id":"model-with-vision","feature_support":{"vision":true,"reasoning":{"type":"only"}}}`), &entry); err != nil {
+		t.Fatal(err)
+	}
+	flags := remoteModelFeatureSupport(entry, "Kimi", nil)
+	if flags == nil || flags.Vision == nil || !*flags.Vision || flags.Reasoning != nil {
+		t.Fatalf("valid vision declaration was lost with unknown reasoning: %+v", flags)
+	}
+}
+
+func TestRemoteModelFeatureSupportKeepsValidArchitectureModality(t *testing.T) {
+	var entry openaiModelListEntry
+	if err := json.Unmarshal([]byte(`{"id":"model-with-image-input","architecture":{"input_modalities":["text","image"],"output_modalities":{"new_shape":true}}}`), &entry); err != nil {
+		t.Fatal(err)
+	}
+	flags := remoteModelFeatureSupport(entry, "OpenRouter", nil)
+	if flags == nil || flags.Vision == nil || !*flags.Vision {
+		t.Fatalf("valid input modalities were lost with unknown output modalities: %+v", flags)
+	}
+}

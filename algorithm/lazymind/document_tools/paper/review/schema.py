@@ -29,7 +29,7 @@ FactStatus = Literal['verified', 'conflict', 'insufficient', 'not_applicable']
 class FactSource(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
 
-    path: NonEmptyText = Field(description='JSON Pointer into supplied analysis/evidence/charts/papers/result_meta')
+    path: NonEmptyText = Field(description='JSON Pointer into manuscript or its supplied papers/charts')
     quote: NonEmptyText | None = Field(default=None, description='Exact excerpt when the source is text')
     value_text: NonEmptyText | None = Field(default=None, description='Exact quantity within source quote')
     column: NonEmptyText | None = Field(default=None, description='Numeric column in supplied columns/rows table')

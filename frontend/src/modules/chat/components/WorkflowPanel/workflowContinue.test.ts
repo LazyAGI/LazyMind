@@ -101,6 +101,11 @@ describe('workflow continuation checkpoints', () => {
   });
 });
 
+it('does not offer a continue shortcut while a question card is unanswered', () => {
+  expect(resolveWorkflowContinueAction({
+    status: 'completed', current_step_id: 'outline', steps: [],
+  }, 'waiting_input', outlineTab)).toBeUndefined();
+});
 
 describe('continuing edited inputs', () => {
   it('regenerates the ready downstream step without approving its obsolete results', () => {

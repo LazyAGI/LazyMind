@@ -175,6 +175,20 @@ interface KnowledgePageProps {
   modelSettingsPath?: string;
 }
 
+type EmbeddingIndexStatus = "empty" | "indexed" | "rebuilding" | "clearing" | "cleared" | "unknown";
+
+interface EmbeddingIndexState {
+  status: EmbeddingIndexStatus;
+  model_name?: string;
+  provider_name?: string;
+  indexed_knowledge_bases: number;
+  pending_knowledge_bases: number;
+}
+
+const embeddingIndexStatuses = new Set<EmbeddingIndexStatus>([
+  "empty", "indexed", "rebuilding", "clearing", "cleared", "unknown",
+]);
+
 const KnowledgePage: FC<KnowledgePageProps> = ({
   modelSettingsPath = "/settings?section=model_defaults",
 }) => {
@@ -283,6 +297,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         : loadedTableQuery === tableQueryKey,
   );
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
+  const [embeddingIndexState, setEmbeddingIndexState] = useState<EmbeddingIndexState | null>(null);
+  const embeddingIndexRequestSeq = useRef(0);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
   >(null);
@@ -456,6 +472,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      embeddingIndexRequestSeq.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
@@ -470,6 +487,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [fromPaperReading, mineScene]);
 
   async function checkEmbeddingReady() {
+    void checkEmbeddingIndexState();
     try {
       const features = await fetchModelFeatures(true);
       const imageEmbedRequired = isImageEmbedRequired(features);
@@ -504,6 +522,27 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     } catch {
       setEmbeddingReady(null);
       setMultimodalEmbeddingReady(null);
+    }
+  }
+
+  async function checkEmbeddingIndexState() {
+    const request = ++embeddingIndexRequestSeq.current;
+    try {
+      const response = await axiosInstance.get<unknown>(
+        `${BASE_URL}/api/core/model_providers/embedding/index-state`,
+      );
+      const body = response.data;
+      const state = body && typeof body === "object" && "data" in body
+        ? body.data : body;
+      if (request !== embeddingIndexRequestSeq.current) return;
+      setEmbeddingIndexState(
+        state && typeof state === "object" && "status" in state
+          && typeof state.status === "string"
+          && embeddingIndexStatuses.has(state.status as EmbeddingIndexStatus)
+          ? state as EmbeddingIndexState : null,
+      );
+    } catch {
+      if (request === embeddingIndexRequestSeq.current) setEmbeddingIndexState(null);
     }
   }
 
@@ -1790,6 +1829,34 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ) : null}
       </div>
 
+      {activeView === "mine" && embeddingIndexState ? (
+        <div role="status" aria-label={t("knowledge.embeddingIndexStateTitle")}>
+          <Alert
+            className="knowledge-embedding-warning"
+            showIcon
+            type={embeddingIndexState.status === "indexed" ? "success"
+              : embeddingIndexState.status === "empty" ? "info" : "warning"}
+            message={
+              <span>
+                <strong>{t("knowledge.embeddingIndexStateTitle")}</strong>
+                {embeddingIndexState.model_name ? ` · ${t("knowledge.embeddingIndexModel", {
+                  provider: embeddingIndexState.provider_name || t("knowledge.unknown"),
+                  model: embeddingIndexState.model_name,
+                })}` : null}
+              </span>
+            }
+            description={
+              embeddingIndexState.status === "indexed"
+                ? t("knowledge.embeddingIndexIndexed", { count: embeddingIndexState.indexed_knowledge_bases })
+                : embeddingIndexState.status === "rebuilding"
+                  ? t("knowledge.embeddingIndexRebuilding", { count: embeddingIndexState.pending_knowledge_bases })
+                  : t(`knowledge.embeddingIndex${embeddingIndexState.status === "empty" ? "Empty"
+                    : embeddingIndexState.status === "clearing" ? "Clearing"
+                      : embeddingIndexState.status === "cleared" ? "Cleared" : "Unknown"}`)
+            }
+          />
+        </div>
+      ) : null}
       {embeddingReady === false ? (
         <Alert
           banner

@@ -46,6 +46,7 @@ export interface SideChatPanelProps {
   onRetained?: (conversation: SideChatConversation) => void;
   canChat?: boolean;
   embeddingReady?: boolean | null;
+  vlmReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   returnFocusRef?: RefObject<HTMLElement | null>;

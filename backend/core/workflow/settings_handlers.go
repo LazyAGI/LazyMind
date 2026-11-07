@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -173,6 +174,16 @@ func RuntimePolicyForRevision(ctx context.Context, db *gorm.DB, owner, refOrID, 
 	var graph graphengine.CompiledStateGraph
 	if json.Unmarshal(pkg.CompiledGraph, &graph) != nil {
 		return graphengine.RuntimePolicy{}, false
+	}
+	// Older compilers omitted editor declarations. Recover only from this exact
+	// immutable revision, never from the current head or a model-supplied file.
+	if len(graph.Runtime.CompletedActions) == 0 {
+		var spec struct {
+			Runtime graphengine.RuntimePolicy `yaml:"runtime"`
+		}
+		if yaml.Unmarshal(pkg.Files["workflow.yaml"], &spec) == nil {
+			graph.Runtime.CompletedActions = spec.Runtime.CompletedActions
+		}
 	}
 	if graph.Runtime.IsZero() {
 		return graphengine.RuntimePolicy{}, false

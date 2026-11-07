@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -13,33 +14,42 @@ import (
 	"lazymind/core/modelprovider"
 )
 
+// ChatModelFallbackEnabled controls automatic recovery, not initial model selection.
+// Unset/invalid values preserve the default enabled behavior.
+func ChatModelFallbackEnabled() bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED")))
+	return err != nil || value
+}
+
 type AvailableChatModel struct {
-	CredentialRevision  int64    `gorm:"column:credential_revision"`
-	LogoDataURL         string   `gorm:"column:logo_data_url"`
-	Vision              bool     `gorm:"column:vision"`
-	ModelSettings       string   `gorm:"column:model_settings"`
-	ID                  string   `gorm:"column:model_id"`
-	ProviderID          string   `gorm:"column:provider_id"`
-	ProviderGroupID     string   `gorm:"column:provider_group_id"`
-	OwnerUserID         string   `gorm:"column:owner_user_id"`
-	ProviderName        string   `gorm:"column:provider_name"`
-	ProviderDisplayName string   `gorm:"column:provider_display_name"`
-	ProviderIsCustom    bool     `gorm:"column:provider_is_custom"`
-	GroupName           string   `gorm:"column:group_name"`
-	ModelName           string   `gorm:"column:model_name"`
-	ModelType           string   `gorm:"column:model_type"`
-	BaseURL             string   `gorm:"column:base_url"`
-	APIKey              string   `gorm:"column:api_key"`
-	APIKeyCiphertext    string   `gorm:"column:api_key_ciphertext"`
-	MaxInputTokens      *string  `gorm:"column:max_input_tokens"`
-	InputTokenLimit     *string  `gorm:"column:input_token_limit"`
-	MaxOutputTokens     *string  `gorm:"column:max_output_tokens"`
-	GroupVerified       bool     `gorm:"column:group_verified"`
-	Source              string   `gorm:"-"`
-	Availability        string   `gorm:"-"`
-	Lifecycle           string   `gorm:"-"`
-	Capabilities        []string `gorm:"-"`
-	DefaultForType      bool     `gorm:"-"`
+	CredentialRevision   int64    `gorm:"column:credential_revision"`
+	LogoDataURL          string   `gorm:"column:logo_data_url"`
+	Vision               bool     `gorm:"column:vision"`
+	ModelSettings        string   `gorm:"column:model_settings"`
+	ID                   string   `gorm:"column:model_id"`
+	ProviderID           string   `gorm:"column:provider_id"`
+	ProviderGroupID      string   `gorm:"column:provider_group_id"`
+	OwnerUserID          string   `gorm:"column:owner_user_id"`
+	ProviderName         string   `gorm:"column:provider_name"`
+	ProviderDisplayName  string   `gorm:"column:provider_display_name"`
+	ProviderIsCustom     bool     `gorm:"column:provider_is_custom"`
+	ProviderCategory     string   `gorm:"column:provider_category"`
+	ActiveKeyInitialized bool     `gorm:"column:active_key_initialized"`
+	GroupName            string   `gorm:"column:group_name"`
+	ModelName            string   `gorm:"column:model_name"`
+	ModelType            string   `gorm:"column:model_type"`
+	BaseURL              string   `gorm:"column:base_url"`
+	APIKey               string   `gorm:"column:api_key"`
+	APIKeyCiphertext     string   `gorm:"column:api_key_ciphertext"`
+	MaxInputTokens       *string  `gorm:"column:max_input_tokens"`
+	InputTokenLimit      *string  `gorm:"column:input_token_limit"`
+	MaxOutputTokens      *string  `gorm:"column:max_output_tokens"`
+	GroupVerified        bool     `gorm:"column:group_verified"`
+	Source               string   `gorm:"-"`
+	Availability         string   `gorm:"-"`
+	Lifecycle            string   `gorm:"-"`
+	Capabilities         []string `gorm:"-"`
+	DefaultForType       bool     `gorm:"-"`
 }
 
 func LoadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([]AvailableChatModel, error) {
@@ -57,7 +67,7 @@ func LoadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, "+
-				"p.logo_data_url, p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
+				"p.logo_data_url, p.name AS provider_display_name, p.is_custom AS provider_is_custom, p.category AS provider_category, p.active_key_initialized, "+
 				"m.model_type, m.vision, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, "+
 				"g.name AS group_name, g.base_url, g.is_verified AS group_verified, "+
 				"g.api_key, g.api_key_ciphertext, g.credential_revision",
@@ -177,11 +187,12 @@ type runtimeCredentialKey struct {
 	revision int64
 }
 type runtimeCredentialResult struct {
-	key      string
-	baseURL  string
-	advanced credentialvault.ProviderRequestAdvanced
-	protocol string
-	err      error
+	key            string
+	baseURL        string
+	advanced       credentialvault.ProviderRequestAdvanced
+	protocol       string
+	runtimeChecked bool
+	err            error
 }
 type runtimeCredentials map[runtimeCredentialKey]runtimeCredentialResult
 
@@ -217,6 +228,13 @@ func LoadChatRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) (*Ch
 
 func LoadChatModelCandidates(ctx context.Context, db *gorm.DB, userID string) (*ChatRuntimeConfig, error) {
 	return loadChatModelCandidates(ctx, db, userID, runtimeCredentials{})
+}
+
+// PrepareSelectedChatCandidate resolves only the chosen model's runtime.
+// Reading flows must not prepare every available chat model just to use one.
+func PrepareSelectedChatCandidate(ctx context.Context, db *gorm.DB, model AvailableChatModel) *ChatModelCandidate {
+	runtime := &ChatRuntimeConfig{credentials: runtimeCredentials{}, db: db}
+	return runtime.PrepareCandidate(ctx, model)
 }
 
 func loadChatModelCandidates(ctx context.Context, db *gorm.DB, userID string, cache runtimeCredentials) (*ChatRuntimeConfig, error) {
@@ -276,27 +294,53 @@ func (result *ChatRuntimeConfig) PrepareCandidate(ctx context.Context, model Ava
 		}
 		row = resolved
 	} else {
-		key, err := result.credentials.resolve(model.ProviderGroupID, model.CredentialRevision, model.APIKey, model.APIKeyCiphertext)
-		if err != nil {
-			return nil
-		}
-		row.APIKey = key
 		cacheKey := runtimeCredentialKey{groupID: model.ProviderGroupID, revision: model.CredentialRevision}
 		cached := result.credentials[cacheKey]
-		if cached.protocol == "" && result.db != nil && model.ProviderID != "" {
-			var provider orm.UserModelProvider
-			if result.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", model.ProviderID).Take(&provider).Error == nil {
-				advanced, err := modelprovider.ResolveProviderRequestAdvanced(provider)
-				if err != nil {
+		sharedSupplier := strings.EqualFold(strings.TrimSpace(model.ProviderCategory), "model") || model.ActiveKeyInitialized
+		if sharedSupplier && !cached.runtimeChecked {
+			if result.db == nil {
+				return nil
+			}
+			runtime, err := modelprovider.ResolveProviderRuntimeConfiguration(ctx, result.db, model.ProviderGroupID)
+			if err != nil {
+				if model.ActiveKeyInitialized || errors.Is(err, modelprovider.ErrProviderKeyDisabled) || errors.Is(err, modelprovider.ErrProviderKeyUnverified) {
 					return nil
 				}
-				cached.advanced, cached.protocol = advanced, modelprovider.RuntimeRequestProtocol(provider)
+				// An uninitialized legacy connection may have a valid older
+				// encrypted envelope that the supplier resolver cannot read.
+				sharedSupplier = false
+			} else {
+				cached = runtimeCredentialResult{key: runtime.APIKey, baseURL: runtime.BaseURL, advanced: runtime.Advanced, protocol: runtime.Protocol, runtimeChecked: true}
 				result.credentials[cacheKey] = cached
 			}
 		}
-		row.RequestAdvanced, row.RequestProtocol = cached.advanced, cached.protocol
-		// Match the regular runtime path for endpoints that do not require a key.
-		row.SkipAuth = strings.TrimSpace(key) == "" && strings.TrimSpace(row.BaseURL) != ""
+		if sharedSupplier && cached.runtimeChecked {
+			row.APIKey, row.RequestAdvanced, row.RequestProtocol = cached.key, cached.advanced, cached.protocol
+			if strings.TrimSpace(cached.baseURL) != "" {
+				row.BaseURL = cached.baseURL
+			}
+			row.SkipAuth = strings.TrimSpace(cached.key) == "" && strings.TrimSpace(row.BaseURL) != ""
+		} else {
+			key, err := result.credentials.resolve(model.ProviderGroupID, model.CredentialRevision, model.APIKey, model.APIKeyCiphertext)
+			if err != nil {
+				return nil
+			}
+			row.APIKey = key
+			cached = result.credentials[cacheKey]
+			if cached.protocol == "" && result.db != nil && model.ProviderID != "" {
+				var provider orm.UserModelProvider
+				if result.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", model.ProviderID).Take(&provider).Error == nil {
+					advanced, err := modelprovider.ResolveProviderRequestAdvanced(provider)
+					if err != nil {
+						return nil
+					}
+					cached.advanced, cached.protocol = advanced, modelprovider.RuntimeRequestProtocol(provider)
+					result.credentials[cacheKey] = cached
+				}
+			}
+			row.RequestAdvanced, row.RequestProtocol = cached.advanced, cached.protocol
+			row.SkipAuth = strings.TrimSpace(key) == "" && strings.TrimSpace(row.BaseURL) != ""
+		}
 	}
 	for _, line := range strings.Split(row.APIKey, "\n") {
 		if strings.TrimSpace(line) != "" {

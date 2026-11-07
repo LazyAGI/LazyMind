@@ -142,7 +142,7 @@ func ReplaceKey(w http.ResponseWriter, r *http.Request) {
 		return enqueueCredentialBackup(tx, group.ID, revision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
-		if errors.Is(err, errConnectionChanged) {
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 		} else {
 			common.ReplyErr(w, "update api key failed", http.StatusInternalServerError)

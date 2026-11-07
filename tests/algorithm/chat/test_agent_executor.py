@@ -20,6 +20,13 @@ from lazymind.chat.engine.agent_runtime import executor as executor_mod
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
 
+def test_agent_invocation_excludes_execution_plan_from_trace_config():
+    from lazyllm.tracing.collect.trace_config import collect_trace_config
+
+    invocation = executor_mod.AgentInvocation(MagicMock(), 'agent', _plan())
+    assert 'plan' not in collect_trace_config(invocation, 'callable', (), {})
+
+
 def test_deduplicate_tool_groups_by_name_and_keep_first_duplicate():
     from lazyllm.tools.agent.toolsManager import ToolGroup
 

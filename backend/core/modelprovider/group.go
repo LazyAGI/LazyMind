@@ -141,17 +141,24 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	// Production lists count metadata in one aggregate, without loading models.
 	if len(rows) > 0 && db.Migrator().HasTable(&orm.UserModelProviderGroupModel{}) {
 		groupIDs := make([]string, 0, len(rows))
+		unverifiedCustomGroupIDs := make([]string, 0)
 		for _, group := range rows {
 			groupIDs = append(groupIDs, group.ID)
+			if parent.IsCustom && !group.IsVerified {
+				unverifiedCustomGroupIDs = append(unverifiedCustomGroupIDs, group.ID)
+			}
 		}
 		var counts []struct {
 			UserModelProviderGroupID string
 			ModelCount               int
 		}
-		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+		countQuery := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
 			Select("user_model_provider_group_id, COUNT(*) AS model_count").
-			Where("user_model_provider_id = ? AND create_user_id = ? AND user_model_provider_group_id IN ? AND deleted_at IS NULL", parent.ID, userID, groupIDs).
-			Group("user_model_provider_group_id").Scan(&counts).Error; err != nil {
+			Where("user_model_provider_id = ? AND create_user_id = ? AND user_model_provider_group_id IN ? AND deleted_at IS NULL", parent.ID, userID, groupIDs)
+		if len(unverifiedCustomGroupIDs) > 0 {
+			countQuery = countQuery.Where("NOT (user_model_provider_group_id IN ? AND is_default = ?)", unverifiedCustomGroupIDs, true)
+		}
+		if err := countQuery.Group("user_model_provider_group_id").Scan(&counts).Error; err != nil {
 			common.ReplyErr(w, "list groups failed", http.StatusInternalServerError)
 			return
 		}
@@ -362,6 +369,11 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 				return errCanonicalGroupExists
 			}
 			if strings.TrimSpace(parent.BaseURL) == "" {
+				if strings.TrimSpace(baseURL) != "" {
+					if err := guardEmbeddingRuntimeMutation(tx, userID, parent.ID, "", ""); err != nil {
+						return err
+					}
+				}
 				if err := tx.Model(&parent).Update("base_url", baseURL).Error; err != nil {
 					return err
 				}
@@ -389,13 +401,20 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
+		if keys := splitAPIKeys(apiKey); hasSharedProviderEndpoint(parent) && len(keys) > 0 {
+			// A newly created supplier has no other saved connection. Its first
+			// configured key is usable without a separate enable action, even if
+			// an earlier deleted connection left the selection initialized.
+			if err := saveActiveProviderKey(tx, &parent, row.ID, groupKeyID(row.ID, keys[0]), row.IsVerified, now); err != nil {
+				return err
+			}
+		} else if err := reconcileProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
 		return enqueueCredentialBackup(tx, row.ID, row.CredentialRevision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
-		if errors.Is(err, errCanonicalGroupExists) {
+		if errors.Is(err, errCanonicalGroupExists) || errors.Is(err, errEmbeddingIdentityInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -679,6 +698,20 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := lockProvider(tx, &parent); err != nil {
+			return errConnectionChanged
+		}
+		if hasSharedProviderEndpoint(parent) {
+			if apiKey != "" && apiKey != storedAPIKey && (parent.ActiveKeyGroupID == row.ID || !parent.ActiveKeyInitialized) {
+				if err := guardEmbeddingRuntimeMutation(tx, userID, parent.ID, "", ""); err != nil {
+					return err
+				}
+			}
+		} else if baseURLChanged || (apiKey != "" && apiKey != storedAPIKey) {
+			if err := guardEmbeddingRuntimeMutation(tx, userID, parent.ID, row.ID, ""); err != nil {
+				return err
+			}
+		}
 		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
 			return err
 		}
@@ -690,7 +723,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, errConnectionChanged) {
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -786,10 +819,8 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if hasSharedProviderEndpoint(parent) {
-			if err := lockProvider(tx, &parent); err != nil {
-				return err
-			}
+		if err := lockProvider(tx, &parent); err != nil {
+			return err
 		}
 		// Re-read model types under the supplier lock, so concurrent edits
 		// cannot turn this route into a bypass of individual-model protection.
@@ -798,14 +829,16 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		modelIDs := make([]string, 0, len(groupModels))
+		embeddingModelIDs := make([]string, 0)
 		for _, model := range groupModels {
 			modelIDs = append(modelIDs, model.ID)
 			hasMultimodal = hasMultimodal || isMultimodalEmbeddingModelType(model.ModelType)
 			if isTextEmbeddingModelType(model.ModelType) {
-				if err := guardEmbeddingRemoval(tx, userID); err != nil {
-					return err
-				}
+				embeddingModelIDs = append(embeddingModelIDs, model.ID)
 			}
+		}
+		if err := guardEmbeddingRemoval(tx, userID, embeddingModelIDs...); err != nil {
+			return err
 		}
 
 		if len(modelIDs) > 0 {
@@ -831,6 +864,9 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 				"deleted_at": now,
 				"updated_at": now,
 			}).Error; err != nil {
+			return err
+		}
+		if err := clearEmbeddingStateAfterRemoval(tx, embeddingModelIDs...); err != nil {
 			return err
 		}
 		return reconcileProviderActiveKey(tx, &parent)
@@ -1150,15 +1186,37 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	encryptedUpdates["is_verified"] = row.IsVerified || !hasSharedProviderEndpoint(parent)
 	encryptedUpdates["updated_at"] = now
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// Read the supplier-wide pool under the same lock as the credential
+		// write. An empty pool means this addition is the first usable key.
+		hadStoredKeys := true
+		if hasSharedProviderEndpoint(parent) {
+			if err := lockProvider(tx, &parent); err != nil {
+				return err
+			}
+			if !parent.ActiveKeyInitialized {
+				if err := guardEmbeddingRuntimeMutation(tx, userID, parent.ID, "", ""); err != nil {
+					return err
+				}
+			}
+			var err error
+			hadStoredKeys, err = hasStoredProviderKeys(tx, parent)
+			if err != nil {
+				return err
+			}
+		}
 		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
 			return err
 		}
-		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
+		if hasSharedProviderEndpoint(parent) && !hadStoredKeys {
+			if err := saveActiveProviderKey(tx, &parent, row.ID, groupKeyID(row.ID, newKey), false, now); err != nil {
+				return err
+			}
+		} else if err := reconcileProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
-		if errors.Is(err, errConnectionChanged) {
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -1275,7 +1333,7 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
-		if errors.Is(err, errConnectionChanged) {
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errEmbeddingIdentityInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}

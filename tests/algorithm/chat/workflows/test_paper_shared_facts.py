@@ -140,6 +140,41 @@ def test_exact_numbers_and_provenance_without_broadcasting_source_corpus():
     assert data['resources'] == original
 
 
+@pytest.mark.parametrize('categories', [
+    ['terminature'], ['method', 'terminature'], ['自定义研究标签'], [' Terminature ', 'terminature'],
+    ['method'], ['literature'],
+])
+def test_descriptive_labels_and_unassigned_evidence_do_not_block_drafting_or_drop_sources(monkeypatch, categories):
+    data, instructions = prepared(), real_plan()
+    original = copy.deepcopy(data['resources'])
+    value = selection(data, instructions)
+    span = next(item for item in source_paragraphs(data['resources']) if 'Success means' in item['content'])
+    next(item for item in value['sources'] if item['source_id'] == span['id'])['categories'] = categories
+    calls = fact_model(monkeypatch, [value])
+    bind_shared_facts(instructions, data)
+    assert len(calls) == 1
+    facts = {fact['fact_id']: fact for fact in data['writing_context']['facts']}
+    content = json.loads(facts[span['id']]['value'])
+    assert content['content'] == span['content']
+    assert content['source_id'] == span['source_id']
+    assert content['source_path'] == span['source_path']
+    assert (content['start'], content['end']) == (span['start'], span['end'])
+    assert len(content['categories']) == len(set(content['categories']))
+    assert json.loads(facts['analysis:finding:F-difference']['value'])['content'] == FINDING
+    assert data['resources'] == original
+
+
+@pytest.mark.parametrize('categories', [[], [' '], [123]])
+def test_invalid_source_labels_still_fail_without_mutating_materials(categories):
+    data, instructions = prepared(), real_plan()
+    value = selection(data, instructions)
+    value['sources'][0]['categories'] = categories
+    before = copy.deepcopy(data)
+    with pytest.raises(ValueError):
+        bind_shared_facts(instructions, data, selection=value)
+    assert data == before
+
+
 @pytest.mark.parametrize('defect', ['empty', 'missing', 'source', 'duplicate', 'fact_id', 'role', 'section_id'])
 def test_bad_or_incomplete_source_binding_is_rejected_before_drafting(defect):
     data, instructions = prepared(), real_plan()
@@ -201,6 +236,36 @@ def test_invalid_empty_model_result_is_repaired_without_losing_sources(monkeypat
     assert len(data['writing_context']['meta']['paper_source_coverage']) == len(correct['sources'])
 
 
+@pytest.mark.parametrize('damage', ['field_typo', 'split_entry', 'nested_tail'])
+def test_large_selection_retries_only_damaged_paragraph_with_valid_sections_retained(monkeypatch, damage):
+    data, instructions = prepared(), real_plan()
+    data['resources'][1] = material('writing_materials', '\n\n'.join(
+        f'Recorded protocol detail {index}.' for index in range(800)))
+    original = copy.deepcopy(data['resources'])
+    value = selection(data, instructions)
+    corrected = dict(source_id=value['sources'][557]['source_id'], categories=['method'])
+    repairs = [corrected]
+    if damage == 'field_typo':
+        value['sources'][557] = {'source_id=': corrected['source_id'][1:], 'categories': ['method']}
+    elif damage == 'split_entry':
+        value['sources'][557:558] = ['source_id":"' + corrected['source_id'], {'categories': ['method']}]
+    else:
+        repairs += copy.deepcopy(value['sources'][558:798])
+        value['sources'][557:798] = [dict(source_id=corrected['source_id'], categories=[{'': ['method']}, *repairs[1:]])]
+    calls = fact_model(monkeypatch, [value, dict(sources=repairs, sections=[])])
+    bind_shared_facts(instructions, data)
+    assert len(calls) == 2
+    assert [item['id'] for item in calls[1]['source_paragraphs']] == [item['source_id'] for item in repairs]
+    assert len(calls[1]['correction']) < 1000
+    assert calls[1]['sections'] == []
+    context = data['writing_context']
+    assert len(context['meta']['paper_source_coverage']) == len(source_paragraphs(data['resources']))
+    assert all(item['meta']['argument_role'] for item in instructions['instructions'])
+    fact = next(item for item in context['facts'] if item['fact_id'] == corrected['source_id'])
+    assert json.loads(fact['value'])['content'] == calls[1]['source_paragraphs'][0]['content']
+    assert data['resources'] == original
+
+
 def test_failed_fact_preparation_does_not_publish_a_truncated_context(monkeypatch):
     data, instructions = prepared(), real_plan()
     value = selection(data, instructions)
@@ -212,10 +277,15 @@ def test_failed_fact_preparation_does_not_publish_a_truncated_context(monkeypatc
     assert data == before
 
 
-def test_real_public_writer_and_draft_entry_reach_streaming(monkeypatch):
+@pytest.mark.parametrize('uploaded', [False, True])
+def test_real_public_writer_and_draft_entry_reach_streaming(monkeypatch, uploaded):
     inputs = contracts.validate_input('write_document', dict(
         topic='Comparison', outline=OUTLINE, question=QUESTION, writing_materials=MATERIALS,
         papers=[dict(id='P1', title='Source', text=PAPER, citation='Source [Z].')]))
+    if uploaded:
+        inputs['papers'].append(dict(id='upload-records', title='Study records', text=MATERIALS,
+                                     attachment_key='uploaded-attachment'))
+    body = OUTLINE + ('\n\nObserved task results [文献:upload-records][文献:P1].' if uploaded else '')
     calls = fact_model(monkeypatch)
     toolkit = WriterCreateToolkit()
     original = toolkit.generate_section_instructions
@@ -230,18 +300,19 @@ def test_real_public_writer_and_draft_entry_reach_streaming(monkeypatch):
 
     def stream(**kwargs):
         streamed.append(kwargs)
-        return json.dumps([OUTLINE])
+        return json.dumps([body])
     monkeypatch.setattr(toolkit, 'stream_draft_blocks_markdown', stream)
     monkeypatch.setattr(toolkit, 'generate_draft_document_markdown', lambda **kwargs: json.dumps(
-        {'draft_document': OUTLINE}))
+        {'draft_document': body}))
     # The public Writer may construct an LLM handle; deterministic planning must never call it.
     from lazymind.document_tools import writing
     forbidden = Mock(side_effect=AssertionError('Deterministic Writer planning called a model'))
     monkeypatch.setattr(writing, 'AutoModel', lambda **kwargs: forbidden)
-    assert write_document._write_draft(inputs, toolkit=toolkit)['manuscript'] == OUTLINE
+    expected = body.replace('[文献:upload-records]', '')
+    assert write_document._write_draft(inputs, toolkit=toolkit)['manuscript'] == expected
     assert 'paper_facts' not in plans[0]['meta']
-    assert len(calls) == 2 and len(streamed) == 1
-    assert 'manuscript' in calls[-1] and calls[-1]['source_facts']
+    assert len(calls) == 1 and len(streamed) == 1
+    assert 'source_paragraphs' in calls[0] and 'manuscript' not in calls[0]
     context = json.loads(streamed[0]['writing_context_json'])
     assert 'UNRELATED_FULL_TEXT_MARKER' not in json.dumps(context)
     assert 'Results are simulated.' in json.dumps(context)

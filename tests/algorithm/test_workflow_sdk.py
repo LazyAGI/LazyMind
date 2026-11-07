@@ -107,17 +107,22 @@ def test_external_mcp_zip_path_to_http_contract(tmp_path):
     assert 'zip_base64' not in response['content'][0]['text']
 
 
-def test_core_error_details_survive_sdk_and_mcp():
+@pytest.mark.parametrize('envelope,nested', [('data', False), ('data', True), ('result', True)])
+def test_core_error_details_survive_sdk_and_mcp(envelope, nested):
     from lazymind.workflow_sdk import WorkflowClient
     transport = MagicMock()
+    data = {'error_code': 'IDEMPOTENCY_CONFLICT', 'error_message': 'Different request',
+            'suggestion': 'Use a new key'}
+    if nested:
+        data = {'error': {'code': data['error_code'], 'message': data['error_message'],
+                          'details': {'suggestion': data['suggestion']}}}
     transport.post.return_value = MagicMock(status_code=409, json=lambda: {
-        'code': 2000107, 'message': 'Conflict', 'data': {
-            'error_code': 'IDEMPOTENCY_CONFLICT', 'error_message': 'Different request',
-            'suggestion': 'Use a new key'}})
+        'code': 2000107, 'message': 'Conflict', envelope: data})
     server = WorkflowMCPServer(lambda: WorkflowClient('http://core/api/core', transport=transport), mode='external')
     response = server.handle({'id': 1, 'method': 'tools/call', 'params': {
-        'name': 'start_skill_workflow_task', 'arguments': {'agent_type': 'codex',
-            'skill': {'name': 'demo', 'url': 'https://example.com/demo.zip'}, 'task_description': 'Make a report'}}})
+        'name': 'start_skill_workflow_task', 'arguments': {
+            'agent_type': 'codex', 'skill': {'name': 'demo', 'url': 'https://example.com/demo.zip'},
+            'task_description': 'Make a report'}}})
     error = response['result']['structuredContent']['error']
     assert error['code'] == 'IDEMPOTENCY_CONFLICT'
     assert error['message'] == 'Different request'
@@ -223,8 +228,8 @@ def test_explicit_missing_runtime_does_not_fall_back_to_another_instance(tmp_pat
 
 
 @pytest.mark.parametrize('value', ['localhost:8090', 'file:///tmp/core',
-                                  'http://user:secret@localhost', 'http://localhost/?token=secret',
-                                  'http://localhost/#settings', 'http://localhost:wrong', 'http://[bad'])
+                                   'http://user:secret@localhost', 'http://localhost/?token=secret',
+                                   'http://localhost/#settings', 'http://localhost:wrong', 'http://[bad'])
 def test_invalid_instance_url_fails_before_transport(value):
     from lazymind.workflow_sdk import WorkflowClient, WorkflowClientError
     transport = MagicMock()

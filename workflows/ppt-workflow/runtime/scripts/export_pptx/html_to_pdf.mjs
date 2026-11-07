@@ -2,9 +2,11 @@
 // HTML slides -> vector-preserving print PDF exporter.
 // Usage: node html_to_pdf.mjs --deck-dir <path> [--output <filename>] [--force]
 
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, resolve, basename, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inspectSlideQuality } from './lib/slide_quality.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,7 +54,7 @@ function injectBase(html, htmlPath) {
 }
 
 function renderPdfHost(slides) {
-  const slideJson = JSON.stringify(slides);
+  const slideJson = JSON.stringify(slides).replace(/</g, '\\u003c');
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -101,6 +103,7 @@ function renderPdfHost(slides) {
     const PAGE_W = ${PAGE_W};
     const PAGE_H = ${PAGE_H};
     const SLIDES = ${slideJson};
+    const inspectSlideQuality = ${inspectSlideQuality.toString()};
     const SELECTORS = ['.wrapper', '.slide.canvas', '.slide', 'body'];
     window.__pdfSlidesTotal = SLIDES.length;
     window.__pdfSlidesReady = 0;
@@ -173,9 +176,13 @@ function renderPdfHost(slides) {
 
         try {
           await waitForLoad(iframe);
+          await iframe.contentDocument.fonts.ready;
+          await Promise.all([...iframe.contentDocument.images].map(img => img.decode().catch(() => {})));
           await waitForCharts(iframe);
           await sleep(300);
           fitFrame(iframe);
+          const defects = inspectSlideQuality(iframe.contentDocument);
+          if (defects.length) throw new Error('SLIDE_QUALITY: ' + JSON.stringify(defects));
         } catch (e) {
           window.__pdfFailures.push({ path: slide.path, message: String(e && e.message || e) });
         } finally {
@@ -233,11 +240,17 @@ async function main() {
   installHiddenProcessHooks();
   const { chromium } = await import('playwright');
   const browser = await chromium.launch(hiddenChromiumLaunchOptions());
+  let hostDirectory;
   try {
     console.error(`正在处理 ${htmlFiles.length} 个 HTML 页面...`);
     const page = await browser.newPage({ viewport: { width: PAGE_W, height: PAGE_H } });
     const slides = loadSlides(htmlFiles);
-    await page.setContent(renderPdfHost(slides), { waitUntil: 'load' });
+    // A file-origin host lets relative offline assets load inside srcdoc frames.
+    // about:blank + setContent blocks file: images even with an explicit base URL.
+    hostDirectory = mkdtempSync(resolve(tmpdir(), 'lazymind-pdf-host-'));
+    const hostPath = resolve(hostDirectory, 'index.html');
+    writeFileSync(hostPath, renderPdfHost(slides));
+    await page.goto(pathToFileURL(hostPath).href, { waitUntil: 'load' });
     await page.waitForFunction(
       () => window.__pdfSlidesReady === window.__pdfSlidesTotal,
       null,
@@ -246,6 +259,9 @@ async function main() {
     await page.waitForTimeout(500);
 
     const failures = await page.evaluate(() => window.__pdfFailures || []);
+    if (failures.length) {
+      throw new Error('PDF export stopped: fix slide geometry/assets before export. ' + JSON.stringify(failures));
+    }
     const sizing = await page.evaluate(() => [...document.querySelectorAll('iframe')].map((iframe) => ({
       name: iframe.getAttribute('title'),
       contentWidth: Number(iframe.dataset.contentWidth || 0),
@@ -282,6 +298,7 @@ async function main() {
     if (failures.length > 0) process.exit(1);
   } finally {
     await browser.close();
+    if (hostDirectory) rmSync(hostDirectory, { recursive: true, force: true });
   }
 }
 

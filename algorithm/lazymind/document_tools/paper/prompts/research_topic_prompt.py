@@ -4,7 +4,7 @@ CONTENT_TOPICS = (
     'research subject, scope, and key variables',
     'existing methods and gaps that still require verification',
     'research question',
-    'testable hypotheses',
+    'research objectives and contributions',
     'research approach and validation method',
     'evidence status',
 )
@@ -27,6 +27,7 @@ PAPER_NOTE_PROMPT = (
 )
 
 ABSTRACT_PAPER_GUIDANCE = (
+    'Study briefs and supplied results describe the study being developed; prior publications supply literature. '
     'The provided material contains abstracts, which may be extracted or generated, rather than full papers. '
     'Use them to '
     'compare the research subjects, existing methods, limitations, and questions that can be investigated further. '
@@ -37,14 +38,16 @@ ABSTRACT_PAPER_GUIDANCE = (
 )
 NO_PAPER_GUIDANCE = (
     'No parsed papers are currently available. Based on the research topic, the current request, and any existing '
-    'research question or literature review, formulate one primary research question. In the testable-hypotheses '
-    'section, propose two or three possibilities that still require verification; do not list multiple candidate '
-    'research questions. Do not claim to have read papers or verified novelty. '
+    'research question or literature review, formulate one primary research question. Use objectives and '
+    'evaluation dimensions for methodological or systems research, and testable hypotheses where applicable. '
+    'Do not list multiple candidate research questions or claim to have read papers or verified novelty. '
 )
 
 QUESTION_PROMPT = (
     'You are a rigorous research advisor. {paper_guidance}'
     'Use the available material to propose one research direction. '
+    'For existing-results manuscripts, align the question and evaluation with the supplied method and observations. '
+    'Preserve and refine the supplied contribution grouping. Place proposed additional experiments in future work. '
     'When mode=refine, use the literature review and attached papers as feedback and adjust the research question, '
     'hypotheses, and validation approach according to the current request. If a previous research question exists, '
     'explain what is retained and what is changed; otherwise, explain how the review leads to the current question. '
@@ -59,7 +62,7 @@ QUESTION_PROMPT = (
     'of sections may vary: {topics}. Keep the entire Markdown, including headings and citations, within approximately '
     '2,000 characters by keeping background and method descriptions concise. It must contain exactly one second-level '
     'section titled `## 研究问题`, and that section must present only one primary question. '
-    'Hypotheses must be testable '
+    'Where hypotheses apply, make them testable '
     'and state what observations could falsify them. When discussing papers, use only papers present in the input and '
     'cite only the provided call-local markers such as [M1]. These markers are resolved by the host; '
     'never copy file IDs from previous prose or invent a source marker. '

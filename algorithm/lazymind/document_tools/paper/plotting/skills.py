@@ -13,19 +13,20 @@ from .templates import NATIVE_FUNCTION_GUIDANCE, paper_template
 # The figure planner sees only these descriptions, in this order: name the ordinary chart first,
 # then when to use it and what it must not receive.
 STYLES = {
+    'point_interval': ('paper_extended.py', 'Compact dot plot for unordered estimates, rates, differences or '
+                       'coefficients, with interval whiskers when supplied. Native compact panel grids are available.'),
+    'scatter_tradeoff': ('scatter_tradeoff.py', 'Scatter plot: numeric measurements paired within the same runs '
+                         'or groups. Use paired scatter panels to show resource/outcome relationships.'),
     'bar_grouped_hatch': ('bar_grouped.py', 'Grouped bar chart: values or means per category and series '
-                          '(e.g. method x dataset) with CI error bars when available. Standard main-result '
-                          'comparison; hatching only marks a user-designated focal method.'),
+                          '(e.g. method x dataset) with CI error bars when available. Native compact grids '
+                          'support up to four metric/unit/facet panels without custom code. '
+                          'Hatching only marks a user-designated focal method.'),
     'line_training_curve': ('line_training.py', 'Line chart: values along any ordered numeric x (epochs, steps, '
                             'data size, time, parameter sweep), one line per series, without interval bands.'),
     'line_confidence_band': ('line_selfdistill.py', 'Line chart with CI band: an estimate and its interval at '
                              'each ordered x value, one line per series.'),
-    'point_interval': ('paper_extended.py', 'Dot-and-whisker (forest) plot: differences, effects, coefficients '
-                       'or many estimates with CIs, especially signed values compared with zero.'),
     'box_raw_points': ('box_raw_points.py', 'Box plot with all raw points: distribution of per-run or '
                        'per-subject values by group; needs raw rows.'),
-    'scatter_tradeoff': ('scatter_tradeoff.py', 'Scatter plot: two measured quantities paired by the same runs '
-                         'or groups (e.g. accuracy vs. training time).'),
     'bar_paired_delta': ('bar_paired.py', 'Two side-by-side bars per category (baseline, method) with the gap '
                          'annotated; both inputs are nonnegative raw values. Not for precomputed differences.'),
     'bar_stacked': ('paper_extended.py', 'Stacked bars: complete nonnegative additive components per category, '

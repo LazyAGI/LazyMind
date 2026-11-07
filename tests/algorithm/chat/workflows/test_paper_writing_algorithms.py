@@ -2,6 +2,7 @@
 import base64
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -153,7 +154,7 @@ def test_f1_without_papers_uses_unverified_evidence_prompt(monkeypatch):
     result = tools.run_algorithm('research_topic', {'topic': '研究主题'})
     assert result == {'question': TOPIC_MARKDOWN, 'is_demo': False}
     assert 'No parsed papers are currently available' in prompts[0]
-    assert 'Do not claim to have read papers' in prompts[0]
+    assert re.search(r'Do not[^.]*claim to have read papers', prompts[0])
     assert 'Return only one Markdown document written in Chinese' in prompts[0]
 
 

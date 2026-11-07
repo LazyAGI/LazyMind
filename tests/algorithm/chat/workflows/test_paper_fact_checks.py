@@ -173,7 +173,7 @@ def test_suggestion_remains_advice_while_unresolved_numerical_allegations_stay_u
     result = ReviewResult(summary='审查', issues=[issue, dict(issue, category='analysis')], limitations=[])
     coverage = check_facts(result, {'manuscript': '结果为 100%，实验见图1和文献[P1]，速度提高。'})
     assert {group.category for group in coverage} == {'numbers', 'comparison', 'literature', 'data_status', 'figure'}
-    assert all(group.status == 'insufficient' for group in coverage)
+    assert all(group.status == 'not_applicable' for group in coverage)
     assert [kind for _, kind in review_issues(result, coverage)] == ['advice', 'unverified']
 
 
@@ -429,3 +429,46 @@ def test_regular_proportion_is_not_automatically_changed_to_relative_increase():
                  sources=[{'path': '/analysis/after'}, {'path': '/analysis/before'}])
     checked = evaluate(item, dict(manuscript=item['quote'], analysis={'after': 137.286, 'before': 113.395}))[2]
     assert checked.status == 'insufficient'
+
+
+@pytest.mark.parametrize('asserted,expected', [('93.33%', 'verified'), ('100%', 'conflict')])
+def test_manuscript_arithmetic_uses_its_explicit_operands(asserted, expected):
+    quote = f'15次测试中答对14次，准确率为{asserted}。'
+    item = claim(quote=quote, asserted=asserted, sources=[
+        {'path': '/manuscript', 'quote': quote, 'value_text': '14'},
+        {'path': '/manuscript', 'quote': quote, 'value_text': '15'},
+    ])
+    checked = evaluate(item, {'manuscript': quote})[2]
+    assert checked.status == expected
+    assert '未证明来源本身真实' in checked.calculation
+
+
+@pytest.mark.parametrize('operation,category,asserted', [
+    ('value', 'numbers', '24'), ('status', 'data_status', '实测'),
+])
+def test_manuscript_statement_cannot_verify_itself(operation, category, asserted):
+    quote = '本实验为实测，共24次。'
+    item = claim(category=category, quote=quote, asserted=asserted, operation=operation,
+                 sources=[{'path': '/manuscript', 'quote': quote, 'value_text': '24'}])
+    checked = evaluate(item, {'manuscript': quote})[2]
+    assert checked.status == 'insufficient'
+    assert '自身' in checked.calculation
+
+
+def test_manuscript_figure_check_uses_the_submitted_table_and_rendered_label():
+    quote = '图1报告样本量为24个。'
+    source = '结果表记录样本量为19个。'
+    item = claim(category='figure', quote=quote, asserted='24', operation='figure_value', sources=[
+        {'path': '/manuscript', 'quote': source, 'value_text': '19'},
+        {'path': '/charts/0/svg', 'quote': 'n=24', 'value_text': '24'},
+    ])
+    checked = evaluate(item, {'manuscript': quote + '\n' + source,
+                              'charts': [{'svg': '<svg><text>n=24</text></svg>'}]})[2]
+    assert checked.status == 'conflict'
+
+
+def test_absent_upstream_artifacts_do_not_create_missing_evidence_rows():
+    result = ReviewResult(summary='审阅成稿。', issues=[], limitations=[])
+    coverage = check_facts(result, {'manuscript': '本实验样本量24，方法优于基线，见图1和文献[P1]。'})
+    assert all(group.status == 'not_applicable' for group in coverage)
+    assert all('需补充材料' not in group.reason for group in coverage)
