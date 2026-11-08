@@ -201,8 +201,18 @@ func (a *Adapter) Connect(ctx context.Context) (result agentintegration.Status) 
 	}
 	status.Issue = nil
 
+	store, err := credentials.NewStore(a.home, "")
+	if err != nil {
+		return agentintegration.FailError(status, err)
+	}
+	account, err := store.AccountScope()
+	if err != nil {
+		return agentintegration.FailError(status, err)
+	}
+	// Saved registration determines the switch state. Reusing the installation
+	// also requires an enabled pairing for the currently signed-in account.
 	if status.State == agentintegration.Enabled {
-		if record, e := codexplugin.Read(); e == nil && record.BuildID == codexplugin.BuildID() {
+		if record, e := codexplugin.Read(); e == nil && record.BuildID == codexplugin.BuildID() && workflowhost.Configured(a.home, record.ConnectorID, account) {
 			if e = codexhost.Configure(a.home, record.Node, record.PairingFile); e != nil {
 				return agentintegration.Fail(status, e.Error())
 			}
