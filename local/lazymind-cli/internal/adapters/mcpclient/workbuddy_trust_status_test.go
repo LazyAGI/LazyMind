@@ -18,8 +18,8 @@ import (
 
 func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 	for _, tc := range []struct {
-		name, health, approvals, want           string
-		heartbeat, revoke, disablePair, signOut bool
+		name, health, approvals, want                             string
+		heartbeat, revoke, disablePair, signOut, disableConnector bool
 	}{
 		{name: "first rejection", approvals: "{}", heartbeat: true, want: "mcp_trust_required"},
 		{name: "missing approvals", approvals: "missing", heartbeat: true, want: "mcp_trust_required"},
@@ -31,6 +31,15 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 		{name: "trusted connection", heartbeat: true},
 		{name: "trusted CDP outage", heartbeat: true, health: "cdp_unavailable", want: "cdp_unavailable"},
 		{name: "trusted missing heartbeat", want: "host_unavailable"},
+		{name: "disabled connector", disableConnector: true, heartbeat: true, want: "mcp_enable_required"},
+		{name: "disabled connector without heartbeat", disableConnector: true, want: "mcp_enable_required"},
+		{name: "disabled connector with CDP outage", disableConnector: true, heartbeat: true, health: "cdp_unavailable", want: "mcp_enable_required"},
+		{name: "disabled connector while closed", disableConnector: true, health: "waiting_for_app", want: "mcp_enable_required"},
+		{name: "disabled connector with startup outage", disableConnector: true, health: "startup_unavailable", want: "mcp_enable_required"},
+		{name: "disabled untrusted connector", disableConnector: true, revoke: true, want: "mcp_trust_required"},
+		{name: "disabled connector with disabled pairing", disableConnector: true, disablePair: true, want: "pairing_disabled"},
+		{name: "disabled connector while signed out", disableConnector: true, signOut: true, want: "lazymind_auth_required"},
+		{name: "disabled connector with unreadable approvals", disableConnector: true, approvals: "{", want: "configuration_unreadable"},
 		{name: "unreadable approvals", approvals: "{", heartbeat: true, want: "configuration_unreadable"},
 		{name: "approvals read failure", approvals: "directory", heartbeat: true, want: "configuration_unreadable"},
 		{name: "null approvals store", approvals: "null", heartbeat: true, want: "configuration_unreadable"},
@@ -86,6 +95,13 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 			approved := fmt.Sprintf(`{"%x::lazymind":1792563117657}`, hash)
 			approvalsPath := filepath.Join(filepath.Dir(path), "mcp-approvals.json")
 			writeTestFile(t, approvalsPath, approved)
+			if tc.disableConnector {
+				before := a.Status(context.Background())
+				if before.Connection == nil || !before.Connection.MCPEnabled {
+					t.Fatalf("fixture is not enabled: %+v", before)
+				}
+				setWorkBuddyConnectorDisabled(t, path, true)
+			}
 			if tc.revoke {
 				before := a.Status(context.Background())
 				if before.Connection == nil || !before.Connection.MCPTrusted {
@@ -142,6 +158,44 @@ func TestWorkBuddyStatusTrustGuidance(t *testing.T) {
 					t.Fatalf("stale trust guidance after approval: %+v", restored)
 				}
 			}
+			if tc.want == "mcp_enable_required" {
+				if status.State != agentintegration.Enabled || !status.Connection.MCPTrusted || status.Connection.MCPEnabled || status.Message != workBuddyIssueMessage(tc.want) {
+					t.Fatalf("incorrect enable guidance: %+v connection=%+v", status, status.Connection)
+				}
+				setWorkBuddyConnectorDisabled(t, path, false)
+				restored := a.Status(context.Background())
+				want := tc.health
+				if want == "waiting_for_app" {
+					want = ""
+				} else if want == "" && !tc.heartbeat {
+					want = "host_unavailable"
+				}
+				got := ""
+				if restored.Issue != nil {
+					got = restored.Issue.Code
+				}
+				if !restored.Connection.MCPEnabled || got != want {
+					t.Fatalf("incorrect state after enabling: %+v connection=%+v; want issue %q", restored, restored.Connection, want)
+				}
+			}
 		})
 	}
+}
+
+func setWorkBuddyConnectorDisabled(t *testing.T, path string, disabled bool) {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]map[string]map[string]any
+	if err := json.Unmarshal(body, &config); err != nil {
+		t.Fatal(err)
+	}
+	config["mcpServers"]["lazymind"]["disabled"] = disabled
+	body, err = json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, path, string(body))
 }
