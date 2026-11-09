@@ -4,7 +4,7 @@ import { sourceContextKey, useSourceImportState } from "./state";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Alert, Button, Checkbox, Form, Input, Modal, Pagination, Progress, Radio, Select, Space, Tag, message, theme } from "antd";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { ExportOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { v4 as uuid } from "uuid";
 import { type ChatSource, type ChatSourceCollection, getSourceOriginalHref, openSource } from "../../utils/sourceAdapter";
@@ -251,7 +251,7 @@ function TargetModal({ rows, context, onFound, onCancel, onSubmitted }: {
   </Modal>;
 }
 
-export function SourceImportActions({ source }: { source: ChatSource }) {
+export function SourceImportActions({ source, inline = false }: { source: ChatSource; inline?: boolean }) {
   const ctx = useSourceImports();
   useEffect(() => { void ctx?.load(); }, [ctx?.load]);
   const inspected = ctx && findInspectedSource(ctx.inspections, source);
@@ -261,7 +261,7 @@ export function SourceImportActions({ source }: { source: ChatSource }) {
   return <>
     {latest && <small className="source-import-current-state">{latest.target_name} · {importStatusLabel(latest)}{latest.state_unavailable && tr("unavailableSuffix")}<Button type="link" size="small" onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.setOpened(true)}>{tr("history")}</Button></small>}
     {inspected?.needs_pdf_lookup && <small className="source-import-current-state">{tr("canLookupFulltext")}</small>}
-    <div className="source-import-actions"><Button disabled={!originalHref} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => openSource(source)}>{tr(originalHref ? "openOriginal" : "noOriginalLink")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
+    <div className={inline ? "source-import-actions source-import-actions--inline" : "source-import-actions"}><Button type={inline ? "text" : "default"} icon={inline && originalHref ? <ExportOutlined aria-hidden /> : undefined} disabled={!originalHref} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => openSource(source)}>{tr(originalHref ? "openOriginal" : "noOriginalLink")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
   </>;
 }
 
