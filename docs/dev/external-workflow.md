@@ -261,3 +261,13 @@ Refresh an installed Codex plugin without controlling the desktop lifecycle with
 `lazymind internal agent codex refresh`. Existing Codex chats may retain their MCP
 process/catalog; a new chat loads the refreshed tools and Skill. Refresh does not
 restart Codex or launch LazyMind Desktop.
+
+### Presentation content fidelity
+
+Skill delivery and content adherence are different checks. PPT acceptance is shared
+by native and external executors: review source-to-outline coverage, then map each
+page's retained claims to planned visible copy and final visible objects. Keep the
+map and explicit omissions in validation evidence; hidden notes do not satisfy
+visible content coverage. When exporting HTML and native PPTX, compare both against
+the same page plan and inspect their renders separately. Do not use file validity,
+Skill hashes or a fixed sparse host template as a substitute for this review.

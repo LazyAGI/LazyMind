@@ -99,3 +99,26 @@ artifact slots. Resolve INLINE references against supplied revision files. Do no
 print unresolved template placeholders into artifacts. Retain intermediate design
 and review evidence so the coordinator can verify adherence. Rewriting and repair
 prompts apply only when editing or repairing; do not unnecessarily regenerate pages.
+
+## Content fidelity across stages
+
+Reading the Skills is necessary but does not establish that their output rules
+were followed. For research/technical presentations, retain a per-page coverage
+map from source evidence to outline, exact planned visible copy and final visible
+objects. Identify each core mechanism, its inputs/outputs, variables, conditions,
+tradeoffs and quantitative comparison. Verify each against the preceding stage;
+do not silently turn a detailed outline into a short executive summary.
+
+Keep these checks in worker validation evidence, not visible slide copy or new
+artifact slots. Explain exclusions by the user's scope or source support, not by
+an arbitrary font size or generic sparse template. If space is tight, remove
+repeated framing/decor and recompose before shortening technical explanations.
+Respect an explicit low-text request. Notes expand visible reasoning; they never
+replace the mechanism that the page itself is supposed to explain.
+
+When delivering both HTML and editable PPTX, author them from the same page copy,
+formulas and chart data. Compare extracted visible text and chart values in both
+representations against that plan. Hidden notes and metadata do not count as
+visible coverage. Inspect the actual renders as a separate layout check. A host
+file library is an implementation tool and must not re-outline the content or
+substitute its default sparse slide design for the LazyMind page prompt.

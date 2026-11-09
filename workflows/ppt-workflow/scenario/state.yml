@@ -1123,7 +1123,11 @@ steps:
         required: false
     acceptance_criteria: |
       deck_outline must be one non-empty Markdown document with one concise page
-      description for every requested page.
+      description for every requested page. For technical/research requests, each page
+      must preserve its evidence-backed mechanism, variables, conditions and tradeoffs.
+      Review source coverage before accepting: do not classify a requested core method
+      as optional solely to obtain a sparse layout. Record deliberate exclusions and
+      their source/scope reasons in validation evidence, never as visible slide copy.
 
   plan_page_prompts:
     label: Plan Page Prompts
@@ -1372,6 +1376,12 @@ steps:
       Markdown document: style first, then layout, copy and assets. Do not publish
       extra presentation_style/page_layout/page_assets artifacts. Those optional
       outputs remain only for compatibility with older saved sessions.
+      Compare each page with deck_outline and material_summary before acceptance.
+      Every retained core claim must map to actual visible copy, a labelled diagram,
+      formula or chart specification, with conditions and distinctions preserved.
+      Speaker notes cannot be the sole location of the mechanism. Record this
+      page-by-page coverage map in validation evidence. File count, Skill hashes and
+      valid Markdown alone do not prove content fidelity.
 
   plan_background_prompts:
     label: Plan Background Prompts
@@ -2061,6 +2071,12 @@ steps:
       - material: template_profile
         required: false
     acceptance_criteria: |
+      Before publication, compare the actual visible page text, formulas, diagram
+      labels and chart data with the bound slide_outline. Preserve all specified
+      technical claims and their conditions; do not replace explained mechanisms
+      with headings, slogans or metric cards. Validate content fidelity separately
+      from screenshot/layout quality, and record omissions explicitly. A copied
+      Skill hash, valid file or notes-only match is not a passed fidelity check.
       For the native branch: native_pptx must be a published non-empty PPTX file
       with the exact requested number of slides. Repeat or omit source layouts
       when needed; preserve the original count only if requested. HTML pages and notes slots are
