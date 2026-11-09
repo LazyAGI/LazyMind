@@ -231,7 +231,6 @@
 
 .paper-library-seg button,
 .paper-library-chip,
-.paper-library-tag,
 .paper-library-cite-button {
   border: 0;
   background: #f3f4f6;
@@ -246,7 +245,6 @@
 }
 
 .paper-library-chip { display: inline-flex; align-items: center; gap: 6px; }
-.paper-library-tag { display: inline-flex; align-items: center; }
 
 .paper-library-board { min-width: 0; container-type: inline-size; container-name: paperBoard;  min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .paper-library-loading { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 240px; color: var(--muted); font-size: 13px; }
@@ -296,7 +294,6 @@
 .paper-library-title-button:hover { color: var(--blue); }
 .paper-library-cite { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .paper-library-meta { flex-wrap: wrap; margin-top: 7px; gap: 5px 8px; }
-.paper-library-meta .paper-library-tag { min-height: 22px; padding: 0 7px; color: var(--muted); font-size: 11px; background: #f2f4f7; }
 .paper-library-source { color: var(--faint); font-size: 12px; white-space: nowrap; }
 .paper-library-warn { color: #b42318; font-size: 12px; }
 .paper-library-cite-button { color: var(--blue); background: transparent; border: 1px solid #d7e2fb; font-size: 12px; }
