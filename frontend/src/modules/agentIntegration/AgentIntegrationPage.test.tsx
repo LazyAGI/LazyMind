@@ -1575,6 +1575,57 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).not.toHaveBeenCalled();
   });
 
+  it.each(["zh-CN", "en-US"])("guides WorkBuddy trust after rejection or revocation and clears it after approval (%s)", async (language) => {
+    await retryI18n.changeLanguage(language);
+    const trustMessage = language === "zh-CN"
+      ? "请在 WorkBuddy 的连接器页面信任 lazymind，完成后会自动检查。"
+      : "Trust lazymind in WorkBuddy’s Connectors screen. It will be checked automatically.";
+    const installed = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true,
+      requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true,
+        control_ready: true, presentation_status: "mounted", runtime_state: "connected" } };
+    const untrusted = { ...installed, issue: { code: "mcp_trust_required" }, message: "Trust the connector.",
+      connection: { ...installed.connection, mcp_trusted: false } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: untrusted } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const card = expandAgent("workbuddy");
+    const toggle = within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" });
+    const assertTrustRequired = async () => {
+      expect(await within(card).findByRole("alert")).toHaveTextContent(trustMessage);
+      expect(within(card).queryByText(retryI18n.t("agentIntegration.setupFeedback.connectionUnavailable"))).not.toBeInTheDocument();
+      expect(toggle).toBeChecked();
+    };
+    await assertTrustRequired();
+    fireEvent.click(within(card).getByRole("button", { name: new RegExp(retryI18n.t("agentIntegration.workbuddyInstallGuide.entry")) }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(retryI18n.t("agentIntegration.workbuddyInstallGuide.entryDescription"));
+    fireEvent.click(within(dialog).getByRole("button", { name: retryI18n.t("agentIntegration.workbuddyInstallGuide.later") }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    for (const status of [installed, untrusted, installed]) {
+      mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+      fireEvent.focus(window);
+      if (status === untrusted) await assertTrustRequired();
+      else await waitFor(() => expect(within(card).queryByRole("alert")).not.toBeInTheDocument());
+      expect(toggle).toBeChecked();
+    }
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it.each(["host_unavailable", "cdp_unavailable", "configuration_unreadable", "pairing_disabled"])("does not infer missing WorkBuddy trust from %s", async (code) => {
+    const status = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
+      message: "Connection check failed.", issue: { code },
+      connection: { mcp_configured: true, mcp_trusted: false, control_ready: false } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { workbuddy: status } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const card = expandAgent("workbuddy");
+    expect(await within(card).findByRole("alert")).toHaveTextContent(retryI18n.t(`agentIntegration.setupFeedback.${code === "configuration_unreadable" ? "readFailed" : "connectionUnavailable"}`));
+    expect(within(card).queryByText(zhCN.agentIntegration.workbuddyErrors.mcp_trust_required)).not.toBeInTheDocument();
+  });
+
   it.each(["waiting", "unavailable", "missing"])("preserves configured WorkBuddy state when health is %s", async (scenario) => {
     const status = { agent: "workbuddy", display_name: "WorkBuddy", state: scenario === "missing" ? "ready" : "enabled", enabled: true,
       can_disconnect: true, message: scenario === "waiting" ? "" : "unavailable",

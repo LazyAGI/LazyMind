@@ -102,7 +102,12 @@ func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 				if err == nil {
 					config, _, err := workbuddyhost.Load(a.home, account)
 					if err == nil {
+						issue, message := status.Issue, status.Message
 						agentintegration.SetRuntimeIssue(&status, workBuddyStartupHealth(ctx, a.home, config.CDPPort))
+						// Native trust is an explicit prerequisite, independent of runtime health.
+						if issue != nil && issue.Code == "mcp_trust_required" {
+							status.Issue, status.Message = issue, message
+						}
 					}
 				}
 			}
@@ -364,7 +369,11 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 	if a.kind == WorkBuddy && state.configured && state.owned && state.current {
 		state.current = false
 		status.Connection = &agentintegration.ConnectionStatus{MCPConfigured: true, PresentationStatus: "host-offline"}
-		status.Connection.MCPTrusted, status.Connection.MCPEnabled = workbuddySetup(configPath(a.kind))
+		status.Connection.MCPTrusted, status.Connection.MCPEnabled, err = workbuddySetup(configPath(a.kind))
+		if err != nil {
+			status.Issue = &agentintegration.Issue{Code: "configuration_unreadable"}
+			return agentintegration.Fail(status, "Unable to read WorkBuddy trust configuration.")
+		}
 		status.Issue = &agentintegration.Issue{Code: "pairing_required"}
 		status.Message = "Enable the connection to start WorkBuddy and connect Workflow session control."
 		store, err := credentials.NewStore(a.home, "")
@@ -403,11 +412,11 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 				}
 				// Persisted trust and enable choices are independent of CDP.
 				// Healthy control alone must never advertise a usable MCP connection.
-				if status.Issue == nil && (!status.Connection.MCPTrusted || !status.Connection.MCPEnabled) {
+				if !status.Connection.MCPTrusted && (status.Issue == nil || status.Issue.Code == "host_unavailable") {
+					status.Issue = &agentintegration.Issue{Code: "mcp_trust_required"}
+					status.Message = workBuddyIssueMessage("mcp_trust_required")
+				} else if status.Issue == nil && !status.Connection.MCPEnabled {
 					code := "mcp_enable_required"
-					if !status.Connection.MCPTrusted {
-						code = "mcp_trust_required"
-					}
 					status.Issue = &agentintegration.Issue{Code: code}
 					status.Message = workBuddyIssueMessage(code)
 				}
