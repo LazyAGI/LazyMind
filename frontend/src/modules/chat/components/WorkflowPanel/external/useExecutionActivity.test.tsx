@@ -110,3 +110,13 @@ it('keeps real progress across reconnect and ignores replayed lower values', () 
   expect(hook.result.current.one.progress).toBe(65);
   hook.unmount();
 });
+
+it('never opens native task streams for external workers, including legacy snapshots', () => {
+  const run = { ...session(), controller_host: 'external-agent' };
+  const hook = renderHook(() => useExecutionActivity(run));
+  expect(streams).toHaveLength(0);
+  expect(hook.result.current).toEqual({});
+  expect(activeExecutionTasks({ ...session(), steps: [{ ...session().steps![0], executor_host: 'external-agent' }] })).toEqual([]);
+  expect(activeExecutionTasks({ ...run, steps: [{ ...run.steps![0], executor_host: 'lazymind' }] })).toHaveLength(1);
+  hook.unmount();
+});

@@ -39,7 +39,7 @@ func externalWorkflowConversationID(owner, sessionID string) string {
 // under its session lock. It only creates a presentation record; it never creates
 // Chat histories, invokes a model, or assigns a made-up external host identity.
 func EnsureExternalWorkflowConversation(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, artifactTime time.Time) error {
-	if session.ConversationID != "" || session.OriginHost != "external-agent" ||
+	if session.OriginHost != "external-agent" ||
 		session.ControllerHost != "external-agent" || session.Dismissed || session.CreateUserID == "" {
 		return nil
 	}
@@ -55,8 +55,9 @@ func EnsureExternalWorkflowConversation(ctx context.Context, tx *gorm.DB, sessio
 		Order("created_at ASC, id ASC").Take(&task).Error; err != nil {
 		return err
 	}
+	// The task points to the result view; the session retains its real host binding.
 	conversationID := externalWorkflowConversationID(session.CreateUserID, session.ID)
-	if task.ConversationID != "" {
+	if task.ConversationID != "" && task.ConversationID != session.ConversationID {
 		// Keep the durable task link even after a conversation is permanently
 		// deleted, so a later publication or recovery cannot resurrect it.
 		if task.ConversationID != conversationID {
@@ -94,7 +95,7 @@ func EnsureExternalWorkflowConversation(ctx context.Context, tx *gorm.DB, sessio
 		return gorm.ErrInvalidData
 	}
 	return tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id = ? AND user_id = ? AND conversation_id = ?", task.ID, session.CreateUserID, "").
+		Where("id = ? AND user_id = ? AND conversation_id = ?", task.ID, session.CreateUserID, task.ConversationID).
 		UpdateColumn("conversation_id", conversationID).Error
 }
 
@@ -106,10 +107,10 @@ func RecoverExternalWorkflowConversations(ctx context.Context, db *gorm.DB, owne
 		return nil
 	}
 	var sessions []orm.WorkflowSession
-	if err := db.WithContext(ctx).Where("create_user_id = ? AND origin_host = ? AND controller_host = ? AND conversation_id = ? AND dismissed = ?",
-		owner, "external-agent", "external-agent", "", false).
+	if err := db.WithContext(ctx).Where("create_user_id = ? AND origin_host = ? AND controller_host = ? AND dismissed = ?",
+		owner, "external-agent", "external-agent", false).
 		Where("EXISTS (SELECT 1 FROM plugin_slot_revisions outputs WHERE outputs.session_id = plugin_sessions.id AND outputs.validity <> ?)", "deleted").
-		Where("NOT EXISTS (SELECT 1 FROM task_center_tasks linked WHERE linked.plugin_session_id = plugin_sessions.id AND (linked.conversation_id <> '' OR linked.archived_at IS NOT NULL))").
+		Where("NOT EXISTS (SELECT 1 FROM task_center_tasks linked WHERE linked.plugin_session_id = plugin_sessions.id AND ((linked.conversation_id <> '' AND linked.conversation_id <> plugin_sessions.conversation_id) OR linked.archived_at IS NOT NULL))").
 		Order("created_at DESC, id ASC").Limit(100).Find(&sessions).Error; err != nil {
 		return err
 	}

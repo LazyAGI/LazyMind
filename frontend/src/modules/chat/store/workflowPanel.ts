@@ -321,6 +321,7 @@ export interface WorkflowSession {
 
 /** A single step execution record from workflow_session_steps. */
 export interface WorkflowSessionStep {
+  executor_host?: string;
   id: string;
   session_id: string;
   step_id: string;

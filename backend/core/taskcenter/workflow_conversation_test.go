@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,9 @@ func TestExternalWorkflowConversationRecoveryIsOwnerScopedAndPreservesRuntime(t 
 			session.OriginHost, session.ControllerHost = "lazymind", "lazymind"
 		case "linked":
 			session.ConversationID = "existing-conversation"
+			if err := db.Create(&orm.Conversation{ID: session.ConversationID, DisplayName: "论文总结", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+				t.Fatal(err)
+			}
 		case "dismissed":
 			session.Dismissed = true
 		}
@@ -48,12 +52,12 @@ func TestExternalWorkflowConversationRecoveryIsOwnerScopedAndPreservesRuntime(t 
 		}
 	}
 	var conversations []orm.Conversation
-	if err := db.Find(&conversations).Error; err != nil || len(conversations) != 2 {
+	if err := db.Where("source_type = ?", ExternalWorkflowConversationSource).Find(&conversations).Error; err != nil || len(conversations) != 3 {
 		t.Fatalf("projections=%+v error=%v", conversations, err)
 	}
 	for _, conversation := range conversations {
 		sessionID := ExternalWorkflowSessionID(conversation)
-		if sessionID != "one-page" && sessionID != "four-page" {
+		if sessionID != "one-page" && sessionID != "four-page" && sessionID != "linked" {
 			t.Fatalf("unexpected projected session %q", sessionID)
 		}
 		if conversation.DisplayName != "论文总结" || conversation.Model != "" || string(conversation.Models) != "[]" ||
@@ -61,7 +65,7 @@ func TestExternalWorkflowConversationRecoveryIsOwnerScopedAndPreservesRuntime(t 
 			t.Fatalf("result conversation started chat or lost request title: %+v", conversation)
 		}
 		var session orm.WorkflowSession
-		if err := db.First(&session, "id = ?", sessionID).Error; err != nil || session.ConversationID != "" || session.OriginRef != "third-party-worker" {
+		if err := db.First(&session, "id = ?", sessionID).Error; err != nil || (sessionID == "linked" && session.ConversationID != "existing-conversation" || sessionID != "linked" && session.ConversationID != "") || session.OriginRef != "third-party-worker" {
 			t.Fatalf("runtime identity changed: %+v error=%v", session, err)
 		}
 		var task orm.TaskCenterTask
@@ -76,12 +80,19 @@ func TestExternalWorkflowConversationRecoveryIsOwnerScopedAndPreservesRuntime(t 
 }
 
 func TestExternalWorkflowConversationDoesNotReviveUserHiddenResults(t *testing.T) {
-	for _, lifecycle := range []string{"renamed", "archived", "trashed", "purged"} {
+	for _, lifecycle := range []string{"renamed", "archived", "trashed", "purged", "bound-renamed", "bound-archived", "bound-trashed", "bound-purged"} {
 		t.Run(lifecycle, func(t *testing.T) {
 			db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{})
 			now := time.Now().UTC().Add(-time.Hour)
 			session := orm.WorkflowSession{ID: "run", CreateUserID: "owner", OriginHost: "external-agent", ControllerHost: "external-agent",
 				WorkflowID: "ppt", CreatedAt: now, UpdatedAt: now}
+			if strings.HasPrefix(lifecycle, "bound-") {
+				session.ConversationID = "native-conversation"
+				if err := db.Create(&orm.Conversation{ID: session.ConversationID, BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+					t.Fatal(err)
+				}
+				lifecycle = strings.TrimPrefix(lifecycle, "bound-")
+			}
 			if err := db.Create(&session).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +103,7 @@ func TestExternalWorkflowConversationDoesNotReviveUserHiddenResults(t *testing.T
 				t.Fatal(err)
 			}
 			var conversation orm.Conversation
-			if err := db.First(&conversation).Error; err != nil {
+			if err := db.Where("source_type = ?", ExternalWorkflowConversationSource).First(&conversation).Error; err != nil {
 				t.Fatal(err)
 			}
 			query := db.Model(&orm.Conversation{}).Where("id = ?", conversation.ID)
@@ -117,7 +128,7 @@ func TestExternalWorkflowConversationDoesNotReviveUserHiddenResults(t *testing.T
 				t.Fatal(err)
 			}
 			var records []orm.Conversation
-			if err := db.Find(&records).Error; err != nil {
+			if err := db.Where("source_type = ?", ExternalWorkflowConversationSource).Find(&records).Error; err != nil {
 				t.Fatal(err)
 			}
 			if lifecycle == "purged" {
