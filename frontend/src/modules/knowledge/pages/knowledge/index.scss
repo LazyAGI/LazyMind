@@ -507,3 +507,10 @@
 
 .paper-assistant-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .paper-assistant-pane[hidden] { display: none; }
+
+.knowledge-translation-modes { padding: 8px 12px; flex: 0 0 auto; }
+.knowledge-full-translation { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.knowledge-full-translation-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 12px 12px; flex: 0 0 auto; }
+.knowledge-full-translation-toolbar .ant-select { min-width: 160px; flex: 1; }
+.knowledge-full-translation-viewer { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.knowledge-full-translation-viewer > .file-viewer-container { flex: 1; min-width: 0; height: 100%; }

@@ -100,6 +100,7 @@ import DocumentReferencesPanel from "@/modules/knowledge/components/DocumentRefe
 import { extractAcademicReferences, listAcademicReferences } from "@/modules/knowledge/api/academicReferences";
 import { capabilityFamilies, capabilityFamily, capabilityFamilyI18nKey, chooseFamilyCapability, type CapabilityFamily } from "@/modules/learning/capabilityFamilies";
 import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
+import FullDocumentTranslationPanel from "./FullDocumentTranslationPanel";
 import PaperTranslationPanel from "./PaperTranslationPanel";
 import PdfTranslationNotice from "./PdfTranslationNotice";
 import {
@@ -188,6 +189,7 @@ const KnowledgeDocumentContent = () => {
   const [documentChatSelection, setDocumentChatSelection] =
     useState<DocumentChatSelection | null>(null);
   const [previewSideTab, setPreviewSideTab] = useState("chat");
+  const [translationPanelMode, setTranslationPanelMode] = useState<"selection" | "document">("selection");
   const [paperDetailsOpened, setPaperDetailsOpened] = useState(false);
   useEffect(() => {if(previewSideTab === "info" || previewSideTab === "notes")setPaperDetailsOpened(true);}, [previewSideTab]);
   const [paperNavTab, setPaperNavTab] = useState("outline");
@@ -198,7 +200,7 @@ const KnowledgeDocumentContent = () => {
   const [notesRevision,setNotesRevision]=useState(0);
   const [savedNotes,setSavedNotes]=useState<{key:string;highlights:PdfNoteHighlight[]}>();
   const [paperAssistantWidth, setPaperAssistantWidth] = useState(() => {
-    try { const saved = Number(localStorage.getItem("paper-reader:assistant-width")); return saved >= 320 && saved <= 640 ? saved : 400; } catch { return 400; }
+    try { const saved = Number(localStorage.getItem("paper-reader:assistant-width")); return Number.isFinite(saved) && saved >= 320 ? saved : 400; } catch { return 400; }
   });
   const resizePaperAssistant = (width: number) => {
     setPaperAssistantWidth(width);
@@ -322,6 +324,19 @@ const KnowledgeDocumentContent = () => {
   const [originalPdfKind, setOriginalPdfKind] = useState<"image_only" | "native_text" | "mixed" | "unknown">("unknown");
   const [pdfSourceView, setPdfSourceView] = useState<"original" | "searchable" | "translation">("original");
   const [selectedPdfArtifact, setSelectedPdfArtifact] = useState<PdfArtifact>();
+  const [selectedTranslationArtifact, setSelectedTranslationArtifact] = useState<PdfArtifact>();
+  const selectTranslationArtifact = useCallback((artifact: PdfArtifact) => {
+    setSelectedTranslationArtifact(artifact);
+    setSelectedPdfArtifact(artifact);
+  }, []);
+  const showFullTranslation = useCallback(() => {
+    setPdfSourceView("original");
+    setTranslationPanelMode("document");
+    setPreviewSideTab("translation");
+    setPreviewSideCollapsed(false);
+  }, []);
+  const sidebarTranslation = selectedTranslationArtifact
+    ?? pdfCapabilities?.translations[pdfCapabilities.translations.length - 1];
   const [pdfViewPosition, setPdfViewPosition] = useState<PdfViewPosition>({ page: 1, progress: 0 });
   const [pdfTask, setPdfTask] = useState<PdfRenderJob>();
   const [pdfTaskDetail, setPdfTaskDetail] = useState("");
@@ -409,6 +424,7 @@ const KnowledgeDocumentContent = () => {
     const text = normalizePdfSelectionText(selection.text);
     setTranslationSource(text);
 
+    setTranslationPanelMode("selection");
     setPreviewSideTab("translation");
     setPreviewSideCollapsed(false);
     await translateSelectedText(text);
@@ -806,8 +822,8 @@ const KnowledgeDocumentContent = () => {
         source_filename: filename,
       });
       if (created.artifact) {
-        setSelectedPdfArtifact(created.artifact);
-        setPdfSourceView("translation");
+        selectTranslationArtifact(created.artifact);
+        showFullTranslation();
         setPdfTaskDetail("");
         message.success("已加载缓存译本");
         return;
@@ -825,7 +841,7 @@ const KnowledgeDocumentContent = () => {
     } finally {
       setTranslationPreparing(false);
     }
-  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, translationDocumentProviders, translationMode, translationPreparing, translationProvider, translationProviderGroupId, translationTarget]);
+  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, showFullTranslation, selectTranslationArtifact, translationDocumentProviders, translationMode, translationPreparing, translationProvider, translationProviderGroupId, translationTarget]);
 
   const openTranslationRegeneration = useCallback((artifact: PdfArtifact) => {
     setRegenerationArtifact(artifact);
@@ -859,9 +875,7 @@ const KnowledgeDocumentContent = () => {
   }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, pdfTask, refreshPdfCapabilities]);
 
   const openTranslationRevision = useCallback(async (selection: PdfTextSelection, textKind: "source" | "translation" = "translation") => {
-    const translationArtifact = selectedPdfArtifact?.kind === "TRANSLATION_PDF"
-      ? selectedPdfArtifact
-      : pdfCapabilities?.translations[pdfCapabilities.translations.length - 1];
+    const translationArtifact = sidebarTranslation;
     if (!translationArtifact?.has_draft) {
       message.warning("这个译本没有可编辑草稿，请重新生成译本后再试");
       return;
@@ -881,7 +895,7 @@ const KnowledgeDocumentContent = () => {
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取翻译草稿失败");
     }
-  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.translations, selectedPdfArtifact]);
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.translations, selectedPdfArtifact, sidebarTranslation]);
 
   const retranslateRevisionBlock = useCallback(async (providerType: "api" | "llm") => {
     if (!selectedPdfArtifact || !revisionBlock) return;
@@ -910,8 +924,8 @@ const KnowledgeDocumentContent = () => {
         [revisionBlock.id]: revisionText.trim(),
       }, revisionProvider);
       await refreshPdfCapabilities();
-      setSelectedPdfArtifact(artifact);
-      setPdfSourceView("translation");
+      selectTranslationArtifact(artifact);
+      showFullTranslation();
       setRevisionModalOpen(false);
       message.success("已生成新的翻译版 PDF，原译本保持不变");
     } catch (error) {
@@ -919,7 +933,7 @@ const KnowledgeDocumentContent = () => {
     } finally {
       setRevisionLoading(false);
     }
-  }, [knowledgeBaseId, knowledgeId, refreshPdfCapabilities, revisionBlock, revisionProvider, revisionText, selectedPdfArtifact]);
+  }, [knowledgeBaseId, knowledgeId, refreshPdfCapabilities, revisionBlock, revisionProvider, revisionText, selectedPdfArtifact, showFullTranslation, selectTranslationArtifact]);
 
   useEffect(() => {
     const activeJob = latestActiveTranslationJob(pdfCapabilities?.jobs || []);
@@ -936,8 +950,8 @@ const KnowledgeDocumentContent = () => {
         if (updated.status === "READY") {
           const artifact = capabilities.translations.find((item) => item.id === updated.artifact_id);
           if (artifact) {
-            setSelectedPdfArtifact(artifact);
-            setPdfSourceView("translation");
+            selectTranslationArtifact(artifact);
+            showFullTranslation();
           }
           message.success("翻译完成并已缓存");
         } else if (updated.status === "FAILED") {
@@ -947,7 +961,7 @@ const KnowledgeDocumentContent = () => {
     };
     const timer = window.setInterval(() => { void poll(); }, 1500);
     return () => window.clearInterval(timer);
-  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs]);
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, showFullTranslation, selectTranslationArtifact]);
 
   const removePdfArtifact = useCallback((artifact: PdfArtifact) => {
     Modal.confirm({
@@ -958,6 +972,7 @@ const KnowledgeDocumentContent = () => {
       cancelText: "取消",
       onOk: async () => {
         await deletePdfArtifact(knowledgeBaseId, knowledgeId, artifact.id);
+        setSelectedTranslationArtifact(current => current?.id === artifact.id ? undefined : current);
         if (artifact.kind === "SEARCHABLE_PDF") {
           setSelectedPdfArtifact(undefined);
           setPdfSourceView("original");
@@ -1009,15 +1024,14 @@ const KnowledgeDocumentContent = () => {
             { label: isPdfDocument ? "普通版" : "原文", value: isPdfDocument && pdfCapabilities?.searchable_artifact ? "searchable" : "original" },
             ...(pdfCapabilities?.translations.length ? [{ label: "翻译版", value: "translation" }] : []),
           ]}
-          onChange={(value) => {
+          onChange={(value: string | number) => {
             const view = value as "original" | "searchable" | "translation";
-            setPdfSourceView(view);
+            if (view === "translation") showFullTranslation();
+            else setPdfSourceView(view);
             if (view === "original") setSelectedPdfArtifact(undefined);
             if (view === "searchable") setSelectedPdfArtifact(pdfCapabilities?.searchable_artifact);
             if (view === "translation") {
-              setSelectedPdfArtifact((current) => current?.kind === "TRANSLATION_PDF"
-                ? current
-                : pdfCapabilities?.translations[pdfCapabilities.translations.length - 1]);
+              if (sidebarTranslation) selectTranslationArtifact(sidebarTranslation);
             }
           }}
         />
@@ -1044,22 +1058,23 @@ const KnowledgeDocumentContent = () => {
             aria-label="选择缓存译本"
             placeholder="缓存译本"
             style={{ width: 150 }}
-            value={pdfSourceView === "translation" ? selectedPdfArtifact?.id : undefined}
+            value={selectedPdfArtifact?.kind === "TRANSLATION_PDF" ? selectedPdfArtifact.id : undefined}
             options={pdfCapabilities.translations.map((artifact) => ({
               value: artifact.id,
               label: `${artifact.target_language === "en" ? "英文" : "中文"} · ${artifact.provider_type === "llm" ? "大模型" : "翻译 API"}`,
             }))}
-            onChange={(id) => {
-              setSelectedPdfArtifact(pdfCapabilities.translations.find((artifact) => artifact.id === id));
-              setPdfSourceView("translation");
+            onChange={(id: string) => {
+              const artifact = pdfCapabilities.translations.find((artifact) => artifact.id === id);
+              if (artifact) selectTranslationArtifact(artifact);
+              showFullTranslation();
             }}
           />
         ) : null}
-        {(isPdfDocument && pdfCapabilities?.searchable_artifact) || ((pdfSourceView === "translation") && selectedPdfArtifact) ? (
+        {(isPdfDocument && pdfCapabilities?.searchable_artifact) || (selectedPdfArtifact?.kind === "TRANSLATION_PDF") ? (
           <Popover
             trigger="click"
             content={<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {(pdfSourceView === "translation") && selectedPdfArtifact ? <>
+              {selectedPdfArtifact?.kind === "TRANSLATION_PDF" ? <>
                 <Button type="text" size="small" onClick={() => openTranslationRegeneration(selectedPdfArtifact)}>重新生成当前译本</Button>
                 <Button type="text" danger size="small" onClick={() => removePdfArtifact(selectedPdfArtifact)}>删除当前译本</Button>
               </> : pdfCapabilities?.searchable_artifact ? <>
@@ -1118,6 +1133,9 @@ const KnowledgeDocumentContent = () => {
     runTranslationPdf,
     removePdfArtifact,
     selectedPdfArtifact?.id,
+    showFullTranslation,
+    selectTranslationArtifact,
+    sidebarTranslation,
     t,
     translationInProgress,
   ]);
@@ -1197,7 +1215,7 @@ const KnowledgeDocumentContent = () => {
 
   return (
     <div className={`knowledge-container is-document-reader !h-full !items-start${isPaperDocument ? " is-paper-document" : ""}`}>
-      <div ref={workspaceRef} className="knowledge-preview-layout knowledge-paper-workspace" data-panel-layout={panelLayout} data-panel-open={!previewSideCollapsed} data-narrow={workspaceWidth<1100} data-compact={workspaceWidth<900} style={{"--paper-assistant-width": `${Math.min(paperAssistantWidth, Math.max(320, workspaceWidth * .48))}px`} as React.CSSProperties}>
+      <div ref={workspaceRef} className="knowledge-preview-layout knowledge-paper-workspace" data-panel-layout={panelLayout} data-panel-open={!previewSideCollapsed} data-narrow={workspaceWidth<1100} data-compact={workspaceWidth<900} style={{"--paper-assistant-width": `${Math.min(paperAssistantWidth, Math.max(320, workspaceWidth * .5))}px`} as React.CSSProperties}>
         <div className="knowledge-preview-file-column paper-reader-pane">
           {!isPdfDocument && <header className="document-reader-header">{readerBackButton}<span title={knowledgeDetail?.display_name}>{knowledgeDetail?.display_name}</span>{readerDocumentActions()}</header>}
           {isPdfDocument && <PaperOutlineRail document={paperIR} nativeOutline={nativePdfOutline} currentPage={pdfViewPosition.page} onNavigate={navigatePaperBlock} onNavigatePage={navigatePaperPage}/> }
@@ -1257,7 +1275,7 @@ const KnowledgeDocumentContent = () => {
             />
 
         </div>
-        {!previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.48))} maxWidth={Math.min(640, Math.max(320,workspaceWidth*.48))} onChange={resizePaperAssistant} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
+        {!previewSideCollapsed && (panelLayout==="left" || panelLayout==="right") && workspaceWidth >= 900 && <PaperPaneDivider side={panelLayout==="left"?"left":"right"} width={Math.min(paperAssistantWidth, Math.max(320,workspaceWidth*.5))} maxWidth={Math.max(320,workspaceWidth*.5)} onChange={resizePaperAssistant} label={i18n.language.startsWith("zh") ? "调整助手宽度" : "Resize assistant"} />}
         <div ref={panelRef} style={panelLayout==="floating"?{"--paper-panel-x":`${floatingPosition.x}px`,"--paper-panel-y":`${floatingPosition.y}px`} as React.CSSProperties:undefined} className={`paper-chat-pane knowledge-preview-panel-column${previewSideCollapsed?" is-collapsed":""}`} aria-hidden={previewSideCollapsed}>
           {knowledgeDetail&&<>
             <div className="paper-chat-open-content">
@@ -1282,7 +1300,23 @@ const KnowledgeDocumentContent = () => {
           />
               </div>}
               <div className="paper-assistant-pane" hidden={previewSideTab !== "translation"}>
+                <div className="knowledge-translation-modes"><Segmented block value={translationPanelMode} options={[{label:"划词翻译",value:"selection"},{label:"全文翻译",value:"document"}]} onChange={(value: string | number) => {
+                  if (value === "document") showFullTranslation();
+                  else setTranslationPanelMode("selection");
+                }} /></div>
+                <div className="paper-assistant-pane" hidden={translationPanelMode !== "selection"}>
                 <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={defaultTranslationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} onRetranslateWithLLM={() => void retranslateSelectedTextWithLLM(translationSource)} />
+                </div>
+                {translationPanelMode === "document" && <FullDocumentTranslationPanel
+                  datasetId={knowledgeBaseId} documentId={knowledgeId}
+                  artifacts={pdfCapabilities?.translations || []} artifact={sidebarTranslation}
+                  supported={canTranslateDocument} busy={translationInProgress}
+                  onTranslate={openNewTranslation}
+                  onSelect={artifact => {selectTranslationArtifact(artifact); setPdfSourceView("original");}}
+                  onRetranslateSelection={selection => void openTranslationRevision(selection, "translation")}
+                  onRegenerate={openTranslationRegeneration}
+                  onHalfWidth={workspaceWidth >= 900 && (panelLayout === "left" || panelLayout === "right") ? () => resizePaperAssistant(workspaceWidth * .5) : undefined}
+                />}
               </div>
               {paperDetailsOpened && <div className="paper-assistant-pane" hidden={previewSideTab !== "info" && previewSideTab !== "notes"}><PaperReaderDetails documentVocabulary={isVocabularyEnabled()?<DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken}/>:undefined} datasetId={knowledgeBaseId} documentId={knowledgeId} fileName={knowledgeDetail.display_name||""} canWrite={hasWritePermission} refreshToken={notesRevision} initialTab={previewSideTab==="notes"?"notes":"info"} onNavigatePage={page=>{setPdfSourceView("original");setPdfNavigateToPage({page,requestId:++navigationSequence.current});}} onNavigateNote={source=>{setPdfSourceView('original');setPdfNavigateToPosition({page:source.page,progress:Math.max(0,(source.rects?.[0]?.[1]??0)-.12),requestId:++navigationSequence.current});}}/></div>}
               <div className="paper-assistant-pane" hidden={previewSideTab !== "chat"}>
@@ -1314,7 +1348,7 @@ const KnowledgeDocumentContent = () => {
         onOk={() => void runTranslationPdf(Boolean(regenerationArtifact), regenerationArtifact, regenerationProviderGroupId)}
       >
         <div className="pdf-translation-config">
-          <div className="pdf-translation-config-row"><label>翻译方式</label><Segmented block disabled={Boolean(regenerationArtifact)} value={translationDialogMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api", disabled: translationStatusRefreshing || !translationDocumentSupported }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
+          <div className="pdf-translation-config-row"><label>翻译方式</label><Segmented block disabled={Boolean(regenerationArtifact)} value={translationDialogMode} onChange={(value: string | number) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api", disabled: translationStatusRefreshing || !translationDocumentSupported }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
           {translationDialogMode === "api" ? <div className="pdf-translation-config-row">
             <label htmlFor="pdf-translation-provider">翻译 API 来源</label>
             <Select
