@@ -3054,6 +3054,26 @@
   }
 }
 
+.composite-file-deliveries {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e8edf3;
+
+  &__item {
+    flex: 1 1 260px;
+    min-width: 0;
+  }
+
+  .workflow-slot__file-card { padding: 10px 12px; }
+}
+
+.composite-files-only {
+  .composite-file-deliveries { border-bottom: 0; }
+}
+
 // Right of the filmstrip: toolbar + slide + notes.
 .composite-main {
   flex: 1;

@@ -74,6 +74,23 @@ describe('SlotHtmlSlide mutation baseline', () => {
     await waitFor(() => expect(enlarged).toHaveStyle({ width: '1280px', height: '720px' }));
   });
 
+  it('fills normal and enlarged previews when the canvas is declared on html/body', async () => {
+    const source = '<html><head><style>html,body{width:1280px;height:720px;margin:0}img{width:1280px;height:720px}</style></head><body><img alt="Page preview"></body></html>';
+    const slot = { slot_id: 'preview_html', slot: 'preview_html', revision: 1, selected: true,
+      created_at: '', content_type: 'text', artifact_value: source,
+    } as SlotRevision;
+    render(<SlotHtmlSlide slot={slot} />);
+    const frame = await screen.findByTitle('slide-1') as HTMLIFrameElement;
+    frame.contentDocument!.documentElement.innerHTML = source;
+    fireEvent.load(frame);
+    await waitFor(() => expect(frame).toHaveStyle({ width: '1280px', height: '720px' }));
+    fireEvent.click(screen.getByRole('button', { name: '放大幻灯片' }));
+    const enlarged = await screen.findByTitle('放大预览-1') as HTMLIFrameElement;
+    enlarged.contentDocument!.documentElement.innerHTML = source;
+    fireEvent.load(enlarged);
+    await waitFor(() => expect(enlarged).toHaveStyle({ width: '1280px', height: '720px' }));
+  });
+
   it('uses the applied revision and draft version for the next rewrite on the same mount', async () => {
     const slot: SlotRevision = {
       slot_id: 'slides',

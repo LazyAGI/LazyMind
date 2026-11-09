@@ -529,6 +529,39 @@ function getCompositeRows(
   return Array.from(orders).sort((a, b) => a - b);
 }
 
+/** File deliveries belong to the whole result, not to an ordered preview page. */
+function compositeFileDeliveries(tab: TabDef, session: WorkflowSession): SlotDef[] {
+  if (!tab.composite_tab_position) return [];
+  return tab.slots.filter(slot => {
+    if (slot.type !== 'file' || slot.cardinality === 'list' || slot.widget?.widgetType === 'html-slide'
+      || tab.composite_behavior?.repeat_single_slots?.includes(slot.id)) return false;
+    const revisions = getTabSlotRevisions(session, tab, slot.id);
+    return slot.cardinality === 'single' || (revisions.length <= 1
+      && !revisions.some(revision => revision.list_index != null));
+  });
+}
+
+/** Preserve the declared tree/legacy layout while removing whole-result files. */
+function compositePageLayout(layout: TabDef['composite_layout'], files: Set<string>): TabDef['composite_layout'] {
+  const prune = (value: unknown): unknown => {
+    if (typeof value === 'string') return files.has(value) ? undefined : value;
+    if (Array.isArray(value)) return value.map(prune).filter(item => item !== undefined);
+    if (!value || typeof value !== 'object') return value;
+    const node = { ...value } as Record<string, unknown>;
+    if ('slot' in node) {
+      node.slot = prune(node.slot);
+      if (node.slot === undefined) return undefined;
+    }
+    for (const key of ['children', 'tabs']) {
+      if (!Array.isArray(node[key])) continue;
+      node[key] = prune(node[key]);
+      if ((node[key] as unknown[]).length === 0) return undefined;
+    }
+    return node;
+  };
+  return prune(layout) as TabDef['composite_layout'];
+}
+
 /** Find a slot revision for (slot, sort_order). */
 function findSlotRevision(
   session: WorkflowSession,
@@ -847,7 +880,7 @@ function CompositeThumbnailRail({
 }
 
 function CompositeSlotGrid({
-  tab,
+  tab: declaredTab,
   session,
   onRefresh,
   onReference,
@@ -866,6 +899,19 @@ function CompositeSlotGrid({
   const tabActive = React.useContext(WorkflowPanelTabActiveContext);
   const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
+  const fileDefinitions = compositeFileDeliveries(declaredTab, session);
+  const fileIds = new Set(fileDefinitions.map(slot => slot.id));
+  const tab = fileIds.size ? { ...declaredTab,
+    slots: declaredTab.slots.filter(slot => !fileIds.has(slot.id)),
+    composite_layout: compositePageLayout(declaredTab.composite_layout, fileIds),
+  } : declaredTab;
+  const visibleFileIds = resolveVisibleSlotIds(declaredTab, session);
+  const fileDeliveries = fileDefinitions.flatMap(definition => {
+    if (visibleFileIds && !visibleFileIds.has(definition.id)) return [];
+    const revisions = getTabSlotRevisions(session, declaredTab, definition.id);
+    const revision = revisions.find(item => item.selected) ?? revisions[0];
+    return revision ? [{ definition, revision }] : [];
+  });
   const rows = getCompositeRows(tab, session);
   const columns = filterColumnsByVisibleSlots(
     buildColumns(tab),
@@ -906,7 +952,7 @@ function CompositeSlotGrid({
     if (paged && tabActive) onFocusSortOrder?.(currentPage ?? undefined);
   }, [paged, tabActive, currentPage, onFocusSortOrder]);
 
-  const activePage = currentPage ?? rows[0];
+  const activePage = currentPage != null && rows.includes(currentPage) ? currentPage : rows[0];
   const reorderableCompositeSlotIds = tab.slots
     .filter((slot) => slot.cardinality === 'list' && slot.ordered)
     .map((slot) => slot.id)
@@ -951,13 +997,27 @@ function CompositeSlotGrid({
     }
   }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t, pageGroups]);
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && fileDeliveries.length === 0) {
     return (
       <div className='workflow-panel__empty' role='status' aria-live='polite'>
         <span>{t(compactEmptyStates ? workflowEmptyStateKey(session, resolveWorkflowTabStepId(tab, session.steps)) : 'chat.workflowWaitingForResults')}</span>
       </div>
     );
   }
+
+  const files = fileDeliveries.length > 0 && <div className='composite-file-deliveries'>
+    {fileDeliveries.map(({ definition, revision }) => <section key={definition.id}
+      className='composite-file-deliveries__item' aria-label={definition.label}>
+      <DocumentActionScope inline label={definition.label}>
+        <SlotRenderer slot={revision} workflowSession={session} widget={definition.widget}
+          expectedType={definition.type} sessionId={session.session_id} slotId={definition.id}
+          revisionCount={revision.revision_count} onRefresh={onRefresh} onReference={onReference}
+          readOnly={readOnly} />
+      </DocumentActionScope>
+    </section>)}
+  </div>;
+
+  if (rows.length === 0) return <div className='composite-files-only'>{files}</div>;
 
   const renderSlotCell = (
     slotId: string,
@@ -1161,6 +1221,7 @@ function CompositeSlotGrid({
 
   return (
     <div className='composite-shell composite-shell--paged'>
+      {files}
       <div className={`composite-with-pagebar composite-with-pagebar--${pageBarPosition}`}>
         {(pageBarPosition === 'top' || pageBarPosition === 'left') && rail}
         <div className='composite-main'>

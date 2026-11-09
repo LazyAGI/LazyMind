@@ -84,7 +84,9 @@ vi.mock('./SlotComponents', () => ({
       });
       return () => { unregisterFlush(); unregisterAction(); };
     }, [active, context.registerFlush, context.registerFooterAction, slotId, slot.document, slot.list_index]);
-    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}<button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
+    return <article onDoubleClick={() => context.setEditing(slotId, true)} data-widget={widget?.widgetType} data-readonly={Boolean(readOnly)} data-value={(slot.artifact_value as { text?: string })?.text}>正文 {slotId}
+      {slot.artifact_value?.url && <a href={String(slot.artifact_value.url)} download={String(slot.artifact_value.filename)}>下载原始文件</a>}
+      <button onClick={() => context.onBrowse?.()}>查看历史</button></article>;
   },
 }));
 
@@ -588,6 +590,94 @@ describe('shared workflow compact layout', () => {
     expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByText('正文 preview')).toBeVisible();
     expect(screen.getByText('正文 notes')).toBeVisible();
+  });
+
+  function configureFileAndPreviews() {
+    fixture.ui.tabs = [{
+      id: 'slides', label: '幻灯片', layout: 'composite', slot_scope: 'selected', composite_tab_position: 'left',
+      slots: [
+        { id: 'native_file', label: '演示文件', type: 'file', cardinality: 'single' },
+        { id: 'preview', label: '预览', type: 'text', cardinality: 'list', ordered: true, widget: { widgetType: 'html-slide' } },
+        { id: 'notes', label: '备注', type: 'text', cardinality: 'list', ordered: true },
+      ],
+      composite_layout: { direction: 'column', children: [{ slot: 'native_file' }, { slot: 'preview', weight: 3 }, { slot: 'notes' }] },
+    }];
+    fixture.session.slots = [
+      { slot: 'native_file', slot_id: 'native_file', sort_order: 0, selected: true,
+        artifact_value: { url: '/artifacts/original-editable.pptx', filename: 'original-editable.pptx' } },
+      ...[1, 2, 3, 4].flatMap(sort_order => ['preview', 'notes'].map(slot => ({
+        slot, slot_id: slot, sort_order, list_index: sort_order - 1, selected: true,
+        artifact_value: { text: `${slot}-${sort_order}` },
+      }))),
+    ] as WorkflowSession['slots'];
+  }
+
+  it.each(['native', 'external'])('separates the original file delivery from four actual preview pages on %s surfaces', async surface => {
+    configureFileAndPreviews();
+    const original = JSON.stringify(fixture.session.slots);
+    render(<WorkflowPanel conversationId='layout-test' {...(surface === 'external' ? { embedded: true, resultsOnly: true, externalPresentation: { activities: {} } } : {})} />);
+    const first = await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(first).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-1');
+    expect(screen.getByText('正文 notes')).toHaveAttribute('data-value', 'notes-1');
+    const delivery = screen.getByRole('region', { name: '演示文件' });
+    expect(delivery.closest('.composite-grid--paged')).toBeNull();
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toHaveAttribute('href', '/artifacts/original-editable.pptx');
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toHaveAttribute('download', 'original-editable.pptx');
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-2');
+    expect(within(delivery).getByRole('link', { name: '下载原始文件' })).toBeVisible();
+    expect(JSON.stringify(fixture.session.slots)).toBe(original);
+  });
+
+  it.each([0, undefined])('keeps a file-only result downloadable without inventing a slide (file order=%s)', async sort_order => {
+    configureFileAndPreviews();
+    fixture.session.slots = [{ ...fixture.session.slots![0], sort_order }];
+    render(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByRole('link', { name: '下载原始文件' })).toHaveAttribute('href', '/artifacts/original-editable.pptx');
+    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一张幻灯片' })).not.toBeInTheDocument();
+    expect(screen.queryByText('等待生成结果...')).not.toBeInTheDocument();
+  });
+
+  it('keeps preview selection stable when the original file is published later', async () => {
+    configureFileAndPreviews();
+    const file = fixture.session.slots!.shift()!;
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.queryByRole('region', { name: '演示文件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    fixture.session.slots!.unshift(file);
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(await screen.findByRole('link', { name: '下载原始文件' })).toBeVisible();
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getByRole('listitem', { name: '第 2 行' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('正文 preview')).toHaveAttribute('data-value', 'preview-2');
+  });
+
+  it('keeps partially published notes pages and their original sort orders', async () => {
+    configureFileAndPreviews();
+    fixture.session.slots = fixture.session.slots!.filter(slot => slot.slot !== 'preview' || slot.sort_order === 1);
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    fireEvent.click(screen.getByRole('listitem', { name: '第 4 行' }));
+    expect(screen.getByText('正文 notes')).toHaveAttribute('data-value', 'notes-4');
+    expect(screen.queryByText('正文 preview')).not.toBeInTheDocument();
+  });
+
+  it('preserves files explicitly declared as repeated page material', async () => {
+    configureFileAndPreviews();
+    fixture.ui.tabs![0].composite_behavior = { repeat_single_slots: ['native_file'] };
+    fixture.session.slots![0].sort_order = 1;
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('listitem', { name: '第 1 行' });
+    expect(screen.queryByRole('region', { name: '演示文件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张幻灯片' }));
+    expect(screen.getByRole('link', { name: '下载原始文件' }).closest('.composite-grid--paged')).not.toBeNull();
   });
 
   it.each(['preview', 'slide_outline'])('keeps stale %s content visible after an upstream edit', async slot => {

@@ -21,9 +21,18 @@ html.workflow-run-embed #app {
   }
 
   &.workflow-run--results {
-    padding: 20px;
-    > .ant-btn { align-self: flex-start; flex: 0 0 auto; }
+    padding: 0;
     > .ask-wizard { max-height: 45%; flex: 0 1 auto; overflow: auto; margin: 0; }
+  }
+
+  &__title-banner {
+    .ant-alert-content { min-width: 0; }
+    .ant-alert-message > span {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   &--embedded {

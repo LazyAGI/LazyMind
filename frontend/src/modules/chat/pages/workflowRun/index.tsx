@@ -1,6 +1,6 @@
 import { useExecutionActivity } from '@/modules/chat/components/WorkflowPanel/external/useExecutionActivity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Spin, Tag } from 'antd';
+import { Alert, Button, Spin } from 'antd';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AgentAppsAuth } from '@/components/auth';
@@ -12,6 +12,7 @@ import { controlActions, deliveryBanner, externalPanelAction, overlayInfoBanner,
 import { loadWorkflowRunSnapshot, watchWorkflowRun, type WorkflowRunSnapshot } from './loadRun';
 import './index.scss';
 import { workflowHostOrigin } from './hostOrigin';
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 
 /** Shared run workbench: user intent goes to Core, never to an interpreted chat prompt. */
 export default function WorkflowRunPage({ embedded = false, sessionId: suppliedSessionId, title, resultsOnly = false }: {
@@ -22,7 +23,7 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
 }) {
   const { sessionId: routeSessionId = '' } = useParams();
   const sessionId = suppliedSessionId ?? routeSessionId;
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [hostExpanded, setHostExpanded] = useState(false);
   const [hostCollapsed, setHostCollapsed] = useState(false);
   const hostOrigin = useMemo(() => {
@@ -140,6 +141,10 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
     }
   };
   const activities = useExecutionActivity(resultsOnly ? undefined : snapshot?.session);
+  const workflowUIKey = snapshot?.session ? workflowUICacheKey(
+    snapshot.session.workflow_id, snapshot.session.pinned_revision_id, i18n.language || '',
+  ) : '';
+  const workflowName = useWorkflowStore(state => state.workflowUIByWorkflow[workflowUIKey]?.name);
   const control = snapshot?.control;
   const liveDelivery = deliveryBanner(control?.delivery, control?.binding);
   const infoBanner = overlayInfoBanner(noticeKey, control?.delivery, control?.binding);
@@ -147,8 +152,11 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
 
   return <main className={`workflow-run${embedded || resultsOnly ? ' workflow-run--embedded' : ''}${resultsOnly ? ' workflow-run--results' : ''}`}
     style={embedded || resultsOnly ? undefined : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
-    {!embedded && <div className='workflow-run__heading'><h1>{title || t('chat.workflowPanelTitle')}</h1>
-      {resultsOnly && <Tag>{t('chat.externalWorkflowResult')}</Tag>}</div>}
+    {!embedded && (resultsOnly
+      ? <Alert className='workflow-run__title-banner' type='info' role='region'
+        aria-label={t('chat.workflowPanelTitle')}
+        message={<span title={title || workflowName}>{workflowName || title || t('chat.workflowPanelTitle')}</span>} />
+      : <div className='workflow-run__heading'><h1>{title || t('chat.workflowPanelTitle')}</h1></div>)}
     {error && <Alert type='error' showIcon closable onClose={() => setError('')} message={error} />}
     {syncError && <Alert type='warning' showIcon message={t('chat.workflowRunSyncFailed')} description={syncError} />}
     {control?.continuation === 'binding_required' && <Alert type='warning' showIcon
@@ -157,7 +165,7 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
       closable={bannerFromNotice} onClose={() => setNoticeKey('')} message={t(infoBanner.key)} />}
     {!snapshot && !error && !syncError && <Spin />}
     {snapshot && <>
-      {!embedded && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
+      {!embedded && !resultsOnly && <Button onClick={() => { void refresh().catch(reason => setError(String(reason))); }}>{t('chat.workflowRunRefresh')}</Button>}
       {control?.input_request && <WorkflowInputRequestCard request={control.input_request}
         onAnswer={answerText => act({ kind: 'answer_input', input: control.input_request!, answerText })} />}
       <WorkflowPanel conversationId={key} onRefresh={() => refresh().then(() => {})}

@@ -14,7 +14,10 @@ const fixture = vi.hoisted(() => ({
 vi.mock('react-router-dom', () => ({ useParams: () => ({ sessionId: 'acceptance-test' }) }));
 vi.mock('@/components/auth', () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: 'test-user' }) } }));
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ control: fixture.control }) }));
-vi.mock('@/modules/chat/store/workflowPanel', () => ({ useWorkflowStore: (select: any) => select({ setSession: fixture.setSession }) }));
+vi.mock('@/modules/chat/store/workflowPanel', () => ({ useWorkflowStore: (select: any) => select({
+  setSession: fixture.setSession,
+  workflowUIByWorkflow: { '["ppt-workflow","fixed-revision","zh-CN"]': { name: '汇报 PPT' } },
+}) }));
 vi.mock('./loadRun', () => ({
   loadWorkflowRunSnapshot: (...args: unknown[]) => fixture.load(...args),
   watchWorkflowRun: (_id: string, reload: () => void) => { fixture.reload = reload; return () => {}; },
@@ -45,7 +48,20 @@ it('shows results for the explicitly linked run without subscribing to execution
   expect(fixture.load.mock.calls[0][0]).toBe('external-run');
   expect(fixture.activity).toHaveBeenLastCalledWith(undefined);
   expect(fixture.panel).toHaveBeenLastCalledWith(expect.objectContaining({ resultsOnly: true, embedded: true }));
-  expect(screen.getByRole('heading', { name: 'Paper summary' })).toBeVisible();
+  expect(screen.getByRole('region', { name: '工作流面板' })).toHaveTextContent('Paper summary');
+  expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /刷\s*新/ })).not.toBeInTheDocument();
+});
+
+it('uses the pinned workflow name in the traditional compact banner and keeps the request in its tooltip', async () => {
+  const baseline = await fixture.load();
+  baseline.session.workflow_id = 'ppt-workflow';
+  baseline.session.pinned_revision_id = 'fixed-revision';
+  fixture.load.mockResolvedValue(baseline);
+  const title = '根据附件生成四页 PPT，并覆盖论文方法、证据和局限。'.repeat(8);
+  render(<WorkflowRunPage resultsOnly title={title} />);
+  expect(await screen.findByText('汇报 PPT')).toHaveAttribute('title', title);
+  expect(screen.queryByText(title)).not.toBeInTheDocument();
 });
 
 it.each(['stopped', 'awaiting_user'])('saves real Ask answers without auto-resuming (%s)', async continuation => {
