@@ -2598,7 +2598,7 @@ const enUS = {
       cancel: "Cancel",
       close: "Close",
       done: "Done",
-      check: "Plugin enabled, check connection",
+      check: "Plugin enabled, check connection", // workflow-naming: dsh-external
       retryCheck: "Check again",
       reconnect: "Reconnect",
       checking: "Checking…",
@@ -2621,12 +2621,12 @@ const enUS = {
       installFailedDescription: "Make sure DeepSeek Harness has completed its first launch and fully exited, then retry. If installation still fails, close this guide to view the issue on the integration page.",
       installedTitle: "Components configured",
       installedDescription: "Reopen DeepSeek Harness, enable the plugin as shown, then check the connection.",
-      imageAlt: "Select Plugins in the DeepSeek Harness sidebar. Under Installed plugins, find @lazymind/dsh-workflow and turn on its toggle.",
+      imageAlt: "Select Plugins in the DeepSeek Harness sidebar. Under Installed plugins, find @lazymind/dsh-workflow and turn on its toggle.", // workflow-naming: dsh-external
       enlargeImage: "Enlarge image",
       imageNote: "Chinese interface shown · Click image to enlarge",
     },
     dshErrors: {
-      plugin_update_required: "The LazyMind plugin components need an update. Select Reconnect to update them.",
+      plugin_update_required: "The LazyMind plugin components need an update. Select Reconnect to update them.", // workflow-naming: dsh-external
       unsupported_version: "This DSH version is not supported. Update to 0.2.0-rc.2 or later and retry.",
       dependency_environment: "The DSH dependency environment is invalid. Unable to connect.",
       operation_failed: "DSH connection failed. Retry, and report the issue if it persists.",
@@ -2640,7 +2640,7 @@ const enUS = {
       pairing_credential_mismatch: "DeepSeek Harness is using old pairing credentials. Reconnect and restart the app.",
       pairing_invalid: "The DeepSeek Harness pairing record is invalid. Keep diagnostics and repair the configuration.",
       pairing_unreadable: "Unable to read the DeepSeek Harness pairing record. Check file permissions and retry.",
-      mcp_enable_required: "Enable @lazymind/dsh-workflow on the DeepSeek Harness Plugins page. The connection will be checked automatically.",
+      mcp_enable_required: "Enable @lazymind/dsh-workflow on the DeepSeek Harness Plugins page. The connection will be checked automatically.", // workflow-naming: dsh-external
       host_unavailable: "The DeepSeek Harness plugin has not been confirmed online. Make sure it is enabled and check again; reconnect if it does not recover.",
       mcp_unavailable: "DeepSeek Harness has not connected to LazyMind MCP. Check that the plugin is enabled; reconnect to update its components if it does not recover.",
       capability_unavailable: "The DeepSeek Harness plugin lacks the required control capabilities. Reconnect to update it.",

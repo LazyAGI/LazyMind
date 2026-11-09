@@ -2594,7 +2594,7 @@ const zhCN = {
       imageNote: "中文界面示意 · 点击图片放大",
     },
     dshErrors: {
-      plugin_update_required: "LazyMind 插件组件需要更新，请点击“重新连接”完成更新。",
+      plugin_update_required: "LazyMind 插件组件需要更新，请点击“重新连接”完成更新。", // workflow-naming: dsh-external
       unsupported_version: "当前 DSH 版本不受支持，请更新至 0.2.0-rc.2 或更高版本后重试。",
       dependency_environment: "检测到 DSH 依赖环境异常，无法完成接入。",
       operation_failed: "DSH 接入失败，请重试；若仍失败，请反馈问题。",

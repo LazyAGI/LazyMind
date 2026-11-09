@@ -347,7 +347,12 @@ describe("AgentIntegrationPage", () => {
     await act(async () => finish({ ok: true, data: status }));
   });
 
-  it.each(["unsupported_version", "dependency_environment", "plugin_update_required", "operation_failed"])("shows one concise DSH %s error and hides raw logs", async (code) => {
+  it.each([
+    "unsupported_version",
+    "dependency_environment",
+    "plugin_update_required", // workflow-naming: dsh-external
+    "operation_failed",
+  ])("shows one concise DSH %s error and hides raw logs", async (code) => {
     const status = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "error",
       issue: { code, path: "/Users/example/DSH 中文/profiles/web" },
       message: "ERR_PNPM_UNEXPECTED_STORE raw stack output that must never appear",
