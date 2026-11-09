@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   activity: vi.fn(), panel: vi.fn(),
   review: { id: 'review', step_id: 'analyze', execution_id: 'attempt', status: 'pending', version: 1, manifest_hash: 'test-hash' },
 }));
+vi.mock('@/modules/identityAvatar', () => ({ IdentityAvatar: () => <span data-testid='user-avatar' /> }));
 vi.mock('react-router-dom', () => ({ useParams: () => ({ sessionId: 'acceptance-test' }) }));
 vi.mock('@/components/auth', () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: 'test-user' }) } }));
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ control: fixture.control }) }));
@@ -48,20 +49,27 @@ it('shows results for the explicitly linked run without subscribing to execution
   expect(fixture.load.mock.calls[0][0]).toBe('external-run');
   expect(fixture.activity).toHaveBeenLastCalledWith(undefined);
   expect(fixture.panel).toHaveBeenLastCalledWith(expect.objectContaining({ resultsOnly: true, embedded: true }));
-  expect(screen.getByRole('region', { name: '工作流面板' })).toHaveTextContent('Paper summary');
+  expect(screen.getByText('Paper summary').closest('.chat-user')).not.toBeNull();
+  expect(screen.queryByRole('region', { name: '工作流面板' })).not.toBeInTheDocument();
   expect(screen.queryByRole('heading')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /刷\s*新/ })).not.toBeInTheDocument();
 });
 
-it('uses the pinned workflow name in the traditional compact banner and keeps the request in its tooltip', async () => {
+it('shows and copies the complete original request as a native user bubble', async () => {
   const baseline = await fixture.load();
-  baseline.session.workflow_id = 'ppt-workflow';
-  baseline.session.pinned_revision_id = 'fixed-revision';
+  const text = '根据附件生成四页 PPT，并覆盖论文方法、证据和局限。'.repeat(8);
+  baseline.session.intent_context = JSON.stringify({ text: text + '\n\nConfirmed workflow parameters:\n{"slide_count":"4"}', clarification_values: { slide_count: '4' } });
+  baseline.session.created_at = '2026-11-06T08:00:00Z';
   fixture.load.mockResolvedValue(baseline);
-  const title = '根据附件生成四页 PPT，并覆盖论文方法、证据和局限。'.repeat(8);
-  render(<WorkflowRunPage resultsOnly title={title} />);
-  expect(await screen.findByText('汇报 PPT')).toHaveAttribute('title', title);
-  expect(screen.queryByText(title)).not.toBeInTheDocument();
+  const copy = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } });
+  render(<WorkflowRunPage resultsOnly title='截断的标题…' />);
+  expect((await screen.findByText(text)).closest('.chat-user')).not.toBeNull();
+  expect(screen.queryByText('截断的标题…')).not.toBeInTheDocument();
+  expect(screen.getByTestId('user-avatar')).toBeVisible();
+  expect(document.querySelector('time')).toHaveAttribute('datetime', baseline.session.created_at);
+  fireEvent.click(screen.getByRole('button', { name: '复制' }));
+  expect(copy).toHaveBeenCalledWith(text);
 });
 
 it.each(['stopped', 'awaiting_user'])('saves real Ask answers without auto-resuming (%s)', async continuation => {

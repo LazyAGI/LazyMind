@@ -25,16 +25,6 @@ html.workflow-run-embed #app {
     > .ask-wizard { max-height: 45%; flex: 0 1 auto; overflow: auto; margin: 0; }
   }
 
-  &__title-banner {
-    .ant-alert-content { min-width: 0; }
-    .ant-alert-message > span {
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  }
-
   &--embedded {
     display: flex;
     flex: 1 1 auto;
@@ -111,4 +101,26 @@ html.workflow-run-embed #app {
 @keyframes workflow-external-progress { from { transform: translateX(0); } to { transform: translateX(230%); } }
 @media (prefers-reduced-motion: reduce) {
   .workflow-external-activity__progress--indeterminate > span { animation: none; }
+}
+
+// Reuse the native chat message styles, with a bounded request above the workbench.
+.workflow-run .workflow-request-message.chat-chat-container {
+  flex: 0 1 auto;
+  height: auto;
+  max-height: 35%;
+  min-height: 80px;
+  padding: 16px 24px 0;
+  overflow: auto;
+  align-items: stretch;
+  .chat-box { flex: 0 0 auto; overflow: visible; }
+  .chat-item { width: min(100%, 1100px); margin: 0 auto; }
+  .user-wrap { min-width: 0; }
+  .chat-user-mention-text { overflow-wrap: anywhere; }
+}
+@media (max-width: 600px) {
+  .workflow-run .workflow-request-message.chat-chat-container {
+    padding: 12px 8px 0;
+    .user-message-row { flex-wrap: wrap; }
+    .chat-time { order: 1; }
+  }
 }

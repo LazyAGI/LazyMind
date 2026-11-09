@@ -12,7 +12,7 @@ import { controlActions, deliveryBanner, externalPanelAction, overlayInfoBanner,
 import { loadWorkflowRunSnapshot, watchWorkflowRun, type WorkflowRunSnapshot } from './loadRun';
 import './index.scss';
 import { workflowHostOrigin } from './hostOrigin';
-import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
+import WorkflowRequestMessage from './WorkflowRequestMessage';
 
 /** Shared run workbench: user intent goes to Core, never to an interpreted chat prompt. */
 export default function WorkflowRunPage({ embedded = false, sessionId: suppliedSessionId, title, resultsOnly = false }: {
@@ -23,7 +23,7 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
 }) {
   const { sessionId: routeSessionId = '' } = useParams();
   const sessionId = suppliedSessionId ?? routeSessionId;
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [hostExpanded, setHostExpanded] = useState(false);
   const [hostCollapsed, setHostCollapsed] = useState(false);
   const hostOrigin = useMemo(() => {
@@ -141,10 +141,6 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
     }
   };
   const activities = useExecutionActivity(resultsOnly ? undefined : snapshot?.session);
-  const workflowUIKey = snapshot?.session ? workflowUICacheKey(
-    snapshot.session.workflow_id, snapshot.session.pinned_revision_id, i18n.language || '',
-  ) : '';
-  const workflowName = useWorkflowStore(state => state.workflowUIByWorkflow[workflowUIKey]?.name);
   const control = snapshot?.control;
   const liveDelivery = deliveryBanner(control?.delivery, control?.binding);
   const infoBanner = overlayInfoBanner(noticeKey, control?.delivery, control?.binding);
@@ -152,11 +148,8 @@ export default function WorkflowRunPage({ embedded = false, sessionId: suppliedS
 
   return <main className={`workflow-run${embedded || resultsOnly ? ' workflow-run--embedded' : ''}${resultsOnly ? ' workflow-run--results' : ''}`}
     style={embedded || resultsOnly ? undefined : { maxWidth: 1200, margin: '24px auto', padding: 24 }}>
-    {!embedded && (resultsOnly
-      ? <Alert className='workflow-run__title-banner' type='info' role='region'
-        aria-label={t('chat.workflowPanelTitle')}
-        message={<span title={title || workflowName}>{workflowName || title || t('chat.workflowPanelTitle')}</span>} />
-      : <div className='workflow-run__heading'><h1>{title || t('chat.workflowPanelTitle')}</h1></div>)}
+    {!embedded && !resultsOnly && <div className='workflow-run__heading'><h1>{title || t('chat.workflowPanelTitle')}</h1></div>}
+    {!embedded && resultsOnly && snapshot && <WorkflowRequestMessage session={snapshot.session} fallback={title} />}
     {error && <Alert type='error' showIcon closable onClose={() => setError('')} message={error} />}
     {syncError && <Alert type='warning' showIcon message={t('chat.workflowRunSyncFailed')} description={syncError} />}
     {control?.continuation === 'binding_required' && <Alert type='warning' showIcon
