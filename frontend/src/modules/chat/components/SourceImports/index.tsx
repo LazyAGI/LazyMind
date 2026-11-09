@@ -334,7 +334,7 @@ export function SourceImportActions({ source, inline = false }: { source: ChatSo
   const latest = matching[matching.length - 1];
   const originalHref = getSourceOriginalHref(source);
   return <>
-    {latest && <small className="source-import-current-state">{latest.target_name} · {importStatusLabel(latest)}{latest.state_unavailable && tr("unavailableSuffix")}<Button type="link" size="small" onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.setOpened(true)}>{tr("history")}</Button></small>}
+    {latest && <small className="source-import-current-state">{latest.target_name} · {importStatusLabel(latest)}<Button type="link" size="small" onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.setOpened(true)}>{tr("history")}</Button></small>}
     {inspected?.needs_pdf_lookup && <small className="source-import-current-state">{tr("canLookupFulltext")}</small>}
     <div className={inline ? "source-import-actions source-import-actions--inline" : "source-import-actions"}><Button type={inline ? "text" : "default"} icon={inline && originalHref ? <ExportOutlined aria-hidden /> : undefined} disabled={!originalHref} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => openSource(source)}>{tr(originalHref ? "openOriginal" : "noOriginalLink")}</Button>{inspected?.eligible && <Button type="primary" aria-label={tr("add")} icon={<PlusOutlined aria-hidden />} onMouseDown={(event: MouseEvent) => event.preventDefault()} onClick={() => ctx?.choose([inspected])}>{tr("add")}</Button>}</div>
   </>;
@@ -352,7 +352,7 @@ function SourceImportResults() {
     if (!opened || document.hidden) { observed.current.clear(); return; }
     if (ctx?.submittedBatch && submitted.current !== ctx.submittedBatch) { observed.current.add(ctx.submittedBatch); submitted.current = ctx.submittedBatch; }
     for (const row of items) if (["pending", "running", "waiting_retry"].includes(row.status)) observed.current.add(row.batch_id);
-    const finished = [...observed.current].filter(batch => items.some(row => row.batch_id === batch) && !items.some(row => row.batch_id === batch && (["pending", "running", "waiting_retry", "unknown"].includes(row.status) || row.state_unavailable)));
+    const finished = [...observed.current].filter(batch => items.some(row => row.batch_id === batch) && !items.some(row => row.batch_id === batch && ["pending", "running", "waiting_retry", "unknown"].includes(row.status)));
     finished.forEach(batch => observed.current.delete(batch));
     const failures = items.filter(row => finished.includes(row.batch_id) && row.status === "failed");
     if (failures.length) Modal.error({ title: tr("importFailed"), content: <ul>{failures.map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> });
@@ -377,6 +377,6 @@ function SourceImportResults() {
   return <Modal title={tr("paperHistory")} open={opened} onCancel={() => ctx?.setOpened(false)} footer={null} width={480} destroyOnHidden>
     {ctx?.queryError && <Alert type="warning" message={tr("keepLastStatus")} action={<Button size="small" onClick={() => void ctx.refresh()}>{tr("retryQuery")}</Button>} />}
     <ImportHistoryCards imports={items} onRetry={rows => void retry(rows)} retrying={retrying} onRefreshImports={ctx?.refresh} />
-    {items.some(row => row.retryable) && <Space className="import-history-footer"><Button loading={retrying} onClick={() => void retry(items)}>{tr("retryFailedOnly")}</Button><Button onClick={() => Modal.error({ title: tr("importFailed"), content: <ul>{items.filter(row => row.status === "failed" || row.processing_status === "failed").map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> })}>{tr("failureDetails")}</Button></Space>}
+    {items.some(row => row.retryable) && <Space className="import-history-footer"><Button loading={retrying} onClick={() => void retry(items)}>{tr("retryFailedOnly")}</Button><Button onClick={() => Modal.error({ title: tr("failureDetails"), content: <ul>{items.filter(row => row.status === "failed" || row.processing_status === "failed").map(row => <li key={row.item_id}>{row.title}：{row.error_message || tr("processingFailed")}</li>)}</ul> })}>{tr("failureDetails")}</Button></Space>}
   </Modal>;
 }
