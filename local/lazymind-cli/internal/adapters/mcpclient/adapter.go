@@ -104,8 +104,8 @@ func (a *Adapter) Status(ctx context.Context) (status agentintegration.Status) {
 					if err == nil {
 						issue, message := status.Issue, status.Message
 						agentintegration.SetRuntimeIssue(&status, workBuddyStartupHealth(ctx, a.home, config.CDPPort))
-						// Native trust is an explicit prerequisite, independent of runtime health.
-						if issue != nil && issue.Code == "mcp_trust_required" {
+						// Native trust and enablement are prerequisites, independent of runtime health.
+						if issue != nil && (issue.Code == "mcp_trust_required" || issue.Code == "mcp_enable_required") {
 							status.Issue, status.Message = issue, message
 						}
 					}
@@ -415,7 +415,7 @@ func (a *Adapter) status(ctx context.Context) agentintegration.Status {
 				if !status.Connection.MCPTrusted && (status.Issue == nil || status.Issue.Code == "host_unavailable") {
 					status.Issue = &agentintegration.Issue{Code: "mcp_trust_required"}
 					status.Message = workBuddyIssueMessage("mcp_trust_required")
-				} else if status.Issue == nil && !status.Connection.MCPEnabled {
+				} else if !status.Connection.MCPEnabled && (status.Issue == nil || status.Issue.Code == "host_unavailable") {
 					code := "mcp_enable_required"
 					status.Issue = &agentintegration.Issue{Code: code}
 					status.Message = workBuddyIssueMessage(code)

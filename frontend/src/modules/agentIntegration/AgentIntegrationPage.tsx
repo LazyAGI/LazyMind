@@ -590,8 +590,8 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
   if (requiresAgentQuit(status)) return t("agentIntegration.quitRequired.description", { agent: status.display_name });
-  if (agent === "workbuddy" && status.issue?.code === "mcp_trust_required") {
-    return t("agentIntegration.workbuddyErrors.mcp_trust_required");
+  if (agent === "workbuddy" && status.issue && ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) {
+    return t(`agentIntegration.workbuddyErrors.${status.issue.code}`);
   }
   const key = status.issue?.code === "configuration_unreadable" ? "readFailed"
     : status.state === "error" ? status.retry_action === "disconnect" ? "disableFailed" : "enableFailed"
