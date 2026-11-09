@@ -73,12 +73,9 @@ from .resources import _extract_provider_resources, _target_from_document
 
 _CHINESE_CHAR_LIMIT_RE = re.compile(
     r'(?P<prefix>不超过|至多|最多|约|大约|大概)?\s*'
-    r'(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>万|千)?\s*'
-    r'(?:(?:至|到|[-–—~～])\s*(?P<upper>\d+(?:\.\d+)?)\s*(?P<upper_unit>万|千)?\s*)?'
-    r'(?:个\s*)?(?:汉字|字)'
+    r'(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>万|千)?\s*字'
     r'(?P<suffix>左右|上下|以内|以下)?'
 )
-_SECTION_CHAR_SCOPE_RE = re.compile(r'(?:每(?:一)?|各)(?:个)?(?:章节?|小节|节|段落?|部分|页)')
 _MARKDOWN_ATX_HEADING_RE = re.compile(
     r'^(?P<indent> {0,3})(?P<marks>#{1,6})[ \t]+' r'(?P<title>.*?)(?:[ \t]+#+)?[ \t]*$',
 )
@@ -164,24 +161,10 @@ def _is_retryable_section_error(exc: Exception) -> bool:
 
 
 def _extract_length_constraints(query: str) -> dict[str, int]:
-    candidates = []
-    for match in _CHINESE_CHAR_LIMIT_RE.finditer(query):
-        # A section budget must never become a cap on the entire document.
-        clause = re.split(r'[，,。；;！!？?\n]', query[:match.start()])[-1]
-        if not _SECTION_CHAR_SCOPE_RE.search(clause):
-            candidates.append((bool(re.search(r'全文|正文|全篇|总计|总字数', clause)), match))
-    if not candidates:
+    match = _CHINESE_CHAR_LIMIT_RE.search(query)
+    if match is None:
         return {}
-    match = max(candidates, key=lambda candidate: candidate[0])[1]
     multiplier = {'万': 10000, '千': 1000}.get(match.group('unit'), 1)
-    if match.group('upper') is not None:
-        upper_unit = match.group('upper_unit') or match.group('unit')
-        lower_unit = match.group('unit') or match.group('upper_unit')
-        lower = int(float(match.group('value')) * {'万': 10000, '千': 1000}.get(lower_unit, 1))
-        upper = int(float(match.group('upper')) * {'万': 10000, '千': 1000}.get(upper_unit, 1))
-        if lower > upper:
-            return {}
-        return {'target_chars': (lower + upper) // 2, 'max_chars': upper}
     target_chars = int(float(match.group('value')) * multiplier)
     approximate = match.group('prefix') in {'约', '大约', '大概'} or match.group(
         'suffix'

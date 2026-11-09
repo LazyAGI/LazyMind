@@ -779,9 +779,6 @@ func OnSubAgentDone(
 		if step.Status == StepStatusInterrupted && step.TerminalCode == "WORKFLOW_STOPPED" {
 			return
 		}
-		// Rewind can supersede an executor before its terminal callback arrives.
-		// Keep its historical status, but never route or retry the current session
-		// from an invalidated attempt's result.
 		if step.Validity == "stale" {
 			return
 		}

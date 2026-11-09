@@ -4638,7 +4638,6 @@ const enUS = {
       versionAria: "Version {{version}}",
       versionHistory: "Version history",
       versionActionFailed: "The version action failed. Please try again.",
-      staleVersionReadOnly: "This version is no longer valid and can only be viewed. Continue editing the current version.",
       versionHistoryCount: "Version history ({{count}} versions)",
       versionList: "Version list",
       versionSourceLabel: "{{version}} · {{source}}",

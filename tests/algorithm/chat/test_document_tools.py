@@ -36,7 +36,7 @@ from lazymind.document_tools.resources import WriterResourceCapabilities
 from lazymind.document_tools import resources as document_resources
 from lazymind.document_tools.references import bind_cross_reference_targets
 from lazymind.document_tools.revision import WriterRevisionCapabilities
-from lazymind.document_tools.writing import WriterWritingCapabilities, parse_writer_request_constraints
+from lazymind.document_tools.writing import WriterWritingCapabilities
 
 
 WRITING_CHAT_APIS = {
@@ -202,20 +202,6 @@ def test_chat_tool_calls_work_without_a_workflow_context():
         query='润色报告', writer_document_json='# 报告\n\n正文。',
     )
     assert revised['task_type'] == 'revise'
-
-
-@pytest.mark.parametrize('query, expected', [
-    ('正文约900至1100个汉字，每章约300字', {'target_chars': 1000, 'max_chars': 1100}),
-    ('每章约300字，全文900-1100字', {'target_chars': 1000, 'max_chars': 1100}),
-    ('正文0.9～1.1千字', {'target_chars': 1000, 'max_chars': 1100}),
-    ('全文1千到2千字', {'target_chars': 1500, 'max_chars': 2000}),
-    ('每个章节约300字，各段约100字', {}),
-    ('写一篇800字的报告', {'target_chars': 800, 'max_chars': 800}),
-    ('报告约1千字', {'target_chars': 1000, 'max_chars': 1100}),
-    ('最多800个汉字', {'target_chars': 800, 'max_chars': 800}),
-])
-def test_writer_total_length_does_not_use_a_section_budget(query, expected):
-    assert parse_writer_request_constraints(query) == expected
 
 
 @pytest.mark.parametrize('response', [
@@ -455,7 +441,6 @@ def _bound_document(provider="fake"):
 
 def test_conversion_is_pure_and_cross_provider_content_is_detached(monkeypatch):
     calls = []
-
     class FakeProvider:
         def convert_document(self, content, *, target=None, media_assets=None):
             return self.convert_document_with_template(

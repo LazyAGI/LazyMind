@@ -17,59 +17,6 @@ import (
 	"lazymind/core/workflow/graphengine"
 )
 
-func TestAttemptHistoryDurationIgnoresInvalidationTime(t *testing.T) {
-	for _, tc := range []struct {
-		name, source string
-		want         float64
-	}{
-		{"native failed attempt", "native", 3},
-		{"hosted failed attempt", "events", 3},
-		{"legacy attempt without execution timestamps", "legacy", -1},
-		{"terminal attempt without finish timestamp", "unfinished", -1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			db, session, now := ordinaryFixture(t)
-			must := func(err error) {
-				t.Helper()
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			row := orm.WorkflowSessionStep{ID: "failed-attempt", SessionID: session.ID, StepID: "write", TaskID: "failed-task", Attempt: 1, Status: "failed", Validity: "effective", CreatedAt: now, UpdatedAt: now.Add(5 * time.Second)}
-			must(db.Create(&row).Error)
-			started, finished := now.Add(time.Second), now.Add(4*time.Second)
-			if tc.source == "native" || tc.source == "unfinished" {
-				task := orm.SubAgentTask{ID: row.TaskID, ConversationID: session.ConversationID, Status: "failed", StartedAt: &started, FinishedAt: &finished, InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`)}
-				if tc.source == "unfinished" {
-					task.FinishedAt = nil
-				}
-				must(db.Create(&task).Error)
-			}
-			if tc.source == "events" {
-				for _, event := range []orm.WorkflowEvent{
-					{SessionID: session.ID, EntityID: row.ID, EventType: "attempt.patch", PayloadJSON: json.RawMessage(`{"status":"running"}`), CreatedAt: started},
-					{SessionID: session.ID, EntityID: row.ID, EventType: "attempt.progress", PayloadJSON: json.RawMessage(`{}`), CreatedAt: started.Add(time.Second)},
-					{SessionID: session.ID, EntityID: row.ID, EventType: "attempt.patch", PayloadJSON: json.RawMessage(`{"status":"failed"}`), CreatedAt: finished},
-				} {
-					must(db.Create(&event).Error)
-				}
-			}
-			for _, invalidate := range []bool{false, true} {
-				if invalidate {
-					// Retrying invalidates the old attempt long after execution ended.
-					must(db.Model(&row).Updates(map[string]any{"validity": "stale", "updated_at": now.Add(time.Hour)}).Error)
-				}
-				projection, err := projectSession(t.Context(), db.DB, &session)
-				must(err)
-				history := projection.AttemptHistory["write"]
-				if len(history) != 1 || history[0].DurationSec != tc.want {
-					t.Fatalf("invalidated=%v: history=%+v, want duration %v", invalidate, history, tc.want)
-				}
-			}
-		})
-	}
-}
-
 func TestReadStepProgressKeepsHistoricalAttemptsAfterRevisionRemoval(t *testing.T) {
 	db, _ := setupBatchTransitionSession(t)
 	session, err := GetSession(t.Context(), db.DB, "batch-session")

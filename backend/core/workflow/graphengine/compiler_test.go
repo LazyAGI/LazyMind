@@ -48,50 +48,6 @@ steps:
     outputs: [final]
 `
 
-func TestBundledPPTRoutesRequirePagePlanningBeforeCompletion(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "..", "workflows", "ppt-workflow")
-	plugin, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	state, err := os.ReadFile(filepath.Join(root, "scenario", "state.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	compiled := Compile(string(plugin), string(state), "", ProfilePublish)
-	if !compiled.Valid {
-		t.Fatalf("invalid bundled PPT graph: %#v", compiled.Diagnostics)
-	}
-	for _, target := range []string{"generate_ppt", "plan_page_prompts"} {
-		t.Run(target, func(t *testing.T) {
-			decision := SelectRouteTarget(compiled.Graph, "build_outline", target,
-				DecideRoute(compiled.Graph, "build_outline", nil))
-			if len(decision.Activated) != 1 || decision.Activated[0] != "plan_page_prompts" || len(decision.Pruned) != 0 {
-				t.Fatalf("PPT generation must use the page-planning route: %#v", decision)
-			}
-			snapshot := RuntimeSnapshot{
-				Attempts: []AttemptFact{
-					{StepID: "analyze_requirements", Status: "succeeded", Validity: "effective"},
-					{StepID: "build_outline", Status: "succeeded", Validity: "effective"},
-					{StepID: "generate_ppt", Status: "succeeded", Validity: "effective"},
-				},
-				Routes: []RouteFact{
-					{From: "__start__", Activated: []string{"analyze_requirements"}, Validity: "effective"},
-					{From: "analyze_requirements", Activated: []string{"build_outline"}, Pruned: []string{"collect_materials", "plan_background_prompts"}, Validity: "effective"},
-					{From: "build_outline", Activated: decision.Activated, Pruned: decision.Pruned, Validity: "effective"},
-					{From: "generate_ppt", Activated: []string{"__end__"}, Validity: "effective"},
-				},
-			}
-			snapshot.Attempts = append(snapshot.Attempts, AttemptFact{StepID: "plan_page_prompts", Status: "succeeded", Validity: "effective"})
-			snapshot.Routes = append(snapshot.Routes, RouteFact{From: "plan_page_prompts", Activated: []string{"generate_ppt"}, Validity: "effective"})
-			projection := Project(compiled.Graph, snapshot)
-			if !projection.Completed || len(projection.Ready) != 0 {
-				t.Fatalf("planned and rendered PPT must complete: %#v", projection)
-			}
-		})
-	}
-}
-
 func TestCompileArbitraryDAGAndProjectBlockedMerge(t *testing.T) {
 	result := Compile(validWorkflow, validState, "", ProfilePublish)
 	if !result.Valid {

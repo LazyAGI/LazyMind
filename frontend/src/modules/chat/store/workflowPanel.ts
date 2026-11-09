@@ -677,7 +677,6 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
 
 export interface SlotVersionEntry {
   revision: number;
-  validity?: "effective" | "stale";
   draft_version?: number;
   /** User-visible version number. Writer working drafts are excluded from this sequence. */
   version?: number;

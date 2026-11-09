@@ -443,44 +443,6 @@ func TestPrepareHTTPReturnsFlatPublicContractOnCreateAndReplay(t *testing.T) {
 	}
 }
 
-func TestPrepareHTTPReplaySurvivesJSONBFormatting(t *testing.T) {
-	h, _ := testHandler(t)
-	// Model the JSONB representation returned by PostgreSQL, including reordered
-	// nested keys. The same request must work on both Compose and Desktop.
-	stored := json.RawMessage(`{"input_bindings": {"source": {"revision": 9007199254740993, "resource_id": "输入"}}, "workflow_id": "writer", "idempotency_key": "jsonb-retry"}`)
-	prepared, _, err := h.Store.Prepare(t.Context(), "owner", "jsonb-retry", "writer", ContractVersion,
-		stored, json.RawMessage(`{"status":"ready","workflow_revision":"rev-1"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name, body string
-		status     int
-	}{
-		{"reordered request", `{"workflow_id":"writer","idempotency_key":"jsonb-retry","input_bindings":{"source":{"resource_id":"\u8f93\u5165","revision":9007199254740993}}}`, 200},
-		{"different workflow", `{"workflow_id":"other","idempotency_key":"jsonb-retry","input_bindings":{"source":{"resource_id":"输入","revision":9007199254740993}}}`, 409},
-		{"different large integer", `{"workflow_id":"writer","idempotency_key":"jsonb-retry","input_bindings":{"source":{"resource_id":"输入","revision":9007199254740992}}}`, 409},
-		{"missing input", `{"workflow_id":"writer","idempotency_key":"jsonb-retry","input_bindings":{}}`, 409},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			h.Prepare(w, request(http.MethodPost, "/workflow-preparations", "owner", []byte(tc.body)))
-			if w.Code != tc.status {
-				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
-			}
-			response := decodeEnvelope(t, w)
-			if tc.status == 200 {
-				data, _ := json.Marshal(response.Data)
-				if !bytes.Contains(data, []byte(prepared.ID)) {
-					t.Fatal("replay created another preparation")
-				}
-			} else if response.Error == nil || response.Error.Code != "IDEMPOTENCY_CONFLICT" {
-				t.Fatalf("changed payload did not remain a conflict: %s", w.Body.String())
-			}
-		})
-	}
-}
-
 func TestConsumeHTTPChecksOwnerAndConsumesExactlyOnce(t *testing.T) {
 	h, _ := testHandler(t)
 	p, _, err := h.Store.Prepare(t.Context(), "owner", "key", "writer", ContractVersion, json.RawMessage(`{}`), json.RawMessage(`{}`))

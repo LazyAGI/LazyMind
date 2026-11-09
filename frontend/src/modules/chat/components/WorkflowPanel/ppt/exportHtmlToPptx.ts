@@ -2,7 +2,6 @@ import { embedSlideAssetsForExport } from './slideAssets';
 import { toPng } from 'html-to-image';
 import PptxGenJS from 'pptxgenjs';
 import { jsPDF } from 'jspdf';
-import { normalizePptxPackage } from './pptxPackage';
 import { measureSlideCanvas } from './slideCanvas';
 
 const SLIDE_W_PX = 1600;
@@ -623,19 +622,7 @@ export async function exportHtmlSlidesAsRasterPptx(
     }
   }
 
-  const source = await pptx.write({ outputType: 'arraybuffer' }) as ArrayBuffer;
-  const blob = await normalizePptxPackage(source);
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  try {
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-  } finally {
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }
+  await pptx.writeFile({ fileName });
 }
 
 /** @deprecated Use exportHtmlSlidesAsRasterPptx — name was misleading. */

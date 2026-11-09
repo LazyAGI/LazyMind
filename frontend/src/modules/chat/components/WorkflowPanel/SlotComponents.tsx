@@ -963,7 +963,7 @@ export function SlotVersionPopover({
   }, [handleClose]);
 
   const handleRollback = useCallback(async (revision: number) => {
-    if (readOnly || rolling || versions.find(version => version.revision === revision)?.validity === 'stale') return;
+    if (readOnly || rolling) return;
     setRolling(true);
     setVersionError('');
     try {
@@ -979,7 +979,7 @@ export function SlotVersionPopover({
     } finally {
       setRolling(false);
     }
-  }, [sessionId, slotId, listIndex, rollbackSlotItem, setOpen, onRollbackDone, onRollback, readOnly, rolling, versions]);
+  }, [sessionId, slotId, listIndex, rollbackSlotItem, setOpen, onRollbackDone, onRollback, readOnly, rolling]);
 
   const handleFlushDraft = useCallback(async () => {
     if (!draftText) return;
@@ -1219,7 +1219,7 @@ export function SlotVersionPopover({
                 <button className='workflow-slot__version-footer-cancel' onClick={handleClose}>{tr('common.cancel')}</button>
                 <button
                   className='workflow-slot__version-footer-apply'
-                  disabled={rolling || readOnly || isPreviewingCurrent || !previewedVersion || previewedVersion.validity === 'stale'}
+                  disabled={rolling || readOnly || isPreviewingCurrent || !previewedVersion}
                   onClick={() => previewedVersion && handleRollback(previewedVersion.revision)}
                 >
                   {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.setCurrentVersion')}
@@ -1227,7 +1227,7 @@ export function SlotVersionPopover({
               </div>
               {previewedVersion && !isPreviewingCurrent && (
                 <p className='workflow-slot__version-footer-hint'>
-                  {tr(previewedVersion.validity === 'stale' ? 'chat.slots.staleVersionReadOnly' : 'chat.slots.setCurrentVersionHint')}
+                  {tr('chat.slots.setCurrentVersionHint')}
                 </p>
               )}
             </div>
@@ -1282,13 +1282,12 @@ export function SlotVersionPopover({
                 />
                 <button
                   className='workflow-slot__version-apply-btn'
-                  disabled={rolling || readOnly || effectiveSelectedVersion.validity === 'stale'}
+                  disabled={rolling || readOnly}
                   onClick={() => handleRollback(effectiveSelectedVersion.revision)}
                   aria-label={tr('chat.slots.applyVersionAria', { version: entryVersionLabel(effectiveSelectedVersion) })}
                 >
                   {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: entryVersionLabel(effectiveSelectedVersion) })}
                 </button>
-                {effectiveSelectedVersion.validity === 'stale' && <p role='status'>{tr('chat.slots.staleVersionReadOnly')}</p>}
               </div>
             ) : (
               <div className='workflow-slot__version-compare workflow-slot__version-compare--file'>
@@ -1408,14 +1407,13 @@ export function SlotVersionPopover({
                 {!effectiveSelectedVersion.selected && (
                   <button
                     className='workflow-slot__version-apply-btn'
-                    disabled={rolling || readOnly || effectiveSelectedVersion.validity === 'stale'}
+                    disabled={rolling || readOnly}
                     onClick={() => handleRollback(effectiveSelectedVersion.revision)}
                     aria-label={tr('chat.slots.applyVersionAria', { version: entryVersionLabel(effectiveSelectedVersion) })}
                   >
                     {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: entryVersionLabel(effectiveSelectedVersion) })}
                   </button>
                 )}
-                {effectiveSelectedVersion.validity === 'stale' && <p role='status'>{tr('chat.slots.staleVersionReadOnly')}</p>}
               </div>
             ) : (
               <div className='workflow-slot__version-compare workflow-slot__version-compare--same'>

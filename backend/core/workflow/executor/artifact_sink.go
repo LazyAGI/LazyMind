@@ -226,13 +226,6 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err != nil {
 			return err
 		}
-		if !transactionalOutputs && artifact.Slot == "preview_html" && listIndex != nil &&
-			metadata["_source_tool"] == "ppt_edit_page_html" &&
-			(session.WorkflowRef == "builtin:ppt-workflow" || session.WorkflowID == "ppt-workflow") {
-			if err := carryPPTTextEditPages(tx, session, attempt, *listIndex, now); err != nil {
-				return err
-			}
-		}
 		revision, err := nextArtifactRevision(tx, attempt.SessionID, artifact.Slot, cardinality, listIndex)
 		if err != nil {
 			return err

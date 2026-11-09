@@ -2729,7 +2729,6 @@ def _publish_one_page(
     with_notes: bool = True,
     slot_orders: Optional[dict[str, list[int]]] = None,
     insert_before: Optional[int] = None,
-    source_tool: str = 'ppt_publish_pages',
 ) -> dict[str, Any]:
     """Save one page HTML (+ optional notes stub) into session artifacts."""
     path = _page_html_path(deck, page_no)
@@ -2785,7 +2784,7 @@ def _publish_one_page(
         page_no=page_no,
         value=html,
         content_type='text',
-        source_tool=source_tool,
+        source_tool='ppt_publish_pages',
         caption=title or None,
         order_list=html_order,
         insert_before=insert_before,
@@ -2973,7 +2972,6 @@ def _publish_pages_from_disk(
     pages: Optional[list[int]] = None,
     *,
     with_notes: bool = True,
-    source_tool: str = 'ppt_publish_pages',
 ) -> dict[str, Any]:
     targets = pages if pages is not None else _iter_page_numbers(deck)
     slot_orders = {
@@ -2990,7 +2988,6 @@ def _publish_pages_from_disk(
                 page_no,
                 with_notes=with_notes,
                 slot_orders=slot_orders,
-                source_tool=source_tool,
             )
         except Exception as exc:
             item = {'page': page_no, 'ok': False, 'error': str(exc)}
@@ -9470,14 +9467,8 @@ def ppt_patch_page_outline(
 
     outline_pub = None
     try:
-        ctx = require_context()
-        generation_mode, _ = _resolve_artifact_text(ctx, 'generation_mode')
-        if str(generation_mode).strip() == 'quick' and not _ui_slot_order_list('slide_outline'):
-            # Quick mode never published per-page briefs. Keep its disk outline
-            # consistent without trying to replace a nonexistent UI list item.
-            outline_pub = {'ok': True, 'skipped': True}
-        else:
-            outline_pub = _publish_one_slide_outline(deck, page_no)
+        require_context()
+        outline_pub = _publish_one_slide_outline(deck, page_no)
     except Exception as exc:
         outline_pub = {'ok': False, 'error': str(exc)}
     if not outline_pub.get('ok'):
@@ -9511,7 +9502,7 @@ def ppt_patch_page_outline(
         'bullets_before': bullets_before,
         'bullets_after': bullets_after,
         'patched_page': _outline_page_view(page_outline),
-        'slide_outline_published': bool(outline_pub and outline_pub.get('ok') and not outline_pub.get('skipped')),
+        'slide_outline_published': bool(outline_pub and outline_pub.get('ok')),
         'next_step': (
             f"For a text-only change, use ppt_read_page_html then "
             f"ppt_edit_page_html(page={page_no}, expected_sha256=<html_sha256 from read>) "
@@ -9728,19 +9719,16 @@ def ppt_edit_page_html(
             'redraw brings the deleted content back.'
         )
 
-    published = _publish_pages_from_disk(
-        deck, [page_no], with_notes=False, source_tool='ppt_edit_page_html',
-    )
+    published = _publish_pages_from_disk(deck, [page_no], with_notes=True)
     if published['published_count'] != 1 or published.get('failed'):
         rollback_tmp = path.with_name(path.name + '.rollback.tmp')
         rollback_publish = None
         try:
             rollback_tmp.write_text(original, encoding='utf-8')
             os.replace(rollback_tmp, path)
-            # Republish the original HTML; a text edit must never rewrite notes.
-            rollback_publish = _publish_pages_from_disk(
-                deck, [page_no], with_notes=False, source_tool='ppt_edit_page_html',
-            )
+            # If preview_html was emitted before preview_notes failed, publish the
+            # original once more so disk and UI converge on the same revision.
+            rollback_publish = _publish_pages_from_disk(deck, [page_no], with_notes=True)
         except OSError as exc:
             return _tool_error(
                 'ppt_edit_page_html',

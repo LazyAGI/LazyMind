@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/common/taskdisplay"
 	"lazymind/core/log"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
@@ -206,54 +205,12 @@ type attemptHistoryDTO struct {
 	TaskID        string          `json:"task_id"`
 	Status        string          `json:"status"`
 	Validity      string          `json:"validity"`
-	DurationSec   float64         `json:"duration_sec"` // -1 when execution timing is unavailable
+	DurationSec   float64         `json:"duration_sec"`
 	ArtifactCount int64           `json:"artifact_count"`
 	StartedAt     string          `json:"started_at"`
 	UpdatedAt     string          `json:"updated_at"`
 	IntentContext string          `json:"intent_context,omitempty"`
 	InputRequired json.RawMessage `json:"input_required,omitempty"`
-}
-
-func loadAttemptHistoryTimings(ctx context.Context, db *gorm.DB, session orm.WorkflowSession, attempts []orm.WorkflowSessionStep) (map[string]taskdisplay.Timing, error) {
-	taskIDs := []string{}
-	for _, row := range attempts {
-		if row.TaskID != "" {
-			taskIDs = append(taskIDs, row.TaskID)
-		}
-	}
-	tasks := map[string]orm.SubAgentTask{}
-	if len(taskIDs) > 0 {
-		var rows []orm.SubAgentTask
-		if err := db.WithContext(ctx).Select("id", "started_at", "finished_at").
-			Where("conversation_id = ? AND id IN ?", session.ConversationID, taskIDs).Find(&rows).Error; err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			tasks[row.ID] = row
-		}
-	}
-	var events []orm.WorkflowEvent
-	if err := db.WithContext(ctx).Where("session_id = ? AND event_type IN ?", session.ID, []string{"attempt.patch", "attempt.progress"}).Order("id ASC").Find(&events).Error; err != nil {
-		return nil, err
-	}
-	eventsByAttempt := map[string][]orm.WorkflowEvent{}
-	for _, event := range events {
-		eventsByAttempt[event.EntityID] = append(eventsByAttempt[event.EntityID], event)
-	}
-	timings := map[string]taskdisplay.Timing{}
-	measuredAt := time.Now().UTC()
-	for _, row := range attempts {
-		view := taskdisplay.NewTask()
-		view.Timing.MeasuredAt = measuredAt
-		if task, ok := tasks[row.TaskID]; ok {
-			view.Timing.StartedAt, view.Timing.FinishedAt = task.StartedAt, task.FinishedAt
-		}
-		// Share the ordinary view's execution clock for native and hosted attempts.
-		// UpdatedAt also changes on invalidation and must not extend a finished run.
-		applyOrdinaryAttemptEvents(&view, row, eventsByAttempt[row.ID])
-		timings[row.ID] = view.Timing
-	}
-	return timings, nil
 }
 
 func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) (projectionResponse, error) {
@@ -270,10 +227,6 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 	inputWitnesses := map[string][]graphengine.Witness{}
 	var attempts []orm.WorkflowSessionStep
 	if err := db.WithContext(ctx).Where("session_id = ?", session.ID).Order("created_at ASC").Find(&attempts).Error; err != nil {
-		return projectionResponse{}, err
-	}
-	timings, err := loadAttemptHistoryTimings(ctx, db, *session, attempts)
-	if err != nil {
 		return projectionResponse{}, err
 	}
 	for _, attempt := range attempts {
@@ -294,9 +247,9 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 				return projectionResponse{}, err
 			}
 		}
-		duration := float64(-1)
-		if elapsed := timings[attempt.ID].ExecutionElapsedMS; elapsed != nil {
-			duration = float64(*elapsed) / 1000
+		duration := attempt.UpdatedAt.Sub(attempt.CreatedAt).Seconds()
+		if duration < 0 {
+			duration = 0
 		}
 		var pending struct {
 			InputRequired json.RawMessage `json:"input_required"`

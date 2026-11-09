@@ -396,7 +396,6 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			"change_source": rev.ChangeSource,
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
-			"validity":      rev.Validity,
 		}
 		if slotID == "draft_document" || slotID == "flat_draft_document" {
 			item["version"] = formalVersion

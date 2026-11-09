@@ -15,55 +15,6 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(TOOLS)
 
 
-def test_text_edit_publishes_only_html_with_incremental_marker(tmp_path):
-    deck, page = make_deck(tmp_path)
-    with mock.patch.object(TOOLS, 'require_context'), \
-         mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[0]), \
-         mock.patch.object(TOOLS, '_save_artifact', return_value={'ok': True}) as save:
-        result = TOOLS.ppt_edit_page_html(str(deck), 1,
-            [{'op': 'replace_text', 'el': 'title', 'value': 'New title'}],
-            expected_sha256=TOOLS._html_sha256(PAGE_HTML))
-    assert result['published_count'] == 1
-    assert page.read_text() == PAGE_HTML.replace('Old title', 'New title')
-    assert len(save.call_args_list) == 1
-    assert save.call_args.kwargs['key'] == 'preview_html'
-    assert save.call_args.kwargs['source_tool'] == 'ppt_edit_page_html'
-
-
-def test_quick_outline_edit_does_not_publish_nonexistent_page_briefs(tmp_path):
-    deck, _ = make_deck(tmp_path)
-    path = deck / 'outline.json'
-    outline = json.loads(path.read_text())
-    first = outline['pages'][0].copy()
-    outline['pages'].append({**first, 'page_no': 2, 'title': 'Second'})
-    path.write_text(json.dumps(outline))
-    with mock.patch.object(TOOLS, 'require_context'), \
-         mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=('quick', 'text')), \
-         mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]), \
-         mock.patch.object(TOOLS, '_publish_one_slide_outline') as publish:
-        result = TOOLS.ppt_patch_page_outline(str(deck), 2,
-            [{'op': 'set_field', 'field': 'title', 'value': 'New second'}])
-    updated = json.loads(path.read_text())
-    assert updated['pages'][0] == first
-    assert updated['pages'][1]['title'] == 'New second'
-    assert result['slide_outline_published'] is False
-    publish.assert_not_called()
-
-
-def test_full_outline_edit_still_publishes_and_rolls_back_failure(tmp_path):
-    import pytest
-    deck, _ = make_deck(tmp_path)
-    before = json.loads((deck / 'outline.json').read_text())
-    with mock.patch.object(TOOLS, 'require_context'), \
-         mock.patch.object(TOOLS, '_resolve_artifact_text', return_value=('full', 'text')), \
-         mock.patch.object(TOOLS, '_publish_one_slide_outline', return_value={'ok': False, 'error': 'offline'}) as publish:
-        with pytest.raises(ToolExecutionError, match='outline.json was restored'):
-            TOOLS.ppt_patch_page_outline(str(deck), 1,
-                [{'op': 'set_field', 'field': 'title', 'value': 'New title'}])
-    publish.assert_called_once_with(deck, 1)
-    assert json.loads((deck / 'outline.json').read_text()) == before
-
-
 def accept_suggested_styles(_system, prompt, **_kwargs):
     return json.dumps({'op': 'set_style', 'styles': json.loads(prompt)['suggested_styles']})
 
