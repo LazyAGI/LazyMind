@@ -2367,7 +2367,7 @@ const enUS = {
       pairing_credential_mismatch: "WorkBuddy is using stale pairing credentials. Reconnect to load the current pairing.",
       pairing_invalid: "WorkBuddy pairing is damaged. Keep the diagnostics and repair its configuration.",
       pairing_unreadable: "Cannot read WorkBuddy pairing. Check file permissions and retry.",
-      mcp_trust_required: "Trust lazymind in WorkBuddy’s Connectors screen. It will be checked automatically.",
+      mcp_trust_required: "Please follow the installation guide to trust lazymind first.",
       mcp_enable_required: "Enable lazymind in WorkBuddy’s Connectors screen. It will be checked automatically.",
       unsupported_version: "Update WorkBuddy to 5.8.3 or later, then retry.",
       version_unreadable: "Unable to read the WorkBuddy version. Check its installation path and retry.",
