@@ -1578,8 +1578,8 @@ describe("AgentIntegrationPage", () => {
   it.each(["zh-CN", "en-US"])("guides WorkBuddy trust after rejection or revocation and clears it after approval (%s)", async (language) => {
     await retryI18n.changeLanguage(language);
     const trustMessage = language === "zh-CN"
-      ? "请先在按照安装引导信任lazymind"
-      : "Please follow the installation guide to trust lazymind first.";
+      ? "请在 WorkBuddy 的连接器页面信任 lazymind，完成后会自动检查。"
+      : "Trust lazymind in WorkBuddy’s Connectors screen. It will be checked automatically.";
     const installed = { agent: "workbuddy", display_name: "WorkBuddy", state: "enabled", enabled: true,
       can_connect: true, can_disconnect: true,
       requirements: [{ id: "workbuddy_desktop", satisfied: true }, { id: "workbuddy_desktop_initialized", satisfied: true }],

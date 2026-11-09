@@ -2335,7 +2335,7 @@ const zhCN = {
       pairing_credential_mismatch: "WorkBuddy 正在使用旧配对凭据，请重新连接以加载当前配对。",
       pairing_invalid: "WorkBuddy 配对记录损坏，请保留诊断日志并修复配置。",
       pairing_unreadable: "无法读取 WorkBuddy 配对记录，请检查文件权限并重试。",
-      mcp_trust_required: "请先在按照安装引导信任lazymind",
+      mcp_trust_required: "请在 WorkBuddy 的连接器页面信任 lazymind，完成后会自动检查。",
       mcp_enable_required: "请在 WorkBuddy 的连接器页面开启 lazymind，完成后会自动检查。",
       unsupported_version: "请升级至 WorkBuddy 5.8.3 或更高版本后重试。",
       version_unreadable: "无法读取 WorkBuddy 版本，请检查安装位置后重试。",
