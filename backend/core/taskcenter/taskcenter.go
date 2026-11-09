@@ -673,6 +673,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	if taskType != "" {
 		dataQ = dataQ.Where("tct.task_type = ?", taskType)
 	}
+	if conversationID := strings.TrimSpace(q.Get("conversation_id")); conversationID != "" {
+		dataQ = dataQ.Where("tct.conversation_id = ?", conversationID)
+	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		dataQ = dataQ.Where("COALESCE(NULLIF(c.display_name, ''), tct.title) LIKE ?", like)

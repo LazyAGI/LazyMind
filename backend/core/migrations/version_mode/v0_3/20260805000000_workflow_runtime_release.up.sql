@@ -3809,3 +3809,24 @@ CREATE INDEX idx_reading_job_enrollment ON async_jobs
     WHERE job_type = 'document_reading_preparation';
 CREATE INDEX idx_reading_job_daily ON async_jobs (job_type, resource_type, create_user_id, created_at);
 CREATE INDEX idx_reading_document_candidates ON documents (create_user_id, created_at, id) WHERE deleted_at IS NULL;
+
+-- GitHub Star invitation state.
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS user_github_star_prompts (
+    user_id VARCHAR(255) PRIMARY KEY,
+    prompted_task_ids TEXT NOT NULL DEFAULT '[]',
+    last_prompt_at TIMESTAMP WITH TIME ZONE NULL,
+    supported BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS user_github_star_prompts (
+    user_id VARCHAR(255) PRIMARY KEY,
+    prompted_task_ids TEXT NOT NULL DEFAULT '[]',
+    last_prompt_at DATETIME NULL,
+    supported BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);

@@ -84,6 +84,7 @@ import "@/modules/modelProvider/index.scss";
 import "./index.scss";
 import { SettingsNavigationGuard } from "./SettingsNavigationGuard";
 import { useSettingsChange } from "./useSettingsChange";
+import { CLOUD_DOCUMENTS_GITHUB_PATH } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 
 import NotificationSettings from "@/modules/notifications/NotificationSettings";
 
@@ -442,7 +443,7 @@ function SettingsPageContent() {
     if (result.mcp && result.enabled && result.mcp.skippedUnverifiedCount > 0) {
       message.warning(t("settingsPage.confirm.mcpEnabledToast", { updated: result.mcp.updatedCount, skipped: result.mcp.skippedUnverifiedCount }));
     } else message.success(t("settingsPage.saved"));
-  });
+  }, () => navigate(CLOUD_DOCUMENTS_GITHUB_PATH));
   const saving = preferenceSaving || (settingsChange.saving === "developer_mode_active" ? "developer" : settingsChange.saving);
   const requestMasterChange = (key: MasterSetting, enabled: boolean) => settingsChange.requestChange(key, enabled);
   const requestDeveloperChange = (enabled: boolean) => settingsChange.requestChange("developer_mode_active", enabled);

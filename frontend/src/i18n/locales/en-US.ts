@@ -307,6 +307,19 @@ const enUS = {
         "skipped": "Skipped"
     }
 },
+
+  githubStar: {
+    title: 'Support LazyMind', message: 'Has LazyMind been helpful? Star our GitHub project to support continued improvements.',
+    star: 'Star the project', close: 'Close', account: 'GitHub account', selectAccount: 'Choose a GitHub account',
+    localHint: 'We will try your existing local GitHub sign-in first. If none is available, you can connect through GitHub authorization.',
+    continueAuth: 'Continue to GitHub connection', success: 'Thank you for your support. Project starred.',
+    alreadyStarred: 'You have already starred the project. Thank you!',
+    permissionDenied: 'GitHub permission is missing. Please authorize again.',
+    rateLimited: 'GitHub is rate limiting requests. Please wait before trying again.',
+    unknownResult: 'The result could not be confirmed. Please check again later.',
+    failed: 'Could not star the project. Please try again.', accountChanged: 'Your GitHub account changed. Please confirm it again.',
+    reauthorize: 'Your GitHub sign-in expired. Please authorize again.', manageAccount: 'Manage GitHub account',
+  },
   sourceImports: {
     "waitingRetryAt": "Waiting to retry · {{time}}",
     "waitingRetry": "Waiting to retry",
@@ -10596,7 +10609,7 @@ const enUS = {
       resourceConsequence: "{{title}} calls already in flight are not force-stopped; the other resource group is unaffected.",
       defaultConsequence: "Calls already in flight are not force-stopped. Re-enabling restores child selections.",
       developerTitle: "{{action}} developer mode",
-      developerEnableContent: "Turning this on activates developer-mode features.",
+      developerEnableContent: "A valid GitHub connection is required. We will check your connection before enabling developer-mode features.",
       developerDisableContent: "Turning this off disables developer-mode features but does not delete existing self-evolution data.",
       mcpEnabledToast: "Enabled {{updated}} services; {{skipped}} unverified services stay disabled",
       mcpToggledToast: "{{state}} {{count}} MCP services",
@@ -10933,6 +10946,11 @@ const enUS = {
 
     developer: {
       description: "Manage Developer Mode and the options that take effect only while it is on.",
+      githubGuideTitle: "Connect GitHub to enable Developer Mode",
+      githubGuideDescription: "Connect a GitHub account before enabling Developer Mode. Once connected, return to Settings and enable it again. Canceling or leaving the connection incomplete keeps Developer Mode off.",
+      githubGuideConnect: "Connect GitHub",
+      githubGuideCancel: "Cancel enabling",
+      githubCheckFailed: "Could not check your GitHub connection. Developer Mode is still off. Please retry.",
       inactiveNotice: "Your saved options are preserved but currently inactive. Enable Developer Mode to use them.",
       optionsGroupAria: "Dependent Developer Mode options",
       enableTitle: "Enable developer mode",
