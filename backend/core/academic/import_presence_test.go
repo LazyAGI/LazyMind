@@ -38,14 +38,14 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	_, p, presenceErr := findEquivalentPresentWork(context.Background(), work.ID, "target", false)
+	_, p, presenceErr := findEquivalentPresentWork(context.Background(), db, work.ID, "target", false)
 	if presenceErr != nil || p.DocumentID != d.ID {
 		t.Fatal("control presence failed")
 	}
 	if _, e := sourcePresentDocument(db, "target", work.ID, "", false); e != nil {
 		t.Fatal("control active-document query failed", e)
 	}
-	if _, _, err := findEquivalentPresentWork(t.Context(), work.ID, "target", true); err != nil {
+	if _, _, err := findEquivalentPresentWork(t.Context(), db, work.ID, "target", true); err != nil {
 		t.Fatalf("an existing PDF must satisfy paper import: %v", err)
 	}
 	summaryPath := filepath.Join(t.TempDir(), "summary.md")
@@ -57,7 +57,7 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := findEquivalentPresentWork(t.Context(), work.ID, "target", true); !errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, _, err := findEquivalentPresentWork(t.Context(), db, work.ID, "target", true); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("bibliography markdown satisfied PDF presence: %v", err)
 	}
 	if _, err := sourcePresentDocument(db, "target", work.ID, "", true); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -66,7 +66,7 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("dataset_id", "other").Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target", false); !errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, _, err := findEquivalentPresentWork(context.Background(), db, work.ID, "target", false); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("association to document in another library counted as present: %v", err)
 	}
 	if err := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("dataset_id", "target").Error; err != nil {
@@ -77,7 +77,7 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	if e := db.Model(&orm.Document{}).Where("id = ?", d.ID).Update("deleted_at", time.Now().UTC()).Error; e != nil {
 		t.Fatal(e)
 	}
-	_, p, presenceErr = findEquivalentPresentWork(context.Background(), work.ID, "target", false)
+	_, p, presenceErr = findEquivalentPresentWork(context.Background(), db, work.ID, "target", false)
 	_, activeErr := sourcePresentDocument(db, "target", work.ID, "", false)
 	t.Logf("after deletion: presence_error=%v document=%s active_query=%v", presenceErr, p.DocumentID, activeErr)
 	if !errors.Is(presenceErr, gorm.ErrRecordNotFound) || !errors.Is(activeErr, gorm.ErrRecordNotFound) {
@@ -129,7 +129,7 @@ func TestEquivalentPresencePropagatesDatabaseFailure(t *testing.T) {
 	if err := db.Migrator().DropTable(&orm.AcademicWorkDocument{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := findEquivalentPresentWork(context.Background(), work.ID, "target", false); err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, _, err := findEquivalentPresentWork(context.Background(), db, work.ID, "target", false); err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("database failure treated as absence: %v", err)
 	}
 }
