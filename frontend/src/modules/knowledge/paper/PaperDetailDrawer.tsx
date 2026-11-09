@@ -178,7 +178,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
                         }, '论文信息保存失败，请重试')}/>
             <Button disabled={disabled || saving} onClick={() => setEditing(false)}>取消编辑</Button>
           </> : <>
-            <dl><dt>标题</dt><dd>{current.metadata.title}</dd><dt>作者</dt><dd>{current.metadata.authors.join('、') || '未填写'}</dd><dt>年份</dt><dd>{current.metadata.year || '未填写'}</dd><dt>会议／期刊</dt><dd>{current.metadata.venue || '未填写'}</dd><dt>DOI</dt><dd>{current.metadata.identifiers.doi || '未填写'}</dd><dt>arXiv</dt><dd>{current.metadata.identifiers.arxiv ? `${current.metadata.identifiers.arxiv}${current.arxivVersion || ''}` : '未填写'}</dd><dt>摘要</dt><dd>{current.metadata.abstract ?? '未填写'}</dd></dl>
+            <dl><dt>标题</dt><dd>{current.metadata.title}</dd><dt>年份</dt><dd>{current.metadata.year || '未填写'}</dd><dt>会议／期刊</dt><dd>{current.metadata.venue || '未填写'}</dd><dt>DOI</dt><dd>{current.metadata.identifiers.doi || '未填写'}</dd><dt>arXiv</dt><dd>{current.metadata.identifiers.arxiv ? `${current.metadata.identifiers.arxiv}${current.arxivVersion || ''}` : '未填写'}</dd><dt>摘要</dt><dd>{current.metadata.abstract ?? '未填写'}</dd></dl>
             <div className="paper-detail-tags">{current.tags.filter(tag => tag !== 'paper' && !tag.startsWith('arxiv:')).map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
           </>}
           <div className="paper-detail-section-head"><h3>全文附件</h3></div>

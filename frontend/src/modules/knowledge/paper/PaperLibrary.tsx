@@ -10,6 +10,7 @@ import { applyPaperEdits, citationLabel, descendantFolderIds, papersInView, pape
 import { loadPersistedPaperLibrary, mergeLibraryChanges, patchLibraryPaper, moveLibraryPapers, deleteLibraryPapers, detachLibraryAttachment, addLibraryNote, createLibraryFolder, deleteLibraryFolder, type LibraryChanges, type PersistedPaperLibrary } from "./store";
 import { emptyLibrary } from "./libraryModel";
 import PaperDetailDrawer, { type PaperDetailTab } from "./PaperDetailDrawer";
+import PaperAuthors from './PaperAuthors';
 import RestartKnowledgeModal, { type IRestartKnowledgeProps } from "../pages/detail/components/RestartKnowledgeModal";
 import type { ProcessingLevel } from "../utils/processingLevel";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
@@ -673,15 +674,17 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
             ] }}>
             <Button className="paper-library-import-button" disabled={disabled} type="primary" icon={<PlusOutlined />}>导入<DownOutlined /></Button>
           </Dropdown>
-          <div className="paper-library-folders">
-          <div className="paper-library-browse-head"><span className="paper-library-rail-label">浏览视图</span></div>
-          <FolderButton icon={<FileTextOutlined />} name="全部" count={data.papers.length} current={libraryView === "all"} onClick={() => selectView(null, 'all')}/>
-          <FolderButton icon={<StarOutlined />} name="收藏" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
-          <div className="paper-library-directory-head paper-library-browse-head">
-            <span className="paper-library-rail-label">目录</span>
+          <div className="paper-library-browse">
+            <div className="paper-library-browse-head"><span className="paper-library-rail-label">浏览视图</span></div>
+            <FolderButton icon={<FileTextOutlined />} name="全部" count={data.papers.length} current={libraryView === "all"} onClick={() => selectView(null, 'all')}/>
+            <FolderButton icon={<StarOutlined />} name="收藏" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
           </div>
-          <PaperDirectoryTree key={datasetId} data={data} title={title} active={libraryView === 'directory'} folderId={folderId} detailPaperId={detailPresentation === 'page' ? detailPaperId : null} onOpenPaper={id => openDetail(id, 'overview', 'page')} disabled={disabled} draggedIds={draggedIds} dropFolderId={dropFolderId} onSelectFolder={id => selectView(id, 'directory')} onCreateFolder={openFolderDialog} onDeleteFolder={deleteFolder}/>
-          {!!draggedIds.length && <p className="paper-library-drag-hint" role="status">移动 {draggedIds.length} 篇文献<br />拖到目标文件夹</p>}
+          <div className="paper-library-directory">
+            <div className="paper-library-browse-head"><span className="paper-library-rail-label">目录</span></div>
+            <div className="paper-library-directory-scroll">
+              <PaperDirectoryTree key={datasetId} data={data} title={title} active={libraryView === 'directory'} folderId={folderId} detailPaperId={detailPresentation === 'page' ? detailPaperId : null} onOpenPaper={id => openDetail(id, 'overview', 'page')} disabled={disabled} draggedIds={draggedIds} dropFolderId={dropFolderId} onSelectFolder={id => selectView(id, 'directory')} onCreateFolder={openFolderDialog} onDeleteFolder={deleteFolder}/>
+            </div>
+            {!!draggedIds.length && <p className="paper-library-drag-hint" role="status">移动 {draggedIds.length} 篇文献<br />拖到目标文件夹</p>}
           </div>
           <div ref={setTaskActionsContainer} className="paper-library-task-actions-slot"/>
         </nav>
@@ -732,7 +735,7 @@ function PaperLibraryContent({ userId, datasetId, onUploadPdf, title = "论文�
                     {display.importance && renderImportance(item)}
 
                   </div>
-                <Tooltip title={item.metadata.authors.length ? item.metadata.authors.join("、") : undefined}><p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p></Tooltip>
+                <p className="paper-library-cite"><PaperAuthors authors={item.metadata.authors} empty="作者待补全" fitToWidth /></p>
                 {(() => {
                 const identity = libraryIndex.identities.get(item.id);
                 const status = identity?.state.status;
