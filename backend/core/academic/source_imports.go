@@ -29,6 +29,18 @@ type sourceImportPolicy struct {
 	CreatedLibrary bool          `json:"created_library"`
 }
 
+const sourceAlreadyPresent = "already_present"
+
+var errSourceAlreadyPresent = errors.New("所选论文已在此论文集，请更新选择")
+
+const sourceTargetNotFoundCode = "TARGET_NOT_FOUND"
+const sourceTargetNotFoundMessage = "目标知识库不存在，请重新选择或新建知识库"
+
+func isSourceTargetNotFound(err error) bool {
+	var resource *doc.ResourceError
+	return errors.As(err, &resource) && resource.Code == "NOT_FOUND"
+}
+
 func sourcePolicy(b orm.PaperImportBatch) sourceImportPolicy {
 	var p sourceImportPolicy
 	_ = json.Unmarshal(b.PolicySnapshotJSON, &p)
@@ -54,7 +66,7 @@ func lockSourceTarget(ctx context.Context, tx *gorm.DB, c doc.DatasetCatalogCall
 		return orm.Dataset{}, result.Error
 	}
 	if result.RowsAffected != 1 {
-		return orm.Dataset{}, errors.New("target unavailable")
+		return orm.Dataset{}, &doc.ResourceError{Code: "NOT_FOUND", Message: sourceTargetNotFoundMessage}
 	}
 	return doc.ResolveResourceDataset(ctx, tx, c, id, acl.PermissionDatasetWrite)
 }
@@ -128,7 +140,7 @@ func createSourceImport(w http.ResponseWriter, r *http.Request, user string, req
 		return
 	}
 	batch := newSourceImportBatch(c, *req.SourceContext, target, batchID, req.IdempotencyKey, hash, len(unique), req.NewKnowledgeBase != nil)
-	if e = enqueueSourceImport(ctx, c, &batch, unique, nil); e != nil {
+	if e = enqueueSourceImport(ctx, c, &batch, unique, req.TargetDatasetID != "", nil); e != nil {
 		sourceSubmitError(w, target, e)
 		return
 	}
@@ -168,7 +180,7 @@ func newSourceImportBatch(c doc.DatasetCatalogCaller, source SourceContext, targ
 	return orm.PaperImportBatch{ID: batchID, EntryType: "conversation_sources", TargetDatasetID: target, SourceDocumentIDsJSON: json.RawMessage("[]"), PolicySnapshotJSON: policy, Status: "pending", TotalItems: count, IdempotencyKey: operationKey, CreatedBy: c.UserID, CreatedAt: now, UpdatedAt: now}
 }
 
-func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch *orm.PaperImportBatch, unique map[string]SourceInspection, guard func(context.Context, *gorm.DB) error) error {
+func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch *orm.PaperImportBatch, unique map[string]SourceInspection, checkPresence bool, guard func(context.Context, *gorm.DB) error) error {
 	now := batch.CreatedAt
 	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if guard != nil {
@@ -192,6 +204,17 @@ func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch 
 			return nil
 		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
+		}
+		if checkPresence {
+			for _, source := range unique {
+				presence, err := sourceTargetPresence(ctx, tx, batch.TargetDatasetID, source)
+				if err != nil {
+					return err
+				}
+				if presence == sourceAlreadyPresent {
+					return errSourceAlreadyPresent
+				}
+			}
 		}
 		if e := tx.Create(batch).Error; e != nil {
 			return e
@@ -255,9 +278,16 @@ func enqueueSourceImport(ctx context.Context, c doc.DatasetCatalogCaller, batch 
 }
 
 func sourceSubmitError(w http.ResponseWriter, target string, e error) {
+	status, code, message := http.StatusConflict, "IMPORT_NOT_CREATED", e.Error()
+	switch {
+	case isSourceTargetNotFound(e):
+		status, code, message = http.StatusNotFound, sourceTargetNotFoundCode, sourceTargetNotFoundMessage
+	case errors.Is(e, errSourceAlreadyPresent):
+		code = "SOURCE_ALREADY_PRESENT"
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-	_ = json.NewEncoder(w).Encode(map[string]any{"code": "IMPORT_NOT_CREATED", "message": e.Error(), "target_dataset_id": target})
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "message": message, "target_dataset_id": target})
 }
 func mustSourceJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 func sourceWork(ctx context.Context, tx *gorm.DB, s SourceInspection) (orm.AcademicWork, error) {

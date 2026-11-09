@@ -18,9 +18,12 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"lazymind/core/academic/arxivsource"
+	"lazymind/core/acl"
 	"lazymind/core/capability"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
+	"lazymind/core/learning"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
 )
@@ -60,6 +63,7 @@ type SourceInspection struct {
 	PDFLookupFailed bool              `json:"pdf_lookup_failed,omitempty"`
 	Eligible        bool              `json:"eligible"`
 	PaperKey        string            `json:"paper_key,omitempty"`
+	TargetPresence  string            `json:"target_presence,omitempty"`
 	Reason          string            `json:"reason,omitempty"`
 	Work            WorkInput         `json:"-"`
 	Candidate       FulltextCandidate `json:"-"`
@@ -332,19 +336,61 @@ func InspectSources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Context SourceContext `json:"source_context"`
-		IDs     []string      `json:"source_ids,omitempty"`
+		Context         SourceContext `json:"source_context"`
+		IDs             []string      `json:"source_ids,omitempty"`
+		TargetDatasetID string        `json:"target_dataset_id,omitempty"`
 	}
 	if !parseJSON(r, &req) || len(req.IDs) > 500 {
 		replyError(w, 400, "INVALID_REQUEST", "invalid source selection")
 		return
 	}
-	items, e := inspectSourcePDFs(r.Context(), store.DB(), user, req.Context, req.IDs)
+	ctx, db := r.Context(), store.DB()
+	items, e := inspectSourcePDFs(ctx, db, user, req.Context, req.IDs)
 	if e != nil {
 		replyError(w, 403, "SOURCE_UNAVAILABLE", e.Error())
 		return
 	}
+	if req.TargetDatasetID != "" {
+		caller := sourceCaller(r)
+		dataset, err := doc.ResolveResourceDataset(ctx, db, caller, req.TargetDatasetID, acl.PermissionDatasetWrite)
+		if err == nil {
+			_, err = doc.ResolveResourceDataset(ctx, db, caller, req.TargetDatasetID, acl.PermissionDatasetUpload)
+		}
+		if isSourceTargetNotFound(err) {
+			replyError(w, http.StatusNotFound, sourceTargetNotFoundCode, sourceTargetNotFoundMessage)
+			return
+		}
+		scene, sceneErr := learning.NormalizeScene(dataset.Scene)
+		if err != nil || sceneErr != nil || scene != "academic_papers" {
+			replyError(w, 403, "TARGET_UNAVAILABLE", "目标论文集不可用")
+			return
+		}
+		for i := range items {
+			presence, err := sourceTargetPresence(ctx, db, dataset.ID, items[i])
+			if err != nil {
+				replyError(w, 500, "PRESENCE_QUERY_FAILED", "暂时无法检查目标论文集")
+				return
+			}
+			items[i].TargetPresence = presence
+		}
+	}
 	common.ReplyJSON(w, map[string]any{"items": items})
+}
+
+func sourceTargetPresence(ctx context.Context, db *gorm.DB, datasetID string, source SourceInspection) (string, error) {
+	if !source.Eligible || source.Work.WorkID == "" {
+		return "", nil
+	}
+	candidate := source.Candidate
+	// Without a source version, any usable PDF of the same work satisfies the import.
+	_, _, err := findEquivalentPresentWork(ctx, db, source.Work.WorkID, datasetID, true, candidate.Version, candidate.SourceProvider)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return sourceAlreadyPresent, nil
 }
 
 func LookupSourcePDFs(w http.ResponseWriter, r *http.Request) {
