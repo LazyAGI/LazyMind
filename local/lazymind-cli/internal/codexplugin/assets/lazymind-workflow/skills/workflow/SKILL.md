@@ -29,3 +29,11 @@ revocation or grant replacement. A continuation notification requires a fresh
 workflow.state read; it is not an execution grant. The connector supplies real
 conversation identity and optional panel presentation; never invent a driver ID.
 Use the same artifact/control protocol even if embedded panel delivery is unavailable.
+
+The returned LazyMind Skills are authoritative for the business work. Every worker
+must read all supplied Skill content before generating or validating; do not replace
+it with Codex presentation, writing or design Skills. Codex helpers may only supply
+tool operations under the LazyMind instructions. Discover declared LazyMind tools
+first; use applicable configured tools and supplement missing operations with Codex
+tools. Missing Skill files are a blocking contract issue, not permission to improvise.
+Return used Skill paths and tool substitutions with validation evidence.

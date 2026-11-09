@@ -80,8 +80,14 @@ runtime:
         - name: knowledge_read_document
           source: package
       build_outline:
+        skills:
+        - runtime/prompts/outline.md
         tools: []
       plan_page_prompts:
+        skills:
+        - runtime/prompts/style_spec.md
+        - runtime/references/style_catalog.md
+        - runtime/prompts/outline.md
         tools: []
       plan_background_prompts:
         tools: []
@@ -92,6 +98,13 @@ runtime:
       generate_ppt:
         skills:
         - runtime/references/html_constraints.md
+        - runtime/prompts/style_spec.md
+        - runtime/references/style_catalog.md
+        - runtime/references/style_rendering_recipes.json
+        - runtime/prompts/page_html.md
+        - runtime/prompts/page_html_rewrite.md
+        - runtime/prompts/refine_review.md
+        - runtime/prompts/refine_apply.md
         tools:
         - name: ppt_export_html
           source: package

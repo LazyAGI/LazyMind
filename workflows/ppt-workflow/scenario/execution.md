@@ -69,3 +69,33 @@ Check overflow, clipping, readable typography, charts, image presence and notes.
 Repair only defective or explicitly requested pages, at most two quality repair
 rounds; preserve the last usable version and disclose unresolved findings. A missing
 screenshot is not a passed visual check. One-page repairs preserve other pages.
+
+## Skill authority and tool fallback
+
+The pinned LazyMind step prompt and supplied Skill files are the authoritative
+business instructions for both native and external execution. Read all supplied
+Skill files before generating or validating. Do not substitute a host presentation,
+writing, design or other domain Skill for this workflow's method, style, sequence,
+output schemas or quality criteria. Host helpers may only implement tool operations
+within these instructions; they do not define a second workflow.
+
+Discover the declared LazyMind package/global tools first. Use an applicable,
+configured LazyMind tool when available; if it does not provide the needed
+operation, use the host's own tools without changing the Skill's business intent.
+Do not call a LazyMind text/vision model in place of external generation or validation.
+If neither side can perform the required operation, report the missing capability
+and ask the user to configure it in LazyMind before retrying. Missing Skill content
+is not a tool gap: obtain it from the pinned revision or stop, never replace it with
+a host Skill or a guessed procedure. Report the Skill paths/revisions used and any
+tool substitutions with the worker's validation evidence.
+
+## Native presentation references
+
+Use the supplied runtime/prompts and runtime/references files directly, as the
+native presentation runtime does. Apply each prompt to its corresponding operation
+(outline, shared style, page authoring, or review/repair); a prompt's JSON-only output
+is the intermediate format for that operation, not a replacement for the step's
+artifact slots. Resolve INLINE references against supplied revision files. Do not
+print unresolved template placeholders into artifacts. Retain intermediate design
+and review evidence so the coordinator can verify adherence. Rewriting and repair
+prompts apply only when editing or repairing; do not unnecessarily regenerate pages.

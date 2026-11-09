@@ -29,3 +29,22 @@ Create the requested reading reflection from supplied papers without inventing
 reading. Preserve its full Markdown and the original ordered paper list in the
 subsequent ppt_request. The PPT node is an interface handoff under development,
 not a claim that a PPTX file was generated.
+
+## Skill authority and tool fallback
+
+The pinned LazyMind step prompt and supplied Skill files are the authoritative
+business instructions for both native and external execution. Read all supplied
+Skill files before generating or validating. Do not substitute a host presentation,
+writing, design or other domain Skill for this workflow's method, style, sequence,
+output schemas or quality criteria. Host helpers may only implement tool operations
+within these instructions; they do not define a second workflow.
+
+Discover the declared LazyMind package/global tools first. Use an applicable,
+configured LazyMind tool when available; if it does not provide the needed
+operation, use the host's own tools without changing the Skill's business intent.
+Do not call a LazyMind text/vision model in place of external generation or validation.
+If neither side can perform the required operation, report the missing capability
+and ask the user to configure it in LazyMind before retrying. Missing Skill content
+is not a tool gap: obtain it from the pinned revision or stop, never replace it with
+a host Skill or a guessed procedure. Report the Skill paths/revisions used and any
+tool substitutions with the worker's validation evidence.

@@ -96,6 +96,30 @@ func TestAllBuiltinWorkflowsShareBusinessContracts(t *testing.T) {
 			if !result.Valid || result.Graph.Runtime.Execution == nil || result.Graph.Runtime.ExternalExecution != nil {
 				t.Fatalf("shared package compilation: %+v", result.Diagnostics)
 			}
+			if filepath.Base(filepath.Dir(path)) == "ppt-workflow" {
+				for step, required := range map[string][]string{
+					"build_outline":     {"runtime/prompts/outline.md"},
+					"plan_page_prompts": {"runtime/prompts/style_spec.md", "runtime/references/style_catalog.md"},
+					"generate_ppt":      {"runtime/prompts/page_html.md", "runtime/prompts/refine_review.md", "runtime/prompts/refine_apply.md", "runtime/references/html_constraints.md"},
+				} {
+					node := result.Graph.Nodes[step]
+					for _, file := range required {
+						found := false
+						for _, skill := range node.Execution.Skills {
+							if skill == file {
+								found = true
+							}
+						}
+						if !found {
+							t.Fatalf("%s omitted native presentation instructions %s", step, file)
+						}
+					}
+					if !reflect.DeepEqual(node.Execution.Skills, node.ExternalExecution.Skills) {
+						t.Fatalf("%s supplies different Skills to external workers", step)
+					}
+				}
+			}
+
 			for _, node := range result.Graph.Nodes {
 				steps++
 				if node.Execution == nil || !node.ExternalExecution.Supported() || node.Prompt != node.ExternalExecution.Prompt || node.ExternalExecution.Acceptance != nil || node.ExternalExecution.RequiredOutputs != nil {
