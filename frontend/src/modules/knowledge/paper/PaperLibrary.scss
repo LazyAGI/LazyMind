@@ -89,7 +89,27 @@
   overflow: hidden;
 }
 
-.paper-library-folders { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; }
+.paper-library-browse { flex: none; }
+.paper-library-directory {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.paper-library-directory > .paper-library-browse-head { flex: none; }
+.paper-library-directory-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  padding-inline-end: 4px;
+}
 .paper-library-task-actions-slot { flex: none; }
 .paper-library-task-actions { display: grid; gap: 2px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .paper-library-task-action.ant-btn { display: flex; justify-content: flex-start; gap: 9px; width: 100%; height: 36px; padding: 0 10px; border-radius: 6px; color: var(--muted); font-size: 13px; text-align: left; }
@@ -116,15 +136,23 @@
 .paper-library-folder-hint { margin: 14px 10px; color: var(--faint); font-size: 12px; }
 .paper-library-folder-form { display: grid; gap: 8px; padding: 16px 0 8px; }
 
-.paper-library-directory-head { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
 .paper-directory-tree.ant-tree { background: transparent; color: var(--muted); font-size: 13px; }
 .paper-directory-tree .ant-tree-indent-unit { width: 14px; }
-.paper-directory-tree .ant-tree-treenode { width: 100%; padding: 0 0 2px; align-items: center; }
+.paper-directory-tree .ant-tree-treenode { width: 100%; min-width: 0; padding: 0 0 2px; align-items: center; }
 .paper-directory-tree .ant-tree-node-content-wrapper { min-width: 0; flex: 1; display: flex; align-items: center; padding: 3px 4px; }
 .paper-directory-tree .ant-tree-title { min-width: 0; flex: 1; }
 .paper-directory-tree .ant-tree-node-content-wrapper.ant-tree-node-selected { background: var(--blue-soft); color: var(--blue); }
-.paper-directory-folder-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.paper-directory-folder-title,
+.paper-directory-paper-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .paper-directory-node-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.paper-directory-title-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.paper-directory-star { flex: none; }
 .paper-directory-count { flex: none; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .paper-directory-folder-title.is-drop-target { background: var(--blue-soft); color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); border-radius: 4px; }
 .paper-library-view-heading { padding: 22px 24px 18px; }
@@ -266,7 +294,7 @@
 }
 .paper-library-title-button { border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; text-decoration: none; }
 .paper-library-title-button:hover { color: var(--blue); }
-.paper-library-cite { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paper-library-cite { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .paper-library-meta { flex-wrap: wrap; margin-top: 7px; gap: 5px 8px; }
 .paper-library-meta .paper-library-tag { min-height: 22px; padding: 0 7px; color: var(--muted); font-size: 11px; background: #f2f4f7; }
 .paper-library-source { color: var(--faint); font-size: 12px; white-space: nowrap; }
@@ -448,7 +476,7 @@
   .paper-library-tool.ant-btn { padding: 0 7px; }
   .paper-library-layout { grid-template-columns: minmax(130px, 32%) minmax(0, 1fr); gap: 8px; }
   .paper-library-rail { min-height: 0; }
-  .paper-library-folders { overflow-y: auto; }
+  .paper-library-directory { margin-top: 8px; padding-top: 8px; }
   .paper-library-task-actions { grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); }
   .paper-library-import-button.ant-btn { width: 100%; margin-bottom: 4px; }
   .paper-library-browse-head { width: 100%; padding-bottom: 2px; }
