@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, cleanup, within, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import MarkdownViewer from "../MarkdownViewer";
 import { SourceImportProvider, uniquePapers } from "./index";
 import { ChatSourcePanel, ReferenceSourcesButton } from "./ReferenceSources";
 import * as api from "./api";
@@ -21,6 +22,19 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("source imports", () => {
+  it("opens the currently selected citation and offers single import from a grouped inline card", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    try {
+      const { container } = view(<MarkdownViewer sources={sources}>{"Compare [1](#source-a) and [2](#source-b)."}</MarkdownViewer>);
+      fireEvent.focus(container.querySelector(".md-source-chip")!);
+      fireEvent.click(await screen.findByRole("button", { name: "Next source" }));
+      fireEvent.click(screen.getByRole("button", { name: "打开原文" }));
+      expect(open).toHaveBeenCalledWith(sources[1].url, "_blank", "noopener,noreferrer");
+      expect(await screen.findByRole("button", { name: "加入知识库" })).toBeEnabled();
+    } finally {
+      open.mockRestore();
+    }
+  });
   it("groups a confirmed paper and lets the reader open each source version", async () => {
     view(<ChatSourcePanel sources={sources} onClose={() => {}} embedded />);
     const versions = await screen.findByRole("button", { name: /2 个来源/ });
