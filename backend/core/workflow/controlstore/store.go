@@ -58,6 +58,7 @@ type BindingView struct {
 }
 
 type Snapshot struct {
+	InputRequest        *displaystate.InputRequest     `json:"input_request,omitempty"`
 	Protocol            string                         `json:"protocol"`
 	SessionID           string                         `json:"session_id"`
 	StateVersion        int64                          `json:"state_version"`
@@ -170,6 +171,10 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		return nil, err
 	}
 	result.ActiveExecutions = int64(len(result.ActiveExecutionIDs))
+	result.InputRequest, err = displaystate.PendingInput(tx, session)
+	if err != nil {
+		return nil, err
+	}
 	result.AutomaticRetrySteps = []string{}
 	if session.Status == "failed" && result.ActiveExecutions == 0 {
 		exhausted := tx.Model(&orm.WorkflowTransitionCommand{}).Select("target_step_id").
@@ -184,7 +189,7 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		}
 	}
 	result.Continuation, result.Admission = controlpolicy.Decide(controlpolicy.Facts{Status: session.Status,
-		Dismissed: session.Dismissed, PendingReviews: pending, ActiveAttempts: result.ActiveExecutions, NativeAttempts: int64(len(result.NativeExecutionIDs)),
+		Dismissed: session.Dismissed, PendingInput: result.InputRequest != nil, PendingReviews: pending, ActiveAttempts: result.ActiveExecutions, NativeAttempts: int64(len(result.NativeExecutionIDs)),
 		BindingRequired: binding.Required, Bound: result.Binding.Bound, AutomaticRetryAvailable: len(result.AutomaticRetrySteps) > 0})
 	if binding.EditPaused && session.Status != "stopped" {
 		result.Continuation = "awaiting_user"
@@ -219,6 +224,9 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		}
 	} else if !session.Dismissed {
 		result.AvailableActions = append(result.AvailableActions, "resume", "save", "rewind")
+	}
+	if result.InputRequest != nil && !session.Dismissed {
+		result.AvailableActions = append(result.AvailableActions, "answer_input")
 	}
 	return result, nil
 }

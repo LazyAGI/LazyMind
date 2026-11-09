@@ -177,6 +177,20 @@ class RemoteWorkflowExecutor:
                     'input_slots': task.get('input_slots') or [],
                     'output_slots': task.get('output_slots') or [],
                 })
+                # Both executors receive the same pinned Skills and constraints.
+                # Native tool bindings remain in the task; they do not replace
+                # the package's shared business instructions.
+                execution = context.get('execution') or {}
+                shared_instructions = [str(value) for value in execution.get('constraints', [])]
+                for skill in execution.get('skill_files', []):
+                    shared_instructions.append(
+                        f"Pinned workflow Skill ({skill['path']}):\n{skill['content']}")
+                if shared_instructions:
+                    task['objective'] = '\n\n'.join([
+                        str(task.get('objective') or context.get('objective') or context.get('prompt') or ''),
+                        'Shared workflow instructions (apply to every executor):',
+                        *shared_instructions,
+                    ])
                 checkpoint = context.get('post_step_checkpoint')
                 if checkpoint:
                     # Core pins this completed execution only when retrying its

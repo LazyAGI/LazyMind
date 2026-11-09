@@ -18,6 +18,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/publication"
@@ -296,6 +297,9 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Create(&orm.WorkflowEvent{SessionID: attempt.SessionID, OwnerUserID: session.CreateUserID,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: row.ID,
 			StateVersion: stateVersion, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		if err := taskcenter.EnsureExternalWorkflowConversation(ctx, tx, *session, now); err != nil {
 			return err
 		}
 		persisted = true

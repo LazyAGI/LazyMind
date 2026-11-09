@@ -8,46 +8,22 @@ tool_scripts:
   - copy_bound_brief
   - check_showcase_brief
 runtime:
-  external_execution:
+  execution:
     version: '1'
     skills:
-    - scenario/external.md
+    - scenario/execution.md
     constraints:
-    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall
-      back to a LazyMind text or vision model.
-    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
-      capabilities must be configured in LazyMind before retry.
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
     steps:
       prepare:
-        prompt: Read scenario/external.md and its prepare step contract from this pinned package. Complete Prepare
-          Brief using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - brief
-        acceptance_criteria:
-        - The external subagent has completed the declared objective, verified the actual outputs and reported concrete
-          evidence without inventing state.
       implement:
-        prompt: Read scenario/external.md and its implement step contract from this pinned package. Complete Implement
-          and review using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - implementation
-        - checks
-        acceptance_criteria:
-        - Both artifacts contain the actual implementation and test output; human review is required.
       validate_brief:
-        prompt: Read scenario/external.md and its validate_brief step contract from this pinned package. Complete
-          Validate Brief using the bound evidence and the domain rules above. Generate and validate with your own
-          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - admission
-        acceptance_criteria:
-        - admission exactly equals the bound brief JSON; intentional invalid briefs remain invalid for the runtime
-          gate.
   post_step_checks:
   - step_id: validate_brief
     tool: check_showcase_brief

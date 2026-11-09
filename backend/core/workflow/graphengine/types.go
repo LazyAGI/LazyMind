@@ -50,6 +50,7 @@ type ProducerRef struct {
 }
 
 type CompiledNode struct {
+	Execution         *StepExecution         `json:"execution,omitempty"`
 	ExternalExecution *ExternalStepExecution `json:"external_execution,omitempty"`
 	ID                string                 `json:"id"`
 	Label             string                 `json:"label,omitempty"`
@@ -176,6 +177,7 @@ type CompletedAction struct {
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
 type RuntimePolicy struct {
+	Execution         *ExecutionPolicy         `json:"execution,omitempty" yaml:"execution,omitempty"`
 	ExternalExecution *ExternalExecutionPolicy `json:"external_execution,omitempty" yaml:"external_execution,omitempty"`
 	CompletedActions  []CompletedAction        `json:"completed_actions,omitempty" yaml:"completed_actions,omitempty"`
 	// These contracts are pinned to the package revision, never inferred from its ID.
@@ -201,7 +203,7 @@ type RuntimePolicy struct {
 }
 
 func (p RuntimePolicy) IsZero() bool {
-	if p.ExternalExecution != nil {
+	if p.Execution != nil || p.ExternalExecution != nil {
 		return false
 	}
 	return len(p.CompletedActions) == 0 && p.TriggerInputs == nil && len(p.ExecutionLimits) == 0 && !p.TransactionalOutputs && p.Publication == nil && len(p.PublishedInputAliases) == 0 && len(p.HostExtensions) == 0 && len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&

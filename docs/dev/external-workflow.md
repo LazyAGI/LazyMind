@@ -19,15 +19,16 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 
 ## 包格式与兼容性
 
-格式定义见 [workflow-format.md](../workflow-format.md#外部-agent-执行)。`runtime.external_execution.version: '1'` 为每个编译节点声明外部 prompt、skills、constraints、tools 与验收标准。原生 `state.yml`/`driver.md` 不变。
+格式定义见 [workflow-format.md](../workflow-format.md#外部-agent-执行)。新工作流采用 `runtime.execution.version: '1'`：`scenario/state.yml` 是步骤目标、输入输出、分支和验收规则的唯一来源；`runtime.execution` 只补充共用的 Skills、约束和工具能力清单。14 个内置包均使用这一声明。
 
-- 新声明只有重新发布后才生效；运行绑定的 revision 不随 HEAD 更新。
-- 旧 revision 没有声明时，保留原 executor 路由；不能把旧 run 强制迁移为外部执行。
-- 外部步骤即使声明了工具，仍由外部 Agent 执行；工具声明本身不启动 LazyMind 子代理。
-- 固定 Skill 正文随 `step_contract.external_execution.skill_files` 返回；包含 `path`、`content` 和 `sha256`。宿主必须将正文传给 worker。
-- `launch_request` 保留启动请求，`user_request` 保留本次执行或重试补充；两者和固定输入一并交给 worker，不能只传通用步骤 prompt。
-- `external_execution.task_specification` 保留同 revision 的业务说明，供读取精确枚举、JSON 形状和分支条件。执行方式以外部 prompt、constraints 和 Skill 为准；其中原生模型、包装工具、自动发布和页数下限等指令不转移到外部执行。
-- `validation_owner` 为 `external-agent`。输出类型、列表顺序、条件分支、审核与暂停规则仍来自同一编译图。
+- 同一 revision 的原生和外部执行器收到相同的 `step_contract.prompt`、`execution.skill_files`、`execution.constraints`、验收和必需输出。Skill 按固定 revision 读取，包含 `path`、`content` 和 `sha256`；原生 runner 也实际加载这些内容。
+- 编译器拒绝在 `runtime.execution.steps` 覆盖 prompt、acceptance 或 required_outputs，避免形成第二套业务规则。
+- 原生工具包装、本地路径、tools-only 和自动保存方式属于执行适配。外部执行器按照公共 `external_execution.adapter_instructions`，用宿主能力或已声明的 MCP 工具完成相同业务要求。它不需要安装或调用原生模型包装。
+- `external_execution` 仍作为兼容的返回字段存在，但新包的值从共享契约推导；它不是第二份可编辑的业务定义。旧 revision 的独立 `runtime.external_execution` 及未声明外部能力的 executor 路由继续保持，运行中不能替换绑定 revision。
+- `launch_request` 和 `user_request` 分别携带启动与本次执行/重试请求，必须连同输入传给 worker。
+- 外部验证由宿主执行；服务端继续检查类型、哈希、owner、当前 lease 和幂等。Native 与外部均遵守同一状态机、列表顺序、审核、暂停和条件输出。
+
+更新工作流时应重新发布，再启动新运行测试共享契约。已有运行和已有 PPT 产物仍使用原来固定的 revision；打开历史结果不会触发重跑。
 
 ## 根 Controller 的执行循环
 
@@ -35,15 +36,44 @@ LazyMind 不根据模型评分决定外部产物是否合格，不要求语义�
 2. `workflow.start` 使用唯一且稳定的 `idempotency_key`。缺少输入时按返回问题继续收集；不创建重复 run。宿主 Connector 提供真实会话身份，不能编造 `driver_session_id`。
 3. 读取 `workflow.state`。已有 execution 用 `workflow.step.claim`，仅在 admission 允许时 `workflow.step.begin`。
 4. 取得 `execution_handle` 与固定 `step_contract`。根代理保留 handle，不给 worker。
-5. 用宿主原生 subagent 执行该步骤；传入完整固定契约（包括 Skill、业务说明、启动/补充请求、输入资源、必需/条件输出）与独立输出目录。需要 LazyMind 工具时由 worker 返回调用请求，根代理代为调用。
+5. 用宿主原生 subagent 执行该步骤；传入完整固定契约（包括共享 execution Skill、步骤业务说明、启动/补充请求、输入资源、必需/条件输出）与独立输出目录。需要 LazyMind 工具时由 worker 返回调用请求，根代理代为调用。
 6. 用宿主验证 worker 检查实际文件、源事实和预览；修复失败项。worker 返回真实 artifact manifest 和验证结论。
 7. 根代理逐项 `workflow.artifact.publish`；每个槽使用稳定正整数 `seq`，重试不换序号。文件必须存在于 Connector 可读的机器上。
 8. 收到全部发布回执后，调用 `workflow.step.complete`，传原 handle、outcome 和实际 worker 的 `executor_ref`。最终文字不能代替产物保存。
 9. 按最新状态继续。待人工审核时交还用户；完成时交付 artifact 链接。停止/回退/重领后丢弃旧 worker 结果，不能使用旧 handle 提交。
 
-MCP 不负责替宿主启动原生 subagent。Codex 集成的 workflow Skill 负责要求这种调度；`executor_ref` 用于关联日志，不是服务端可验证的宿主运行证明。其他宿主需自行实现生成和验证 worker、取消及恢复适配。
+MCP 不负责替宿主启动原生 subagent。所有宿主遵守相同的 MCP 执行说明；Codex Skill 仅映射原生子代理和问答工具，不维护工作流业务规则。`executor_ref` 用于关联日志，不是服务端可验证的宿主运行证明。其他宿主需自行实现生成和验证 worker、取消及恢复适配。
 
 输入契约可能只含修订引用。根 Controller 用 `workflow.input.get` 读取输入资源、用 `workflow.artifact.get` 读取绑定的 `source_revision_id`，校验内容和版本后把实际文件或文本交给 worker；不能仅凭文件名或旧会话缓存重建内容。下载与发布都复用正常凭证机制，凭证不进入 worker 提示或产物。
+
+## 用户追问、暂停与恢复
+
+启动缺少资料时，`workflow.start` 返回 `needs_input` 与精确问题 ID，此时尚未创建运行；宿主收集用户回答到 `clarification_values` 后重新提交。
+
+运行中的追问来自同一 `runtime.input_checkpoint` 和对应 JSON 产物。人工模式（`workflow_mode=dynamic`）在生产步骤成功且存在未回答问题时返回 `control.input_request`，阻止新步骤开始，`continuation=awaiting_user`。自动模式沿用原生策略，不额外追问；未知事实应标注或省略，不能编造。
+
+`input_request` 包含 `artifact_id`、`revision`、`slot`、`title`、`questions`。外部宿主可以使用自己的问答 UI 或普通会话提问；LazyMind 结果页使用同一问题卡。等待用户真实回复后调用：
+
+```json
+{
+  "session_id": "<run>",
+  "input_artifact_id": "<control.input_request.artifact_id>",
+  "input_revision": 1,
+  "expected_state_version": 12,
+  "answer_text": "<用户对这些问题的真实回答>",
+  "command_id": "<稳定的回答操作 ID>"
+}
+```
+
+MCP 工具名为 `workflow.input.answer`；HTTP 复用 `POST /workflow-sessions/{session_id}/control`，增加 `kind: answer_input`。问题版本、状态版本和 owner 均验证，成功重试返回原回执；不同回答不能复用同一个 command。回答保存为 human artifact revision，生成步骤自行填入 `answer_text` 不能绕过提问。该入口只支持文字回答（可包含选择题答案）；附件仍通过启动材料或已有输入资源接口绑定。
+
+保存回答不会批准 review、启动下一步或解除停止。随后读取状态，按 admission 决定是否继续；已暂停仍需用户明确恢复，待审核仍由用户确认。用户可明确回退问题生产步骤或其上游来修正问题；不能借下游重试绕过未回答问题。暂停使用 `workflow.session.stop`，恢复使用 `workflow.session.resume`；旧 execution_handle 的迟到产物会被拒绝。
+
+## 接入其他外部 Agent
+
+基础接入只需配置 LazyMind 通用 MCP 服务 `lazymind mcp proxy` 并沿用当前用户的连接凭证，无需设置 Codex 身份。不同开发者使用相同的工具 schema、执行契约和上述问答/暂停接口。没有控制通道时，用户回到原外部会话发出继续请求后，宿主读取同一个 run 并恢复；不要创建替代运行。
+
+需要 LazyMind 面板自动唤醒原会话时，实现 [workflow-agent-core](../../integrations/workflow-agent-core/README.md) 的 `RuntimeAdapter`：真实会话定位、消息投递、定向取消及可选持久回执。工具识别和控制状态机放在该共享库，宿主插件仅转换自己的 SDK 事件。缺少可靠回执时保持 delivery unknown，不能重复发送。自动唤醒能力与 MCP 执行能力分别验收；配置了插件并不证明控制通道已可用。
 
 ## 步骤工具 MCP
 
@@ -118,6 +148,8 @@ local/build/bin/lazymind internal agent codex refresh
 
 `refresh` 保留配对和启用偏好，不关闭或启动宿主。首次连接仍通过设置中的连接入口；`internal agent codex connect` 可能为建立宿主控制而重启应用，不能在正在执行的会话中当作普通刷新命令使用。已运行的 MCP 进程需要客户端重新连接才能加载新工具 schema；刷新成功不代表当前会话已经热加载。
 
+登录与配对应使用一致的服务地址。当前配对的账户范围包含服务地址，`localhost` 与 `127.0.0.1` 不会自动合并；切换地址后可能出现 `installation_unavailable`。先核对已登录账户与原连接地址，不能通过修改配对范围或复制 token 绕过校验。通用 MCP 可用与宿主控制配对有效需要分别检查。
+
 独立协议调试入口为 `local/build/bin/lazymind mcp codex-workflow`；需使用已安装插件声明的 provider、host control 和 pairing 配置，只有指定进程模式并不会自动启用会话绑定。仍沿用正常凭证机制。不要将 token、provider key 或测试身份写进文档与提交。
 
 其他宿主同事需要完成：真实会话身份注入；原生 subagent 调度与隔离；根代理工具代理；文件资源在宿主/Connector 之间传输；通知去重、取消与明确恢复；待审核时交还用户。连接控制协议见 [外部 Agent 与 Workflow 交互协议](../architecture/external-agent-workflow-protocol-draft.md)。不能通过新开顶层会话或第二个 Codex 进程替代本会话的 native worker。
@@ -134,8 +166,10 @@ local/build/bin/lazymind internal agent codex refresh
 
 验收必须分别覆盖无 LazyMind 模型的外部执行、同 revision 的原生执行、旧 revision 兼容、停止后的迟到结果、工具幂等与权限、缺少媒体能力后的配置提示、实际文件页数与预览检查。声明完成迁移不等于每种外部宿主及每个媒体 provider 已通过端到端测试；对外发布时应区分契约覆盖、回归测试和实际连接验证。
 
-### LazyMind 中查看外部运行与中间产物
+### LazyMind 聊天列表中的外部产物
 
-外部执行器通过 `workflow.artifact.publish` 发布阶段产物后，LazyMind 持久化产物并发送工作流事件。任务中心会登记未绑定 LazyMind 对话的外部运行；用户可通过“查看过程与产物”打开同一个工作流面板，查看需求、素材、大纲、逐页预览与最终文件。面板订阅运行事件并重新读取服务端快照，不需要配置 LazyMind 生成模型，也不依赖宿主自动唤醒通道。
+外部执行器逐项 `workflow.artifact.publish` 后，独立外部运行会在共享产物保存事务内创建专属 Chat 结果会话。用户从聊天侧栏打开即可查看同一工作流的已保存产物、问题卡和暂停/恢复控件；页面不加载本地聊天输入框，不需要本地模型，也不复制外部代理的中间 trace。
 
-已存储但尚无任务记录的独立外部运行，在所属用户读取任务列表时补登。补登不会连接无关对话、重复创建已有任务或恢复已归档任务；产物读取继续使用既有的所有者权限检查。外部执行器应在每个产物生成后立即发布，才能展示执行过程，而非只在全部完成后提交。
+结果会话只是展示记录，通过 `external_workflow_session_id` 关联运行，不修改运行原有 `conversation_id`、origin 或宿主绑定。已有 LazyMind 会话的运行继续使用原会话。列表和详情返回 `execution_owner: external_agent` 供通用 UI 选择结果视图；任何宿主均使用这一机制。
+
+历史有产物的独立外部运行在所属用户读取聊天列表时补显。恢复有数量边界和所有者过滤；重复发布不会重复创建，用户重命名保留，归档、删除及永久删除的会话不会被重新创建。任务中心入口继续保留。产物内容仍由原工作流权限和版本接口读取，不复制另一套文件。

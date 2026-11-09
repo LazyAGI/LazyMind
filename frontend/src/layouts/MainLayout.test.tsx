@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   fetchPreferences: vi.fn().mockResolvedValue({ document_directories_enabled: true }),
 }));
 
+vi.mock('@/modules/taskCenter/useWorkflowChanges', () => ({ useWorkflowChanges: vi.fn() }));
+
 vi.mock("@/modules/user/uiPreferencesApi", () => ({
  fetchUserUiPreferences: mocks.fetchPreferences,
  USER_UI_PREFERENCES_CHANGED_EVENT: "lazymind:user-ui-preferences-changed",

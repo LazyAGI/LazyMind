@@ -12,6 +12,20 @@ html.workflow-run-embed #app {
 }
 
 .workflow-run {
+  &__heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+    h1 { font-size: 20px; margin: 0; overflow-wrap: anywhere; }
+  }
+
+  &.workflow-run--results {
+    padding: 20px;
+    > .ant-btn { align-self: flex-start; flex: 0 0 auto; }
+    > .ask-wizard { max-height: 45%; flex: 0 1 auto; overflow: auto; margin: 0; }
+  }
+
   &--embedded {
     display: flex;
     flex: 1 1 auto;

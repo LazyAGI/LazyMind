@@ -81,20 +81,17 @@ when_to_use: >
   Retry only when the user explicitly requests a retry after seeing the failure.
   Always relay necessary user_notice messages from tools.
 runtime:
-  external_execution:
+  execution:
     version: '1'
     skills:
-    - scenario/external.md
+    - scenario/execution.md
     constraints:
-    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
-      to a LazyMind text or vision model.
-    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
-      capabilities must be configured in LazyMind before retry.
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
     steps:
       research_topic:
-        prompt: Read scenario/external.md and its research_topic step contract from this pinned package. Develop an evidence-based
-          bounded research topic. Generate and validate with your own host capabilities; return the real declared artifacts
-          and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -104,16 +101,7 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - research_topic_pool
-        - research_topic_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       literature_review:
-        prompt: Read scenario/external.md and its literature_review step contract from this pinned package. Read the retained
-          literature and produce a source-grounded synthesis. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -123,16 +111,7 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - literature_review_pool
-        - literature_review_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       refine_topic:
-        prompt: Read scenario/external.md and its refine_topic step contract from this pinned package. Refine the topic
-          using current evidence while preserving requested scope. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -142,78 +121,31 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - refine_topic_pool
-        - refine_topic_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       experiment:
-        prompt: Read scenario/external.md and its experiment step contract from this pinned package. Organize real experiment
-          data or perform only explicitly authorized computation/simulation. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
         - name: academic_read_paper
           source: package
-        required_outputs:
-        - experiment_pool
-        - experiment_document
-        - experiment_code
-        - experiment_results
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       data_analysis:
-        prompt: Read scenario/external.md and its data_analysis step contract from this pinned package. Analyze the complete
-          supplied results and generate reproducible plots. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
         - name: academic_read_paper
           source: package
-        required_outputs:
-        - data_analysis_pool
-        - data_analysis_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       write_outline:
-        prompt: Read scenario/external.md and its write_outline step contract from this pinned package. Author the editable
-          paper outline and stop at its approval boundary. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
         - name: academic_read_paper
           source: package
-        required_outputs:
-        - write_outline_pool
-        - write_outline_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       write_document:
-        prompt: Read scenario/external.md and its write_document step contract from this pinned package. Write the manuscript
-          from the latest approved outline and evidence. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
         - name: academic_read_paper
           source: package
-        required_outputs:
-        - write_document_pool
-        - write_document_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       peer_review:
-        prompt: Read scenario/external.md and its peer_review step contract from this pinned package. Review the actual
-          current manuscript with anchored, actionable issues. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -223,17 +155,7 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - peer_review_pool
-        - peer_review_document
-        - peer_review_data
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       revise_document:
-        prompt: Read scenario/external.md and its revise_document step contract from this pinned package. Apply only the
-          requested edits or selected current review issues and verify changed facts. Generate and validate with your own
-          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -243,17 +165,7 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - revise_document_pool
-        - revise_document_document
-        - revision_fact_check_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       reading_reflection:
-        prompt: Read scenario/external.md and its reading_reflection step contract from this pinned package. Write a reading
-          reflection grounded in the actual supplied papers. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -263,26 +175,12 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - reading_reflection_pool
-        - reading_reflection_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
       finish:
-        prompt: Read scenario/external.md and its finish step contract from this pinned package. Assemble and deliver only
-          the requested completed research outputs. Generate and validate with your own host capabilities; return the real
-          declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
         - name: academic_read_paper
           source: package
-        required_outputs:
-        - finish_document
-        acceptance_criteria:
-        - The external subagent validates actual outputs and every required artifact is submitted; never present demonstration
-          outputs as real research findings.
   trigger_inputs: [manuscript_file, manuscript_text, paper_topic, review_request, paper_input, experiment_execution, experiment_question]
   transactional_outputs: true
   recovery_inputs:

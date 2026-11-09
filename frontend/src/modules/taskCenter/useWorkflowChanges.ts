@@ -5,10 +5,11 @@ import { SSE } from '@/modules/chat/utils/sse';
 
 import { WORKFLOW_TASKS_CHANGED } from './events';
 
-// One owner-scoped connection for the task center, including paused/completed
-// workflows that may be resumed from a different browser tab.
-export function useWorkflowChanges() {
+// One owner-scoped connection in the signed-in layout, shared by the chat list
+// and task center, including workflows resumed from another host.
+export function useWorkflowChanges(ownerKey = 'current-user') {
   useEffect(() => {
+    if (!ownerKey) return;
     let closed = false;
     let stream: SSE;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -31,5 +32,5 @@ export function useWorkflowChanges() {
     }
     connect();
     return () => { closed = true; clearTimeout(timer); stream?.close(); };
-  }, []);
+  }, [ownerKey]);
 }

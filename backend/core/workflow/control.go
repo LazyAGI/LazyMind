@@ -29,6 +29,9 @@ type WorkflowControlCommand struct {
 	Objective       string `json:"objective,omitempty"`
 	Instruction     string `json:"runtime_instruction,omitempty"`
 	RetryOrigin     string `json:"retry_origin,omitempty"`
+	InputArtifactID string `json:"input_artifact_id,omitempty"`
+	InputRevision   int    `json:"input_revision,omitempty"`
+	AnswerText      string `json:"answer_text,omitempty"`
 }
 
 type WorkflowControlReceipt struct {
@@ -108,6 +111,10 @@ func (s WorkflowControlService) execute(ctx context.Context, owner, sessionID st
 			return controlstore.Reject("STATE_VERSION_CONFLICT", "refresh the workflow before applying this operation")
 		}
 		switch command.Kind {
+		case "answer_input":
+			if err := answerWorkflowInput(ctx, tx, session, command); err != nil {
+				return err
+			}
 		case "begin":
 			if command.StepID == "" {
 				return controlstore.Reject("INVALID_COMMAND", "step_id is required")

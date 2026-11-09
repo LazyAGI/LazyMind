@@ -19,22 +19,31 @@ type ExternalExecutionContract struct {
 	TaskSpecification string              `json:"task_specification,omitempty"`
 }
 
+// ExecutionContract is the same revision-owned instruction set for native and
+// external executors. The surrounding AttemptContext owns the single prompt,
+// acceptance criteria and output declaration.
+type ExecutionContract struct {
+	graphengine.StepExecution
+	SkillFiles []ExternalSkillFile `json:"skill_files,omitempty"`
+}
+
 type ExternalSkillFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	SHA256  string `json:"sha256"`
 }
 
-// ApplyExternalExecution selects instructions without native tool-only modes or
-// automatic generators. Inputs and output types remain the shared data contract.
+// ApplyExternalExecution selects the external adapter without native tool-only
+// modes. Shared policies retain the exact native business prompt and schemas;
+// only historical external profiles may override them.
 func ApplyExternalExecution(value *AttemptContext, node graphengine.CompiledNode) {
 	if !node.ExternalExecution.Supported() {
 		return
 	}
 	value.ExternalExecution = &ExternalExecutionContract{
 		ExternalStepExecution: *node.ExternalExecution,
-		// Retain detailed business requirements, enums and output shapes without
-		// enabling native wrappers. External prompt/constraints govern execution.
+		// Legacy profiles retain their original reference. Shared profiles use
+		// precisely the same prompt as the native executor.
 		TaskSpecification: node.Prompt,
 	}
 	value.Prompt = node.ExternalExecution.Prompt
@@ -51,12 +60,18 @@ func ApplyExternalExecution(value *AttemptContext, node graphengine.CompiledNode
 // Skills are resolved from the same immutable revision as the step, never HEAD
 // or caller-controlled disk paths. Deliver text with the contract so an external
 // worker does not need another host's filesystem to follow its instructions.
-func loadExternalSkillFiles(ctx context.Context, db *gorm.DB, value *AttemptContext) error {
-	if value.ExternalExecution == nil {
+func loadExecutionSkillFiles(ctx context.Context, db *gorm.DB, value *AttemptContext) error {
+	var skills []string
+	if value.Execution != nil {
+		skills = value.Execution.Skills
+	} else if value.ExternalExecution != nil {
+		skills = value.ExternalExecution.Skills
+	} else {
 		return nil
 	}
 	remaining := 512 << 10
-	for _, skill := range value.ExternalExecution.Skills {
+	files := make([]ExternalSkillFile, 0, len(skills))
+	for _, skill := range skills {
 		if !graphengine.ValidExternalSkillPath(skill) {
 			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "invalid revision skill path")
 		}
@@ -76,9 +91,15 @@ func loadExternalSkillFiles(ctx context.Context, db *gorm.DB, value *AttemptCont
 			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill must be bounded UTF-8 text: "+skill)
 		}
 		remaining -= len(blob.Content)
-		value.ExternalExecution.SkillFiles = append(value.ExternalExecution.SkillFiles, ExternalSkillFile{
+		files = append(files, ExternalSkillFile{
 			Path: skill, Content: string(blob.Content), SHA256: "sha256:" + digest,
 		})
+	}
+	if value.Execution != nil {
+		value.Execution.SkillFiles = files
+	}
+	if value.ExternalExecution != nil {
+		value.ExternalExecution.SkillFiles = files
 	}
 	return nil
 }

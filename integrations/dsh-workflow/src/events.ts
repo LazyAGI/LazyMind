@@ -1,4 +1,4 @@
-import { interaction, object, readControl, type RunLink } from '../../workflow-agent-core/src/protocol'
+import { interaction, object, readControl, workflowOperationName, type RunLink } from '../../workflow-agent-core/src/protocol'
 
 // The host's configured frontend owns the URL; tool results carry run identity.
 export function presentationLink(runId: unknown, webUrl: string): RunLink | null {
@@ -21,15 +21,12 @@ export function presentationRun(meta: unknown, webUrl: string): RunLink | null {
   }
 }
 
-const OPERATIONS = new Set(['list', 'get', 'input_import', 'input_get', 'start', 'state', 'session_list',
-  'session_stop', 'session_resume', 'step_begin', 'step_claim', 'step_resume', 'step_complete', 'artifact_publish', 'artifact_list', 'artifact_get'])
-
 export function workflowOperation(name: string, serverName: string): string | null {
   const prefix = `mcp__${serverName}__workflow_`
   if (!name.startsWith(prefix)) return null
   // DSH appends a 12-hex identity hash whenever dots are normalized.
   const operation = name.slice(prefix.length).replace(/_[0-9a-f]{12}$/, '')
-  return OPERATIONS.has(operation) ? operation : null
+  return workflowOperationName(operation)
 }
 
 function visitTexts(value: unknown, into: string[]): void {
@@ -73,7 +70,7 @@ export function eventRun(event: unknown, serverName: string, webUrl: string): Ru
     return null
   }
   if (value?.type !== 'tool/ptc-dispatch' || data?.isError !== false || typeof data.name !== 'string'
-    || !['start', 'state', 'step_begin', 'step_claim', 'step_resume', 'step_complete'].includes(workflowOperation(data.name, serverName) ?? '')
+    || !['start', 'state', 'input_answer', 'step_begin', 'step_claim', 'step_resume', 'step_complete'].includes(workflowOperation(data.name, serverName) ?? '')
     || !Array.isArray(data.content)) return null
   for (const raw of [...data.content].reverse()) {
     const content = object(raw)

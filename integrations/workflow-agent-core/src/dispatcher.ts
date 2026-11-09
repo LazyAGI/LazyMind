@@ -90,5 +90,6 @@ function continuationMessage(action: HostAction): string {
   return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} ` +
     'Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. ' +
     'After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. ' +
+    'When control.input_request is present, show its exact questions and wait for the user; submit their actual answers with workflow.input.answer against that artifact revision. An input answer does not itself approve a separate result review. ' +
     'A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.'
 }

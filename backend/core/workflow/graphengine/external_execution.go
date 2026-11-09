@@ -9,8 +9,8 @@ import (
 
 const ExternalExecutionVersion = "1"
 
-// ExternalExecutionPolicy is a revision-owned opt-in. Native instructions and
-// tools remain unchanged; external execution never falls back to a native model.
+// ExternalExecutionPolicy is the legacy revision-owned external profile. Keep it
+// readable for pinned historical runs; new packages use the shared ExecutionPolicy.
 type ExternalExecutionPolicy struct {
 	Version     string                           `json:"version" yaml:"version"`
 	Skills      []string                         `json:"skills,omitempty" yaml:"skills,omitempty"`
@@ -26,12 +26,13 @@ type ExternalTool struct {
 // ExternalStepExecution is resolved from the immutable package revision.
 // Validation belongs to the external agent; Core checks access and consistency.
 type ExternalStepExecution struct {
-	Version         string         `json:"version,omitempty" yaml:"-"`
-	ValidationOwner string         `json:"validation_owner,omitempty" yaml:"-"`
-	Prompt          string         `json:"prompt" yaml:"prompt"`
-	Skills          []string       `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Constraints     []string       `json:"constraints,omitempty" yaml:"constraints,omitempty"`
-	Tools           []ExternalTool `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Version             string         `json:"version,omitempty" yaml:"-"`
+	ValidationOwner     string         `json:"validation_owner,omitempty" yaml:"-"`
+	Prompt              string         `json:"prompt" yaml:"prompt"`
+	AdapterInstructions string         `json:"adapter_instructions,omitempty" yaml:"-"`
+	Skills              []string       `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Constraints         []string       `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+	Tools               []ExternalTool `json:"tools,omitempty" yaml:"tools,omitempty"`
 	// Nil inherits the native data contract; an explicit empty list clears it.
 	Acceptance      []string `json:"acceptance_criteria" yaml:"acceptance_criteria"`
 	RequiredOutputs []string `json:"required_outputs" yaml:"required_outputs"`
@@ -51,6 +52,9 @@ func ValidExternalSkillPath(value string) bool {
 }
 
 func compileExternalExecution(graph *CompiledStateGraph) []Diagnostic {
+	if graph.Runtime.Execution != nil {
+		return compileExecution(graph)
+	}
 	policy := graph.Runtime.ExternalExecution
 	if policy == nil {
 		return nil

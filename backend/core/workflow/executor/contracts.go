@@ -9,6 +9,7 @@ import (
 // trusted Executor boundaries. It never contains a model configuration, API
 // credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
+	Execution               *ExecutionContract         `json:"execution,omitempty"`
 	ExternalExecution       *ExternalExecutionContract `json:"external_execution,omitempty"`
 	KnowledgeScope          *KnowledgeScope            `json:"knowledge_scope,omitempty"`
 	LaunchRequest           string                     `json:"launch_request,omitempty"`

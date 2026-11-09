@@ -35,7 +35,8 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		}
 	}
 	value.ContractVersion, value.SessionID, value.AttemptID, value.StepID, value.AttemptNo = attempt.ContractVersion, row.SessionID, row.ID, row.StepID, row.Attempt
-	// External policy is authoritative only in the immutable compiled revision.
+	// Execution instructions are authoritative only in the immutable revision.
+	value.Execution = nil
 	value.ExternalExecution = nil
 	var session orm.WorkflowSession
 	if err := loader.DB.WithContext(ctx).Where("id = ?", row.SessionID).First(&session).Error; err != nil {
@@ -65,6 +66,9 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.DeclaredInputTypes[materialID] = materialType
 				}
 				if node, ok := graph.Nodes[row.StepID]; ok {
+					if node.Execution != nil {
+						value.Execution = &ExecutionContract{StepExecution: *node.Execution}
+					}
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
 					value.DeclaredInputTransports = node.InputTransports
 					value.DeclaredOutputs, value.RequiredOutputs = node.Outputs, node.RequiredOutputs
@@ -73,7 +77,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.ToolsOnly = node.ToolsOnly
 					value.TerminalToolsOnly = node.TerminalToolsOnly
 					// Only the persisted external executor may select the new policy.
-					// Native runs of the same revision keep their original contract.
+					// Native runs retain tool bindings; business instructions are shared.
 					value.ExternalExecution = nil
 					if controlstore.Controlled(session) && row.ExecutorHost == "external-agent" {
 						ApplyExternalExecution(&value, node)
@@ -87,7 +91,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 			value.OutputCardinality = cardinality
 		}
 	}
-	if err := loadExternalSkillFiles(ctx, loader.DB, &value); err != nil {
+	if err := loadExecutionSkillFiles(ctx, loader.DB, &value); err != nil {
 		return AttemptContext{}, err
 	}
 	if controlstore.Controlled(session) && value.Metadata[frozenInputsKey] == "true" {

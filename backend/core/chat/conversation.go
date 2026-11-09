@@ -359,7 +359,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		if errors.Is(err, errConversationInTrash) {
+		if errors.Is(err, errConversationInTrash) || errors.Is(err, errExternalWorkflowConversation) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -1732,6 +1732,7 @@ func GetConversation(w http.ResponseWriter, r *http.Request) {
 		"models":                models,
 	}
 	mergeConversationRelationMetadata(item, c, loadParentDisplayName(r.Context(), db, c, userID), true)
+	mergeExternalWorkflowConversationMetadata(item, c)
 	writeConversationJSON(w, http.StatusOK, item)
 }
 
@@ -2222,6 +2223,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mergeConversationRelationMetadata(conversationItem, c, loadParentDisplayName(r.Context(), db, c, userID), true)
+	mergeExternalWorkflowConversationMetadata(conversationItem, c)
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": conversationItem,
 	})
@@ -2554,6 +2556,10 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := store.DB()
+	if err := taskcenter.RecoverExternalWorkflowConversations(r.Context(), db, userID); err != nil {
+		common.ReplyErr(w, "load external workflow results failed", http.StatusInternalServerError)
+		return
+	}
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL", userID)
 	if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_ephemeral")), "true") {
 		q = q.Where("is_ephemeral = ?", false)
@@ -2719,6 +2725,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			parentName = parentNames[*c.ParentConversationID]
 		}
 		mergeConversationRelationMetadata(item, c, parentName, false)
+		mergeExternalWorkflowConversationMetadata(item, c)
 		items = append(items, item)
 	}
 	nextToken := ""

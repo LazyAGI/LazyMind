@@ -171,8 +171,8 @@ func TestReadOnlyClassificationCoversEveryWorkflowTool(t *testing.T) {
 		"workflow.state": true, "workflow.session.list": true,
 		"workflow.artifact.list": true, "workflow.artifact.get": true, "workflow.tool.list": true,
 	}
-	if len(ToolNames) != 18 {
-		t.Fatalf("tool count=%d, want 18", len(ToolNames))
+	if len(ToolNames) != 19 {
+		t.Fatalf("tool count=%d, want 19", len(ToolNames))
 	}
 	for _, name := range ToolNames {
 		if IsReadOnlyTool(name) != readOnly[name] {

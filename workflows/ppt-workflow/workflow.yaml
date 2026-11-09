@@ -55,39 +55,21 @@ when_to_use: >
   PowerPoint file.
 
 runtime:
-  external_execution:
+  execution:
     version: '1'
     skills:
-    - scenario/external.md
+    - scenario/execution.md
     constraints:
-    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
-      to a LazyMind text or vision model.
-    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
-      capabilities must be configured in LazyMind before retry.
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
     steps:
       analyze_requirements:
-        prompt: Read scenario/external.md and its analyze_requirements step contract from this pinned package. Analyze
-          the brief and actual supplied template; preserve exact page count, including one. Generate and validate with
-          your own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: ppt_inspect_pptx
           source: package
-        required_outputs:
-        - presentation_scenario
-        - requirement_analysis
-        - ppt_capability_requirements
-        - style_flow
-        - generation_mode
-        - presentation_output_format
-        - template_mode
-        - generate_background_images
-        acceptance_criteria:
-        - The brief covers purpose, audience, exact requested count (one is valid), constraints and source/template roles;
-          routing markers match the external presentation rules.
       collect_materials:
-        prompt: Read scenario/external.md and its collect_materials step contract from this pinned package. Read and evaluate
-          the actual sources; produce evidence summary and explicit clarification gaps. Generate and validate with your
-          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -97,60 +79,19 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - material_summary
-        - material_clarification
-        acceptance_criteria:
-        - Sources, factual claims and gaps are explicit; material_clarification is present; optional images are real registered
-          or transferred files.
       build_outline:
-        prompt: Read scenario/external.md and its build_outline step contract from this pinned package. Write a coherent
-          deck outline for exactly the requested count and optional timing plan. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - deck_outline
-        acceptance_criteria:
-        - The deck outline has exactly the requested number of page descriptions, including a valid single page; evidence
-          and timing are consistent.
       plan_page_prompts:
-        prompt: Read scenario/external.md and its plan_page_prompts step contract from this pinned package. Author complete
-          page specifications, shared visual design and speaker notes from the selected outline. Generate and validate
-          with your own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - slide_outline
-        - speaker_notes_source
-        acceptance_criteria:
-        - Each requested page has a complete aligned specification and speaker notes; shared style is consistent and user
-          edits are retained.
       plan_background_prompts:
-        prompt: Read scenario/external.md and its plan_background_prompts step contract from this pinned package. Author
-          aligned text-free background prompts only for the enabled branch. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - background_prompts
-        acceptance_criteria:
-        - Exactly the requested enabled-branch page prompts are supplied; untouched page identities remain stable.
       generate_backgrounds:
-        prompt: Read scenario/external.md and its generate_backgrounds step contract from this pinned package. Generate
-          the approved background images using the selected available provider. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_generator
           source: global
-        required_outputs:
-        - background_images
-        acceptance_criteria:
-        - Every selected approved prompt has a real 1280x720 image, aligned to its page; no empty provider result is accepted.
       generate_ppt:
         skills:
         - runtime/references/html_constraints.md
-        prompt: Read scenario/external.md and its generate_ppt step contract from this pinned package. Create the editable
-          PPTX and aligned HTML/notes previews, inspect the actual output, and repair only defective pages. Generate and
-          validate with your own host capabilities; return the real declared artifacts and verification evidence for hosted
-          publication.
         tools:
         - name: ppt_export_html
           source: package
@@ -158,14 +99,6 @@ runtime:
           source: package
         - name: ppt_inspect_pptx
           source: package
-        required_outputs:
-        - native_pptx
-        - preview_html
-        - preview_notes
-        acceptance_criteria:
-        - A real editable native_pptx has the exact requested slide count (minimum one). Aligned preview_html/preview_notes
-          exist for every page. Actual render and file checks are recorded; unresolved visual limits are disclosed and
-          unrelated pages stay unchanged.
   trigger_inputs: [template_pptx, uploaded_materials]
   publisher_owned_slots:
     - reflection_markdown

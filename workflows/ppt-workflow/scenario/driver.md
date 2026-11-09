@@ -77,23 +77,23 @@ that an unrelated upstream stage needs to run again.
 
 ### build_outline
 
-- `deck_outline` is one Markdown artifact with at least 2 numbered page
+- `deck_outline` is one Markdown artifact with exactly the requested number of page
   descriptions -> PASS
 - This is an automatic step; continue to `plan_page_prompts` after validation.
 - On a whole-slide insertion, the deck outline has exactly one additional page
   at the requested position and old page plans are otherwise unchanged -> PASS
-- Missing deck_outline or fewer than 2 page descriptions -> RETRY
+- Missing deck_outline or a page count different from the request -> RETRY
 - Retry limits are owned by Runtime, not this evaluator. Never declare a terminal
   failure merely from an attempt count.
 
 ### plan_page_prompts
 
-- `slide_outline` list has at least 2 pages with sort_order aligned, each page
+- `slide_outline` list has exactly the requested number of pages with sort_order aligned, each page
   prompt containing a title and content points -> PASS
 - Page-prompt bodies must not contain a `第N页` positional header. On insertion,
   exactly one new composite card is inserted and later cards are not revised.
 - Continue automatically in auto mode; only approval mode may pause for review.
-- Missing slide_outline or fewer than 2 pages -> RETRY
+- Missing slide_outline or a page count different from the request -> RETRY
 - Retry limits are owned by Runtime, not this evaluator. Never declare a terminal
   failure merely from an attempt count.
 
@@ -104,7 +104,7 @@ that an unrelated upstream stage needs to run again.
 
 Full generation:
 
-- `preview_html` and `preview_notes` are present for at least two aligned rows,
+- `preview_html` and `preview_notes` are present for exactly the requested number of aligned rows (one is valid),
   and each `preview_html` value is an HTML document (contains `<html` or
   `<!DOCTYPE`) — NOT slide JSON with layout/theme enums -> DONE
 - Each `preview_notes` should be a richer spoken intro (typically well above one

@@ -159,6 +159,7 @@ type BeginInput struct {
 }
 
 type StepContract struct {
+	Execution               map[string]any    `json:"execution,omitempty"`
 	ExternalExecution       map[string]any    `json:"external_execution,omitempty"`
 	KnowledgeScope          map[string]any    `json:"knowledge_scope,omitempty"`
 	LaunchRequest           string            `json:"launch_request,omitempty"`
@@ -363,6 +364,8 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
 		steps, _ := json.Marshal(retries)
 		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
+	} else if state.Control["input_request"] != nil && continuation == "awaiting_user" {
+		state.AgentInstruction = "Ask the exact questions in control.input_request using the host's question UI or ordinary conversation, then wait for the user's actual reply. Save only that reply with workflow.input.answer using the returned artifact_id, revision and state_version. Never infer answers or mark a review approved. Read workflow.state after saving; stopped runs still require an explicit user resume."
 	} else if continuation == "stopped" {
 		state.AgentInstruction = "The Workflow is stopped. If the user explicitly asks to continue, call workflow.session.resume on this run. Inspect or claim any returned execution_id with workflow.step.claim instead of beginning a duplicate; otherwise read workflow.state again. Without a new user request, END this turn."
 	} else if continuation == "completed" || continuation == "failed" {

@@ -15,3 +15,9 @@
     overflow: hidden;
   }
 }
+
+.conversation-surface-loading {
+  display: grid;
+  height: 100%;
+  place-items: center;
+}

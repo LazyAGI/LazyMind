@@ -44,10 +44,10 @@ def pptx_bytes(order=(2, 1), absolute_targets=False):
     return output.getvalue()
 
 
-def request(files=None, tools=None, **extra):
+def request(files=None, tools=None, policy='external_execution', **extra):
     tools = tools if tools is not None else ['ppt_inspect_pptx']
-    workflow = {'runtime': {'external_execution': {'version': '1', 'steps': {
-        'inspect': {'prompt': 'Inspect', 'tools': [{'name': name, 'source': 'package'} for name in tools]}}}},
+    workflow = {'runtime': {policy: {'version': '1', 'steps': {
+        'inspect': {'tools': [{'name': name, 'source': 'package'} for name in tools]}}}},
         'tool_scripts': [{'path': 'scripts/external_tools.py', 'functions': tools}]}
     contents = {'workflow.yaml': yaml.safe_dump(workflow).encode(),
                 'scripts/external_tools.py': PPT_BINDING.encode(), **(files or {})}
@@ -62,8 +62,9 @@ def call(payload, name='ppt_inspect_pptx', arguments=None):
 
 
 @pytest.mark.parametrize('absolute_targets', [False, True])
-def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets):
-    payload = request()
+@pytest.mark.parametrize('policy', ['external_execution', 'execution'])
+def test_pinned_tool_catalog_and_real_inspection_preserve_slide_order(absolute_targets, policy):
+    payload = request(policy=policy)
     catalog = list_external_tools(ExternalToolRequest(**payload))['tools']
     assert catalog[0]['available'] is True
     assert catalog[0]['name'] == 'ppt_inspect_pptx'
@@ -154,20 +155,22 @@ def test_authenticated_route_uses_same_pinned_validation(monkeypatch):
     assert response.json()['detail']['code'] == 'TOOL_NOT_ALLOWED'
 
 
-def test_every_builtin_has_complete_external_step_contracts():
+def test_every_builtin_has_one_shared_business_specification():
     packages = sorted((ROOT / 'workflows').glob('*/workflow.yaml'))
     assert len(packages) == 14
     count = 0
     for path in packages:
         workflow = yaml.safe_load(path.read_text())
-        external = workflow['runtime']['external_execution']
+        assert 'external_execution' not in workflow['runtime']
+        shared = workflow['runtime']['execution']
         states = yaml.safe_load((path.parent / 'scenario/state.yml').read_text())
         steps = states['steps']
-        assert set(external['steps']) == set(steps)
+        assert set(shared['steps']) == set(steps)
         for step_id in steps:
-            contract = external['steps'][step_id]
-            assert contract['prompt'].strip()
-            for skill in external['skills'] + contract.get('skills', []):
+            contract = shared['steps'][step_id]
+            assert steps[step_id]['prompt'].strip()
+            assert not {'prompt', 'required_outputs', 'acceptance_criteria'} & contract.keys()
+            for skill in shared['skills'] + contract.get('skills', []):
                 assert (path.parent / skill).is_file()
             count += 1
     assert count == 107

@@ -1256,6 +1256,21 @@ describe('external workflow surface boundary', () => {
 
 
 describe('external presentation opt-in', () => {
+  it('keeps conversation results on persisted artifacts even when execution and developer activity are available', async () => {
+    fixture.session.status = 'active';
+    fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
+    fixture.ui.tabs![0].slots = [{ id: 'internal_prompt', label: '生成提示词', type: 'text', user_visible: false }];
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'internal_prompt', slot: 'internal_prompt', step_id: 'prepare' });
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    setDeveloperModeActive(true);
+    render(<WorkflowPanel conversationId='layout-test' resultsOnly externalPresentation={{ activities: {
+      task: { kind: 'tool', tool: 'search', artifacts: [{ slot: 'document', content_type: 'text', seq: 2, value: { text: 'provisional' } }] },
+    } }} />);
+    expect(await screen.findByText('正文 document')).toHaveAttribute('data-value', '正文');
+    expect(screen.queryByText('正文 internal_prompt')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在调用工具：search')).not.toBeInTheDocument();
+    expect(screen.queryByText('生成中预览')).not.toBeInTheDocument();
+  });
   it('shows activity and readonly previews only for the external surface, without changing stored artifacts', async () => {
     fixture.session.status = 'active';
     fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };

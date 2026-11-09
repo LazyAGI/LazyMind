@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,62 @@ func TestExternalSkillCorruptionFailsClosed(t *testing.T) {
 	}
 	if _, err := (DBContextLoader{DB: db}).LoadAttemptContext(t.Context(), "attempt"); err == nil {
 		t.Fatal("skill content no longer matching its pinned hash was accepted")
+	}
+}
+
+func TestSharedExecutionLoadsIdenticalBusinessContractForBothExecutors(t *testing.T) {
+	db := externalExecutionDB(t)
+	compiled := graphengine.Compile(`
+id: shared
+runtime:
+  execution:
+    version: '1'
+    skills: [scenario/external.md]
+    constraints: [Keep exact requested scope]
+    steps:
+      write:
+        tools: [{name: inspect_output, source: package}]
+slots: [{id: result, type: file}]
+steps: [{id: write}]
+`, `
+transitions:
+  __start__: [{to: write}]
+  write: [{to: __end__}]
+steps:
+  write:
+    prompt: Create the requested file with the user's exact content.
+    acceptance_criteria: [The actual file preserves the requested content]
+    tools: [native_generator]
+    terminal_tools: [native_generator]
+    tools_only: true
+    outputs: [{material: result, required: true}]
+`, "", graphengine.ProfilePublish)
+	if !compiled.Valid {
+		t.Fatalf("shared compile: %+v", compiled.Diagnostics)
+	}
+	if err := db.Model(&orm.WorkflowRevision{}).Where("id = ?", "pinned").Update("compiled_graph", compiled.Graph.JSON()).Error; err != nil {
+		t.Fatal(err)
+	}
+	loader := DBContextLoader{DB: db}
+	external, err := loader.LoadAttemptContext(t.Context(), "attempt")
+	if err != nil || external.Execution == nil || external.ExternalExecution == nil || len(external.Execution.SkillFiles) != 1 || external.Execution.SkillFiles[0].Content != "Pinned instructions" {
+		t.Fatalf("external shared context: %+v %v", external, err)
+	}
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "attempt").Update("executor_host", "lazymind").Error; err != nil {
+		t.Fatal(err)
+	}
+	native, err := loader.LoadAttemptContext(t.Context(), "attempt")
+	if err != nil || native.Execution == nil || native.ExternalExecution != nil || !native.ToolsOnly || external.ToolsOnly || len(external.LegacyTools) != 0 {
+		t.Fatalf("native adapter/shared context: %+v %v", native, err)
+	}
+	if native.Prompt != external.Prompt || !reflect.DeepEqual(native.Execution, external.Execution) || !reflect.DeepEqual(native.Acceptance, external.Acceptance) || !reflect.DeepEqual(native.RequiredOutputs, external.RequiredOutputs) {
+		t.Fatal("executors received different business rules, Skills or outputs")
+	}
+	if err := db.Where("revision_id = ? AND path = ?", "pinned", "scenario/external.md").Delete(&orm.WorkflowRevisionEntry{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loader.LoadAttemptContext(t.Context(), "attempt"); err == nil {
+		t.Fatal("native execution silently skipped a missing shared Skill")
 	}
 }
 

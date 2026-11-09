@@ -24,248 +24,84 @@ when_to_use: >
   delivery mode: static or dynamic.
 
 runtime:
-  external_execution:
+  execution:
     version: '1'
     skills:
-    - scenario/external.md
+    - scenario/execution.md
     constraints:
-    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
-      to a LazyMind text or vision model.
-    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
-      capabilities must be configured in LazyMind before retry.
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
     steps:
       classify_request:
-        prompt: Read scenario/external.md and its classify_request step contract from this pinned package. Complete Classify
-          Final Deliverable using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - route_plan
-        acceptance_criteria:
-        - route_plan contains exactly one supported route, a rationale, and delivery_mode=static|dynamic|unspecified for
-          meme or not_applicable otherwise; after it is saved, the workflow engine selects the sole matching transition.
       ordinary_prepare:
-        prompt: Read scenario/external.md and its ordinary_prepare step contract from this pinned package. Complete Prepare
-          Ordinary Image using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - material_summary
-        - ordinary_prompt
-        acceptance_criteria:
-        - The prompt is usable and all saved web images came verbatim from validated selected results.
       ordinary_generate:
-        prompt: Read scenario/external.md and its ordinary_generate step contract from this pinned package. Complete Generate
-          Ordinary Image using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_generator
           source: global
-        required_outputs:
-        - ordinary_output
-        acceptance_criteria:
-        - At least one generated image is saved and no hidden retry occurred.
       edit_prepare:
-        prompt: Read scenario/external.md and its edit_prepare step contract from this pinned package. Complete Prepare
-          Local Edit using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - authoritative_image
-        - edit_contract
-        acceptance_criteria:
-        - One valid authoritative image and a complete four-part edit contract exist.
       edit_candidate:
-        prompt: Read scenario/external.md and its edit_candidate step contract from this pinned package. Complete Generate
-          and Review Edit using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_editor
           source: global
-        required_outputs:
-        - edit_candidate
-        acceptance_criteria:
-        - A new candidate exists and the user explicitly accepts it before completion.
       meme_brief:
-        prompt: Read scenario/external.md and its meme_brief step contract from this pinned package. Complete Confirm Meme
-          Brief using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - meme_brief_data
-        acceptance_criteria:
-        - One delivery mode and a complete ordered state list exist; every state has one non-duplicative caption, communication
-          purpose, and action design; dynamic delivery defaults to one proposed caption per state unless no_text was explicit;
-          every caption is approved or no_text is explicit; brief_status is approved only after both caption approval and
-          count compliance; save_validated_meme_brief confirms requested_count and state count match the immutable launch
-          request and preserves supplied captions verbatim; the user explicitly approves the complete scheme before generation
-          can continue.
       meme_preflight:
-        prompt: Read scenario/external.md and its meme_preflight step contract from this pinned package. Complete Preflight
-          Media Runtime using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - preflight_report
-        acceptance_criteria:
-        - preflight_report.ready is true; otherwise the workflow fails closed before paid calls.
       canonical_character:
-        prompt: Read scenario/external.md and its canonical_character step contract from this pinned package. Complete
-          Confirm Canonical Character using the bound evidence and the domain rules above. Generate and validate with your
-          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_generator
           source: global
-        required_outputs:
-        - canonical_character_image
-        acceptance_criteria:
-        - With an upload, the exact unchanged source is the sole canonical character; without an upload, one neutral generated
-          candidate exists.
       build_identity_anchors:
-        prompt: Read scenario/external.md and its build_identity_anchors step contract from this pinned package. Complete
-          Build Eye and Mouth Anchors using the bound evidence and the domain rules above. Generate and validate with your
-          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_generator
           source: global
-        required_outputs:
-        - character_identity_prompt
-        - face_anchor_images
-        - face_anchor_grid
-        acceptance_criteria:
-        - One grounded identity lock, exactly four distinct ordered eye/mouth anchor images, and one 2x2 review grid exist;
-          no editor call was retried; the user explicitly approves the anchor result before static image generation can
-          continue.
       understand_states:
-        prompt: Read scenario/external.md and its understand_states step contract from this pinned package. Complete Understand
-          Communication States using the bound evidence and the domain rules above. Generate and validate with your own
-          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - state_specs
-        acceptance_criteria:
-        - Every requested state has exactly one distinct, broadly reusable proposition, and every item preserves the exact
-          state and caption from meme_brief_data.states in the same order.
       design_best_performances:
-        prompt: Read scenario/external.md and its design_best_performances step contract from this pinned package. Complete
-          Design Best Performances using the bound evidence and the domain rules above. Generate and validate with your
-          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - best_performances
-        acceptance_criteria:
-        - Every state has one complete, distinct, identity-safe BestPerformance with the exact approved state and caption
-          and a non-empty facial performance; no signed URL, local path, or model-rendered text instruction is embedded;
-          select_meme_delivery_route returns the sole control.next_step matching the approved delivery mode after best_performances
-          is saved.
       plan_static:
-        prompt: Read scenario/external.md and its plan_static step contract from this pinned package. Complete Plan Static
-          Hero Frames using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - static_plan
-        acceptance_criteria:
-        - There is exactly one text-free hero-frame plan per state and no caption box is preselected.
       render_static:
-        prompt: Read scenario/external.md and its render_static step contract from this pinned package. Complete Render
-          Text-Free Hero Frames using the bound evidence and the domain rules above. Generate and validate with your own
-          host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_generator
           source: global
-        required_outputs:
-        - hero_no_text
-        acceptance_criteria:
-        - One and only one text-free hero result exists per successful state-generation call.
       caption_static:
-        prompt: Read scenario/external.md and its caption_static step contract from this pinned package. Complete Caption
-          Static Results using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - static_final
-        acceptance_criteria:
-        - Final images preserve order and captions, when enabled, use post-render whitespace analysis.
       plan_dynamic:
-        prompt: Read scenario/external.md and its plan_dynamic step contract from this pinned package. Complete Plan Key
-          Images and Motion using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - dynamic_plan
-        acceptance_criteria:
-        - Each state has the exact same grounded identity_lock, exactly one key-image prompt, and one motion-only prompt
-          that starts from that image without redefining appearance.
       render_keyframes:
-        prompt: Read scenario/external.md and its render_keyframes step contract from this pinned package. Complete Render
-          Key Images using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: image_generator
           source: global
-        required_outputs:
-        - master_keyframes
-        acceptance_criteria:
-        - The list contains exactly one ordered key image per state, every call uses the same canonical source and shared
-          identity lock, and every caption identifies its state; the user explicitly approves all static key images before
-          video generation can continue.
       video_canary:
-        prompt: Read scenario/external.md and its video_canary step contract from this pinned package. Complete Generate
-          and Review Video Canary using the bound evidence and the domain rules above. Generate and validate with your
-          own host capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: video_generator
           source: global
-        required_outputs:
-        - canary_video
-        - canary_state_id
-        acceptance_criteria:
-        - Exactly one first-state canary exists before the remaining videos are generated.
       render_dynamic:
-        prompt: Read scenario/external.md and its render_dynamic step contract from this pinned package. Complete Render
-          Remaining Videos using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: video_generator
           source: global
-        required_outputs:
-        - remaining_videos
-        acceptance_criteria:
-        - The canary and every remaining state have exactly one ordered video matching dynamic_plan, and the user explicitly
-          approves the complete video set before GIF conversion can continue.
       caption_dynamic:
-        prompt: Read scenario/external.md and its caption_dynamic step contract from this pinned package. Complete Caption
-          and Convert GIFs using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - gif_output
-        acceptance_criteria:
-        - One ordered final GIF exists per successful video; every output is provenance-checked as the atomic converter-captioner
-          result and contains its exact approved caption.
       review_pack:
-        prompt: Read scenario/external.md and its review_pack step contract from this pinned package. Complete Review Final
-          Pack using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - pack_review
-        acceptance_criteria:
-        - One final review covers every delivered item; approval is allowed only when all requested states pass in order
-          and failed_units is empty, while any rework is scoped to the smallest failed unit.
   clarification_fields:
     - id: image_goal
       label: 图片主体或修改要求

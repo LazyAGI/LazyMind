@@ -251,6 +251,9 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		if c.DeletedAt != nil {
 			return nil, 0, errConversationInTrash
 		}
+		if taskcenter.ExternalWorkflowSessionID(c) != "" {
+			return nil, 0, errExternalWorkflowConversation
+		}
 		var count int64
 		db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", convID).Count(&count)
 

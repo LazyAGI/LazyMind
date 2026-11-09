@@ -6,3 +6,9 @@ it('recognizes published DSH MCP names and rejects unrelated tools', () => {
   expect(workflowOperation('mcp__lazymind__workflow_start_other', 'lazymind')).toBeNull()
   expect(workflowOperation('mcp__other__workflow_start_301c35d7c4b6', 'lazymind')).toBeNull()
 })
+
+it.each(['input_answer', 'tool_list', 'tool_call'])('recognizes shared %s operations without a host-specific implementation', operation => {
+  expect(workflowOperation(`mcp__lazymind__workflow_${operation}_301c35d7c4b6`, 'lazymind')).toBe(operation)
+  expect(workflowOperation(`mcp__lazymind__workflow_${operation}`, 'lazymind')).toBe(operation)
+  expect(workflowOperation(`mcp__other__workflow_${operation}`, 'lazymind')).toBeNull()
+})

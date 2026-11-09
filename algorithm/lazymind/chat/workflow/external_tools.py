@@ -85,7 +85,10 @@ def _selected(request: ExternalToolRequest, *, listing: bool = False) -> dict[st
     files = _decode_package(request)
     try:
         workflow = yaml.safe_load(files['workflow.yaml'])
-        external = workflow['runtime']['external_execution']
+        runtime = workflow['runtime']
+        if 'execution' in runtime and 'external_execution' in runtime:
+            raise ValueError('ambiguous execution policy')
+        external = runtime.get('execution', runtime.get('external_execution'))
         if str(external['version']) != '1':
             raise ValueError('unsupported version')
         step = external['steps'][request.step_id]

@@ -1,4 +1,5 @@
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from '@/modules/taskCenter/events';
+import { useWorkflowChanges } from '@/modules/taskCenter/useWorkflowChanges';
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -169,6 +170,7 @@ export default function MainLayout() {
     return () => { disposed = true; window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, changed); };
   }, [isLoggedIn, directoryUser]);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
+  useWorkflowChanges(isLoggedIn ? userInfo?.userId || userInfo?.username || '' : '');
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();

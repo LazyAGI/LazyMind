@@ -16,6 +16,41 @@ class StopReceiptRuntime:
 
 
 @pytest.mark.asyncio
+async def test_native_executor_consumes_pinned_shared_skills_and_constraints(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+
+    worker = RemoteWorkflowExecutor()
+    runtime = AsyncMock()
+    runtime.context.return_value = {
+        'metadata': {'task_id': 'shared-task'}, 'inputs': {},
+        'execution': {
+            'version': '1', 'constraints': ['Keep the exact requested page count.'],
+            'skill_files': [{'path': 'scenario/execution.md', 'content': 'Inspect the actual output.'}],
+        },
+    }
+    runtime.execution_spec.return_value = {
+        'task': {'objective': 'Create one slide.', 'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'params': {'tools_only': True},
+        'steps': [], 'llm_config': {},
+    }
+    worker.runtime = runtime
+
+    async def stream(**kwargs):
+        task = kwargs['task_spec']
+        assert 'Create one slide.' in task['objective']
+        assert 'Keep the exact requested page count.' in task['objective']
+        assert 'Pinned workflow Skill (scenario/execution.md):\nInspect the actual output.' in task['objective']
+        assert task['params']['tools_only'] is True
+        yield 'data: ' + json.dumps({'type': 'done', 'status': 'interrupted'}) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    await worker._run_claim(object(), {'attempt_id': 'shared-attempt', 'lease_token': 'lease'})
+    runtime.cancel.assert_awaited_once()
+    runtime.fail.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_stop_receipt_retries_transport_and_service_errors_without_rerunning_tools(monkeypatch):
     from unittest.mock import AsyncMock
     from lazymind.chat.workflow.client import RemoteExecutorClient

@@ -24,6 +24,7 @@ var ToolNames = []string{
 	"workflow.get",
 	"workflow.input.import",
 	"workflow.input.get",
+	"workflow.input.answer",
 	"workflow.start",
 	"workflow.state",
 	"workflow.session.list",
@@ -105,6 +106,7 @@ const workflowStartDescription = "Prepare a Workflow and create a durable sessio
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	registerExecutionTools(server, client)
+	registerInputAnswer(server, client)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
 		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}},
@@ -205,6 +207,9 @@ func Register(server *mcp.Server, client *Client) {
 				return nil, value, err
 			}
 			if AwaitingReview(value.State) {
+				if value.State.Control["input_request"] != nil {
+					return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: value.State.AgentInstruction}}}, value, nil
+				}
 				message := "Stop this turn. The submitted step requires user review in the Workflow panel"
 				message += ". Do not call workflow.step.begin until the user asks to continue."
 				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}}, value, nil

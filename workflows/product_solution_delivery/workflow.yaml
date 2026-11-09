@@ -15,266 +15,82 @@ when_to_use: >
   不用于单独市场规模、路线图排序、技术架构、发布运维、数据分析方案或营销文案。
 
 runtime:
-  external_execution:
+  execution:
     version: '1'
     skills:
-    - scenario/external.md
+    - scenario/execution.md
     constraints:
-    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
-      to a LazyMind text or vision model.
-    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
-      capabilities must be configured in LazyMind before retry.
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
     steps:
       route_product_stage:
-        prompt: Read scenario/external.md and its route_product_stage step contract from this pinned package. Complete
-          产品阶段 Router using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - routing_record
-        - execution_plan
-        - routing_summary
-        - research_evidence
-        - research_log
-        - material_digest
-        - resource_profiles
-        acceptance_criteria:
-        - 'The parent routing record satisfies the source contract, exactly one business-stage edge is
-
-          selected, the closed evidence handoff contains no invented retrieval, and user files are
-
-          profiled exactly once.'
       build_direction_outline:
-        prompt: Read scenario/external.md and its build_direction_outline step contract from this pinned package. Complete
-          产品方向大纲生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - direction_task
-        - direction_context
-        - direction_outline
-        - direction_outline_report
-        - direction_context_approved
-        acceptance_criteria:
-        - One editable, structurally valid direction outline exists and is approved by the user.
       write_direction_document:
-        prompt: Read scenario/external.md and its write_direction_document step contract from this pinned package. Complete
-          产品方向文档生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - direction_assessment
-        - direction_document
-        - direction_document_html
-        - direction_context_final
-        acceptance_criteria:
-        - The editable direction brief follows the approved outline and preserves evidence and decision status.
       analyze_competitive_position:
-        prompt: Read scenario/external.md and its analyze_competitive_position step contract from this pinned package.
-          Complete 竞品与生态位分析 using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - competitive_assessment
-        - competitive_analysis
-        - competitive_analysis_markdown
-        acceptance_criteria:
-        - The synchronized HTML and Markdown lead with the same readable market conclusion, use evidence-bound visuals,
-          and keep research details separate.
       route_design_scope:
-        prompt: Read scenario/external.md and its route_design_scope step contract from this pinned package. Complete 产品方案内部
-          Router using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - design_routing_record
-        - design_effort_route
-        - design_routing_summary
-        acceptance_criteria:
-        - 'The record activates only actual primary/linked design domains, assigns every subdecision one
-
-          validated effort, honors all hard gates, and selects exactly one light or heavy edge.'
       collect_design_light_evidence:
-        prompt: Read scenario/external.md and its collect_design_light_evidence step contract from this pinned package.
-          Complete 产品方案轻量取证 using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - design_light_evidence
-        acceptance_criteria:
-        - 'Evidence stays within the approved design scope, supports each light decision at an honest
-
-          conclusion strength, and exposes any trigger that requires escalation.'
       collect_design_heavy_evidence:
-        prompt: Read scenario/external.md and its collect_design_heavy_evidence step contract from this pinned package.
-          Complete 产品方案重型取证 using the bound evidence and the domain rules above. Generate and validate with your own host
-          capabilities; return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - design_heavy_evidence
-        acceptance_criteria:
-        - 'Heavy evidence satisfies the activated domain contracts or explicitly lowers the conclusion
-
-          ceiling, includes contrary evidence, and records all hard-gate confirmations and boundaries.'
       build_design_outline:
-        prompt: Read scenario/external.md and its build_design_outline step contract from this pinned package. Complete
-          产品方案大纲生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - design_task
-        - design_context
-        - design_outline
-        - design_outline_report
-        - design_context_approved
-        acceptance_criteria:
-        - One editable design outline incorporates actual approved upstream artifacts and is approved by the user.
       write_design_document:
-        prompt: Read scenario/external.md and its write_design_document step contract from this pinned package. Complete
-          产品方案文档生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - design_assessment
-        - design_document
-        - design_document_html
-        - design_context_final
-        acceptance_criteria:
-        - The editable product design follows the approved outline and actual upstream decisions.
       build_prd_outline:
-        prompt: Read scenario/external.md and its build_prd_outline step contract from this pinned package. Complete PRD
-          大纲生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - prd_task
-        - prd_context
-        - prd_outline
-        - prd_outline_report
-        - prd_context_approved
-        acceptance_criteria:
-        - One editable PRD outline uses the approved design or honestly marks missing upstream decisions.
       write_prd_document:
-        prompt: Read scenario/external.md and its write_prd_document step contract from this pinned package. Complete PRD
-          文档生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - prd_assessment
-        - prd_document
-        - prd_document_html
-        - prd_context_final
-        acceptance_criteria:
-        - The editable PRD follows the approved outline and distinguishes confirmed rules from gaps.
       build_interactive_prototype:
-        prompt: Read scenario/external.md and its build_interactive_prototype step contract from this pinned package. Complete
-          交互原型生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - prototype_assessment
-        - prototype
-        - prototype_markdown
-        acceptance_criteria:
-        - The synchronized HTML and Markdown map to approved upstream rules, expose the same key states and limits, and
-          use plain Chinese product copy without workflow jargon.
       build_review_outline:
-        prompt: Read scenario/external.md and its build_review_outline step contract from this pinned package. Complete
-          方案评审大纲生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - review_task
-        - review_context
-        - review_outline
-        - review_outline_report
-        - review_context_approved
-        acceptance_criteria:
-        - One editable review outline is grounded in exact available artifact versions and approved by the user.
       write_review_document:
-        prompt: Read scenario/external.md and its write_review_document step contract from this pinned package. Complete
-          方案评审报告生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - review_assessment
-        - review_document
-        - review_document_html
-        - review_context_final
-        acceptance_criteria:
-        - The review report is traceable, prioritized and does not mutate reviewed artifacts.
       build_handoff_outline:
-        prompt: Read scenario/external.md and its build_handoff_outline step contract from this pinned package. Complete
-          研发交付大纲生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - handoff_task
-        - handoff_context
-        - handoff_outline
-        - handoff_outline_report
-        - handoff_context_approved
-        acceptance_criteria:
-        - One editable handoff outline reflects exact approved dependencies, blockers and confirmation items.
       write_handoff_document:
-        prompt: Read scenario/external.md and its write_handoff_document step contract from this pinned package. Complete
-          研发交付文档生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: knowledge_list_documents
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - handoff_assessment
-        - handoff_document
-        - handoff_document_html
-        - handoff_context_final
-        acceptance_criteria:
-        - The handoff package is traceable and gives a non-inflated implementation-readiness conclusion.
       finalize_product_delivery:
-        prompt: Read scenario/external.md and its finalize_product_delivery step contract from this pinned package. Complete
-          产品交付总结 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - delivery_summary
-        - stage_manifest
-        - workspace_state
-        acceptance_criteria:
-        - 'Exactly one selected-stage artifact is registered, the Workspace stops at
-
-          awaiting-stage-confirmation, and the visible summary offers continue/switch/export/finish
-
-          without exposing the internal contracts.'
   transactional_outputs: true
   host_extensions: [product-project-v1]
   trigger_inputs: [product_goal, product_materials, requested_stage, execution_depth, word_target, reference_sample, reference_sample_choice]

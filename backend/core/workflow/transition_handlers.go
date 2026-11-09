@@ -663,7 +663,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
-		if err := guardRunAdvance(tx, session); err != nil {
+		if err := guardRunAdvance(tx, session, replacesInputCheckpoint(graph, req)); err != nil {
 			var rejected *controlstore.Error
 			if errors.As(err, &rejected) {
 				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, rejected.Code, rejected.Message, false, nil)

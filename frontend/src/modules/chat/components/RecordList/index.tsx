@@ -1,4 +1,4 @@
-import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
+import { TASKS_REMOVED_EVENT, WORKFLOW_TASKS_CHANGED } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
@@ -20,6 +20,7 @@ import {
   FolderOutlined,
   InboxOutlined,
   FilePdfOutlined,
+  ApiOutlined,
   MoreOutlined,
   PushpinFilled,
   PushpinOutlined,
@@ -593,6 +594,34 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       },
     }));
 
+    const refreshWhenIdle = useRef<() => boolean>(() => false);
+    refreshWhenIdle.current = () => {
+      if (isHistoryLoading || showBatchExport || renamingId || openMenuId || activeDragId
+        || archiveItem || movingConversation || deleteHistoryInFlightRef.current
+        || pinningConversationRef.current || reorderingConversationRef.current) return false;
+      void getHistory({ isFirst: true, searchText: keyword, preserveWindow: true, silent: true });
+      return true;
+    };
+    useEffect(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const refresh = () => {
+        timer = undefined;
+        if (document.hidden) return;
+        // A refresh must not interrupt a selection, drag or title edit.
+        if (!refreshWhenIdle.current()) timer = setTimeout(refresh, 500);
+      };
+      const schedule = () => { clearTimeout(timer); timer = setTimeout(refresh, 200); };
+      window.addEventListener(WORKFLOW_TASKS_CHANGED, schedule);
+      window.addEventListener('focus', schedule);
+      document.addEventListener('visibilitychange', schedule);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener(WORKFLOW_TASKS_CHANGED, schedule);
+        window.removeEventListener('focus', schedule);
+        document.removeEventListener('visibilitychange', schedule);
+      };
+    }, []);
+
 
     useEffect(() => {
       if (
@@ -666,8 +695,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       isFirst?: boolean;
       searchText?: string;
       preserveWindow?: boolean;
+      silent?: boolean;
     }) {
-      const { isMore = false, isFirst = false, searchText, preserveWindow = false } = params ?? {};
+      const { isMore = false, isFirst = false, searchText, preserveWindow = false, silent = false } = params ?? {};
       const activeFilter = conversationFiltersRef.current;
       const requestId = ++historyRequestRef.current;
       const scope = JSON.stringify([activeFilter, (searchText ?? keyword).trim()]);
@@ -707,7 +737,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       } catch {
         if (!isCurrent()) return;
         rememberView();
-        message.error(t("chat.fork.historyLoadFailed"));
+        if (!silent) message.error(t("chat.fork.historyLoadFailed"));
         setHistoryRevision(revision => revision + 1);
       } finally {
         if (isCurrent()) setIsHistoryLoading(false);
@@ -1159,6 +1189,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />
             </Tooltip>
           ) : null}
+          {source.external_workflow_session_id && <Tooltip title={t('chat.externalWorkflowResult')}>
+            <ApiOutlined className='record-source-icon' aria-label={t('chat.externalWorkflowResult')} />
+          </Tooltip>}
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>

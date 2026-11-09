@@ -189,6 +189,8 @@ interface WorkflowPanelProps {
   /** Optional external host surface; omitted by native chat callers. */
   embedded?: boolean;
   externalPresentation?: ExternalWorkflowPresentation;
+  /** Show persisted user-facing artifacts without execution activity or debug slots. */
+  resultsOnly?: boolean;
   onRefresh?: () => Promise<void>;
   controlAdapter?: WorkflowPanelControlAdapter;
 
@@ -1711,7 +1713,7 @@ export function WorkflowPanel({
   onReference,
   chatBusy = false,
   onDismissed,
-  embedded = false, onRefresh, controlAdapter, externalPresentation,
+  embedded = false, onRefresh, controlAdapter, externalPresentation, resultsOnly = false,
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
   const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId, Boolean(onRefresh));
@@ -1722,7 +1724,7 @@ export function WorkflowPanel({
   const locatedPreview = useRef<string | null>(null);
   const refresh = onRefresh ?? refreshConversation;
   const activities = externalPresentation?.activities ?? {};
-  const runningTasks = externalPresentation ? activeExecutionTasks(session) : [];
+  const runningTasks = externalPresentation && !resultsOnly ? activeExecutionTasks(session) : [];
   const latestActivity = runningTasks.map(step => activities[step.task_id]).find(activity => activity?.kind && !activity.finished);
   const taskCenterTasks = useTaskCenterStore((state) =>
     conversationId
@@ -1740,7 +1742,8 @@ export function WorkflowPanel({
   const [uiResponse, setUIResponse] = useState<{ requestKey: string; ui: WorkflowUI } | null>(null);
   const uiReady = uiResponse?.requestKey === uiRequestKey && Boolean(session);
   const rawUI = uiReady ? uiResponse!.ui : undefined;
-  const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
+  const [developerModeEnabled, setDeveloperMode] = useState(isDeveloperModeActive);
+  const developerMode = developerModeEnabled && !resultsOnly;
   useEffect(() => {
     const update = () => setDeveloperMode(isDeveloperModeActive());
     window.addEventListener(DEVELOPER_ACTIVE_EVENT, update);
@@ -2489,7 +2492,7 @@ export function WorkflowPanel({
             beforeAction={flushPendingEdits} onRefresh={refresh} onSendMessage={onSendMessage} />
           {hasTabs ? (
             tabs.map((tab, idx) => {
-              const preview = externalPresentation && !anySlotEditing ? executionPreview(session, tab, activities) : session;
+              const preview = externalPresentation && !resultsOnly && !anySlotEditing ? executionPreview(session, tab, activities) : session;
               const previewing = preview !== session;
               const isPaperAnalysis = session.workflow_id === 'paper-writing'
                 && resolveWorkflowTabStepId(tab, session.steps) === 'data_analysis';

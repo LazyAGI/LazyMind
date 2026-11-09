@@ -2,7 +2,7 @@ import { AdmissionRejected, type RuntimeAdapter, type ToolCall, type HostInput }
 import { BridgeError, type HostTransport, type ActionClaim } from './transport'
 import { interaction, object, readControl, type RunLink, type WorkflowControl } from './protocol'
 
-const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get'])
+const READS = new Set(['list', 'get', 'input_get', 'state', 'session_list', 'artifact_list', 'artifact_get', 'tool_list'])
 const ACQUIRE = new Set(['step_begin', 'step_claim', 'step_resume'])
 const PAUSED = new Set(['awaiting_user', 'awaiting_executor', 'draining', 'stopped', 'binding_required'])
 

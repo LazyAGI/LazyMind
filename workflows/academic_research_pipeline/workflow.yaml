@@ -17,35 +17,19 @@ when_to_use: >
   单独审稿或格式转换时不应触发完整流程。
 
 runtime:
-  external_execution:
+  execution:
     version: '1'
     skills:
-    - scenario/external.md
+    - scenario/execution.md
     constraints:
-    - All generative reasoning and semantic/visual validation are performed by the external host subagent; never fall back
-      to a LazyMind text or vision model.
-    - Honor pinned input revisions, conditional outputs, requested scope and actual review boundaries. Missing required
-      capabilities must be configured in LazyMind before retry.
+    - Follow the shared state.yml step specification, declared output schemas and acceptance criteria; preserve the
+      user request and bound input revisions.
+    - Validate actual artifacts before completion, honor questions and review pauses, and report missing capabilities
+      without fabricating output.
     steps:
       formulate_research:
-        prompt: Read scenario/external.md and its formulate_research step contract from this pinned package. Complete 研究问题与方法设计
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - generation_parameters
-        - research_question_brief
-        - methodology_blueprint
-        acceptance_criteria:
-        - 'Parameters are canonical and contain no inferred defaults. The primary question is
-
-          answerable and bounded; methodology is compatible with the question and labels every
-
-          unavailable empirical input or institutional determination as planned/unknown.'
       retrieve_literature:
-        prompt: Read scenario/external.md and its retrieve_literature step contract from this pinned package. Complete
-          学术与知识库检索 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -55,19 +39,7 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - literature_evidence
-        - search_log
-        acceptance_criteria:
-        - 'Every registered evidence ID maps to a real returned record with preserved provenance.
-
-          Failed/unavailable channels and coverage limits are explicit. No citation, DOI, author,
-
-          title, venue, date or URL is invented.'
       synthesize_evidence:
-        prompt: Read scenario/external.md and its synthesize_evidence step contract from this pinned package. Complete
-          文献核验与证据综合 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools:
         - name: academic_context
           source: package
@@ -77,163 +49,26 @@ runtime:
           source: package
         - name: knowledge_read_document
           source: package
-        required_outputs:
-        - annotated_bibliography
-        - research_synthesis
-        - writing_task
-        - resource_profiles
-        - writing_context
-        acceptance_criteria:
-        - 'The bibliography accounts for every retained evidence ID without invented metadata.
-
-          Synthesis exposes supporting and contradictory evidence plus gaps. Writer files are real
-
-          files and context preserves the complete registered corpus as a locked fact.'
       build_paper_outline:
-        prompt: Read scenario/external.md and its build_paper_outline step contract from this pinned package. Complete
-          论文大纲生成 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - outline_document
-        - outline_check_report
-        - writing_context_after_outline
-        acceptance_criteria:
-        - 'The editable outline is a real Markdown file. Structural report says PASS, leaf targets
-
-          sum to the confirmed target, source refs are registered, and the standard academic
-
-          sections/declarations are present or explicitly flagged before user approval.'
       write_paper_draft:
-        prompt: Read scenario/external.md and its write_paper_draft step contract from this pinned package. Complete 论文全文生成
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - effective_outline_check_report
-        - draft_document
-        - writing_context_after_draft
-        acceptance_criteria:
-        - 'The latest editable draft is a real Markdown file and follows the approved heading order.
-
-          Target-length and evidence-ID deviations remain visible in the following external-agent audit
-
-          without making completed prose disappear. Per-section source_refs are
-
-          planning guidance rather than a hard authorization boundary. Conventional sections omitted by
-
-          the user-approved outline are visible warnings rather than silently restored chapters or
-
-          deterministic failures. First generation has ordered section files; targeted revision does
-
-          not fabricate replacement evidence.'
       pre_review_integrity:
-        prompt: Read scenario/external.md and its pre_review_integrity step contract from this pinned package. Complete
-          审稿前完整性检查 using the bound evidence and the domain rules above. Generate and validate with your own host capabilities;
-          return the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - pre_integrity_report
-        - pre_integrity_summary
-        acceptance_criteria:
-        - 'Report and summary expose deterministic failures, sampling denominators, UNKNOWN and
-
-          NOT_CHECKED states, seven failure modes and every blocking concern. No unsupported
-
-          claim of complete plagiarism, statistical or source-content verification is made.'
       peer_review:
-        prompt: Read scenario/external.md and its peer_review step contract from this pinned package. Complete 五视角同行评审
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - reviewer_configuration
-        - review_reports
-        - editorial_decision
-        - revision_roadmap
-        acceptance_criteria:
-        - 'Five ordered, perspective-specific reports exist; every criticism is anchored and
-
-          actionable. Decision is one closed value, synthesizes rather than fabricates findings,
-
-          and roadmap accounts for all Critical/Major/Minor items.'
       revise_paper:
-        prompt: Read scenario/external.md and its revise_paper step contract from this pinned package. Complete 论文一轮修订
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - revised_document
-        - revision_response
-        - writing_context_after_revision
-        acceptance_criteria:
-        - 'revised_document is editable and every roadmap item has an explicit disposition.
-
-          Untouched scope is preserved, disagreements are evidence-based, and no new unregistered
-
-          source or fabricated result appears.'
       re_review:
-        prompt: Read scenario/external.md and its re_review step contract from this pinned package. Complete 修订验证复审 using
-          the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - re_review_report
-        - re_review_decision
-        acceptance_criteria:
-        - 'Every first-round item is verified against manuscript evidence. Decision is one closed
-
-          value; no Reject is emitted, and MAJOR is used only for material unresolved issues.'
       second_revision:
-        prompt: Read scenario/external.md and its second_revision step contract from this pinned package. Complete 论文二轮修订
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - second_revised_document
-        - second_revision_response
-        acceptance_criteria:
-        - 'Second revision is a real editable Markdown file, stays within residual issue scope and
-
-          records every addressed or acknowledged item. No third revision loop is possible.'
       final_integrity:
-        prompt: Read scenario/external.md and its final_integrity step contract from this pinned package. Complete 最终完整性检查
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - final_integrity_report
-        - final_integrity_summary
-        acceptance_criteria:
-        - 'Final report is a fresh check of the latest bytes, exposes every unresolved state and
-
-          never inherits a previous PASS without re-evaluation.'
       finalize_paper:
-        prompt: Read scenario/external.md and its finalize_paper step contract from this pinned package. Complete 论文格式化与交付
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - final_paper_markdown
-        - final_paper
-        - delivery_metadata
-        acceptance_criteria:
-        - 'Markdown snapshot is complete. final_paper is a non-empty `.md` or valid `.docx`
-
-          matching the confirmed output format, and metadata names the actual renderer and source
-
-          Skill adaptation.'
       process_summary:
-        prompt: Read scenario/external.md and its process_summary step contract from this pinned package. Complete 研究与写作过程记录
-          using the bound evidence and the domain rules above. Generate and validate with your own host capabilities; return
-          the real declared artifacts and verification evidence for hosted publication.
         tools: []
-        required_outputs:
-        - process_record
-        acceptance_criteria:
-        - 'Process record is auditable, distinguishes deterministic/generative/human actions,
-
-          preserves failures and limitations, and names the exact source Skill adaptation.'
   exclusive_tool_capabilities: [writer.create, writer.revise]
   collects_knowledge: true
   clarification_fields:

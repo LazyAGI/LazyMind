@@ -229,6 +229,35 @@ describe('shared delivery contract with an SDK-free host', () => {
 })
 
 describe('shared coordination contract with an SDK-free host', () => {
+  it('pauses on a mid-run question, admits the user answer turn and waits for Core before continuing', async () => {
+    const f = fixture()
+    await f.start()
+    f.updateControl({ continuation: 'awaiting_user', admission: { can_begin: false },
+      input_request: { artifact_id: 'questions-1', revision: 2, slot: 'clarification',
+        questions: [{ id: 'audience', question: 'Who is the audience?' }] } })
+    const pending = await f.coordinator.afterResult({ structuredContent: { execution_id: 'done', control: f.control() } }, f.call('step_complete'))
+    expect(f.coordinator.shouldConclude(f.root, pending)).toBe(true)
+    expect(await f.turn()).toBe(false)
+    expect(await f.coordinator.beforeTurn({ agent: f.root, turn: 2,
+      messages: [{ user: true, requestId: 'actual-user-answer' }], signal: f.lifetime.signal })).toBe(true)
+    // Receiving user text does not approve/clear the pending question.
+    expect(f.coordinator.ensure(f.root).control?.input_request?.revision).toBe(2)
+    expect(f.coordinator.ensure(f.root).control?.admission.can_begin).toBe(false)
+    f.updateControl({ continuation: 'continue', admission: { can_begin: true }, input_request: undefined })
+    const answered = await f.coordinator.afterResult({ structuredContent: { control: f.control() } }, f.call('input_answer'))
+    expect(answered?.continuation).toBe('continue')
+    expect(f.coordinator.shouldConclude(f.root, answered)).toBe(false)
+    expect(f.runtime.prompt).not.toHaveBeenCalled()
+    expect(f.coordinator.ensure(f.root).grants.size).toBe(0)
+  })
+
+  it('does not claim an unrelated run when discovering its optional tools', async () => {
+    const f = fixture()
+    await f.coordinator.afterResult({ structuredContent: { control: f.control() } }, f.call('tool_list', f.other))
+    expect(f.coordinator.ensure(f.other).runId).toBeUndefined()
+    expect(f.bridge.bind).not.toHaveBeenCalled()
+  })
+
   it('yields at review without blocking another host session', async () => {
     const f = fixture()
     await f.start()

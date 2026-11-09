@@ -7,10 +7,21 @@ export interface WorkflowControl {
   state_version: number
   continuation: string
   admission: { can_begin: boolean; reason?: string }
+  input_request?: { artifact_id: string; revision: number; slot: string; title?: string; questions: Array<Record<string, unknown>> }
   native_execution_ids?: string[]
   active_execution_ids?: string[]
   active_executions?: number
   binding?: { provider?: string; connector_id?: string; driver_session_id?: string; generation?: number; bound: boolean }
+}
+
+// Canonical MCP operations are shared by every host adapter. Adapters only
+// decode their transport's tool-name spelling before using this registry.
+const WORKFLOW_OPERATIONS = new Set(['list', 'get', 'input_import', 'input_get', 'input_answer',
+  'start', 'state', 'session_list', 'session_stop', 'session_resume', 'step_begin', 'step_claim',
+  'step_resume', 'step_complete', 'artifact_publish', 'artifact_list', 'artifact_get', 'tool_list', 'tool_call'])
+
+export function workflowOperationName(value: string): string | null {
+  return WORKFLOW_OPERATIONS.has(value) ? value : null
 }
 
 export function object(value: unknown): Record<string, unknown> | null {
