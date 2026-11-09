@@ -20,6 +20,7 @@ import (
 const maxLocalArtifactBytes = 20 << 20
 
 var ToolNames = []string{
+	"workflow.action.get", "workflow.action.respond", "workflow.action.cancel", "workflow.edit.context", "workflow.edit.commit",
 	"workflow.list",
 	"workflow.get",
 	"workflow.input.import",
@@ -43,7 +44,7 @@ var ToolNames = []string{
 
 func IsReadOnlyTool(name string) bool {
 	switch name {
-	case "workflow.list", "workflow.get", "workflow.input.get", "workflow.state", "workflow.session.list",
+	case "workflow.action.get", "workflow.edit.context", "workflow.list", "workflow.get", "workflow.input.get", "workflow.state", "workflow.session.list",
 		"workflow.artifact.list", "workflow.artifact.get", "workflow.tool.list":
 		return true
 	default:
@@ -106,6 +107,8 @@ const workflowStartDescription = "Prepare a Workflow and create a durable sessio
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	registerExecutionTools(server, client)
+	registerActionTools(server, client)
+	registerEditTools(server, client)
 	registerInputAnswer(server, client)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
 		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly,
@@ -115,7 +118,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.get", Title: "Get a LazyMind Workflow",
-		Description: "Read one published Workflow revision: identifiers, startup_contract and declared tool_scripts as UTF-8 files. startup_contract.input_materials lists exact material_id values, types and cardinalities for workflow.start inputs; use these IDs instead of guessing input keys. startup_contract.clarification_fields declares startup answers. Omits compiled_graph, scenario, and yaml. Use when inspecting package scripts; step execution uses the contract returned by workflow.step.begin.", Annotations: readOnly},
+		Description: "Read one published Workflow revision: identifiers and startup_contract. startup_contract.input_materials lists exact material_id values, types and cardinalities for workflow.start inputs; use these IDs instead of guessing input keys. startup_contract.clarification_fields declares startup answers. Omits implementation source and compiled graph to keep host context compact; step execution uses the contract returned by workflow.step.begin.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input GetInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.Get(ctx, input.WorkflowID, input.RevisionID)
 			return nil, value, err
@@ -260,6 +263,9 @@ func encodeOutput(output Output) (map[string]any, error) {
 	}
 	if output.LocalPath != "" && output.Value != nil {
 		return nil, fmt.Errorf("output %q must use either local_path or value, not both", slot)
+	}
+	if nested, ok := output.Value.(map[string]any); ok && nested["local_path"] != nil {
+		return nil, fmt.Errorf("output %q: local_path must be at output.local_path, not inside value; otherwise the file is not uploaded", slot)
 	}
 	value := output.Value
 	if output.LocalPath != "" {

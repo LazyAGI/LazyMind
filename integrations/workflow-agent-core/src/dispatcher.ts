@@ -8,13 +8,13 @@ export function createDispatcher<A>(runtime: RuntimeAdapter<A>, host: Pick<Coord
   async function deliver(action: HostAction) {
     // Offline/busy hosts retain pending work without spending a delivery lease.
     // Cancel never waits behind a continuation's readiness check.
-    if (action.status === 'pending' && action.kind === 'continue' && runtime.ready
+    if (action.status === 'pending' && action.kind !== 'cancel' && runtime.ready
       && !await runtime.ready(action.native_session_id, signal)) return
     if (action.status !== 'pending') {
       // Reconcile delivery receipts, not Workflow execution eligibility.
       const current = await bridge.action(action.id, signal)
       if (!['pending', 'dispatching', 'unknown'].includes(current.action.status)) return
-      if (current.action.status !== 'pending' && action.kind === 'continue') {
+      if (current.action.status !== 'pending' && action.kind !== 'cancel') {
         const seq = await runtime.reconcile?.(action.native_session_id, action.id, signal) ?? 0
         if (seq > 0) { await bridge.settle(action.id, instanceId, '', 'accepted', seq, '', signal); return }
       }
@@ -84,6 +84,13 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 function continuationMessage(action: HostAction): string {
+  if (action.kind === 'artifact_edit') return `LazyMind artifact edit: session_id=${action.session_id}, job_id=${action.execution_id}. ` +
+    'Call workflow.action.get. When status=waiting_agent, delegate the returned generation_request to a native subagent. ' +
+    'Use its exact LazyMind system_prompt and user_prompt; do not substitute your own business Skill. ' +
+    'Submit only its answer with workflow.action.respond using the unchanged version and request_hash. ' +
+    'Repeat only if another generation_request is returned. When ready or cancelled, END this turn: the user confirms the preview in LazyMind. ' +
+    'Do not begin, rewind or rerun workflow steps, and do not apply the edit yourself.'
+
   const request = action.execution_id
     ? `When applicable, call workflow.step.claim with execution_id=${action.execution_id}. For a completed internal execution, inspect its result and the current state instead of executing it again.`
     : 'When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step.'

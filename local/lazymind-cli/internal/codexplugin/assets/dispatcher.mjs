@@ -78,7 +78,7 @@ var HostBridge = class {
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
 function createDispatcher(runtime, host, bridge, instanceId, signal) {
 	async function deliver(action) {
-		if (action.status === "pending" && action.kind === "continue" && runtime.ready && !await runtime.ready(action.native_session_id, signal)) return;
+		if (action.status === "pending" && action.kind !== "cancel" && runtime.ready && !await runtime.ready(action.native_session_id, signal)) return;
 		if (action.status !== "pending") {
 			const current = await bridge.action(action.id, signal);
 			if (![
@@ -86,7 +86,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				"dispatching",
 				"unknown"
 			].includes(current.action.status)) return;
-			if (current.action.status !== "pending" && action.kind === "continue") {
+			if (current.action.status !== "pending" && action.kind !== "cancel") {
 				const seq$1 = await runtime.reconcile?.(action.native_session_id, action.id, signal) ?? 0;
 				if (seq$1 > 0) {
 					await bridge.settle(action.id, instanceId, "", "accepted", seq$1, "", signal);
@@ -169,8 +169,9 @@ function delay(ms, signal) {
 	});
 }
 function continuationMessage(action) {
+	if (action.kind === "artifact_edit") return `LazyMind artifact edit: session_id=${action.session_id}, job_id=${action.execution_id}. Call workflow.action.get. When status=waiting_agent, delegate the returned generation_request to a native subagent. Use its exact LazyMind system_prompt and user_prompt; do not substitute your own business Skill. Submit only its answer with workflow.action.respond using the unchanged version and request_hash. Repeat only if another generation_request is returned. When ready or cancelled, END this turn: the user confirms the preview in LazyMind. Do not begin, rewind or rerun workflow steps, and do not apply the edit yourself.`;
 	const request = action.execution_id ? `When applicable, call workflow.step.claim with execution_id=${action.execution_id}. For a completed internal execution, inspect its result and the current state instead of executing it again.` : "When control.continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step.";
-	return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.`;
+	return `LazyMind workflow ${action.session_id} has a control notification. Call workflow.state first; the notification may be delayed. ${request} Execute only a granted external step_contract and publish/submit using its execution_handle. If executor_host is lazymind, let Core execute it. After submission, use the returned state to continue. Yield when awaiting_user, awaiting_executor, draining, stopped, binding_required, completed, or failed; do not poll while waiting. When control.input_request is present, show its exact questions and wait for the user; submit their actual answers with workflow.input.answer against that artifact revision. An input answer does not itself approve a separate result review. A human step requires review AFTER execution. Do not assume this notification means a review was approved. Do not create a new workflow.`;
 }
 
 //#endregion
@@ -305,7 +306,8 @@ var CodexAdapter = class {
 		const claim = this.claims.get(input.actionId);
 		this.claims.delete(input.actionId);
 		if (!claim) throw new AdmissionRejected("Workflow notification has not been claimed");
-		this.validate(thread, claim, "continue");
+		const kind = claim.action.kind === "artifact_edit" ? "artifact_edit" : "continue";
+		this.validate(thread, claim, kind);
 		if (await this.receipts.read(input.actionId)) throw new Error("Message was already attempted; do not resend");
 		const before = await this.native.read(thread, signal);
 		if (before.active) throw new AdmissionRejected("Codex chat became busy; no message was sent");
@@ -327,7 +329,7 @@ var CodexAdapter = class {
 				receipt.status = "rejected";
 				await this.receipts.write(receipt);
 				await setTimeout$1(250, void 0, { signal });
-				this.validate(thread, await this.bridge.action(input.actionId, signal), "continue");
+				this.validate(thread, await this.bridge.action(input.actionId, signal), kind);
 				signal.throwIfAborted();
 				receipt.status = "sending";
 				await this.receipts.write(receipt);

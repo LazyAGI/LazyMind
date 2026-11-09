@@ -968,3 +968,5 @@ DROP TABLE IF EXISTS vocabulary_cloud_connections;
 
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS embedding_index_states;
+
+DROP TABLE IF EXISTS workflow_action_jobs;

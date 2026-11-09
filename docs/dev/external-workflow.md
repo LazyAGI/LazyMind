@@ -192,3 +192,72 @@ local/build/bin/lazymind internal agent codex refresh
 PPT 工作流直接交付原生 runtime 的大纲、风格目录、页面生成及审查修复提示词，
 而非另写外部版提示词。各提示词的中间 JSON 格式按所属操作应用，最终产物仍遵循
 步骤声明。历史会话固定旧版本不会自动迁移；验证新 Skill 必须启动新版本会话。
+
+### 外部 Agent 的产物局部润色
+
+外部运行的 `rewrite_selection` 走独立的持久化产物动作，不创建、回退或重跑工作流步骤。工作流包在 `artifact_actions` 声明 `external_generation: true` 后，其原有规划器通过上下文隔离的 generation boundary 产出模型请求；本地执行仍使用原有模型调用，外部执行只接收同一规划器的提示词并返回模型文本。选择器解析、修改范围校验、候选预览和版本提交都属于 LazyMind。
+
+- 原有 `:action-preview` 在外部会话返回 `waiting_agent`、`job_id`、`version`。连接器通过通用 `artifact_edit` host action 通知绑定的原生会话，离线时保留待交付请求。
+- `workflow.action.get` 读取当前请求；宿主将其中完整的 `system_prompt`、`user_prompt` 交给原生子代理。`workflow.action.respond` 提交文本及原样的 `version`、`request_hash`。请求哈希防止把其他选区或其他版本的模型回答复用到当前规划过程。
+- 若规划器需要下一次生成，返回新的 generation request；`ready` 表示预览就绪，外部 Agent 应结束该轮。MCP 不返回候选 HTML 和确认令牌，避免把大型产物重新灌入模型上下文。
+- 页面轮询同一请求并展示原来的差异预览；只有用户确认后才走原有 `:action-execute`。确认使用创建预览时固定的包版本，并检查产物 revision 和人工草稿版本。取消后禁止确认；相同响应重试幂等，不重复调用规划器。
+- 当前 PPT 包支持外部润色。存在 `native_pptx` 配套产物时，文本润色只对可唯一定位的原生文本做局部替换，保留其他 ZIP 部件（包括图表和字体），并将 HTML 与 PPTX 版本放在同一数据库事务中保存。无法唯一定位、多文本段结构变更或样式操作应转原生 PPTX 编辑器，不允许只改预览却留下旧下载文件。
+
+新增开发者接入只需实现已有通用 host action 交付及上述 MCP 工具，不需要复制 PPT 业务 Skill。其他工作流可复用 generation boundary，但必须在包内显式声明支持；不支持时返回升级工作流提示，不静默回退到 LazyMind 模型。
+
+### 外部执行的上下文与耗时
+
+`workflow.get` 只提供发现与启动契约，不下发 Python 实现源码；MCP 的状态投影省略完整 compiled graph，保留控制状态、就绪步骤、拓扑投影和执行历史。当前步骤的完整业务 Skill、约束与输入仍由执行授权中的 `step_contract` 提供，不能为节省上下文删减业务规则。
+
+文件产物必须在 `output.local_path` 指定路径；`output.value.local_path` 会被明确拒绝，防止把路径对象误存成已经上传的文件。宿主避免把 HTML 的内嵌字体、图片或整个工具响应直接打印进模型上下文。评估性能时分别记录执行步骤、调度间隔、返工和总墙钟时间；模型未返回 token usage 时记为未知，不能记为零。不同模型、工作流版本和原生 PPTX/HTML 交付要求的耗时不可直接按页数比较。
+
+### Chat edits to completed artifacts
+
+`workflow.edit.context(session_id)` returns the current ordered artifact references,
+state version, published package revision, original Skill Markdown and the package's
+`artifact_edit` policy. The native and external paths share LazyMind's revision,
+publication, linked-list ordering and durable event storage; the host supplies model
+work and missing file tools. No Codex-specific business pipeline is introduced.
+
+For user-requested local changes, scoped page regeneration, insertion, deletion or
+reordering, delegate the complete contract to a native worker and validate the
+current artifact. Submit `workflow.edit.commit` once with `revision_id`,
+`state_version` and `slots`. Each included list is the full desired visual order:
+`{list_index: N}` preserves an item; adding `content_type` and `value` replaces it;
+a new item omits `list_index`; omitting an existing item deletes it. File bytes use
+item-level `local_path` in MCP. All nonempty package-declared linked lists must be
+included with equal nonzero lengths, together with the updated required file.
+Unchanged pages keep their revisions. The transaction checks the session version,
+uses the native artifact mutation functions, and rolls back the whole bundle on
+conflicts. A retry with an old version fails; reread and reconcile rather than
+applying insertion/deletion twice. The session stays completed.
+
+The PPT policy requires preserving editable objects, synchronizing preview HTML,
+notes and visible page numbers, and validating native file page count and rendering
+before publication. These semantic checks belong to the worker; the server enforces
+bundle structure, ownership, allowed slots and optimistic concurrency. This endpoint
+does not itself regenerate slides or verify factual content. New user instructions
+authorize their edits; a queued AI dialog preview still requires its own user
+confirmation and must not be committed through this endpoint.
+
+Package configuration is read at the published head for edit-context discovery and
+pinned by revision for commit. Older packages without `artifact_edit` return an
+explicit upgrade error. Existing running step contracts remain pinned unchanged.
+
+`workflow.action.cancel` cancels an explicitly discarded preview without changing
+published artifacts. Pending or ready AI previews block chat bundle commits until
+confirmed or cancelled. Planner replay runs outside database transactions because
+it reads its pinned package back through Core; the result is committed with a
+version comparison, so cancellation or another response cannot be overwritten.
+
+Editable export prefers the selected native PPTX for the entire current deck when
+its publication attempt matches the previews, or when it is newer than all preview
+revisions. Mutable/newer preview drafts and partial exports keep the HTML conversion
+path. File deliveries remain in the export action's declared tab even though the
+page layout renders them outside its page list. This avoids re-converting an
+already editable delivery and preserves its native charts and fonts.
+
+Refresh an installed Codex plugin without controlling the desktop lifecycle with
+`lazymind internal agent codex refresh`. Existing Codex chats may retain their MCP
+process/catalog; a new chat loads the refreshed tools and Skill. Refresh does not
+restart Codex or launch LazyMind Desktop.

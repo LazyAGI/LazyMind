@@ -69,32 +69,11 @@ func loadExecutionSkillFiles(ctx context.Context, db *gorm.DB, value *AttemptCon
 	} else {
 		return nil
 	}
-	remaining := 512 << 10
-	files := make([]ExternalSkillFile, 0, len(skills))
-	for _, skill := range skills {
-		if !graphengine.ValidExternalSkillPath(skill) {
-			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "invalid revision skill path")
-		}
-		var entry orm.WorkflowRevisionEntry
-		if err := db.WithContext(ctx).Where("revision_id = ? AND path = ? AND entry_type = ?", value.WorkflowRevision, skill, "file").First(&entry).Error; err != nil || entry.BlobHash == nil {
-			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill is unavailable: "+skill)
-		}
-		var blob orm.WorkflowBlob
-		if err := db.WithContext(ctx).Where("hash = ?", *entry.BlobHash).First(&blob).Error; err != nil {
-			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill content is unavailable: "+skill)
-		}
-		digest := fmt.Sprintf("%x", sha256.Sum256(blob.Content))
-		if digest != *entry.BlobHash {
-			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill content hash does not match: "+skill)
-		}
-		if entry.Binary || blob.Binary || len(blob.Content) > 256<<10 || len(blob.Content) > remaining || !utf8.Valid(blob.Content) {
-			return controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill must be bounded UTF-8 text: "+skill)
-		}
-		remaining -= len(blob.Content)
-		files = append(files, ExternalSkillFile{
-			Path: skill, Content: string(blob.Content), SHA256: "sha256:" + digest,
-		})
+	files, err := LoadRevisionSkillFiles(ctx, db, value.WorkflowRevision, skills)
+	if err != nil {
+		return err
 	}
+
 	if value.Execution != nil {
 		value.Execution.SkillFiles = files
 	}
@@ -102,6 +81,38 @@ func loadExecutionSkillFiles(ctx context.Context, db *gorm.DB, value *AttemptCon
 		value.ExternalExecution.SkillFiles = files
 	}
 	return nil
+}
+
+// LoadRevisionSkillFiles shares pinned Skill loading between step execution and
+// post-completion artifact edits.
+func LoadRevisionSkillFiles(ctx context.Context, db *gorm.DB, revisionID string, skills []string) ([]ExternalSkillFile, error) {
+	remaining := 512 << 10
+	files := make([]ExternalSkillFile, 0, len(skills))
+	for _, skill := range skills {
+		if !graphengine.ValidExternalSkillPath(skill) {
+			return nil, controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "invalid revision skill path")
+		}
+		var entry orm.WorkflowRevisionEntry
+		if err := db.WithContext(ctx).Where("revision_id = ? AND path = ? AND entry_type = ?", revisionID, skill, "file").First(&entry).Error; err != nil || entry.BlobHash == nil {
+			return nil, controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill is unavailable: "+skill)
+		}
+		var blob orm.WorkflowBlob
+		if err := db.WithContext(ctx).Where("hash = ?", *entry.BlobHash).First(&blob).Error; err != nil {
+			return nil, controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill content is unavailable: "+skill)
+		}
+		digest := fmt.Sprintf("%x", sha256.Sum256(blob.Content))
+		if digest != *entry.BlobHash {
+			return nil, controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill content hash does not match: "+skill)
+		}
+		if entry.Binary || blob.Binary || len(blob.Content) > 256<<10 || len(blob.Content) > remaining || !utf8.Valid(blob.Content) {
+			return nil, controlstore.Reject("EXTERNAL_SKILL_UNAVAILABLE", "revision skill must be bounded UTF-8 text: "+skill)
+		}
+		remaining -= len(blob.Content)
+		files = append(files, ExternalSkillFile{
+			Path: skill, Content: string(blob.Content), SHA256: "sha256:" + digest,
+		})
+	}
+	return files, nil
 }
 
 // AuthorizeExternalExecution is shared by tool discovery and calls. Call again

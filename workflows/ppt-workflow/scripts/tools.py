@@ -5512,6 +5512,11 @@ def _agent_llm_call(
     _budget: _PPTGenerationBudget | None = None,
     _page_deadline: float | None = None,
 ) -> str:
+    from lazymind.chat.workflow.action_generation import generate
+    external = generate(system_prompt, user_prompt, request_name)
+    if external is not None:
+        return external
+
     from lazyllm import AutoModel
     from lazyllm.components import ChatPrompter
 
@@ -10542,12 +10547,41 @@ def _selection_edit_ops(
     return combined_ops, '\n'.join(old_texts), '\n'.join(new_texts)
 
 
+def _patch_native_selection(source, destination, page, old_text, new_text, ops):
+    """Patch unique native text runs without rebuilding charts, fonts or notes."""
+    import zipfile
+    from lxml import etree
+    if any(op.get('op') not in {'replace_text', 'replace_text_segments'} for op in ops):
+        raise ValueError('This native PPTX supports text polishing here; use the native PPTX editor for layout or structure changes')
+    replacements = list(zip(old_text.split('\n'), new_text.split('\n')))
+    name = f'ppt/slides/slide{page}.xml'
+    with zipfile.ZipFile(source) as deck:
+        if name not in deck.namelist():
+            raise ValueError('Native PPTX page is missing')
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        root = etree.fromstring(deck.read(name), parser)
+        ns = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
+        for old, new in replacements:
+            if old == new:
+                continue
+            # Preserve each existing run's formatting. Ambiguous/multi-run edits
+            # need a native selection mapping; never guess or rebuild the deck.
+            matches = [node for node in root.findall('.//a:t', ns) if old and old in (node.text or '')]
+            if len(matches) != 1 or matches[0].text.count(old) != 1:
+                raise ValueError('Cannot uniquely match the selection in native PPTX; edit the native document instead')
+            matches[0].text = matches[0].text.replace(old, new, 1)
+        with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED) as output:
+            for info in deck.infolist():
+                output.writestr(info, etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True) if info.filename == name else deck.read(info.filename))
+
+
 def ppt_preview_selection_edit(
     artifact: Any,
     instruction: str,
     selection: dict[str, Any],
     artifact_store: str = '',
     slot: str = '',
+    native_companion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Preview one atomic edit against one or more selected PPT HTML elements."""
     if slot != 'preview_html' or _coerce_str(selection.get('type')) != 'ppt_html':
@@ -10590,8 +10624,21 @@ def ppt_preview_selection_edit(
     token = uuid.uuid4().hex
     raw_candidate = action_root / f'{token}.html'
     manifest = action_root / f'{token}.json'
+    companion_result = None
+    if native_companion:
+        companion_value = native_companion.get('value') or {}
+        source_pptx = _runtime_ppt_path(_coerce_str(companion_value.get('path'))).resolve()
+        candidate_pptx = action_root / f'{token}.pptx'
+        _patch_native_selection(source_pptx, candidate_pptx, selected_page or source_page, old_text, new_text, ops)
+        companion_result = {
+            **native_companion,
+            'value': {'path': str(candidate_pptx), 'filename': companion_value.get('filename') or companion_value.get('name') or 'presentation.pptx',
+                      'size': candidate_pptx.stat().st_size, 'mime_type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'},
+            'sha256': hashlib.sha256(candidate_pptx.read_bytes()).hexdigest(),
+        }
     raw_candidate.write_text(edited, encoding='utf-8')
     manifest.write_text(json.dumps({
+        'native_companion': companion_result,
         'mode': 'source_page' if source is not None else 'artifact_only',
         'source_path': str(source) if source is not None else None,
         'expected_sha256': _html_sha256(base_original),
@@ -10688,12 +10735,18 @@ def ppt_apply_selection_edit(
             raise error
     else:
         raise ValueError('invalid PPT selection edit mode')
+    companion = manifest.get('native_companion')
+    if companion:
+        candidate_pptx = Path(companion['value']['path']).resolve()
+        if candidate_pptx.parent != action_root or hashlib.sha256(candidate_pptx.read_bytes()).hexdigest() != companion['sha256']:
+            raise ValueError('Native PPTX preview was modified')
     _validate_local_html_edit(original, revised)
     if mode == 'source_page':
         tmp = source.with_name(source.name + f'.{token}.tmp')
         tmp.write_text(revised, encoding='utf-8')
         os.replace(tmp, source)
     return {
+        'native_companion': companion,
         'representation': 'ppt_html',
         'artifact': {
             'content_type': 'text',

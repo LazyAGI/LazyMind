@@ -193,6 +193,7 @@ class WorkflowActionInvokeRequest(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
     artifact_store: str = ''
     llm_config: Optional[Dict[str, Any]] = None
+    generation_responses: Optional[list[Dict[str, Any]]] = None
     tool_config: Optional[Dict[str, Any]] = None
 
 
@@ -408,7 +409,12 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
             kwargs['artifact_store'] = request.artifact_store
         if 'slot' in parameters:
             kwargs['slot'] = request.slot
-        return {'result': tool(**kwargs)}
+        from lazymind.chat.workflow.action_generation import generation_scope, GenerationRequired
+        try:
+            with generation_scope(request.generation_responses):
+                return {'result': tool(**kwargs)}
+        except GenerationRequired as pending:
+            return {'result': {'status': 'needs_generation', 'generation_request': pending.request}}
     except HTTPException:
         raise
     except DocumentActionError as exc:

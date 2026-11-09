@@ -37,3 +37,21 @@ tool operations under the LazyMind instructions. Discover declared LazyMind tool
 first; use applicable configured tools and supplement missing operations with Codex
 tools. Missing Skill files are a blocking contract issue, not permission to improvise.
 Return used Skill paths and tool substitutions with validation evidence.
+
+## Artifact edits after generation
+
+An `artifact_edit` notification is a separate preview request, including on a completed run. Use `workflow.action.get` with its session and job IDs. Delegate the exact returned `generation_request.system_prompt` and `user_prompt` to a native subagent; these are the shared LazyMind planner's business instructions. Submit the worker's answer through `workflow.action.respond` with the unchanged version and request hash. Process another request only when returned. On `ready` or `cancelled`, end the turn; the user confirms the preview in LazyMind. Never rewind the workflow, regenerate the deck, or commit the preview on the user's behalf.
+
+Keep host context compact: fetch the current step contract once and pass its complete Skills to the worker. Do not print entire HTML/base64 artifacts, compiled graphs, or package implementations into the conversation. For file publication, `local_path` belongs directly on `output`, never under `output.value`.
+
+For a new user instruction in this chat to edit, regenerate selected pages, insert,
+delete or reorder pages of a completed artifact, call `workflow.edit.context` on
+that run. Delegate its original LazyMind Skills, edit policy, current artifact
+references and the full user instruction to a native worker. The worker inspects
+and validates the current artifact; preserve unspecified pages. The root submits
+one `workflow.edit.commit` bundle containing the updated downloadable file and all
+nonempty linked lists, using the unchanged context version. List positions are
+visual page numbers; `list_index` is a stable identity, not a page number. On a
+conflict, reread context and reconcile, never blindly repeat the old change. This
+explicit user edit is distinct from a pending AI dialog preview: never use the
+bundle endpoint to bypass its confirmation. Do not start a replacement workflow.

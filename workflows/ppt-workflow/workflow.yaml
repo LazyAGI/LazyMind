@@ -549,8 +549,32 @@ tool_scripts:
       - ppt_preview_selection_edit
       - ppt_apply_selection_edit
 
+artifact_edit:
+  step: generate_ppt
+  slots: [slide_outline, background_prompts, background_images, preview_html, preview_notes, native_pptx]
+  linked_lists: [slide_outline, background_prompts, background_images, preview_html, preview_notes]
+  required: [native_pptx]
+  instruction: |-
+    Use the original LazyMind PPT Skills and the current selected native_pptx.
+    Delegate the user's full edit instruction to a native worker. Inspect the current
+    page before editing. Never substitute the uploaded template or rebuild unrelated pages.
+    Local text/style/chart/notes edits preserve every unspecified object and page.
+    Explicit regeneration replaces only the requested pages, using their saved outline,
+    prompts and paper evidence. Delete/insert/reorder whole pages as requested and keep
+    every nonempty linked page list in the same visual order. Preserve existing stable
+    list_index values; new pages omit list_index. Refresh visible page numbers and notes.
+    Use host tools for capabilities unavailable in LazyMind; do not replace these Skills.
+    Keep editable native text, charts, fonts and notes. Render and validate the changed
+    pages and the complete PPTX page count; preview_html and preview_notes must match it.
+    Submit one atomic workflow.edit.commit bundle including native_pptx and all nonempty
+    linked lists. Existing unchanged items carry only list_index. A user-requested edit
+    authorizes this save; never use this API to bypass a pending AI preview confirmation.
+    If a required operation cannot be validated, report the limitation and do not publish.
+
 artifact_actions:
   rewrite_selection:
+    external_generation: true
+    companion_slot: native_pptx
     revision_policy: head
     slots:
       - preview_html

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -74,7 +73,7 @@ type Projection struct {
 		Nodes      map[string]any   `json:"nodes,omitempty"`
 		Edges      []map[string]any `json:"edges,omitempty"`
 	} `json:"projection"`
-	Graph          map[string]any `json:"graph,omitempty"`
+	Graph          map[string]any `json:"-"`
 	AttemptHistory map[string]any `json:"attempt_history,omitempty"`
 	InputWitnesses map[string]any `json:"input_witnesses,omitempty"`
 }
@@ -327,26 +326,9 @@ func keepHostGetFiles(pkg map[string]any) {
 		pkg["startup_contract"] = contract
 	}
 	delete(pkg, "compiled_graph")
-	raw, _ := pkg["files"].(map[string]any)
-	if raw == nil {
-		return
-	}
-	out := map[string]string{}
-	for p, v := range raw {
-		if !strings.HasPrefix(p, "scripts/") || !strings.HasSuffix(p, ".py") || strings.Contains(p, "/tests/") {
-			continue
-		}
-		s, ok := v.(string)
-		if !ok {
-			continue
-		}
-		body, err := base64.StdEncoding.DecodeString(s)
-		if err != nil {
-			body = []byte(s)
-		}
-		out[p] = string(body)
-	}
-	pkg["files"] = out
+	// Runtime implementation stays on LazyMind. The execution grant delivers
+	// the pinned Skills and constraints for the current step, not every script.
+	delete(pkg, "files")
 }
 
 func (c *Client) State(ctx context.Context, sessionID string) (Projection, error) {
@@ -369,7 +351,7 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	} else if continuation == "stopped" {
 		state.AgentInstruction = "The Workflow is stopped. If the user explicitly asks to continue, call workflow.session.resume on this run. Inspect or claim any returned execution_id with workflow.step.claim instead of beginning a duplicate; otherwise read workflow.state again. Without a new user request, END this turn."
 	} else if continuation == "completed" || continuation == "failed" {
-		state.AgentInstruction = "END this turn unless the user explicitly requested recovery. For a requested change, use an exact projection.rewindable target with workflow.step.begin; for a requested retry, use an exact projection.retryable target and retry_origin=user. Core applies the same rules as the internal controller. Do not create a replacement Workflow."
+		state.AgentInstruction = "END this turn unless the user explicitly requested recovery. For an explicit edit to completed artifacts, read workflow.edit.context and follow the shared package Skills; use workflow.edit.commit for local changes, page insertion/deletion or scoped regeneration without rewinding. Only a request to rerun the workflow uses an exact projection.rewindable target with workflow.step.begin; for a requested retry, use an exact projection.retryable target and retry_origin=user. Core applies the same rules as the internal controller. Do not create a replacement Workflow."
 	} else {
 		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
 			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."

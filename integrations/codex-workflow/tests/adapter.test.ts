@@ -19,6 +19,18 @@ async function fixture() {
  return { native, receipts, bridge, adapter: new CodexAdapter(native, receipts, bridge, new AbortController().signal) }
 }
 describe('CDP Workflow admission and interruption', () => {
+ it('delivers an artifact edit on a completed run without starting a workflow step',async()=>{
+  const {adapter,native,bridge}=await fixture(),action=claim('artifact_edit')
+  action.action.execution_id='edit-job';action.control.continuation='completed'
+  bridge.claim=vi.fn().mockResolvedValue({...action,dispatch_token:'lease'})
+  bridge.action.mockResolvedValue(action);bridge.settle=vi.fn().mockResolvedValue(undefined)
+  await createDispatcher(adapter,adapter.host,bridge,'instance',new AbortController().signal).deliver({...action.action,status:'pending'})
+  const message=native.start.mock.calls[0]?.[2]
+  expect(message).toContain('workflow.action.get');expect(message).toContain('job_id=edit-job')
+  expect(message).toContain('user confirms');expect(message).not.toContain('Call workflow.state first')
+  expect(bridge.settle).toHaveBeenCalledWith('action-1','instance','lease','accepted',0,'',expect.any(AbortSignal))
+ })
+
  it('sends one notification to the bound chat and saves its actual turn receipt', async () => {
   const {adapter,native,receipts}=await fixture();adapter.host.cacheClaim(claim())
   await expect(adapter.prompt(thread,{actionId:'action-1',message:'continue'},new AbortController().signal)).resolves.toBe(0)

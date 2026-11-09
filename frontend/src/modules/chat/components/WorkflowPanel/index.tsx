@@ -1225,7 +1225,7 @@ function CompositeSlotGrid({
       <div className={`composite-with-pagebar composite-with-pagebar--${pageBarPosition}`}>
         {(pageBarPosition === 'top' || pageBarPosition === 'left') && rail}
         <div className='composite-main'>
-          <WorkflowTabActions actions={tab.actions} tab={tab} session={session} rows={rows} />
+          <WorkflowTabActions actions={declaredTab.actions} tab={declaredTab} session={session} rows={rows} />
           {session.workflow_id === 'ppt-workflow' && tab.slots.some(def => {
             const revision = findSlotRevision(session, tab, def.id, activePage);
             return revision && !revision.selected;

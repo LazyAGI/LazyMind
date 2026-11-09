@@ -4,7 +4,7 @@ export interface Pairing { connector_id: string; token: string }
 export interface HostAction {
   id: string
   session_id: string
-  kind: 'continue' | 'cancel'
+  kind: 'continue' | 'cancel' | 'artifact_edit'
   native_session_id: string
   /** Legacy wire field, ignored by delivery and runtime control. */
   binding_generation?: number

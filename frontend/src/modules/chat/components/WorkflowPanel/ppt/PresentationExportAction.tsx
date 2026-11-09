@@ -62,6 +62,24 @@ function findSlotRevision(
   );
 }
 
+// Prefer the selected native delivery when it represents the complete visible
+// deck. Re-converting its HTML loses native charts and can require another service.
+export function selectedNativePresentation(action: WorkflowTabAction, tab: TabDef, session: WorkflowSession, rows: number[]): SlotRevision | undefined {
+  const pageSlots = getTabSlotRevisions(session, tab, action.inputs.pages).filter(slot => slot.selected);
+  if (pageSlots.length !== rows.length || pageSlots.some(slot => !rows.includes(slot.sort_order ?? -1))) return undefined;
+  const declared = action.inputs.native_file ? [action.inputs.native_file] : tab.slots.map(slot => slot.id);
+  const candidates = (session.slots ?? []).filter(slot => {
+    const value = slot.artifact_value;
+    const filename = String(value?.filename ?? value?.name ?? value?.path ?? value?.url ?? '').split('?')[0];
+    return slot.selected && declared.includes(slot.slot) && slot.content_type === 'file' && /\.pptx$/i.test(filename);
+  });
+  if (candidates.length !== 1) return undefined;
+  const native = candidates[0];
+  const inputs = [...pageSlots, ...getTabSlotRevisions(session, tab, action.inputs.notes ?? '').filter(slot => slot.selected)];
+  if (inputs.some(slot => (slot.draft_version ?? 1) > 1 || (!(native.producer_attempt_id && slot.producer_attempt_id === native.producer_attempt_id) && Date.parse(slot.created_at) > Date.parse(native.created_at)))) return undefined;
+  return native;
+}
+
 async function loadHtmlArtifact(raw: unknown): Promise<string> {
   const inline = extractHtmlFromArtifact(raw);
   if (inline) return inline;
@@ -175,6 +193,16 @@ export function PresentationExportAction({
     setExporting(true);
     setExportError(null);
     try {
+      const native = mode === 'editable' ? selectedNativePresentation(action, tab, session, rows) : undefined;
+      if (native) {
+        const value = native.artifact_value as Record<string, unknown>;
+        const direct = value.url ? resolveCoreAssetUrl(String(value.url)) : '';
+        const url = direct && !isExpiredSignedUrl(direct) ? direct : await resolveMarkdownImageUrlAsync(String(value.path ?? value.url ?? ''));
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(t('chat.workflowExportFailed'));
+        downloadBlob(await response.blob(), String(value.filename ?? value.name ?? 'presentation.pptx'));
+        return;
+      }
       const pages = await collectPresentationPages(action, tab, session, rows);
       if (!pages.length) throw new Error(t('chat.workflowExportNoHtml'));
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
