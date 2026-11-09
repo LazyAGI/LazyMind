@@ -129,3 +129,63 @@ func TestWorkflowHostDistinguishesSignedOutFromUnreadableCredentials(t *testing.
 		})
 	}
 }
+
+func TestDSHRuntimeRequiresAuthenticatedPollAndExplicitMCPReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		name, header, issue string
+		upstreamStatus      int
+		wrongToken, wantMCP bool
+	}{
+		{name: "ready", header: "1", upstreamStatus: 200, wantMCP: true},
+		{name: "no MCP tools", header: "0", upstreamStatus: 200},
+		{name: "legacy plugin", upstreamStatus: 200},
+		{name: "core unavailable", header: "1", upstreamStatus: 503, wantMCP: true, issue: "lazymind_unavailable"},
+		{name: "core rejects authentication", header: "1", upstreamStatus: 401, wantMCP: true, issue: "lazymind_auth_required"},
+		{name: "binding error is not expired login", header: "1", upstreamStatus: 409, wantMCP: true, issue: "lazymind_unavailable"},
+		{name: "unauthenticated", header: "1", upstreamStatus: 200, wrongToken: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.upstreamStatus)
+				if tc.upstreamStatus == 200 {
+					// A Workflow waiting to bind is not a broken transport.
+					_, _ = w.Write([]byte(`{"actions":[],"control":{"continuation":"binding_required"}}`))
+				} else {
+					_, _ = w.Write([]byte(`{"code":"BINDING_REQUIRED","error":"binding_required"}`))
+				}
+			}))
+			defer upstream.Close()
+			home := t.TempDir()
+			server := newTestServer(t, home)
+			if err := server.store.Save(credentials.Credentials{ServerURL: upstream.URL, AccessToken: "access", RefreshToken: "refresh", SavedAt: float64(time.Now().Unix()), ExpiresIn: 3600}); err != nil {
+				t.Fatal(err)
+			}
+			account, _ := server.store.AccountScope()
+			pair, err := workflowhost.Ensure(home, t.TempDir(), account)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/v1/workflow-host/actions", nil)
+			token := pair.Token
+			if tc.wrongToken {
+				token = "wrong"
+			}
+			request.Header.Set("Authorization", "Bearer "+token)
+			request.Header.Set("X-LazyMind-Connector-Id", pair.ConnectorID)
+			request.Header.Set("X-LazyMind-MCP-Ready", tc.header)
+			response := httptest.NewRecorder()
+			server.routes().ServeHTTP(response, request)
+			status, err := workflowhost.ReadRuntimeStatus(home, pair)
+			if tc.wrongToken {
+				if response.Code != http.StatusForbidden || err == nil {
+					t.Fatalf("unauthenticated poll recorded runtime readiness: response=%d status=%+v err=%v", response.Code, status, err)
+				}
+				return
+			}
+			if err != nil || status.MCPReady != tc.wantMCP || status.Issue != tc.issue {
+				t.Fatalf("runtime status=%+v err=%v", status, err)
+			}
+		})
+	}
+}

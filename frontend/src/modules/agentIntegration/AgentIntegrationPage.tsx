@@ -40,7 +40,9 @@ import {
 import "./index.scss";
 import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
 import WorkBuddyInstallationGuide from "./WorkBuddyInstallationGuide";
+import DSHInstallationGuide from "./DSHInstallationGuide";
 import { requiresAgentQuit } from "./agentActions";
+import { dshConnectionReady, dshErrorMessage } from "./dshConnection";
 
 interface AgentDefinition {
   id: DesktopAgent;
@@ -146,6 +148,12 @@ export default function AgentIntegrationPage() {
   const [manualBindingPath, setManualBindingPath] = useState("");
   const [workBuddyGuideOpen, setWorkBuddyGuideOpen] = useState(false);
   const [codexGuideOpen, setCodexGuideOpen] = useState(false);
+  const [dshGuideOpen, setDSHGuideOpen] = useState(false);
+  const openInstallationGuide = (agent: DesktopAgent) => {
+    if (agent === "deepseek-harness") setDSHGuideOpen(true);
+    else if (agent === "codex") setCodexGuideOpen(true);
+    else if (agent === "workbuddy") setWorkBuddyGuideOpen(true);
+  };
   const confirmBindingClose = useSettingsDraft({
     dirty: manualBindingTarget !== null && manualBindingPath !== "",
     saving: Boolean(manualBindingTarget && action === `binding:${manualBindingTarget}`),
@@ -246,7 +254,7 @@ export default function AgentIntegrationPage() {
     let inFlight = false;
     const markUnavailable = () => setStatuses(current => {
       const next = { ...current };
-      for (const agent of ["codex", "workbuddy"] as const) {
+      for (const agent of ["codex", "workbuddy", "deepseek-harness"] as const) {
         const status = next[agent];
         if (!status || !(status.enabled ?? status.state === "enabled")) continue;
         next[agent] = { ...status, issue: { code: "host_unavailable" }, message: "Connection status is unavailable.",
@@ -339,8 +347,8 @@ export default function AgentIntegrationPage() {
   };
 
   const runAction = async (agent: DesktopAgent, nextAction: DesktopAgentIntegrationAction, restartConfirmed = false) => {
-    if (["workbuddy", "codex"].includes(agent) && nextAction === "connect" && !restartConfirmed) {
-      if (agent === "codex") setCodexGuideOpen(true); else setWorkBuddyGuideOpen(true);
+    if (["workbuddy", "codex", "deepseek-harness"].includes(agent) && nextAction === "connect" && !restartConfirmed) {
+      openInstallationGuide(agent);
       return;
     }
     if (pendingAgentActions.current.has(agent)) return;
@@ -357,7 +365,7 @@ export default function AgentIntegrationPage() {
         const detail = failureMessage;
         const checked = await agentIntegrationStatuses();
         if (checked.ok) setStatuses(checked.data);
-        if (["codex", "workbuddy"].includes(agent) && restartConfirmed) throw new Error(detail);
+        if (["codex", "workbuddy", "deepseek-harness"].includes(agent) && restartConfirmed) throw new Error(detail);
         setError(detail);
         return;
       }
@@ -375,7 +383,7 @@ export default function AgentIntegrationPage() {
             : "agentIntegration.loginStarted", { agent: executorName }));
           setPendingLoginAgent(agent);
         }
-      } else if (result.data.state === "enabled" && !["workbuddy", "codex"].includes(agent)) {
+      } else if (result.data.state === "enabled" && !["workbuddy", "codex", "deepseek-harness"].includes(agent)) {
         message.success(t("agentIntegration.enableSuccess", { agent: result.data.display_name }));
       }
       return result.data;
@@ -383,7 +391,7 @@ export default function AgentIntegrationPage() {
       setError(failureMessage);
       const checked = await agentIntegrationStatuses();
       if (checked.ok) setStatuses(checked.data);
-      if (["codex", "workbuddy"].includes(agent) && restartConfirmed) throw cause;
+      if (["codex", "workbuddy", "deepseek-harness"].includes(agent) && restartConfirmed) throw cause;
     } finally {
       pendingAgentActions.current.delete(agent);
       setAction((current) => current === key ? "" : current);
@@ -508,7 +516,7 @@ export default function AgentIntegrationPage() {
                       return next;
                     })}
                     onMCPAction={async (agent, operation) => { await runAction(agent, operation); }}
-                    onOpenInstallationGuide={() => agent.id === "codex" ? setCodexGuideOpen(true) : setWorkBuddyGuideOpen(true)}
+                    onOpenInstallationGuide={() => openInstallationGuide(agent.id)}
                     onExecutorAction={runExecutorAction}
                     onBindingAction={runBindingAction}
                     onExternalConfigurationStarted={(target) => {
@@ -525,6 +533,12 @@ export default function AgentIntegrationPage() {
         </section>
       </Spin>
       <ExternalCapabilityAccess />
+      {dshGuideOpen && <DSHInstallationGuide
+        status={statuses["deepseek-harness"]}
+        onConnect={() => runAction("deepseek-harness", "connect", true)}
+        onStatus={(status) => setStatuses(current => ({ ...current, "deepseek-harness": status }))}
+        onClose={() => setDSHGuideOpen(false)}
+      />}
       {codexGuideOpen && <WorkBuddyInstallationGuide
         agent="codex"
         status={statuses.codex}
@@ -590,6 +604,7 @@ function executablePathPlaceholderKey(target: DesktopAgentBindingTarget | null):
 
 function integrationErrorMessage(agent: DesktopAgent, status: DesktopAgentIntegrationStatus, t: TFunction): string {
   if (requiresAgentQuit(status)) return t("agentIntegration.quitRequired.description", { agent: status.display_name });
+  if (agent === "deepseek-harness" && status.retry_action !== "disconnect") return dshErrorMessage(status, t);
   if (agent === "workbuddy" && status.issue && ["mcp_trust_required", "mcp_enable_required"].includes(status.issue.code)) {
     return t(`agentIntegration.workbuddyErrors.${status.issue.code}`);
   }
@@ -1007,9 +1022,9 @@ function AgentConfigurationFlow({
 
   const mcpActions = (
     <Space wrap size={8}>
-      {agent.id === "workbuddy" && mcpStatus?.issue && mcpStatus?.can_connect && (
+      {["workbuddy", "deepseek-harness"].includes(agent.id) && !retryDisconnect && mcpStatus?.issue && mcpStatus?.can_connect && (
         <Button size="small" disabled={busyAction !== ""} onClick={onOpenInstallationGuide}>
-          {t("agentIntegration.workbuddyInstallGuide.reconnect")}
+          {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : "workbuddyInstallGuide"}.reconnect`)}
         </Button>
       )}
       {!mcpPrepared && !mcpEnabled && (
@@ -1202,7 +1217,7 @@ function AgentConfigurationFlow({
           <IntegrationMethod
             title={t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeTitle" : agent.id === "codex" ? "agentIntegration.codexModeTitle" : "agentIntegration.mcpModeTitle", { agent: mcpClientName })}
             description={t(agent.id === "workbuddy" ? "agentIntegration.workbuddyModeDescription" : agent.id === "codex" ? "agentIntegration.codexModeDescription" : "agentIntegration.mcpModeDescription", { agent: mcpClientName })}
-            help={["workbuddy", "codex"].includes(agent.id) ? (
+            help={["workbuddy", "codex", "deepseek-harness"].includes(agent.id) ? (
               <Button
                 type="text"
                 size="small"
@@ -1210,7 +1225,7 @@ function AgentConfigurationFlow({
                 icon={<QuestionCircleOutlined />}
                 onClick={onOpenInstallationGuide}
               >
-                {t(`agentIntegration.${agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.entry`)}
+                {t(`agentIntegration.${agent.id === "deepseek-harness" ? "dshInstallGuide" : agent.id === "codex" ? "codexInstallGuide" : "workbuddyInstallGuide"}.entry`)}
               </Button>
             ) : undefined}
             status={mcpStatus?.issue?.code === "configuration_unreadable" ? t("agentIntegration.setupFeedback.unknown")
@@ -1218,8 +1233,10 @@ function AgentConfigurationFlow({
               : mcpStatus?.connection?.runtime_state === "waiting" ? t("agentIntegration.waitingForApplication")
               : mcpStatus?.connection?.runtime_state === "connection_required" ? t("agentIntegration.connectionRequired")
               : mcpChecked && mcpStatus?.issue ? t("agentIntegration.configurationIssue")
+              : agent.id === "deepseek-harness" && mcpChecked ? t(`agentIntegration.dshInstallGuide.${dshConnectionReady(mcpStatus) ? "connected" : "pendingCheck"}`)
                 : mcpStatus?.enabled ? t("agentIntegration.enabled") : mcpCapabilityStatus(mcpState, t)}
-            ready={mcpEnabled && !mcpStatus?.issue && !["waiting", "connection_required"].includes(mcpStatus?.connection?.runtime_state || "")}
+            ready={agent.id === "deepseek-harness" ? dshConnectionReady(mcpStatus)
+              : mcpEnabled && !mcpStatus?.issue && !["waiting", "connection_required"].includes(mcpStatus?.connection?.runtime_state || "")}
             disabled={!mcpCanToggle}
             loading={busyAction === `${agent.id}:connect` || busyAction === `${agent.id}:disconnect`}
             checked={mcpStatus?.issue?.code === "configuration_unreadable" ? undefined : mcpChecked}
@@ -1251,7 +1268,7 @@ function AgentConfigurationFlow({
         {mcpChecked && mcpStatus?.connection?.runtime_state === "connection_required" && (
           <div className="agent-integration-stage-hint" role="status"><InfoCircleFilled />{t("agentIntegration.setupFeedback.connectionUnavailable")}</div>
         )}
-        {mcpStatus?.message && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue)) && (
+        {mcpStatus && (mcpStatus.message || mcpStatus.issue) && (["error", "conflict"].includes(mcpState) || Boolean(mcpStatus.issue)) && (
           <div className={`agent-integration-stage-hint ${quitRequired ? "is-warning" : "is-error"}`} role={quitRequired ? "status" : "alert"}>
             <WarningOutlined />
             {integrationErrorMessage(agent.id, mcpStatus, t)}

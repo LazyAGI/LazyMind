@@ -50,8 +50,8 @@ vi.mock("./externalCapabilitiesApi", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
-      if (key.startsWith("agentIntegration.quitRequired.")) return retryI18n.t(key, options);
-      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
+      if (key.startsWith("agentIntegration.quitRequired.") || key.startsWith("agentIntegration.dshErrors.")) return retryI18n.t(key, options);
+      if (key === "agentIntegration.retryDisconnection" || key.startsWith("agentIntegration.workbuddyInstallGuide.") || key.startsWith("agentIntegration.codexInstallGuide.") || key.startsWith("agentIntegration.dshInstallGuide.") || key.startsWith("agentIntegration.workbuddyErrors.") || key.startsWith("agentIntegration.connectionErrors.") || key.startsWith("agentIntegration.setupFeedback.") || key.startsWith("agentIntegration.waitingForApplication") || key.startsWith("agentIntegration.loginStates.") ||
         key.startsWith("agentIntegration.cliSources.") || ["agentIntegration.selectedCLI", "agentIntegration.reselectCLI"].includes(key)) {
         return retryI18n.t(key, options);
       }
@@ -265,6 +265,8 @@ describe("AgentIntegrationPage", () => {
     expect(within(panel).getByRole("switch")).toBeChecked();
     expect(within(panel).getByRole("switch")).toBeEnabled();
     fireEvent.click(retry);
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.dshInstallGuide.continue }));
     expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", "connect");
     expect(retry).toBeDisabled();
     const toggle = within(panel).getByRole("switch");
@@ -328,6 +330,7 @@ describe("AgentIntegrationPage", () => {
     const panel = screen.getByTestId("agent-panel-deepseek-harness");
     const compactSwitch = await within(panel).findByRole("switch");
     fireEvent.click(compactSwitch);
+    if (operation === "connect") fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.dshInstallGuide.continue }));
     expect(compactSwitch).toBeDisabled();
     fireEvent.click(compactSwitch);
     expandAgent("deepseek-harness");
@@ -338,19 +341,20 @@ describe("AgentIntegrationPage", () => {
     expect(mocks.action).toHaveBeenCalledWith("deepseek-harness", operation);
     await act(async () => finish({ ok: false, reason: "request_failed" }));
     expect(expandedSwitch).toBeEnabled();
-    fireEvent.click(expandedSwitch);
+    if (operation === "connect") fireEvent.click(screen.getByRole("button", { name: zhCN.agentIntegration.dshInstallGuide.retryInstall }));
+    else fireEvent.click(expandedSwitch);
     expect(mocks.action).toHaveBeenCalledTimes(2);
     await act(async () => finish({ ok: true, data: status }));
   });
 
-  it.each(["unsupported_version", "dependency_environment", "operation_failed"])("shows one concise DSH %s error and hides raw logs", async (code) => {
+  it.each(["unsupported_version", "dependency_environment", "plugin_update_required", "operation_failed"])("shows one concise DSH %s error and hides raw logs", async (code) => {
     const status = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "error",
       issue: { code, path: "/Users/example/DSH 中文/profiles/web" },
       message: "ERR_PNPM_UNEXPECTED_STORE raw stack output that must never appear",
       can_connect: false, requirements: [{ id: "dsh_desktop", satisfied: true }] };
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": status } });
     render(<AgentIntegrationPage />);
-    const key = zhCN.agentIntegration.setupFeedback.enableFailed;
+    const key = retryI18n.t(`agentIntegration.dshErrors.${code}`);
     expect(await screen.findAllByText(new RegExp(key))).toHaveLength(1);
     const panel = expandAgent("deepseek-harness");
     expect(within(panel).getAllByText(new RegExp(key))).toHaveLength(1);
@@ -1348,6 +1352,60 @@ describe("AgentIntegrationPage", () => {
       expect(mocks.executors).toHaveBeenCalledTimes(2);
     });
   });
+  it.each(["zh-CN", "en-US"])("guides DSH installation without claiming runtime connectivity (%s)", async (language) => {
+    await retryI18n.changeLanguage(language);
+    const tr = (key: string) => retryI18n.t(`agentIntegration.dshInstallGuide.${key}`);
+    const ready = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
+      can_connect: true, requirements: [{ id: "dsh_desktop", satisfied: true }] };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": ready } });
+    mocks.action.mockResolvedValueOnce({ ok: true, data: { ...ready, state: "action_required",
+      action: { kind: "quit_agent" }, issue: { code: "quit_required" } } })
+      .mockResolvedValue({ ok: true, data: { ...ready, state: "enabled", enabled: true } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    const toggle = await within(card).findByRole("switch");
+    expect(toggle).toHaveAccessibleName("DeepSeek Harness Web 使用 LazyMind MCP");
+    fireEvent.click(toggle);
+    let dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(tr("prepareDescription"));
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: language === "zh-CN" ? /取\s*消/ : tr("cancel") }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.action).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("continue") }));
+    await within(dialog).findByText(retryI18n.t("agentIntegration.quitRequired.title", { agent: "DeepSeek Harness" }));
+    expect(within(dialog).queryByText(tr("installedTitle"))).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("retryInstall") }));
+    await within(dialog).findByText(tr("installedTitle"));
+    expect(within(dialog).getByText(tr("installedDescription"))).toBeInTheDocument();
+    expect(mocks.action).toHaveBeenCalledTimes(2);
+    expect(mocks.action).toHaveBeenLastCalledWith("deepseek-harness", "connect");
+    expect(within(dialog).getByRole("img", { name: tr("imageAlt") })).toHaveAttribute("src", "/installation-guides/deepseek-harness/enable.png");
+    fireEvent.click(within(dialog).getByRole("button", { name: tr("enlargeImage") }));
+    const dialogs = await screen.findAllByRole("dialog");
+    expect(dialogs).toHaveLength(2);
+    expect(within(dialogs[1]).getByRole("img", { name: tr("imageAlt") })).toHaveAttribute("src", "/installation-guides/deepseek-harness/enable.png");
+  });
+
+  it("opens the DSH plugin instructions without reinstalling an existing configuration", async () => {
+    const copy = zhCN.agentIntegration.dshInstallGuide;
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      requirements: [{ id: "dsh_desktop", satisfied: true }],
+    } } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    fireEvent.click(await within(card).findByRole("button", { name: new RegExp(copy.entry) }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("img", { name: copy.imageAlt })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /关\s*闭/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.action).not.toHaveBeenCalled();
+    expect(within(card).getByRole("switch")).toBeChecked();
+  });
+
   it("detects DSH from the Web profile and does not ask for a local path", async () => {
     mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
       agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
@@ -1428,7 +1486,8 @@ describe("AgentIntegrationPage", () => {
     mocks.action.mockResolvedValue({ ok: true, data: { ...configured, state: "ready", enabled: false, can_disconnect: false, issue: undefined, message: "" } });
     render(<AgentIntegrationPage />);
     const card = expandAgent(agent);
-    await within(card).findByText(zhCN.agentIntegration.setupFeedback.environmentMismatch);
+    await within(card).findByText(agent === "deepseek-harness" ? zhCN.agentIntegration.dshErrors.environment_mismatch
+      : zhCN.agentIntegration.setupFeedback.environmentMismatch);
     expect(within(card).queryByText(/MCP server named/)).not.toBeInTheDocument();
     const toggle = within(card).getAllByRole("switch")[0];
     expect(toggle).toBeChecked();
@@ -1693,6 +1752,45 @@ describe("AgentIntegrationPage", () => {
     fireEvent.focus(window);
     await within(card).findByText(zhCN.agentIntegration.setupFeedback.connectionUnavailable);
     expect(within(card).getByRole("switch", { name: "WorkBuddy 使用 LazyMind" })).toBeChecked();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it("marks DSH unavailable after bridge loss and recovers on focus without changing the enabled choice", async () => {
+    const connected = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }],
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: true, control_ready: true,
+        presentation_status: "ready", runtime_state: "connected" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connected } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    const toggle = await within(card).findByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" });
+    await within(card).findByText(zhCN.agentIntegration.dshInstallGuide.connected);
+    mocks.statuses.mockResolvedValue({ ok: false, reason: "unavailable" });
+    fireEvent.focus(window);
+    await within(card).findByText(zhCN.agentIntegration.dshErrors.host_unavailable);
+    expect(toggle).toBeChecked();
+    expect(within(card).queryByText(zhCN.agentIntegration.dshInstallGuide.connected)).not.toBeInTheDocument();
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": connected } });
+    fireEvent.focus(window);
+    await within(card).findByText(zhCN.agentIntegration.dshInstallGuide.connected);
+    expect(toggle).toBeChecked();
+    expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it("shows an actionable disabled DSH plugin issue without raw output or an account-expired claim", async () => {
+    const disabled = { agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled", enabled: true,
+      can_connect: true, can_disconnect: true, requirements: [{ id: "dsh_desktop", satisfied: true }],
+      issue: { code: "mcp_enable_required" }, message: "authentication_required private raw output",
+      connection: { mcp_configured: true, mcp_trusted: true, mcp_enabled: false, control_ready: false,
+        presentation_status: "host-offline", runtime_state: "unavailable" } };
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": disabled } });
+    render(<AgentIntegrationPage />);
+    const card = expandAgent("deepseek-harness");
+    await within(card).findByText(zhCN.agentIntegration.dshErrors.mcp_enable_required);
+    expect(within(card).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeChecked();
+    expect(card).not.toHaveTextContent("authentication_required");
+    expect(card).not.toHaveTextContent(zhCN.agentIntegration.dshErrors.lazymind_auth_required);
     expect(mocks.action).not.toHaveBeenCalled();
   });
 

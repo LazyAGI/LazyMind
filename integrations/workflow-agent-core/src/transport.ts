@@ -30,17 +30,18 @@ export function isHostAuthorizationError(error: unknown): error is BridgeError {
 
 export class HostBridge {
   private readonly base: string
-  constructor(url: string, private readonly pairing: Pairing) {
+  constructor(url: string, private readonly pairing: Pairing,
+    private readonly actionHeaders?: (signal: AbortSignal) => Record<string, string> | Promise<Record<string, string>>) {
     const parsed = new URL(url)
     if (!['http:', 'https:'].includes(parsed.protocol) || !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
       || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('Workflow Bridge must be a loopback URL without credentials')
     this.base = parsed.href.replace(/\/$/, '') + '/v1/workflow-host'
   }
 
-  private async request<T>(path: string, signal: AbortSignal, body?: unknown): Promise<T> {
+  private async request<T>(path: string, signal: AbortSignal, body?: unknown, headers?: Record<string, string>): Promise<T> {
     const response = await fetch(this.base + path, {
       method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-      headers: { Authorization: `Bearer ${this.pairing.token}`, 'X-LazyMind-Connector-Id': this.pairing.connector_id,
+      headers: { ...headers, Authorization: `Bearer ${this.pairing.token}`, 'X-LazyMind-Connector-Id': this.pairing.connector_id,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
@@ -64,7 +65,7 @@ export class HostBridge {
     return (await this.request<{ control: WorkflowControl }>(`/runs/${encodeURIComponent(runId)}/control`, signal)).control
   }
   async actions(after: string, signal: AbortSignal): Promise<{ actions: HostAction[]; next_page_token?: string }> {
-    return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ''}`, signal)
+    return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ''}`, signal, undefined, await this.actionHeaders?.(signal))
   }
   async action(id: string, signal: AbortSignal): Promise<ActionClaim> {
     return this.request(`/actions/${encodeURIComponent(id)}`, signal)

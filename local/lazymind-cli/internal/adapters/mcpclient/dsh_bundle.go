@@ -191,15 +191,27 @@ func configureDSHWorkflow(path, configPath, command string, disabled bool) error
 }
 
 func (a *Adapter) dshWorkflowConfigured() bool {
+	return a.dshWorkflowConfiguration(true)
+}
+
+// Installation survives a native plugin toggle, sign-out or a revoked pairing.
+// Those are reported separately as runtime prerequisites, not a missing bundle.
+func (a *Adapter) dshWorkflowInstalled() bool {
+	return a.dshWorkflowConfiguration(false)
+}
+
+func (a *Adapter) dshWorkflowConfiguration(requireEnabled bool) bool {
+	return a.dshWorkflowConfigurationVersion(requireEnabled, true)
+}
+
+// Only identify an update when the installed package and every other managed
+// configuration field are valid. Missing or unreadable files keep their errors.
+func (a *Adapter) dshWorkflowNeedsUpdate() bool {
+	return !a.dshWorkflowInstalled() && a.dshWorkflowConfigurationVersion(false, false)
+}
+
+func (a *Adapter) dshWorkflowConfigurationVersion(requireEnabled, currentBundle bool) bool {
 	document, err := readYAMLDocument(a.dshConfigPath())
-	if err != nil {
-		return false
-	}
-	store, err := credentials.NewStore(a.home, "")
-	if err != nil {
-		return false
-	}
-	account, err := store.AccountScope()
 	if err != nil {
 		return false
 	}
@@ -233,11 +245,11 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 		}
 	}
 	for _, item := range yamlSequence(document).Content {
-		if scalarValue(item, "id") != dshWorkflowRow || scalarValue(item, "disabled") == "true" {
+		if scalarValue(item, "id") != dshWorkflowRow || requireEnabled && scalarValue(item, "disabled") == "true" {
 			continue
 		}
 		config := mappingValue(item, "config")
-		if scalarValue(config, "bundleHash") != dshBundleHash() {
+		if currentBundle && scalarValue(config, "bundleHash") != dshBundleHash() {
 			return false
 		}
 		c, err := connectorconfig.Load(scalarValue(config, "connectorConfig"))
@@ -249,7 +261,15 @@ func (a *Adapter) dshWorkflowConfigured() bool {
 		if filepath.Clean(file) != filepath.Join(a.home, "workflow-hosts", id+".json") {
 			return false
 		}
-		return workflowhost.Configured(a.home, id, account)
+		if !requireEnabled {
+			return true
+		}
+		store, err := credentials.NewStore(a.home, "")
+		if err != nil {
+			return false
+		}
+		account, err := store.AccountScope()
+		return err == nil && workflowhost.Configured(a.home, id, account)
 	}
 	return false
 }

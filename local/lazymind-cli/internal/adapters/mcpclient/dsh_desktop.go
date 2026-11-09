@@ -198,7 +198,7 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 	if conflict {
 		s.Message = "Hand-written LazyMind configuration conflicts with this connection: " + globalPath
 	}
-	complete, partial, failed := 0, false, false
+	complete, outdated, partial, failed := 0, 0, false, false
 	for _, name := range dshDesktopProfiles {
 		target := a.forDSHProfile(name, cli)
 		for _, inspected := range inspection.Profiles {
@@ -223,9 +223,11 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 				if managed && !state.owned {
 					p.State = agentintegration.Conflict
 				}
-				if managed && state.current && target.dshWorkflowConfigured() {
+				if managed && state.current && target.dshWorkflowInstalled() {
 					p.State = agentintegration.Enabled
 					complete++
+				} else if managed && state.current && target.dshWorkflowNeedsUpdate() {
+					outdated++
 				}
 				if message := record.Profiles[name]; message != "" {
 					p.State, p.Message = agentintegration.Failed, message
@@ -253,6 +255,9 @@ func (a *Adapter) dshDesktopStatusWithRuntime(runtime dshDesktopRuntime) (s agen
 	case complete == len(dshDesktopProfiles) && !failed:
 		s.State = agentintegration.Enabled
 		s.Message = "Desktop and Web are configured. Restart DSH to activate plugins. This is installation status, not online status."
+	case outdated > 0 && complete+outdated == len(dshDesktopProfiles) && !failed:
+		s.State = agentintegration.Failed
+		s.Issue = dshIssue("plugin_update_required", "")
 	case cliErr != nil:
 		s.State = agentintegration.RequirementsMissing
 		s.Message = cliErr.Error()
@@ -439,7 +444,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	runtime := a.inspectDSHDesktop(ctx)
 	s := a.dshDesktopStatusWithRuntime(runtime)
 	a.inspectConfiguration(&s)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled) {
+	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
 		return s
 	}
 	if !connect && !s.CanDisconnect {
@@ -462,7 +467,7 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 	}
 	s = a.dshDesktopStatusWithRuntime(runtime)
 	a.inspectConfiguration(&s)
-	if connect && (!s.CanConnect || s.State == agentintegration.Enabled) {
+	if connect && (!s.CanConnect || s.State == agentintegration.Enabled && a.dshDesktopWorkflowConfigured(runtime)) {
 		return s
 	}
 	r, err := a.dshRecord()
@@ -514,10 +519,15 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		}
 	}
 	for _, p := range s.Profiles {
-		if connect && p.State == agentintegration.Enabled {
+		target := a.forDSHProfile(p.Name, cli)
+		for _, inspected := range runtime.inspection.Profiles {
+			if inspected.Name == p.Name {
+				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
+			}
+		}
+		if connect && p.State == agentintegration.Enabled && target.dshWorkflowConfigured() {
 			continue
 		}
-		target := a.forDSHProfile(p.Name, cli)
 		if err := target.checkDSHOwnership(); err != nil {
 			r.Profiles[p.Name] = err.Error()
 			log.Printf("DSH %s integration: %v", p.Name, err)
@@ -540,4 +550,19 @@ func (a *Adapter) changeDSHDesktop(ctx context.Context, connect bool) agentinteg
 		return a.dshDesktopStatus(ctx)
 	}
 	return a.dshDesktopStatusWithRuntime(runtime)
+}
+
+func (a *Adapter) dshDesktopWorkflowConfigured(runtime dshDesktopRuntime) bool {
+	for _, name := range dshDesktopProfiles {
+		target := a.forDSHProfile(name, runtime.cli)
+		for _, inspected := range runtime.inspection.Profiles {
+			if inspected.Name == name {
+				target.dshMCPReady = inspected.Diagnostic == "" && inspected.MCPPath != "" && inspected.MCPVersion != ""
+			}
+		}
+		if !target.dshWorkflowConfigured() {
+			return false
+		}
+	}
+	return true
 }

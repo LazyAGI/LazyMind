@@ -42,13 +42,14 @@ func (e *PairingError) Error() string {
 }
 
 type Pairing struct {
-	Provider     string    `json:"provider"`
-	ConnectorID  string    `json:"connector_id"`
-	Token        string    `json:"token"`
-	AccountScope string    `json:"account_scope"`
-	Profile      string    `json:"profile"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	Provider        string    `json:"provider"`
+	ConnectorID     string    `json:"connector_id"`
+	Token           string    `json:"token"`
+	AccountScope    string    `json:"account_scope"`
+	Profile         string    `json:"profile"`
+	Enabled         bool      `json:"enabled"`
+	RuntimeRevision string    `json:"runtime_revision,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 var connectorPattern = regexp.MustCompile(`^(dsh|host)-[a-f0-9]{32}$`)
@@ -107,7 +108,6 @@ func EnsureForProvider(home, provider, profile, accountScope string) (Pairing, e
 		if !normalizeProvider(&pair) || pair.Provider != provider || pair.ConnectorID != id || pair.AccountScope != accountScope || pair.Profile != absolute || len(pair.Token) != 64 {
 			return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
 		}
-		pair.Enabled = true
 	} else if errors.Is(err, os.ErrNotExist) {
 		secret := make([]byte, 32)
 		if _, err := rand.Read(secret); err != nil {
@@ -117,10 +117,32 @@ func EnsureForProvider(home, provider, profile, accountScope string) (Pairing, e
 	} else {
 		return Pairing{}, err
 	}
+	// Re-enabling preserves the business credential but invalidates runtime
+	// evidence, including a poll that authenticated before the disconnection.
+	if provider == DSHProvider && (!pair.Enabled || pair.RuntimeRevision == "") {
+		generation := make([]byte, 16)
+		if _, err := rand.Read(generation); err != nil {
+			return Pairing{}, err
+		}
+		pair.RuntimeRevision = hex.EncodeToString(generation)
+	}
+	pair.Enabled = true
 	return pair, save(path, pair)
 }
 
 func Verify(home, id, token, accountScope string) (Pairing, error) {
+	pair, err := Load(home, id, accountScope)
+	if err != nil {
+		return Pairing{}, err
+	}
+	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(pair.Token)) != 1 {
+		return Pairing{}, &PairingError{Code: "HOST_CREDENTIAL_MISMATCH"}
+	}
+	return pair, nil
+}
+
+// Load checks the current local pairing without changing it or issuing credentials.
+func Load(home, id, accountScope string) (Pairing, error) {
 	path, err := pairingPath(home, id)
 	if err != nil {
 		return Pairing{}, &PairingError{Code: "HOST_PAIRING_INVALID"}
@@ -141,9 +163,6 @@ func Verify(home, id, token, accountScope string) (Pairing, error) {
 	}
 	if accountScope == "" || pair.AccountScope != accountScope {
 		return Pairing{}, &PairingError{Code: "HOST_ACCOUNT_MISMATCH"}
-	}
-	if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(pair.Token)) != 1 {
-		return Pairing{}, &PairingError{Code: "HOST_CREDENTIAL_MISMATCH"}
 	}
 	return pair, nil
 }

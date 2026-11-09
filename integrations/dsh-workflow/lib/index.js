@@ -53,8 +53,9 @@ function isHostAuthorizationError(error) {
 }
 var HostBridge = class {
 	base;
-	constructor(url, pairing) {
+	constructor(url, pairing, actionHeaders) {
 		this.pairing = pairing;
+		this.actionHeaders = actionHeaders;
 		const parsed = new URL(url);
 		if (!["http:", "https:"].includes(parsed.protocol) || ![
 			"localhost",
@@ -63,11 +64,12 @@ var HostBridge = class {
 		].includes(parsed.hostname) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error("Workflow Bridge must be a loopback URL without credentials");
 		this.base = parsed.href.replace(/\/$/, "") + "/v1/workflow-host";
 	}
-	async request(path, signal, body) {
+	async request(path, signal, body, headers) {
 		const response = await fetch(this.base + path, {
 			method: body === void 0 ? "GET" : "POST",
 			signal: AbortSignal.any([signal, AbortSignal.timeout(15e3)]),
 			headers: {
+				...headers,
 				Authorization: `Bearer ${this.pairing.token}`,
 				"X-LazyMind-Connector-Id": this.pairing.connector_id,
 				...body === void 0 ? {} : { "content-type": "application/json" }
@@ -92,7 +94,7 @@ var HostBridge = class {
 		return (await this.request(`/runs/${encodeURIComponent(runId)}/control`, signal)).control;
 	}
 	async actions(after, signal) {
-		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal);
+		return this.request(`/actions${after ? `?after=${encodeURIComponent(after)}` : ""}`, signal, void 0, await this.actionHeaders?.(signal));
 	}
 	async action(id, signal) {
 		return this.request(`/actions/${encodeURIComponent(id)}`, signal);
@@ -1119,6 +1121,57 @@ function watchConnection(resolve, install, unavailable, interval = 3e3) {
 }
 
 //#endregion
+//#region src/mcp-readiness.ts
+/** A cached tool schema alone survives MCP disconnection in DSH. The resource
+* provider checks the current MCP client before answering even when that server
+* has no resource capability, so this also verifies the live connection without
+* invoking a Workflow tool or reading any resource contents. */
+function mcpReadiness(ctx, serverName) {
+	let resources;
+	ctx.inject(["mcpResources"], (injected) => {
+		resources = injected.mcpResources;
+		injected.effect(() => () => {
+			resources = void 0;
+		});
+	});
+	const toolsReady = () => {
+		const operations = new Set(ctx.tools.schemas().filter((schema) => ctx.tools.get(schema.name)).map((schema) => workflowOperation(schema.name, serverName)));
+		return [
+			"start",
+			"state",
+			"step_begin"
+		].every((operation) => operations.has(operation));
+	};
+	return async (signal) => {
+		const current = resources;
+		if (!current || !toolsReady() || signal.aborted) return false;
+		const bounded = new AbortController();
+		let interrupt;
+		const interrupted = new Promise((_resolve, reject) => {
+			interrupt = () => {
+				bounded.abort();
+				reject(/* @__PURE__ */ new Error("MCP readiness check interrupted"));
+			};
+		});
+		const timer = setTimeout(interrupt, 2e3);
+		signal.addEventListener("abort", interrupt, { once: true });
+		try {
+			await Promise.race([interrupted, current.request(serverName, { method: "resources/list" }, {
+				agent: void 0,
+				signal: bounded.signal
+			})]);
+			return !signal.aborted && current === resources && toolsReady();
+		} catch {
+			return false;
+		} finally {
+			clearTimeout(timer);
+			signal.removeEventListener("abort", interrupt);
+			bounded.abort();
+		}
+	};
+}
+
+//#endregion
 //#region src/index.ts
 const inject = [
 	"tools",
@@ -1129,13 +1182,19 @@ const inject = [
 async function apply(ctx, config) {
 	let presentation;
 	let lastError = "";
+	const readiness = /* @__PURE__ */ new Map();
 	installPresentationConfig(ctx, () => presentation);
 	const stop = watchConnection((signal) => resolveConnection(config, signal), async (current) => {
 		const pairing = await loadPairing(current.pairingFile);
 		const instance = randomUUID();
 		const release = await dispatcherLock(current.pairingFile, instance);
 		try {
-			const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing), current, instance);
+			let mcpReady = readiness.get(current.serverName);
+			if (!mcpReady) {
+				mcpReady = mcpReadiness(ctx, current.serverName);
+				readiness.set(current.serverName, mcpReady);
+			}
+			const dispose = installHost(ctx, new HostBridge(current.bridgeUrl, pairing, async (signal) => ({ "X-LazyMind-MCP-Ready": await mcpReady(signal) ? "1" : "0" })), current, instance);
 			presentation = current;
 			lastError = "";
 			return async () => {

@@ -709,6 +709,24 @@
   .agent-integration-installation-note { margin: 10px 0 0; font-size: 12px; }
 }
 
+.agent-integration-dsh-guide .agent-integration-installation-image {
+  margin-top: 16px;
+}
+
+.agent-integration-dsh-guide .ant-steps .ant-steps-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  .ant-steps-icon {
+    position: static;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+}
+
 .external-capability-result-modal {
   .external-capability-result-error,
   .external-capability-result-truncated {

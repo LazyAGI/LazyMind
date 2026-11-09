@@ -3,6 +3,7 @@ package assistantbridge
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -99,8 +100,32 @@ func (s *Server) handleWorkflowHostActions(w http.ResponseWriter, r *http.Reques
 	if after := r.URL.Query().Get("after"); after != "" {
 		query.Set("after", after)
 	}
-	relayWorkflowHost(w, r, api, http.MethodGet, "/workflow-host-actions?"+query.Encode(), nil,
+	var result map[string]any
+	err := api.DoJSONHeaders(r.Context(), http.MethodGet, "/workflow-host-actions?"+query.Encode(), nil, &result,
 		http.Header{"X-Workflow-Host-Credential": {pair.Token}})
+	issue := ""
+	if err != nil {
+		issue = "lazymind_unavailable"
+		var apiError *coreapi.Error
+		if credentials.IsAuthenticationRequired(err) || errors.As(err, &apiError) && apiError.StatusCode == http.StatusUnauthorized {
+			issue = "lazymind_auth_required"
+		}
+	}
+	if _, valid := result["actions"].([]any); err == nil && !valid {
+		issue = "lazymind_unavailable"
+	}
+	// A dispatcher may run before its MCP client has registered any tools.
+	// Only the current plugin's explicit runtime observation establishes MCP
+	// readiness; older plugins without the header remain visibly unavailable.
+	mcpReady := r.Header.Get("X-LazyMind-MCP-Ready") == "1"
+	if recordErr := workflowhost.RecordRuntimeStatus(s.store.Directory(), pair, issue, mcpReady); recordErr != nil {
+		log.Printf("DSH dispatcher status could not be recorded")
+	}
+	if err != nil {
+		workflowHostError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleWorkflowHostAction(w http.ResponseWriter, r *http.Request) {
