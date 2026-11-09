@@ -5,7 +5,7 @@ import { Alert, Button, Dropdown, Input, message, Modal, Select, Tabs, Tag, Tool
 import { EditOutlined, ArrowLeftOutlined, CloseOutlined, DownOutlined, EllipsisOutlined, ExclamationCircleOutlined, FilePdfOutlined, InfoCircleOutlined, PlusOutlined, PushpinOutlined, ReadOutlined } from '@ant-design/icons';
 import type { PaperLibraryData, PaperRecord, Attachment } from './libraryModel';
 import { readingSummary } from './libraryModel';
-import { paperImportMethodName, paperSourceProviderLabels, safePaperUrl, sourceLabel, statusLabel, type PaperEdits } from './model';
+import { getPaperTags, paperImportMethodName, paperSourceProviderLabels, safePaperUrl, sourceLabel, statusLabel, type PaperEdits } from './model';
 import type { PdfViewPosition } from '@/components/ui/RenderPdf';
 import PaperAttachmentPreview from './PaperAttachmentPreview';
 import type { DocumentAcademic } from '../api/paperWorkflows';
@@ -179,7 +179,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             <Button disabled={disabled || saving} onClick={() => setEditing(false)}>取消编辑</Button>
           </> : <>
             <dl><dt>标题</dt><dd>{current.metadata.title}</dd><dt>年份</dt><dd>{current.metadata.year || '未填写'}</dd><dt>会议／期刊</dt><dd>{current.metadata.venue || '未填写'}</dd><dt>DOI</dt><dd>{current.metadata.identifiers.doi || '未填写'}</dd><dt>arXiv</dt><dd>{current.metadata.identifiers.arxiv ? `${current.metadata.identifiers.arxiv}${current.arxivVersion || ''}` : '未填写'}</dd><dt>摘要</dt><dd>{current.metadata.abstract ?? '未填写'}</dd></dl>
-            <div className="paper-detail-tags">{current.tags.filter(tag => tag !== 'paper' && !tag.startsWith('arxiv:')).map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
+            <div className="paper-detail-tags">{getPaperTags(current.tags).map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
           </>}
           <div className="paper-detail-section-head"><h3>全文附件</h3></div>
           <p className="paper-detail-muted">{pdfs.length ? <button type="button" className="paper-detail-tab-link" onClick={() => changeTab('attachments')}>PDF · {pdfs.length} 份，查看附件与版本</button> : attachments.length ? '尚未添加入库 PDF，可在附件页查看其他材料。' : '仅题录，尚未添加 PDF。'}</p>

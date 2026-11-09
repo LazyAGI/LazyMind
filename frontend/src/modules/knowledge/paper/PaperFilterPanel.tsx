@@ -1,11 +1,12 @@
 import { useId } from "react";
 import { Slider } from "antd";
 import type { PaperRecord } from "./model";
-import { DEFAULT_PAPER_FILTERS, getFilterBounds, hasPaperFilters, type PaperFilters } from "./paperFilters";
+import { DEFAULT_PAPER_FILTERS, getFilterBounds, hasPaperFilters, PAPER_TAG_MATCH_LABELS, type PaperFilters } from "./paperFilters";
 import "./PaperFilterPanel.scss";
 
 interface Props {
   papers: PaperRecord[];
+  tags: string[];
   value: PaperFilters;
   onChange: (value: PaperFilters) => void;
 }
@@ -24,13 +25,14 @@ function Choices<T extends string>({ label, value, options, onChange }: {
   </fieldset>;
 }
 
-export default function PaperFilterPanel({ papers, value, onChange }: Props) {
+export default function PaperFilterPanel({ papers, tags, value, onChange }: Props) {
   const id = useId();
   const bounds = getFilterBounds(papers);
   const years = value.yearRange || bounds.years;
   const minYear = Math.min(bounds.years?.[0] ?? years?.[0] ?? 0, years?.[0] ?? Number.POSITIVE_INFINITY);
   const maxYear = Math.max(bounds.years?.[1] ?? 0, years?.[1] ?? 0);
   const citationMax = Math.max(bounds.maxCitations, value.minCitations || 0, 1);
+  const tagOptions = [...new Set([...tags, ...value.tags])];
   const update = <K extends keyof PaperFilters>(key: K, next: PaperFilters[K]) => onChange({ ...value, [key]: next });
   const updateYear = (range: number[]) => {
     const next: [number, number] = [range[0], range[1]];
@@ -41,6 +43,24 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
       <strong>筛选</strong>
       <button type="button" className="paper-filter-clear" aria-label="清除筛选" disabled={!hasPaperFilters(value)} onClick={() => onChange({ ...DEFAULT_PAPER_FILTERS })}>清除</button>
     </div>
+    <fieldset className="paper-filter-group">
+      <legend>标签</legend>
+      {tagOptions.length ? <>
+        <div className="paper-filter-options paper-filter-tags">
+          <button type="button" aria-pressed={!value.tags.length} onClick={() => update("tags", [])}>全部标签</button>
+          {tagOptions.map(tag => {
+            const selected = value.tags.includes(tag);
+            return <button key={tag} type="button" aria-pressed={selected}
+              onClick={() => update("tags", selected ? value.tags.filter(item => item !== tag) : [...value.tags, tag])}>{tag}</button>;
+          })}
+        </div>
+        {value.tags.length > 1 && <div className="paper-filter-options paper-filter-tag-mode" role="group" aria-label="标签匹配方式">
+          <span>匹配</span>
+          <button type="button" aria-pressed={value.tagMatch === "any"} onClick={() => update("tagMatch", "any")}>{PAPER_TAG_MATCH_LABELS.any}</button>
+          <button type="button" aria-pressed={value.tagMatch === "all"} onClick={() => update("tagMatch", "all")}>{PAPER_TAG_MATCH_LABELS.all}</button>
+        </div>}
+      </> : <p className="paper-filter-empty paper-filter-tags-empty">论文集还没有标签</p>}
+    </fieldset>
     <Choices label="收藏" value={value.star} onChange={(next) => update("star", next)} options={[
       { value: "all", label: "全部" }, { value: "starred", label: "已收藏" }, { value: "unstarred", label: "未收藏" },
     ]} />
