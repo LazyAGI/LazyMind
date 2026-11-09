@@ -44,7 +44,11 @@ when there are no gaps. Do not ask already answered questions again.
 Freeze one shared design specification and the approved page order. Each slide
 specification contains actual copy, evidence references, visual layout, assets and
 notes. Page work may run independently against these frozen inputs; publish by page
-identity, never completion order. Background prompts/images align with their pages;
+identity, never completion order. Publish each page and its notes immediately after
+its page-level checks pass; do not wait for the remaining pages or final deck export.
+Keep shared style and internal validation data separate from user-editable page
+prompts; do not duplicate exact copy as JSON inside the Markdown prompt.
+Background prompts/images align with their pages;
 AI backgrounds are text-free 16:9 images, exactly 1280x720 when this branch is used.
 
 For final generation, deliver the selected representation with its declared outputs.

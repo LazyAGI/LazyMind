@@ -1374,6 +1374,10 @@ steps:
       slide_outline must contain exactly one non-empty, editable generation
       prompt per requested page with aligned sort_order. Each slide_outline is one
       Markdown document: style first, then layout, copy and assets. Do not publish
+      internal JSON/schema dumps or duplicate the copy as a second object list in
+      this user-editable prompt. Express exact copy, formulas and chart data as
+      readable Markdown; keep machine-oriented coverage evidence separate.
+      Do not publish
       extra presentation_style/page_layout/page_assets artifacts. Those optional
       outputs remain only for compatibility with older saved sessions.
       Compare each page with deck_outline and material_summary before acceptance.
