@@ -58,6 +58,29 @@
   }
 }
 
+.paper-filter-tags {
+  max-height: 112px;
+  align-content: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  padding: 2px;
+
+  button { max-width: 100%; overflow-wrap: anywhere; }
+}
+
+.paper-filter-tag-mode {
+  align-items: center;
+  margin-top: 8px;
+  color: #667085;
+  font-size: 12px;
+
+  button { min-height: 26px; padding: 2px 8px; }
+}
+
+.paper-filter-empty.paper-filter-tags-empty { margin-top: 0; }
+
 .paper-filter-range-group {
   padding-top: 15px;
   border-top: 1px solid #eaedf2;

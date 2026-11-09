@@ -155,6 +155,12 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	if ext.ProcessingLevel == ProcessingLevelStored {
 		return state, ""
 	}
+	// An upload receipt for an original-only paper is not a parser result.
+	// Older receipts have no submitted level or remote task ID.
+	if snapshot.dataset.Scene == "academic_papers" && task.TaskType == string(TaskTypeParseUploaded) &&
+		task.LazyllmTaskID == "" && ext.ProcessingLevel == "" && ext.TaskState == string(TaskStateSucceeded) {
+		return state, ""
+	}
 	nativeIndexing := (state.ParseArtifactRef != "" || state.EmbeddingVersion == embeddingVersionReembedPending || state.EmbeddingVersion == embeddingVersionReembedManual) && ext.ProcessingLevel == ProcessingLevelIndexed
 	if nativeIndexing && (state.IndexArtifactRef != "core-task:"+task.ID || ext.ProcessingRevision != snapshot.dataset.ProcessingRevision) {
 		return state, ""
@@ -213,6 +219,30 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 		state.IndexStatus = status
 	}
 	return state, raw
+}
+
+func (snapshot processingSnapshot) observedProcessingLevel(task orm.Task, state orm.DocumentProcessingState) string {
+	var ext taskExt
+	_ = json.Unmarshal(task.Ext, &ext)
+	if ext.ProcessingRevision == snapshot.dataset.ProcessingRevision {
+		switch ext.ProcessingLevel {
+		case ProcessingLevelParsed, ProcessingLevelChunked, ProcessingLevelIndexed:
+			return ext.ProcessingLevel
+		}
+	}
+	// Legacy tasks can still prove a completed stage through the observed
+	// document state. Seeded pending values alone do not prove a submission.
+	switch {
+	case state.IndexStatus == "succeeded" || state.IndexStatus == "failed":
+		return ProcessingLevelIndexed
+	case state.ChunkStatus == "succeeded" || state.ChunkStatus == "failed":
+		return ProcessingLevelChunked
+	case state.ParseStatus == "succeeded" || state.ParseStatus == "failed" || state.ParseStatus == "running",
+		task.LazyllmTaskID != "", ext.MarketSubmission == "submitting":
+		return ProcessingLevelParsed
+	default:
+		return ProcessingLevelStored
+	}
 }
 
 func ObserveDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, *ProcessingDiagnostic, error) {
